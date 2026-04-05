@@ -22,6 +22,7 @@ export default async function HomePage() {
           modelName: row.modelName,
           benchmarkName: row.benchmarkName,
           benchmarkType: row.benchmarkType,
+          benchTime: row.benchTime,
           valueRaw: row.valueRaw,
           valueNum: row.valueNum,
           source: row.source

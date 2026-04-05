@@ -20,6 +20,55 @@ type EnsureBenchmarkInput = {
   sourceBenchmarkId?: string | null;
 };
 
+type NormalizedTextImportRow = {
+  rowNumber: number;
+  providerName: string;
+  modelName: string;
+  benchmarkName: string;
+  benchmarkType: string;
+  valueRaw: string;
+  benchTime: Date;
+  unit: string;
+  higherIsBetter: boolean;
+  modalities: string[];
+  source: string | null;
+  modelAlias?: string | null;
+  sourceModelId?: string | null;
+  sourceBenchmarkId?: string | null;
+};
+
+const EMPTY_VALUE_MARKERS = new Set(["", "-", "--", "—", "na", "n/a", "null", "none"]);
+
+function normalizeImportedValueRaw(rawInput: string): string {
+  return rawInput.replace(/[％%]/g, "").trim();
+}
+
+function isEmptyImportValue(rawInput: string | undefined): boolean {
+  if (!rawInput) return true;
+  const normalized = normalizeImportedValueRaw(rawInput).toLowerCase();
+  return EMPTY_VALUE_MARKERS.has(normalized);
+}
+
+function splitTableLine(line: string): string[] {
+  if (line.includes("\t")) {
+    return line.split("\t").map((item) => item.trim());
+  }
+
+  return line
+    .trim()
+    .split(/\s{2,}/)
+    .map((item) => item.trim());
+}
+
+function looksLikeStructuredCsv(firstLine: string): boolean {
+  if (!firstLine.includes(",")) return false;
+
+  const lowered = firstLine.toLowerCase();
+  return ["provider", "model", "benchmark", "value", "bench_time", "source"].some((token) =>
+    lowered.includes(token)
+  );
+}
+
 function normalizeModalities(modalities?: string[]): string[] {
   if (!modalities || modalities.length === 0) return ["Text"];
 
@@ -277,6 +326,51 @@ export async function mergeEntity(input: {
   });
 }
 
+export async function updateMergedEntityRecord(input: {
+  entityType: "model" | "benchmark";
+  sourceId: number;
+  targetId: number;
+}) {
+  if (input.sourceId === input.targetId) {
+    throw new Error("sourceId and targetId cannot be the same");
+  }
+
+  if (input.entityType === "model") {
+    await db
+      .update(models)
+      .set({ mergedIntoModelId: input.targetId })
+      .where(eq(models.id, input.sourceId));
+    return { ok: true };
+  }
+
+  await db
+    .update(benchmarks)
+    .set({ mergedIntoBenchmarkId: input.targetId })
+    .where(eq(benchmarks.id, input.sourceId));
+
+  return { ok: true };
+}
+
+export async function deleteMergedEntityRecord(input: {
+  entityType: "model" | "benchmark";
+  sourceId: number;
+}) {
+  if (input.entityType === "model") {
+    await db
+      .update(models)
+      .set({ mergedIntoModelId: null })
+      .where(eq(models.id, input.sourceId));
+    return { ok: true };
+  }
+
+  await db
+    .update(benchmarks)
+    .set({ mergedIntoBenchmarkId: null })
+    .where(eq(benchmarks.id, input.sourceId));
+
+  return { ok: true };
+}
+
 export async function importParsedRecords(
   records: ParsedImportRecord[],
   options?: {
@@ -323,63 +417,221 @@ export async function importParsedRecords(
   };
 }
 
-export async function importBenchmarkCsv(csvText: string) {
-  const rows = parse(csvText, {
+function parseStructuredCsvRows(inputText: string): {
+  format: "structured-csv";
+  rows: NormalizedTextImportRow[];
+  skipped: number;
+} {
+  const parsedRows = parse(inputText, {
     columns: true,
     skipEmptyLines: true,
     trim: true
   }) as Record<string, string>[];
 
-  let inserted = 0;
+  const rows: NormalizedTextImportRow[] = [];
+  let skipped = 0;
 
-  for (const row of rows) {
-    const providerName = row.provider || row.provider_name;
-    const modelName = row.model || row.model_name;
-    const benchmarkName = row.benchmark || row.benchmark_name;
-    const benchmarkType = row.benchmark_type || row.type || "general";
-    const valueRaw = row.value_raw || row.value;
+  parsedRows.forEach((row, index) => {
+    const rowNumber = index + 2;
+    const modelName = (row.model || row.model_name || "").trim();
+    const benchmarkName = (row.benchmark || row.benchmark_name || "").trim();
+    const valueRawInput = row.value_raw || row.value || "";
 
-    if (!providerName || !modelName || !benchmarkName || !valueRaw) {
-      continue;
+    if (!modelName || !benchmarkName || isEmptyImportValue(valueRawInput)) {
+      skipped += 1;
+      return;
     }
 
-    const provider = await ensureProvider(providerName);
-    const model = await ensureModelByProviderId({
-      providerId: provider.id,
-      modelName,
-      modelAlias: toNullableText(row.model_alias),
-      sourceModelId: toNullableText(row.source_model_id)
-    });
-
-    const benchmark = await ensureBenchmark({
-      benchmarkName,
-      benchmarkType,
-      unit: row.unit || "score",
-      higherIsBetter: parseBoolean(row.higher_is_better, true),
-      modalities: (row.modalities || "Text").split(","),
-      sourceBenchmarkId: toNullableText(row.source_benchmark_id)
-    });
-
+    const valueRaw = normalizeImportedValueRaw(valueRawInput);
+    const providerName = (row.provider || row.provider_name || "").trim() || inferProviderNameFromModel(modelName);
+    const benchmarkType = (row.benchmark_type || row.type || "general").trim() || "general";
     const benchTimeRaw = row.bench_time || row.time || row.date || new Date().toISOString();
     const benchTime = new Date(benchTimeRaw);
 
     if (Number.isNaN(benchTime.getTime())) {
+      skipped += 1;
+      return;
+    }
+
+    rows.push({
+      rowNumber,
+      providerName,
+      modelName,
+      benchmarkName,
+      benchmarkType,
+      valueRaw,
+      benchTime,
+      unit: (row.unit || "score").trim() || "score",
+      higherIsBetter: parseBoolean(row.higher_is_better, true),
+      modalities: (row.modalities || "Text").split(",").map((item) => item.trim()).filter(Boolean),
+      source: toNullableText(row.source),
+      modelAlias: toNullableText(row.model_alias),
+      sourceModelId: toNullableText(row.source_model_id),
+      sourceBenchmarkId: toNullableText(row.source_benchmark_id)
+    });
+  });
+
+  return {
+    format: "structured-csv",
+    rows,
+    skipped
+  };
+}
+
+function parseMatrixTextRows(inputText: string): {
+  format: "matrix-table";
+  rows: NormalizedTextImportRow[];
+  skipped: number;
+} {
+  const rawLines = inputText
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\r/g, "").trimEnd())
+    .filter((line) => line.trim().length > 0);
+
+  if (rawLines.length < 2) {
+    return {
+      format: "matrix-table",
+      rows: [],
+      skipped: 0
+    };
+  }
+
+  const headerCells = splitTableLine(rawLines[0]);
+  const modelNames = headerCells.slice(1).map((cell) => cell.trim()).filter(Boolean);
+
+  if (modelNames.length === 0) {
+    return {
+      format: "matrix-table",
+      rows: [],
+      skipped: rawLines.length - 1
+    };
+  }
+
+  const rows: NormalizedTextImportRow[] = [];
+  let skipped = 0;
+
+  for (let lineIndex = 1; lineIndex < rawLines.length; lineIndex += 1) {
+    const cells = splitTableLine(rawLines[lineIndex]);
+    const benchmarkName = (cells[0] || "").trim();
+
+    if (!benchmarkName) {
+      skipped += 1;
       continue;
     }
+
+    for (let modelIndex = 0; modelIndex < modelNames.length; modelIndex += 1) {
+      const modelName = modelNames[modelIndex];
+      const rawInput = (cells[modelIndex + 1] || "").trim();
+
+      if (!modelName || isEmptyImportValue(rawInput)) {
+        continue;
+      }
+
+      rows.push({
+        rowNumber: lineIndex + 1,
+        providerName: inferProviderNameFromModel(modelName),
+        modelName,
+        benchmarkName,
+        benchmarkType: "general",
+        valueRaw: normalizeImportedValueRaw(rawInput),
+        benchTime: new Date(),
+        unit: "score",
+        higherIsBetter: true,
+        modalities: ["Text"],
+        source: null,
+        modelAlias: null,
+        sourceModelId: null,
+        sourceBenchmarkId: null
+      });
+    }
+  }
+
+  return {
+    format: "matrix-table",
+    rows,
+    skipped
+  };
+}
+
+function parseBenchmarkTextRows(inputText: string) {
+  const firstLine = inputText
+    .split(/\r?\n/)
+    .find((line) => line.trim().length > 0)
+    ?.trim() || "";
+
+  if (looksLikeStructuredCsv(firstLine)) {
+    return parseStructuredCsvRows(inputText);
+  }
+
+  return parseMatrixTextRows(inputText);
+}
+
+export async function previewBenchmarkTextImport(inputText: string) {
+  const parsed = parseBenchmarkTextRows(inputText);
+
+  const previewRows = parsed.rows.map((row) => {
+    const parsedValue = parseBenchmarkValue(row.valueRaw);
+
+    return {
+      rowNumber: row.rowNumber,
+      providerName: row.providerName,
+      modelName: row.modelName,
+      benchmarkName: row.benchmarkName,
+      benchmarkType: row.benchmarkType,
+      rawValue: parsedValue.valueRaw,
+      valueNum: parsedValue.valueNum,
+      valueNum2: parsedValue.valueNum2,
+      valueNote: parsedValue.valueNote,
+      source: row.source,
+      valid: parsedValue.valueRaw.length > 0
+    };
+  });
+
+  return {
+    format: parsed.format,
+    total: parsed.rows.length,
+    skipped: parsed.skipped,
+    previewRows
+  };
+}
+
+export async function importBenchmarkCsv(inputText: string) {
+  const parsed = parseBenchmarkTextRows(inputText);
+  let inserted = 0;
+
+  for (const row of parsed.rows) {
+    const provider = await ensureProvider(row.providerName);
+    const model = await ensureModelByProviderId({
+      providerId: provider.id,
+      modelName: row.modelName,
+      modelAlias: row.modelAlias,
+      sourceModelId: row.sourceModelId
+    });
+
+    const benchmark = await ensureBenchmark({
+      benchmarkName: row.benchmarkName,
+      benchmarkType: row.benchmarkType,
+      unit: row.unit,
+      higherIsBetter: row.higherIsBetter,
+      modalities: row.modalities,
+      sourceBenchmarkId: row.sourceBenchmarkId
+    });
 
     await createBenchmarkValue({
       modelId: model.id,
       benchmarkId: benchmark.id,
-      benchTime,
-      valueRaw,
-      source: toNullableText(row.source)
+      benchTime: row.benchTime,
+      valueRaw: row.valueRaw,
+      source: row.source
     });
 
     inserted += 1;
   }
 
   return {
-    total: rows.length,
+    format: parsed.format,
+    total: parsed.rows.length,
+    skipped: parsed.skipped,
     inserted
   };
 }

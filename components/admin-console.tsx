@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Check,
   Database,
   FileSpreadsheet,
   LogOut,
@@ -10,6 +11,7 @@ import {
   Settings2,
   ShieldAlert,
   Table2,
+  TriangleAlert,
   Upload
 } from "lucide-react";
 
@@ -33,6 +35,14 @@ type BenchmarkOption = {
   modalities: string[];
 };
 
+type MergedRecord = {
+  entityType: "model" | "benchmark";
+  sourceId: number;
+  sourceName: string;
+  targetId: number;
+  targetName: string;
+};
+
 type PreviewRow = {
   rowNumber: number;
   category: string | null;
@@ -53,10 +63,25 @@ type ImportWarning = {
   reason: string;
 };
 
+type TextImportPreviewRow = {
+  rowNumber: number;
+  providerName: string;
+  modelName: string;
+  benchmarkName: string;
+  benchmarkType: string;
+  rawValue: string;
+  valueNum: number | null;
+  valueNum2: number | null;
+  valueNote: string | null;
+  source: string | null;
+  valid: boolean;
+};
+
 type Props = {
   providers: ProviderOption[];
   models: ModelOption[];
   benchmarks: BenchmarkOption[];
+  mergedRecords: MergedRecord[];
   initialSettings: Record<string, unknown>;
 };
 
@@ -102,9 +127,33 @@ function normalizeModelDedupeRule(raw: unknown): ModelDedupeRule {
   };
 }
 
-async function postJson(url: string, payload: unknown) {
+function parseMergeEntityId(
+  rawInput: string,
+  options: Array<{ id: number; label: string }>
+): number | null {
+  const normalized = rawInput.trim();
+  if (!normalized) return null;
+
+  if (/^\d+$/.test(normalized)) {
+    return Number(normalized);
+  }
+
+  const matchedId = normalized.match(/\[(\d+)\]\s*$/);
+  if (matchedId) {
+    return Number(matchedId[1]);
+  }
+
+  const exact = options.find((option) => option.label === normalized);
+  return exact?.id ?? null;
+}
+
+async function postJson(
+  url: string,
+  payload: unknown,
+  method: "POST" | "PATCH" | "DELETE" = "POST"
+) {
   const response = await fetch(url, {
-    method: "POST",
+    method,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
@@ -143,9 +192,10 @@ async function postFormData(url: string, formData: FormData) {
   return data;
 }
 
-export function AdminConsole({ providers, models, benchmarks, initialSettings }: Props) {
+export function AdminConsole({ providers, models, benchmarks, mergedRecords, initialSettings }: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>("import");
   const [notice, setNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [noticeVisible, setNoticeVisible] = useState(false);
 
   const [providerName, setProviderName] = useState("");
   const [providerId, setProviderId] = useState<number | "">(providers[0]?.id ?? "");
@@ -168,6 +218,13 @@ export function AdminConsole({ providers, models, benchmarks, initialSettings }:
   const [csvText, setCsvText] = useState(
     "provider,model,benchmark,benchmark_type,modalities,bench_time,value_raw,unit,higher_is_better,source\n"
   );
+  const [textImportPreviewRows, setTextImportPreviewRows] = useState<TextImportPreviewRow[]>([]);
+  const [textImportPreviewMeta, setTextImportPreviewMeta] = useState<{
+    format: string;
+    total: number;
+    skipped: number;
+  } | null>(null);
+  const [textImportPreviewVisibleCount, setTextImportPreviewVisibleCount] = useState(200);
 
   const [workbookFile, setWorkbookFile] = useState<File | null>(null);
   const [sheetNames, setSheetNames] = useState<string[]>([]);
@@ -187,10 +244,19 @@ export function AdminConsole({ providers, models, benchmarks, initialSettings }:
   const [importStatus, setImportStatus] = useState<"idle" | "running" | "success" | "error">("idle");
   const [importStatusText, setImportStatusText] = useState("等待导入");
   const importProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const noticeHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noticeClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [mergeType, setMergeType] = useState<"model" | "benchmark">("model");
-  const [mergeSourceId, setMergeSourceId] = useState<number | "">("");
-  const [mergeTargetId, setMergeTargetId] = useState<number | "">("");
+  const [mergeSourceInput, setMergeSourceInput] = useState("");
+  const [mergeTargetInput, setMergeTargetInput] = useState("");
+  const [mergedRecordList, setMergedRecordList] = useState<MergedRecord[]>(mergedRecords);
+  const [mergedRecordTargetInputs, setMergedRecordTargetInputs] = useState<Record<string, string>>(() =>
+    mergedRecords.reduce<Record<string, string>>((acc, record) => {
+      acc[`${record.entityType}:${record.sourceId}`] = `${record.targetName} [${record.targetId}]`;
+      return acc;
+    }, {})
+  );
 
   const [settingKey, setSettingKey] = useState("");
   const [settingValue, setSettingValue] = useState("{}");
@@ -214,14 +280,100 @@ export function AdminConsole({ providers, models, benchmarks, initialSettings }:
     [providers.length, models.length, benchmarks.length, previewMeta]
   );
 
+  const visibleTextImportPreviewRows = useMemo(
+    () => textImportPreviewRows.slice(0, textImportPreviewVisibleCount),
+    [textImportPreviewRows, textImportPreviewVisibleCount]
+  );
+
+  const modelEntityOptions = useMemo(
+    () =>
+      models.map((item) => ({
+        id: item.id,
+        label: item.modelName
+      })),
+    [models]
+  );
+
+  const benchmarkEntityOptions = useMemo(
+    () =>
+      benchmarks.map((item) => ({
+        id: item.id,
+        label: `${item.benchmarkName} (${item.benchmarkType})`
+      })),
+    [benchmarks]
+  );
+
+  const mergeEntityOptions = useMemo(() => {
+    if (mergeType === "model") {
+      return modelEntityOptions;
+    }
+
+    return benchmarkEntityOptions;
+  }, [mergeType, modelEntityOptions, benchmarkEntityOptions]);
+
+  const resolvedMergeSourceId = useMemo(
+    () => parseMergeEntityId(mergeSourceInput, mergeEntityOptions),
+    [mergeSourceInput, mergeEntityOptions]
+  );
+
+  const resolvedMergeTargetId = useMemo(
+    () => parseMergeEntityId(mergeTargetInput, mergeEntityOptions),
+    [mergeTargetInput, mergeEntityOptions]
+  );
+
   useEffect(() => {
     return () => {
       if (importProgressTimerRef.current) {
         clearInterval(importProgressTimerRef.current);
         importProgressTimerRef.current = null;
       }
+
+      if (noticeHideTimerRef.current) {
+        clearTimeout(noticeHideTimerRef.current);
+        noticeHideTimerRef.current = null;
+      }
+
+      if (noticeClearTimerRef.current) {
+        clearTimeout(noticeClearTimerRef.current);
+        noticeClearTimerRef.current = null;
+      }
     };
   }, []);
+
+  useEffect(() => {
+    setMergedRecordList(mergedRecords);
+    setMergedRecordTargetInputs(
+      mergedRecords.reduce<Record<string, string>>((acc, record) => {
+        acc[`${record.entityType}:${record.sourceId}`] = `${record.targetName} [${record.targetId}]`;
+        return acc;
+      }, {})
+    );
+  }, [mergedRecords]);
+
+  useEffect(() => {
+    if (!notice) return;
+
+    if (noticeHideTimerRef.current) {
+      clearTimeout(noticeHideTimerRef.current);
+      noticeHideTimerRef.current = null;
+    }
+
+    if (noticeClearTimerRef.current) {
+      clearTimeout(noticeClearTimerRef.current);
+      noticeClearTimerRef.current = null;
+    }
+
+    setNoticeVisible(true);
+
+    noticeHideTimerRef.current = setTimeout(() => {
+      setNoticeVisible(false);
+    }, 2300);
+
+    noticeClearTimerRef.current = setTimeout(() => {
+      setNotice(null);
+      setNoticeVisible(false);
+    }, 2750);
+  }, [notice]);
 
   function notifySuccess(message: string) {
     setNotice({ type: "success", message });
@@ -427,32 +579,127 @@ export function AdminConsole({ providers, models, benchmarks, initialSettings }:
     }
   }
 
+  async function onPreviewCsvImport() {
+    try {
+      const result = await postJson("/api/admin/import-csv/preview", { csvText });
+      setTextImportPreviewRows((result.previewRows ?? []) as TextImportPreviewRow[]);
+      setTextImportPreviewMeta({
+        format: result.format ?? "matrix-table",
+        total: result.total ?? 0,
+        skipped: result.skipped ?? 0
+      });
+      setTextImportPreviewVisibleCount(200);
+      notifySuccess(`文本预览完成：可导入 ${result.total ?? 0} 条，跳过 ${result.skipped ?? 0} 条`);
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "文本预览失败");
+    }
+  }
+
   async function onImportCsv(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
       const result = await postJson("/api/admin/import-csv", { csvText });
-      notifySuccess(`CSV 导入完成：${result.inserted}/${result.total}`);
+      notifySuccess(
+        `文本导入完成：${result.inserted ?? 0}/${result.total ?? 0}（跳过 ${result.skipped ?? 0}，格式 ${result.format ?? "auto"}）`
+      );
     } catch (error) {
-      notifyError(error instanceof Error ? error.message : "CSV 导入失败");
+      notifyError(error instanceof Error ? error.message : "文本导入失败");
     }
   }
 
   async function onMerge(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (mergeSourceId === "" || mergeTargetId === "") {
-      notifyError("请填写 sourceId 与 targetId");
+    if (resolvedMergeSourceId === null || resolvedMergeTargetId === null) {
+      notifyError("请从下拉候选中选择 source/target，或直接输入合法 ID");
       return;
     }
 
     try {
       await postJson("/api/admin/merge", {
         entityType: mergeType,
-        sourceId: mergeSourceId,
-        targetId: mergeTargetId
+        sourceId: resolvedMergeSourceId,
+        targetId: resolvedMergeTargetId
       });
       notifySuccess("合并完成。");
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "合并失败");
+    }
+  }
+
+  async function onUpdateMergedRecord(record: MergedRecord) {
+    const key = `${record.entityType}:${record.sourceId}`;
+    const input = mergedRecordTargetInputs[key] ?? "";
+    const options = record.entityType === "model" ? modelEntityOptions : benchmarkEntityOptions;
+    const targetId = parseMergeEntityId(input, options);
+
+    if (targetId === null) {
+      notifyError("请从候选中选择有效 target，或输入合法 ID");
+      return;
+    }
+
+    if (targetId === record.sourceId) {
+      notifyError("source 和 target 不能相同");
+      return;
+    }
+
+    try {
+      await postJson(
+        "/api/admin/merge-record",
+        {
+          entityType: record.entityType,
+          sourceId: record.sourceId,
+          targetId
+        },
+        "PATCH"
+      );
+
+      const targetName = options.find((item) => item.id === targetId)?.label ?? `#${targetId}`;
+
+      setMergedRecordList((prev) =>
+        prev.map((item) =>
+          item.entityType === record.entityType && item.sourceId === record.sourceId
+            ? { ...item, targetId, targetName }
+            : item
+        )
+      );
+
+      setMergedRecordTargetInputs((prev) => ({
+        ...prev,
+        [key]: `${targetName} [${targetId}]`
+      }));
+
+      notifySuccess("已更新合并目标。注意：此操作仅更新合并映射，不会回滚历史值迁移。");
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "更新合并记录失败");
+    }
+  }
+
+  async function onDeleteMergedRecord(record: MergedRecord) {
+    const confirmed = window.confirm("确认删除该合并记录吗？此操作不会回滚历史值迁移。继续？");
+    if (!confirmed) return;
+
+    try {
+      await postJson(
+        "/api/admin/merge-record",
+        {
+          entityType: record.entityType,
+          sourceId: record.sourceId
+        },
+        "DELETE"
+      );
+
+      setMergedRecordList((prev) =>
+        prev.filter((item) => !(item.entityType === record.entityType && item.sourceId === record.sourceId))
+      );
+      setMergedRecordTargetInputs((prev) => {
+        const next = { ...prev };
+        delete next[`${record.entityType}:${record.sourceId}`];
+        return next;
+      });
+
+      notifySuccess("已删除合并映射。若需刷新下拉数据可手动刷新页面。");
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "删除合并记录失败");
     }
   }
 
@@ -522,6 +769,29 @@ export function AdminConsole({ providers, models, benchmarks, initialSettings }:
 
   return (
     <>
+      {notice ? (
+        <div className="pointer-events-none fixed right-6 top-20 z-[120]">
+          <div
+            className={`pointer-events-auto flex min-w-[260px] max-w-[520px] items-center gap-3 rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-md transition-all duration-300 ease-out ${
+              noticeVisible ? "translate-y-0 opacity-100" : "-translate-y-2 opacity-0"
+            } ${
+              notice.type === "success"
+                ? "border-emerald-500/45 bg-emerald-900/80 text-emerald-100"
+                : "border-rose-500/45 bg-rose-900/80 text-rose-100"
+            }`}
+          >
+            <span
+              className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                notice.type === "success" ? "bg-emerald-500/25 text-emerald-200" : "bg-rose-500/25 text-rose-200"
+              }`}
+            >
+              {notice.type === "success" ? <Check size={18} /> : <TriangleAlert size={18} />}
+            </span>
+            <span className="text-sm font-semibold tracking-wide">{notice.message}</span>
+          </div>
+        </div>
+      ) : null}
+
       {sheetPickerOpen ? (
         <div className="modal modal-open">
           <div className="modal-box">
@@ -544,12 +814,6 @@ export function AdminConsole({ providers, models, benchmarks, initialSettings }:
       ) : null}
 
       <div className="space-y-4">
-        {notice ? (
-          <div className={`alert ${notice.type === "success" ? "alert-success" : "alert-error"}`}>
-            <span>{notice.message}</span>
-          </div>
-        ) : null}
-
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="stats stats-vertical lg:stats-horizontal bg-base-200 shadow flex-1 min-w-[320px]">
             <div className="stat">
@@ -793,10 +1057,13 @@ export function AdminConsole({ providers, models, benchmarks, initialSettings }:
             <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
               <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold">
                 <Upload size={18} />
-                CSV 导入
+                表格文本导入（CSV / TSV / 粘贴表格）
               </h3>
               <p className="mb-3 text-sm opacity-80">
-                表头示例：provider,model,benchmark,benchmark_type,modalities,bench_time,value_raw,unit,higher_is_better,source
+                支持两种格式：
+                ① 结构化 CSV（provider/model/benchmark/value...）；
+                ② 矩阵文本（首行模型，首列 benchmark，如从表格直接复制粘贴）。
+                百分号会自动去掉再入库。
               </p>
               <form onSubmit={onImportCsv} className="space-y-3">
                 <textarea
@@ -805,10 +1072,81 @@ export function AdminConsole({ providers, models, benchmarks, initialSettings }:
                   onChange={(e) => setCsvText(e.target.value)}
                   required
                 />
-                <button type="submit" className="btn btn-primary">
-                  执行导入
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className="btn btn-outline" onClick={onPreviewCsvImport}>
+                    预览导入结果
+                  </button>
+                  <button type="submit" className="btn btn-primary">
+                    执行导入
+                  </button>
+                </div>
               </form>
+
+              {textImportPreviewMeta ? (
+                <div className="alert alert-info mt-4">
+                  <div>
+                    <div>识别格式：{textImportPreviewMeta.format}</div>
+                    <div>可导入：{textImportPreviewMeta.total} 条，跳过：{textImportPreviewMeta.skipped} 条</div>
+                  </div>
+                </div>
+              ) : null}
+
+              {textImportPreviewRows.length > 0 ? (
+                <div className="mt-4 space-y-2">
+                  <h4 className="flex items-center justify-between gap-3 font-semibold">
+                    <span>文本导入预览</span>
+                    <span className="text-xs opacity-70">
+                      已显示 {visibleTextImportPreviewRows.length} / {textImportPreviewRows.length}
+                    </span>
+                  </h4>
+                  <div className="overflow-x-auto rounded-box border border-base-300 max-h-[420px]">
+                    <table className="table table-zebra table-sm">
+                      <thead>
+                        <tr>
+                          <th>Row</th>
+                          <th>Provider</th>
+                          <th>Model</th>
+                          <th>Benchmark</th>
+                          <th>Type</th>
+                          <th>Raw</th>
+                          <th>Num</th>
+                          <th>Num2</th>
+                          <th>Note</th>
+                          <th>Source</th>
+                          <th>Valid</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {visibleTextImportPreviewRows.map((row, idx) => (
+                          <tr key={`${row.rowNumber}-${row.modelName}-${row.benchmarkName}-${idx}`}>
+                            <td>{row.rowNumber}</td>
+                            <td>{row.providerName}</td>
+                            <td>{row.modelName}</td>
+                            <td>{row.benchmarkName}</td>
+                            <td>{row.benchmarkType}</td>
+                            <td>{row.rawValue}</td>
+                            <td>{row.valueNum ?? "-"}</td>
+                            <td>{row.valueNum2 ?? "-"}</td>
+                            <td>{row.valueNote ?? "-"}</td>
+                            <td>{row.source ?? "-"}</td>
+                            <td>{row.valid ? "✅" : "⚠️"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {visibleTextImportPreviewRows.length < textImportPreviewRows.length ? (
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm"
+                      onClick={() => setTextImportPreviewVisibleCount((prev) => prev + 200)}
+                    >
+                      加载更多（+200）
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </section>
           </div>
         ) : null}
@@ -956,21 +1294,125 @@ export function AdminConsole({ providers, models, benchmarks, initialSettings }:
             </h3>
             <form onSubmit={onMerge} className="grid grid-cols-1 gap-3 md:grid-cols-12">
               <div className="md:col-span-4">
-                <select className="select select-bordered w-full" value={mergeType} onChange={(e) => setMergeType(e.target.value as "model" | "benchmark")}>
+                <select
+                  className="select select-bordered w-full"
+                  value={mergeType}
+                  onChange={(e) => {
+                    setMergeType(e.target.value as "model" | "benchmark");
+                    setMergeSourceInput("");
+                    setMergeTargetInput("");
+                  }}
+                >
                   <option value="model">model</option>
                   <option value="benchmark">benchmark</option>
                 </select>
               </div>
               <div className="md:col-span-4">
-                <input type="number" className="input input-bordered w-full" value={mergeSourceId} onChange={(e) => setMergeSourceId(e.target.value ? Number(e.target.value) : "")} placeholder="source id" required />
+                <input
+                  list={`merge-options-${mergeType}`}
+                  className="input input-bordered w-full"
+                  value={mergeSourceInput}
+                  onChange={(e) => setMergeSourceInput(e.target.value)}
+                  placeholder="source：输入名称或ID"
+                  required
+                />
               </div>
               <div className="md:col-span-4">
-                <input type="number" className="input input-bordered w-full" value={mergeTargetId} onChange={(e) => setMergeTargetId(e.target.value ? Number(e.target.value) : "")} placeholder="target id" required />
+                <input
+                  list={`merge-options-${mergeType}`}
+                  className="input input-bordered w-full"
+                  value={mergeTargetInput}
+                  onChange={(e) => setMergeTargetInput(e.target.value)}
+                  placeholder="target：输入名称或ID"
+                  required
+                />
+                <datalist id={`merge-options-${mergeType}`}>
+                  {mergeEntityOptions.map((item) => (
+                    <option key={`${mergeType}-${item.id}`} value={`${item.label} [${item.id}]`} />
+                  ))}
+                </datalist>
+              </div>
+              <div className="md:col-span-12 text-xs opacity-75">
+                解析结果：source = {resolvedMergeSourceId ?? "-"}，target = {resolvedMergeTargetId ?? "-"}
               </div>
               <div className="md:col-span-12">
                 <button type="submit" className="btn btn-error">合并实体</button>
               </div>
             </form>
+
+            <h4 className="mt-6 mb-2 font-semibold">已有合并去重记录</h4>
+            {mergedRecordList.length === 0 ? (
+              <p className="text-sm opacity-70">暂无已合并记录</p>
+            ) : (
+              <div className="overflow-x-auto rounded-box border border-base-300">
+                <table className="table table-zebra table-sm">
+                  <thead>
+                    <tr>
+                      <th>Type</th>
+                      <th>Source</th>
+                      <th>Target（可编辑）</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mergedRecordList.map((record) => {
+                      const recordKey = `${record.entityType}:${record.sourceId}`;
+                      const inputValue = mergedRecordTargetInputs[recordKey] ?? `${record.targetName} [${record.targetId}]`;
+
+                      return (
+                        <tr key={recordKey}>
+                          <td>{record.entityType}</td>
+                          <td>{record.sourceName} [{record.sourceId}]</td>
+                          <td>
+                            <input
+                              list={`merge-edit-options-${record.entityType}`}
+                              className="input input-bordered input-sm w-full min-w-[300px]"
+                              value={inputValue}
+                              onChange={(e) =>
+                                setMergedRecordTargetInputs((prev) => ({
+                                  ...prev,
+                                  [recordKey]: e.target.value
+                                }))
+                              }
+                              placeholder="输入名称或ID"
+                            />
+                          </td>
+                          <td>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                className="btn btn-xs btn-outline"
+                                onClick={() => onUpdateMergedRecord(record)}
+                              >
+                                保存修改
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-xs btn-outline btn-error"
+                                onClick={() => onDeleteMergedRecord(record)}
+                              >
+                                删除记录
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <datalist id="merge-edit-options-model">
+              {modelEntityOptions.map((item) => (
+                <option key={`merge-edit-model-${item.id}`} value={`${item.label} [${item.id}]`} />
+              ))}
+            </datalist>
+            <datalist id="merge-edit-options-benchmark">
+              {benchmarkEntityOptions.map((item) => (
+                <option key={`merge-edit-benchmark-${item.id}`} value={`${item.label} [${item.id}]`} />
+              ))}
+            </datalist>
           </section>
         ) : null}
 

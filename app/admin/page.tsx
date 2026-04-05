@@ -1,6 +1,6 @@
 import { AdminConsole } from "@/components/admin-console";
 import { isAdminAuthorized } from "../../lib/admin-auth";
-import { getActiveEntities, getSettings } from "../../lib/db/queries";
+import { getActiveEntities, getMergedEntityRecords, getSettings } from "../../lib/db/queries";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
@@ -18,6 +18,7 @@ export default async function AdminPage() {
 
   const { providers, models, benchmarks } = await getActiveEntities();
   const settings = await getSettings();
+  const mergedRecords = await getMergedEntityRecords();
 
   return (
     <AdminConsole
@@ -38,6 +39,7 @@ export default async function AdminPage() {
         benchmarkType: item.benchmarkType,
         modalities: item.modalities
       }))}
+      mergedRecords={mergedRecords}
       initialSettings={settings}
     />
   );

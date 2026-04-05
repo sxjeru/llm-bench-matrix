@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 
@@ -96,6 +96,62 @@ export async function getSettings() {
     acc[row.key] = row.valueJson;
     return acc;
   }, {});
+}
+
+export type MergedEntityRecord = {
+  entityType: "model" | "benchmark";
+  sourceId: number;
+  sourceName: string;
+  targetId: number;
+  targetName: string;
+};
+
+export async function getMergedEntityRecords(): Promise<MergedEntityRecord[]> {
+  const [allModels, allBenchmarks, mergedModels, mergedBenchmarks] = await Promise.all([
+    db.select({ id: models.id, modelName: models.modelName }).from(models),
+    db
+      .select({ id: benchmarks.id, benchmarkName: benchmarks.benchmarkName, benchmarkType: benchmarks.benchmarkType })
+      .from(benchmarks),
+    db
+      .select({ sourceId: models.id, sourceName: models.modelName, targetId: models.mergedIntoModelId })
+      .from(models)
+      .where(isNotNull(models.mergedIntoModelId)),
+    db
+      .select({ sourceId: benchmarks.id, sourceName: benchmarks.benchmarkName, targetId: benchmarks.mergedIntoBenchmarkId })
+      .from(benchmarks)
+      .where(isNotNull(benchmarks.mergedIntoBenchmarkId))
+  ]);
+
+  const modelNameById = new Map(allModels.map((item) => [item.id, item.modelName]));
+  const benchmarkNameById = new Map(
+    allBenchmarks.map((item) => [item.id, `${item.benchmarkName} (${item.benchmarkType})`])
+  );
+
+  const modelRecords: MergedEntityRecord[] = mergedModels
+    .filter((item) => item.targetId !== null)
+    .map((item) => ({
+      entityType: "model",
+      sourceId: item.sourceId,
+      sourceName: item.sourceName,
+      targetId: item.targetId as number,
+      targetName: modelNameById.get(item.targetId as number) ?? `#${item.targetId}`
+    }));
+
+  const benchmarkRecords: MergedEntityRecord[] = mergedBenchmarks
+    .filter((item) => item.targetId !== null)
+    .map((item) => ({
+      entityType: "benchmark",
+      sourceId: item.sourceId,
+      sourceName: item.sourceName,
+      targetId: item.targetId as number,
+      targetName: benchmarkNameById.get(item.targetId as number) ?? `#${item.targetId}`
+    }));
+
+  return [...modelRecords, ...benchmarkRecords].sort((a, b) => {
+    const typeCompare = a.entityType.localeCompare(b.entityType);
+    if (typeCompare !== 0) return typeCompare;
+    return a.sourceName.localeCompare(b.sourceName, "zh-Hans-CN");
+  });
 }
 
 export async function saveSetting(input: {

@@ -8,14 +8,26 @@ type MatrixInputRow = {
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
+  benchTime: string;
   valueRaw: string;
   valueNum: number | null;
   source: string | null;
 };
 
+type MatrixCellEntry = {
+  valueRaw: string;
+  valueNum: number | null;
+  source: string | null;
+  benchTime: string;
+};
+
 type MatrixCell = {
   valueRaw: string;
   valueNum: number | null;
+  source: string | null;
+  benchTime: string;
+  allEntries: MatrixCellEntry[];
+  hasMultipleValues: boolean;
 };
 
 type MatrixRow = {
@@ -51,7 +63,7 @@ function getProviderBrandColor(providerName: string | null | undefined): string 
   const normalized = (providerName ?? "").trim().toLowerCase();
 
   if (normalized.includes("openai") || normalized.includes("gpt")) return "#34d399";
-  if (normalized.includes("anthropic") || normalized.includes("claude")) return "#f59e0b";
+  if (normalized.includes("anthropic") || normalized.includes("claude")) return "#e09a0e";
   if (normalized.includes("google") || normalized.includes("gemini") || normalized.includes("gemma")) return "#4285f4";
   if (normalized.includes("meta") || normalized.includes("llama")) return "#3b82f6";
   if (normalized.includes("qwen") || normalized.includes("alibaba")) return "#a16dfa";
@@ -107,11 +119,24 @@ function getHeatCellStyle(valueNum: number | null, minNum: number | null, maxNum
   } as const;
 }
 
+function formatTooltipTime(input: string): string {
+  const date = new Date(input);
+  if (Number.isNaN(date.getTime())) {
+    return input;
+  }
+  return date.toISOString().slice(0, 16).replace("T", " ");
+}
+
 export function BenchmarkMatrix({ rows }: Props) {
   const sectionRef = useRef<HTMLElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showCategory, setShowCategory] = useState(true);
   const [isModelFilterExpanded, setIsModelFilterExpanded] = useState(false);
+  const [activeCellTooltip, setActiveCellTooltip] = useState<{
+    x: number;
+    y: number;
+    entries: MatrixCellEntry[];
+  } | null>(null);
 
   const sourceOptions = useMemo(() => {
     const keys = Array.from(new Set(rows.map((row) => getSourceKey(row.source)))).sort((a, b) =>
@@ -237,8 +262,35 @@ export function BenchmarkMatrix({ rows }: Props) {
       if (!matrixRow.cells.has(row.modelName)) {
         matrixRow.cells.set(row.modelName, {
           valueRaw: row.valueRaw,
-          valueNum: row.valueNum
+          valueNum: row.valueNum,
+          source: row.source,
+          benchTime: row.benchTime,
+          allEntries: [
+            {
+              valueRaw: row.valueRaw,
+              valueNum: row.valueNum,
+              source: row.source,
+              benchTime: row.benchTime
+            }
+          ],
+          hasMultipleValues: false
         });
+      } else {
+        const existingCell = matrixRow.cells.get(row.modelName)!;
+        existingCell.allEntries.push({
+          valueRaw: row.valueRaw,
+          valueNum: row.valueNum,
+          source: row.source,
+          benchTime: row.benchTime
+        });
+        existingCell.hasMultipleValues = existingCell.allEntries.length > 1;
+
+        if (row.valueNum !== null && (existingCell.valueNum === null || row.valueNum > existingCell.valueNum)) {
+          existingCell.valueNum = row.valueNum;
+          existingCell.valueRaw = row.valueRaw;
+          existingCell.source = row.source;
+          existingCell.benchTime = row.benchTime;
+        }
       }
     });
 
@@ -559,6 +611,16 @@ export function BenchmarkMatrix({ rows }: Props) {
                   const cell = matrixRow.cells.get(model.modelName);
                   const cellNum = cell?.valueNum ?? null;
                   const rawText = cell?.valueRaw ?? "--";
+                  const allEntries = cell?.allEntries ?? [];
+                  const hasMultipleValues = (cell?.hasMultipleValues ?? false) && allEntries.length > 1;
+                  const uniqueEntries = Array.from(
+                    new Map(
+                      allEntries.map((entry) => [
+                        `${entry.valueRaw}__${entry.source ?? ""}__${entry.benchTime}`,
+                        entry
+                      ])
+                    ).values()
+                  );
                   const isMaxCell =
                     cellNum !== null &&
                     matrixRow.maxNum !== null &&
@@ -575,17 +637,36 @@ export function BenchmarkMatrix({ rows }: Props) {
                         ...heatStyle,
                         backgroundColor: heatBackground,
                         borderBottomColor: hasHeatColor ? "rgba(255, 255, 255, 0.08)" : undefined,
-                        padding: "6px 6px",
+                        padding: "4px 6px",
+                        paddingRight: hasMultipleValues ? "22px" : "6px",
+                        fontSize: "14px",
+                        lineHeight: 1.2,
                         whiteSpace: "nowrap",
+                        position: "relative",
                         fontWeight: isMaxCell ? 800 : undefined,
                         textDecoration: isMaxCell ? "underline" : undefined,
                         textDecorationColor: isMaxCell ? "rgba(15, 23, 42, 0.35)" : undefined,
                         textDecorationThickness: isMaxCell ? "1px" : undefined,
                         textUnderlineOffset: isMaxCell ? "2px" : undefined
                       }}
-                      title={cell?.valueNum !== null ? `Value Num: ${cell?.valueNum}` : "Value Num: --"}
                     >
-                      {rawText}
+                      <span>{rawText}</span>
+                      {hasMultipleValues ? (
+                        <span
+                          className="absolute right-1 top-1/2 inline-flex h-4 w-4 -translate-y-1/2 cursor-help items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
+                          onMouseEnter={(event) => {
+                            const rect = event.currentTarget.getBoundingClientRect();
+                            setActiveCellTooltip({
+                              x: rect.left + rect.width / 2,
+                              y: rect.top - 6,
+                              entries: uniqueEntries
+                            });
+                          }}
+                          onMouseLeave={() => setActiveCellTooltip(null)}
+                        >
+                          ?
+                        </span>
+                      ) : null}
                     </td>
                   );
                 })}
@@ -594,6 +675,30 @@ export function BenchmarkMatrix({ rows }: Props) {
           </tbody>
         </table>
       </div>
+
+      {activeCellTooltip ? (
+        <div
+          className="pointer-events-none fixed z-[2600] w-[320px] max-w-[320px] rounded-xl border border-white/20 bg-slate-900/96 p-2 text-left text-[11px] font-medium text-slate-100 shadow-2xl backdrop-blur-lg"
+          style={{
+            left: activeCellTooltip.x,
+            top: activeCellTooltip.y,
+            transform: "translate(-50%, -100%)"
+          }}
+        >
+          <span className="mb-1 block text-[10px] text-slate-300">该单元格存在多条记录</span>
+          <span className="block max-h-44 space-y-1 overflow-auto">
+            {activeCellTooltip.entries.map((entry) => (
+              <span
+                key={`${entry.valueRaw}-${entry.source ?? "-"}-${entry.benchTime}`}
+                className="block rounded-md bg-white/5 px-2 py-1 leading-4"
+              >
+                {entry.valueRaw}
+                <span className="opacity-80"> · {entry.source ?? "unknown-source"} · {formatTooltipTime(entry.benchTime)}</span>
+              </span>
+            ))}
+          </span>
+        </div>
+      ) : null}
 
       {matrixRows.length === 0 ? (
         <div className="mt-3 text-sm opacity-75">当前筛选条件下暂无数据。</div>
