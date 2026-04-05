@@ -5,15 +5,36 @@ import { getDashboardRows } from "@/lib/db/queries";
 export default async function HomePage() {
   const rows = await getDashboardRows(800);
   const totalNumeric = rows.filter((row) => row.valueNum !== null).length;
+  const providerCount = new Set(rows.map((row) => row.providerName)).size;
+  const modelCount = new Set(rows.map((row) => row.modelName)).size;
+  const benchmarkCount = new Set(rows.map((row) => `${row.benchmarkName}::${row.benchmarkType}`)).size;
 
   return (
     <>
-      <section className="card">
-        <h1>模型 Benchmark 看板</h1>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <span className="badge">总记录：{rows.length}</span>
-          <span className="badge">可数值排序记录：{totalNumeric}</span>
-        </div>
+      <section className="home-metrics-grid">
+        <article className="home-metric-card tone-gold">
+          <div className="home-metric-title">Providers</div>
+          <div className="home-metric-value">{providerCount}</div>
+          <div className="home-metric-sub">数据提供方</div>
+        </article>
+
+        <article className="home-metric-card tone-emerald">
+          <div className="home-metric-title">Models</div>
+          <div className="home-metric-value">{modelCount}</div>
+          <div className="home-metric-sub">可用模型数</div>
+        </article>
+
+        <article className="home-metric-card tone-blue">
+          <div className="home-metric-title">Benchmarks</div>
+          <div className="home-metric-value">{benchmarkCount}</div>
+          <div className="home-metric-sub">评测项数量</div>
+        </article>
+
+        <article className="home-metric-card tone-purple">
+          <div className="home-metric-title">总记录</div>
+          <div className="home-metric-value">{rows.length}</div>
+          <div className="home-metric-sub">可数值排序：{totalNumeric}</div>
+        </article>
       </section>
 
       <BenchmarkMatrix

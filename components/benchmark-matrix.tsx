@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronUp, Expand, Eye, EyeOff, Filter, Layers, Minimize2 } from "lucide-react";
 
 type MatrixInputRow = {
@@ -57,6 +58,15 @@ function getSourceLabel(sourceKey: string): string {
     return "未标注";
   }
   return sourceKey;
+}
+
+function sourceTabDisplayLabel(sourceKey: string): string {
+  const rawLabel = getSourceLabel(sourceKey);
+  const colonIndex = rawLabel.indexOf(":");
+  if (colonIndex < 0) return rawLabel;
+
+  const stripped = rawLabel.slice(colonIndex + 1).trim();
+  return stripped.length > 0 ? stripped : rawLabel;
 }
 
 function getProviderBrandColor(providerName: string | null | undefined): string {
@@ -129,9 +139,14 @@ function formatTooltipTime(input: string): string {
 
 export function BenchmarkMatrix({ rows }: Props) {
   const sectionRef = useRef<HTMLElement | null>(null);
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showCategory, setShowCategory] = useState(true);
   const [isModelFilterExpanded, setIsModelFilterExpanded] = useState(false);
+  const [hoveredRowKey, setHoveredRowKey] = useState<string | null>(null);
+  const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [activeCellTooltip, setActiveCellTooltip] = useState<{
     x: number;
     y: number;
@@ -144,12 +159,37 @@ export function BenchmarkMatrix({ rows }: Props) {
     );
 
     return [
-      { key: SOURCE_ALL, label: "全部 Source" },
+      { key: SOURCE_ALL, label: "全部" },
       ...keys.map((key) => ({ key, label: getSourceLabel(key) }))
     ];
   }, [rows]);
 
   const [activeSource, setActiveSource] = useState(SOURCE_ALL);
+
+  useEffect(() => {
+    const sourceFromUrl = searchParams.get("source");
+    if (!sourceFromUrl) {
+      setActiveSource(SOURCE_ALL);
+      return;
+    }
+
+    const isKnown = sourceOptions.some((item) => item.key === sourceFromUrl);
+    setActiveSource(isKnown ? sourceFromUrl : SOURCE_ALL);
+  }, [searchParams, sourceOptions]);
+
+  function setSourceAndUrl(nextSource: string) {
+    setActiveSource(nextSource);
+
+    const params = new URLSearchParams(searchParams.toString());
+    if (nextSource === SOURCE_ALL) {
+      params.delete("source");
+    } else {
+      params.set("source", nextSource);
+    }
+
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }
 
   const providerGroups = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -381,7 +421,7 @@ export function BenchmarkMatrix({ rows }: Props) {
     <section className="card" ref={sectionRef} style={isFullscreen ? { paddingTop: 8 } : undefined}>
       {!isFullscreen ? (
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="m-0">Benchmark 矩阵表（默认视图）</h2>
+          <h2 className="m-0">Benchmark 矩阵表</h2>
           <button type="button" className="btn btn-sm btn-outline" onClick={toggleFullscreen}>
             <Expand size={15} />
             全屏显示表格
@@ -396,10 +436,14 @@ export function BenchmarkMatrix({ rows }: Props) {
               key={source.key}
               type="button"
               role="tab"
-              className={`tab ${activeSource === source.key ? "tab-active" : ""}`}
-              onClick={() => setActiveSource(source.key)}
+              className={`tab transition-all ${
+                activeSource === source.key
+                  ? "tab-active !rounded-xl !bg-primary/50 !text-primary-content font-semibold shadow-[0_0_0_0px_rgba(93,167,255,0.55),0_4px_20px_rgba(93,167,255,0.22)] scale-[1.01]"
+                  : "opacity-80 hover:opacity-100 hover:!rounded-xl hover:bg-base-100/60"
+              }`}
+              onClick={() => setSourceAndUrl(source.key)}
             >
-              {source.label}
+              {source.key === SOURCE_ALL ? source.label : sourceTabDisplayLabel(source.key)}
             </button>
           ))}
         </div>
@@ -573,8 +617,56 @@ export function BenchmarkMatrix({ rows }: Props) {
             </tr>
           </thead>
           <tbody>
-            {matrixRows.map((matrixRow) => (
-              <tr key={`${matrixRow.category}::${matrixRow.benchmark}`}>
+            {matrixRows.map((matrixRow) => {
+              const rowKey = `${matrixRow.category}::${matrixRow.benchmark}`;
+              const isHoveredRow = hoveredRowKey === rowKey;
+              const isSelectedRow = selectedRowKey === rowKey;
+              const rowBorderColor = isSelectedRow
+                ? "rgba(94, 234, 212, 0.78)"
+                : isHoveredRow
+                  ? "rgba(148, 163, 184, 0.45)"
+                  : null;
+              const rowFrameStyle = isSelectedRow
+                ? {
+                    outline: "1px solid rgba(94, 234, 212, 0.78)",
+                    outlineOffset: "-2px",
+                    boxShadow: "0 0 0 1px rgba(94, 234, 212, 0.36), 0 0 18px rgba(45, 212, 191, 0.26)"
+                  }
+                : isHoveredRow
+                  ? {
+                      outline: "1px solid rgba(148, 163, 184, 0.38)",
+                      outlineOffset: "-2px",
+                      boxShadow: "0 0 12px rgba(148, 163, 184, 0.16)"
+                    }
+                  : undefined;
+              const rowCellLineStyle = rowBorderColor
+                ? {
+                    borderTop: `1px solid ${rowBorderColor}`,
+                    borderBottom: `1px solid ${rowBorderColor}`,
+                    backgroundImage: isSelectedRow
+                      ? "linear-gradient(rgba(45, 212, 191, 0.10), rgba(45, 212, 191, 0.10))"
+                      : "linear-gradient(rgba(148, 163, 184, 0.05), rgba(148, 163, 184, 0.05))"
+                  }
+                : undefined;
+              const rowLeftEdgeStyle = rowBorderColor
+                ? {
+                    borderLeft: `1px solid ${rowBorderColor}`
+                  }
+                : undefined;
+              const rowRightEdgeStyle = rowBorderColor
+                ? {
+                    borderRight: `1px solid ${rowBorderColor}`
+                  }
+                : undefined;
+
+              return (
+              <tr
+                key={rowKey}
+                onMouseEnter={() => setHoveredRowKey(rowKey)}
+                onMouseLeave={() => setHoveredRowKey((prev) => (prev === rowKey ? null : prev))}
+                onClick={() => setSelectedRowKey((prev) => (prev === rowKey ? null : rowKey))}
+                style={{ cursor: "pointer", ...rowFrameStyle }}
+              >
                 {showCategory ? (
                   <td
                     style={{
@@ -584,7 +676,9 @@ export function BenchmarkMatrix({ rows }: Props) {
                       padding: "6px 8px",
                       whiteSpace: "nowrap",
                       overflow: "hidden",
-                      textOverflow: "ellipsis"
+                      textOverflow: "ellipsis",
+                      ...rowCellLineStyle,
+                      ...rowLeftEdgeStyle
                     }}
                     title={matrixRow.category}
                   >
@@ -601,18 +695,25 @@ export function BenchmarkMatrix({ rows }: Props) {
                     padding: "6px 8px",
                     background: "rgba(20, 27, 45, 0.96)",
                     boxShadow: "8px 0 12px rgba(2, 6, 23, 0.28)",
-                    whiteSpace: "nowrap"
+                    whiteSpace: "nowrap",
+                    ...rowCellLineStyle,
+                    ...(showCategory ? {} : rowLeftEdgeStyle ?? {})
                   }}
                 >
                   {matrixRow.benchmark}
                 </td>
 
-                {modelColumnMeta.map((model) => {
+                {modelColumnMeta.map((model, modelIndex) => {
                   const cell = matrixRow.cells.get(model.modelName);
                   const cellNum = cell?.valueNum ?? null;
                   const rawText = cell?.valueRaw ?? "--";
                   const allEntries = cell?.allEntries ?? [];
-                  const hasMultipleValues = (cell?.hasMultipleValues ?? false) && allEntries.length > 1;
+                  const valueIdentitySet = new Set(
+                    allEntries.map((entry) =>
+                      entry.valueNum !== null ? `num:${entry.valueNum}` : `raw:${entry.valueRaw}`
+                    )
+                  );
+                  const hasMultipleValues = (cell?.hasMultipleValues ?? false) && valueIdentitySet.size > 1;
                   const uniqueEntries = Array.from(
                     new Map(
                       allEntries.map((entry) => [
@@ -647,7 +748,9 @@ export function BenchmarkMatrix({ rows }: Props) {
                         textDecoration: isMaxCell ? "underline" : undefined,
                         textDecorationColor: isMaxCell ? "rgba(15, 23, 42, 0.35)" : undefined,
                         textDecorationThickness: isMaxCell ? "1px" : undefined,
-                        textUnderlineOffset: isMaxCell ? "2px" : undefined
+                        textUnderlineOffset: isMaxCell ? "2px" : undefined,
+                        ...rowCellLineStyle,
+                        ...(modelIndex === modelColumnMeta.length - 1 ? rowRightEdgeStyle ?? {} : {})
                       }}
                     >
                       <span>{rawText}</span>
@@ -671,7 +774,7 @@ export function BenchmarkMatrix({ rows }: Props) {
                   );
                 })}
               </tr>
-            ))}
+            );})}
           </tbody>
         </table>
       </div>

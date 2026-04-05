@@ -5,7 +5,6 @@ import {
   Check,
   Database,
   FileSpreadsheet,
-  LogOut,
   Merge as MergeIcon,
   PlusCircle,
   Settings2,
@@ -261,6 +260,7 @@ export function AdminConsole({ providers, models, benchmarks, mergedRecords, ini
   const [settingKey, setSettingKey] = useState("");
   const [settingValue, setSettingValue] = useState("{}");
   const [settingNote, setSettingNote] = useState("");
+  const [deleteModelInput, setDeleteModelInput] = useState("");
   const [modelDedupeRule, setModelDedupeRule] = useState<ModelDedupeRule>(() =>
     normalizeModelDedupeRule(initialSettings.model_dedupe_rule)
   );
@@ -737,6 +737,27 @@ export function AdminConsole({ providers, models, benchmarks, mergedRecords, ini
     }
   }
 
+  async function onDeleteModelData() {
+    const modelId = parseMergeEntityId(deleteModelInput, modelEntityOptions);
+    if (modelId === null) {
+      notifyError("请先选择有效模型（可输入名称后从下拉候选选择）");
+      return;
+    }
+
+    const selectedModelName = models.find((item) => item.id === modelId)?.modelName ?? `#${modelId}`;
+    const confirmed = window.confirm(
+      `确认删除模型 ${selectedModelName} 的所有数据吗？\n将删除该模型及其全部 benchmark_values。`
+    );
+    if (!confirmed) return;
+
+    try {
+      const result = await postJson("/api/admin/debug/delete-model", { modelId });
+      notifySuccess(`已删除模型：${result.modelName ?? selectedModelName}`);
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "删除模型失败");
+    }
+  }
+
   async function onSaveModelDedupeRule() {
     try {
       await postJson("/api/admin/settings", {
@@ -751,17 +772,8 @@ export function AdminConsole({ providers, models, benchmarks, mergedRecords, ini
     }
   }
 
-  async function onLogout() {
-    try {
-      await fetch("/api/admin/logout", { method: "POST" });
-      window.location.href = "/admin/login";
-    } catch {
-      notifyError("退出失败，请重试");
-    }
-  }
-
   const tabClass = (key: TabKey) =>
-    `btn btn-sm rounded-xl border-0 transition-all duration-200 ease-out ${
+    `btn rounded-xl border-0 text-base md:text-base transition-all duration-200 ease-out ${
       activeTab === key
         ? "bg-primary text-primary-content font-semibold shadow-md"
         : "bg-transparent text-base-content/70 hover:bg-base-100/70 hover:text-base-content"
@@ -835,11 +847,6 @@ export function AdminConsole({ providers, models, benchmarks, mergedRecords, ini
               </div>
             </div>
           </div>
-
-          <button className="btn btn-ghost btn-sm mt-1 shrink-0" onClick={onLogout} type="button">
-            <LogOut size={16} />
-            退出登录
-          </button>
         </div>
 
         <div
@@ -1063,7 +1070,6 @@ export function AdminConsole({ providers, models, benchmarks, mergedRecords, ini
                 支持两种格式：
                 ① 结构化 CSV（provider/model/benchmark/value...）；
                 ② 矩阵文本（首行模型，首列 benchmark，如从表格直接复制粘贴）。
-                百分号会自动去掉再入库。
               </p>
               <form onSubmit={onImportCsv} className="space-y-3">
                 <textarea
@@ -1477,6 +1483,30 @@ export function AdminConsole({ providers, models, benchmarks, mergedRecords, ini
               <div className="mt-3">
                 <button type="button" className="btn btn-primary" onClick={onSaveModelDedupeRule}>
                   保存模型规则
+                </button>
+              </div>
+            </div>
+
+            <div className="mb-5 rounded-box border border-error/40 bg-base-200/50 p-4">
+              <h4 className="mb-2 font-semibold text-error">删除单模型及其全部数据</h4>
+              <p className="mb-3 text-sm opacity-80">
+                会删除该模型记录与其所有 benchmark_values（不可恢复）。
+              </p>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(420px,1fr)_auto] md:items-center">
+                <input
+                  className="input input-bordered w-full"
+                  list="delete-model-options"
+                  value={deleteModelInput}
+                  onChange={(e) => setDeleteModelInput(e.target.value)}
+                  placeholder="输入模型名或ID后选择候选"
+                />
+                <datalist id="delete-model-options">
+                  {modelEntityOptions.map((item) => (
+                    <option key={`delete-model-${item.id}`} value={`${item.label} [${item.id}]`} />
+                  ))}
+                </datalist>
+                <button type="button" className="btn btn-outline btn-error" onClick={onDeleteModelData}>
+                  删除模型及数据
                 </button>
               </div>
             </div>

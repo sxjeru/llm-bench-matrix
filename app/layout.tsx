@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { Shield } from "lucide-react";
+import { TopbarActions } from "@/components/topbar-actions";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -17,11 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/" className="brand">
               LLM Bench Matrix
             </Link>
-            <nav className="nav">
-              <Link href="/admin" className="nav-icon" aria-label="后台管理">
-                <Shield size={18} />
-              </Link>
-            </nav>
+            <TopbarActions />
           </div>
         </header>
         <main className="page">

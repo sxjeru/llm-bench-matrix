@@ -91,6 +91,101 @@ a {
   margin-bottom: 16px;
 }
 
+.home-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.home-metric-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid #2b3a5f;
+  padding: 18px 20px;
+  background: linear-gradient(140deg, rgba(17, 27, 45, 0.98), rgba(14, 24, 42, 0.96));
+  transition: transform 0.2s ease, box-shadow 0.24s ease, border-color 0.24s ease;
+}
+
+.home-metric-card::after {
+  content: "";
+  position: absolute;
+  inset: -40% auto auto -18%;
+  width: 140px;
+  height: 220px;
+  transform: rotate(24deg);
+  opacity: 0;
+  transition: opacity 0.24s ease, transform 0.24s ease;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.16), transparent 66%);
+}
+
+.home-metric-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgba(8, 16, 34, 0.45);
+}
+
+.home-metric-card:hover::after {
+  opacity: 1;
+  transform: rotate(24deg) translateX(12px);
+}
+
+.home-metric-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #ccd5ea;
+  margin-bottom: 10px;
+}
+
+.home-metric-value {
+  font-size: clamp(30px, 3vw, 42px);
+  font-weight: 700;
+  line-height: 1.05;
+  margin-bottom: 8px;
+  color: #f8fafc;
+}
+
+.home-metric-sub {
+  font-size: 14px;
+  color: #9fb0d1;
+}
+
+.home-metric-card.tone-gold {
+  border-color: rgba(255, 188, 44, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(255, 188, 44, 0.18);
+}
+
+.home-metric-card.tone-gold .home-metric-title {
+  color: #ffd45b;
+}
+
+.home-metric-card.tone-emerald {
+  border-color: rgba(28, 202, 164, 0.5);
+  box-shadow: inset 0 0 0 1px rgba(28, 202, 164, 0.16);
+}
+
+.home-metric-card.tone-emerald .home-metric-title {
+  color: #3de3be;
+}
+
+.home-metric-card.tone-blue {
+  border-color: rgba(65, 137, 255, 0.48);
+  box-shadow: inset 0 0 0 1px rgba(65, 137, 255, 0.16);
+}
+
+.home-metric-card.tone-blue .home-metric-title {
+  color: #7fb4ff;
+}
+
+.home-metric-card.tone-purple {
+  border-color: rgba(159, 106, 255, 0.52);
+  box-shadow: inset 0 0 0 1px rgba(159, 106, 255, 0.17);
+}
+
+.home-metric-card.tone-purple .home-metric-title {
+  color: #c597ff;
+}
+
 h1,
 h2,
 h3 {
@@ -120,6 +215,16 @@ h3 {
   .legacy-grid > .legacy-col-6,
   .legacy-grid > .legacy-col-12 {
     grid-column: span 12;
+  }
+
+  .home-metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .home-metrics-grid {
+    grid-template-columns: 1fr;
   }
 }
 

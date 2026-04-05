@@ -636,6 +636,33 @@ export async function importBenchmarkCsv(inputText: string) {
   };
 }
 
+export async function deleteModelAndAllValues(modelId: number) {
+  const [existing] = await db
+    .select({ id: models.id, modelName: models.modelName })
+    .from(models)
+    .where(eq(models.id, modelId))
+    .limit(1);
+
+  if (!existing) {
+    throw new Error(`model not found: ${modelId}`);
+  }
+
+  await db.transaction(async (tx: any) => {
+    await tx
+      .update(models)
+      .set({ mergedIntoModelId: null })
+      .where(eq(models.mergedIntoModelId, modelId));
+
+    await tx.delete(models).where(eq(models.id, modelId));
+  });
+
+  return {
+    ok: true,
+    modelId: existing.id,
+    modelName: existing.modelName
+  };
+}
+
 export async function clearNonSettingsData() {
   await db.transaction(async (tx: any) => {
     await tx.delete(benchmarkValues);
