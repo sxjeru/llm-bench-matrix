@@ -55,8 +55,8 @@ export function DashboardCharts({ rows }: { rows: Row[] }) {
   }, [rows]);
 
   return (
-    <div className="grid">
-      <section className="card col-6">
+    <div className="legacy-grid">
+      <section className="card legacy-col-6">
         <h3>Benchmark 均值（Top 12）</h3>
         <div style={{ width: "100%", height: 320 }}>
           <ResponsiveContainer>
@@ -72,7 +72,7 @@ export function DashboardCharts({ rows }: { rows: Row[] }) {
         </div>
       </section>
 
-      <section className="card col-6">
+      <section className="card legacy-col-6">
         <h3>最近记录趋势</h3>
         <div style={{ width: "100%", height: 320 }}>
           <ResponsiveContainer>

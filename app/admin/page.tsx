@@ -1,4 +1,4 @@
-import { AdminConsole } from "../../components/admin-console";
+import { AdminConsole } from "@/components/admin-console";
 import { isAdminAuthorized } from "../../lib/admin-auth";
 import { getActiveEntities, getSettings } from "../../lib/db/queries";
 import { headers } from "next/headers";
@@ -20,32 +20,25 @@ export default async function AdminPage() {
   const settings = await getSettings();
 
   return (
-    <>
-      <section className="card">
-        <h1>后台管理</h1>
-        <p className="subtitle">新增数据、批量导入、实体合并、设置项维护。新增后如需看到最新下拉列表，请刷新页面。</p>
-      </section>
-
-      <AdminConsole
-        providers={providers.map((item) => ({
-          id: item.id,
-          name: item.name,
-          slug: item.slug
-        }))}
-        models={models.map((item) => ({
-          id: item.id,
-          providerId: item.providerId,
-          modelName: item.modelName,
-          canonicalKey: item.canonicalKey
-        }))}
-        benchmarks={benchmarks.map((item) => ({
-          id: item.id,
-          benchmarkName: item.benchmarkName,
-          benchmarkType: item.benchmarkType,
-          modalities: item.modalities
-        }))}
-        initialSettings={settings}
-      />
-    </>
+    <AdminConsole
+      providers={providers.map((item) => ({
+        id: item.id,
+        name: item.name,
+        slug: item.slug
+      }))}
+      models={models.map((item) => ({
+        id: item.id,
+        providerId: item.providerId,
+        modelName: item.modelName,
+        canonicalKey: item.canonicalKey
+      }))}
+      benchmarks={benchmarks.map((item) => ({
+        id: item.id,
+        benchmarkName: item.benchmarkName,
+        benchmarkType: item.benchmarkType,
+        modalities: item.modalities
+      }))}
+      initialSettings={settings}
+    />
   );
 }

@@ -1,10 +1,15 @@
 import { parse } from "csv-parse/sync";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { buildBenchmarkCanonicalKey, buildModelCanonicalKey, toProviderSlug } from "@/lib/db/normalize";
+import {
+  buildBenchmarkCanonicalKey,
+  buildModelCanonicalKey,
+  normalizeModelDedupeRule,
+  toProviderSlug
+} from "@/lib/db/normalize";
 import { parseBenchmarkValue } from "@/lib/db/parse-value";
 import type { ParsedImportRecord } from "@/lib/import/xlsm";
-import { benchmarkValues, benchmarks, models, providers } from "@/lib/db/schema";
+import { benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 
 type EnsureBenchmarkInput = {
   benchmarkName: string;
@@ -83,6 +88,16 @@ function firstResultRow<T>(result: unknown): T | undefined {
   return undefined;
 }
 
+async function getModelDedupeRule() {
+  const [setting] = await db
+    .select({ valueJson: settings.valueJson })
+    .from(settings)
+    .where(eq(settings.key, "model_dedupe_rule"))
+    .limit(1);
+
+  return normalizeModelDedupeRule(setting?.valueJson);
+}
+
 export async function ensureProvider(name: string) {
   const cleanName = name.trim();
   if (!cleanName) {
@@ -130,7 +145,8 @@ export async function ensureModelByProviderId(input: {
     throw new Error(`provider not found: ${input.providerId}`);
   }
 
-  const canonicalKey = buildModelCanonicalKey(provider.slug, cleanName);
+  const rule = await getModelDedupeRule();
+  const canonicalKey = buildModelCanonicalKey(cleanName, rule);
   const [existing] = await db.select().from(models).where(eq(models.canonicalKey, canonicalKey)).limit(1);
 
   if (existing) {
@@ -365,5 +381,18 @@ export async function importBenchmarkCsv(csvText: string) {
   return {
     total: rows.length,
     inserted
+  };
+}
+
+export async function clearNonSettingsData() {
+  await db.transaction(async (tx: any) => {
+    await tx.delete(benchmarkValues);
+    await tx.delete(models);
+    await tx.delete(benchmarks);
+    await tx.delete(providers);
+  });
+
+  return {
+    ok: true
   };
 }

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { Shield } from "lucide-react";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -9,7 +10,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh-CN">
+    <html lang="zh-CN" data-theme="dark">
       <body>
         <header className="topbar">
           <div className="container topbar-inner">
@@ -17,8 +18,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               LLM Bench Matrix
             </Link>
             <nav className="nav">
-              <Link href="/">看板</Link>
-              <Link href="/admin">后台</Link>
+              <Link href="/admin" className="nav-icon" aria-label="后台管理">
+                <Shield size={18} />
+              </Link>
             </nav>
           </div>
         </header>

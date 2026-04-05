@@ -1,3 +1,6 @@
+@import "tailwindcss";
+@plugin "daisyui";
+
 :root {
   color-scheme: dark;
   --bg: #0b1020;
@@ -52,12 +55,28 @@ a {
 
 .nav {
   display: flex;
-  gap: 14px;
+  gap: 10px;
   color: var(--subtext);
 }
 
 .nav a:hover {
   color: var(--text);
+}
+
+.nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid #2f3d63;
+  background: #121b31;
+}
+
+.nav-icon:hover {
+  border-color: #4b6fb9;
+  background: #182544;
 }
 
 .page {
@@ -83,23 +102,23 @@ h3 {
   margin-bottom: 16px;
 }
 
-.grid {
+.legacy-grid {
   display: grid;
   grid-template-columns: repeat(12, 1fr);
   gap: 14px;
 }
 
-.grid > .col-6 {
+.legacy-grid > .legacy-col-6 {
   grid-column: span 6;
 }
 
-.grid > .col-12 {
+.legacy-grid > .legacy-col-12 {
   grid-column: span 12;
 }
 
 @media (max-width: 900px) {
-  .grid > .col-6,
-  .grid > .col-12 {
+  .legacy-grid > .legacy-col-6,
+  .legacy-grid > .legacy-col-12 {
     grid-column: span 12;
   }
 }
@@ -136,10 +155,10 @@ td {
   color: #c8dcff;
 }
 
-input,
-select,
-textarea,
-button {
+input:not(.input):not(.file-input):not(.checkbox):not(.toggle),
+select:not(.select),
+textarea:not(.textarea),
+button:not(.btn):not(.tab) {
   width: 100%;
   border-radius: 10px;
   border: 1px solid #354261;
@@ -149,12 +168,12 @@ button {
   font-size: 14px;
 }
 
-textarea {
+textarea:not(.textarea) {
   min-height: 120px;
   resize: vertical;
 }
 
-button {
+button:not(.btn):not(.tab) {
   cursor: pointer;
   background: linear-gradient(135deg, #355dff, #4a9aff);
   border-color: transparent;
