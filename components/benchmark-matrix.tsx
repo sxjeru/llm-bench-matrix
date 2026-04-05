@@ -47,6 +47,7 @@ type Props = {
 
 const SOURCE_ALL = "__ALL__";
 const SOURCE_EMPTY = "__EMPTY__";
+const SHOW_CATEGORY_STORAGE_KEY = "benchmark-matrix:show-category";
 
 function getSourceKey(source: string | null): string {
   const cleaned = source?.trim();
@@ -139,6 +140,7 @@ function formatTooltipTime(input: string): string {
 
 export function BenchmarkMatrix({ rows }: Props) {
   const sectionRef = useRef<HTMLElement | null>(null);
+  const showCategoryLoadedRef = useRef(false);
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -176,6 +178,29 @@ export function BenchmarkMatrix({ rows }: Props) {
     const isKnown = sourceOptions.some((item) => item.key === sourceFromUrl);
     setActiveSource(isKnown ? sourceFromUrl : SOURCE_ALL);
   }, [searchParams, sourceOptions]);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(SHOW_CATEGORY_STORAGE_KEY);
+      if (saved === "0" || saved === "1") {
+        setShowCategory(saved === "1");
+      }
+    } catch {
+      // ignore storage access errors gracefully
+    }
+
+    showCategoryLoadedRef.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!showCategoryLoadedRef.current) return;
+
+    try {
+      window.localStorage.setItem(SHOW_CATEGORY_STORAGE_KEY, showCategory ? "1" : "0");
+    } catch {
+      // ignore storage access errors gracefully
+    }
+  }, [showCategory]);
 
   function setSourceAndUrl(nextSource: string) {
     setActiveSource(nextSource);
@@ -419,17 +444,7 @@ export function BenchmarkMatrix({ rows }: Props) {
 
   return (
     <section className="card" ref={sectionRef} style={isFullscreen ? { paddingTop: 8 } : undefined}>
-      {!isFullscreen ? (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="m-0">Benchmark 矩阵表</h2>
-          <button type="button" className="btn btn-sm btn-outline" onClick={toggleFullscreen}>
-            <Expand size={15} />
-            全屏显示表格
-          </button>
-        </div>
-      ) : null}
-
-      <div className={`${isFullscreen ? "mt-0" : "mt-3"} flex flex-wrap items-center gap-3`}>
+      <div className="flex flex-wrap items-center gap-3">
         <div role="tablist" className="tabs tabs-boxed bg-base-200/70 p-1">
           {sourceOptions.map((source) => (
             <button
@@ -439,7 +454,7 @@ export function BenchmarkMatrix({ rows }: Props) {
               className={`tab transition-all ${
                 activeSource === source.key
                   ? "tab-active !rounded-xl !bg-primary/50 !text-primary-content font-semibold shadow-[0_0_0_0px_rgba(93,167,255,0.55),0_4px_20px_rgba(93,167,255,0.22)] scale-[1.01]"
-                  : "opacity-80 hover:opacity-100 hover:!rounded-xl hover:bg-base-100/60"
+                  : "hover:!rounded-xl hover:bg-base-100/60"
               }`}
               onClick={() => setSourceAndUrl(source.key)}
             >
@@ -448,12 +463,10 @@ export function BenchmarkMatrix({ rows }: Props) {
           ))}
         </div>
 
-        {isFullscreen ? (
-          <button type="button" className="btn btn-sm btn-outline ml-auto" onClick={toggleFullscreen}>
-            <Minimize2 size={15} />
-            退出全屏
-          </button>
-        ) : null}
+        <button type="button" className="btn btn-sm btn-outline ml-auto" onClick={toggleFullscreen}>
+          {isFullscreen ? <Minimize2 size={15} /> : <Expand size={15} />}
+          {isFullscreen ? "退出全屏" : "全屏显示表格"}
+        </button>
 
         <button
           type="button"
@@ -463,21 +476,9 @@ export function BenchmarkMatrix({ rows }: Props) {
           {showCategory ? <Eye size={14} /> : <EyeOff size={14} />}
           显示类别列
         </button>
-
-        <div className="flex items-center gap-1 text-xs opacity-75">
-          <Filter size={14} />
-          已选模型 {selectedModels.length}/{allModelNames.length}
-        </div>
-
-        <button type="button" className="btn btn-xs btn-ghost" onClick={selectAllModels}>
-          全选模型
-        </button>
-        <button type="button" className="btn btn-xs btn-ghost" onClick={clearAllModels}>
-          清空模型
-        </button>
       </div>
 
-      <div className={`${isFullscreen ? "mt-2" : "mt-3"} rounded-box border border-base-300/70 bg-base-200/35 p-3`}>
+      <div className={`${isFullscreen ? "mt-2" : ""} rounded-box border border-base-300/70 bg-base-200/35 p-3`}>
         <div className="mb-2 flex flex-wrap items-center gap-2 text-xs opacity-80">
           <Layers size={14} />
           <span>模型层叠筛选：点击可展开具体模型列表</span>
@@ -490,6 +491,20 @@ export function BenchmarkMatrix({ rows }: Props) {
             {isModelFilterExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
             {isModelFilterExpanded ? "收起模型筛选" : "展开模型筛选"}
           </button>
+
+          <div className="ml-auto flex flex-wrap items-center gap-2 opacity-100">
+            <div className="flex items-center gap-1 text-xs opacity-75">
+              <Filter size={14} />
+              已选模型 {selectedModels.length}/{allModelNames.length}
+            </div>
+
+            <button type="button" className="btn btn-xs btn-ghost" onClick={selectAllModels}>
+              全选模型
+            </button>
+            <button type="button" className="btn btn-xs btn-ghost" onClick={clearAllModels}>
+              清空模型
+            </button>
+          </div>
         </div>
 
         {isModelFilterExpanded ? (
@@ -630,34 +645,35 @@ export function BenchmarkMatrix({ rows }: Props) {
                 ? {
                     outline: "1px solid rgba(94, 234, 212, 0.78)",
                     outlineOffset: "-2px",
-                    boxShadow: "0 0 0 1px rgba(94, 234, 212, 0.36), 0 0 18px rgba(45, 212, 191, 0.26)"
+                    boxShadow: "0 0 0 1px rgba(94, 234, 212, 0.36), 0 0 12px rgba(45, 212, 191, 0.25)"
                   }
                 : isHoveredRow
                   ? {
                       outline: "1px solid rgba(148, 163, 184, 0.38)",
                       outlineOffset: "-2px",
-                      boxShadow: "0 0 12px rgba(148, 163, 184, 0.16)"
+                      boxShadow: "0 0 8px rgba(148, 163, 184, 0.2)"
                     }
                   : undefined;
               const rowCellLineStyle = rowBorderColor
                 ? {
-                    borderTop: `1px solid ${rowBorderColor}`,
-                    borderBottom: `1px solid ${rowBorderColor}`,
+                    borderTopWidth: 1,
+                    borderTopStyle: "solid" as const,
+                    borderTopColor: rowBorderColor,
+                    borderBottomColor: rowBorderColor,
                     backgroundImage: isSelectedRow
                       ? "linear-gradient(rgba(45, 212, 191, 0.10), rgba(45, 212, 191, 0.10))"
-                      : "linear-gradient(rgba(148, 163, 184, 0.05), rgba(148, 163, 184, 0.05))"
+                      : "linear-gradient(rgba(148, 163, 184, 0.05), rgba(148, 163, 184, 0.05))",
+                    boxShadow: isSelectedRow
+                      ? "inset 0 1px 0 rgba(94, 234, 212, 0.5), inset 0 -1px 0 rgba(94, 234, 212, 0.5)"
+                      : "inset 0 1px 0 rgba(148, 163, 184, 0.3), inset 0 -1px 0 rgba(148, 163, 184, 0.3)"
                   }
                 : undefined;
-              const rowLeftEdgeStyle = rowBorderColor
-                ? {
-                    borderLeft: `1px solid ${rowBorderColor}`
-                  }
-                : undefined;
-              const rowRightEdgeStyle = rowBorderColor
-                ? {
-                    borderRight: `1px solid ${rowBorderColor}`
-                  }
-                : undefined;
+              const rowLeftEdgeStyle = {
+                borderLeft: `1px solid ${rowBorderColor ?? "transparent"}`
+              };
+              const rowRightEdgeStyle = {
+                borderRight: `1px solid ${rowBorderColor ?? "transparent"}`
+              };
 
               return (
               <tr
@@ -693,11 +709,11 @@ export function BenchmarkMatrix({ rows }: Props) {
                     zIndex: 12,
                     minWidth: 180,
                     padding: "6px 8px",
-                    background: "rgba(20, 27, 45, 0.96)",
+                    backgroundColor: "rgba(20, 27, 45, 0.96)",
                     boxShadow: "8px 0 12px rgba(2, 6, 23, 0.28)",
                     whiteSpace: "nowrap",
                     ...rowCellLineStyle,
-                    ...(showCategory ? {} : rowLeftEdgeStyle ?? {})
+                    ...(showCategory ? {} : rowLeftEdgeStyle)
                   }}
                 >
                   {matrixRow.benchmark}

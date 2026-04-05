@@ -215,7 +215,7 @@ export function AdminConsole({ providers, models, benchmarks, mergedRecords, ini
   const [benchTime, setBenchTime] = useState(() => new Date().toISOString().slice(0, 16));
 
   const [csvText, setCsvText] = useState(
-    "provider,model,benchmark,benchmark_type,modalities,bench_time,value_raw,unit,higher_is_better,source\n"
+    ""
   );
   const [textImportPreviewRows, setTextImportPreviewRows] = useState<TextImportPreviewRow[]>([]);
   const [textImportPreviewMeta, setTextImportPreviewMeta] = useState<{
