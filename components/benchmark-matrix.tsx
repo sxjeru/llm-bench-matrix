@@ -38,12 +38,27 @@ type MatrixRow = {
   firstSeenIndex: number;
   rowDataCount: number;
   rowNumericCount: number;
+  minComparable: number | null;
+  maxComparable: number | null;
   minNum: number | null;
   maxNum: number | null;
 };
 
 type RowSortColumn = "category" | "benchmark";
 type RowSortMode = "source" | "alpha" | "data";
+
+const LOWER_IS_BETTER_RULES: Array<{ matcher: RegExp; baseline: number }> = [
+  { matcher: /fleurs/i, baseline: 100 }
+];
+
+function getBenchmarkComparableScore(benchmarkName: string, valueNum: number): number {
+  for (const rule of LOWER_IS_BETTER_RULES) {
+    if (rule.matcher.test(benchmarkName)) {
+      return rule.baseline - valueNum;
+    }
+  }
+  return valueNum;
+}
 
 type Props = {
   rows: MatrixInputRow[];
@@ -54,6 +69,7 @@ const SOURCE_EMPTY = "__EMPTY__";
 const SHOW_CATEGORY_STORAGE_KEY = "benchmark-matrix:show-category";
 const EXPORT_PRESET_STORAGE_KEY = "benchmark-matrix:export-preset";
 const HTML2CANVAS_PRO_CDN = "https://cdn.jsdelivr.net/npm/html2canvas-pro@2.0.2/dist/html2canvas-pro.min.js";
+const SOURCE_MATCH_FRAME_COLOR = "rgba(93, 167, 255, 0.42)";
 const WEBP_EXPORT_QUALITY = 0.94;
 const AVIF_EXPORT_QUALITY = 0.9;
 const EXPORT_PRESET_MAP = {
@@ -163,6 +179,10 @@ function sourceTabDisplayLabel(sourceKey: string): string {
 
   const stripped = rawLabel.slice(colonIndex + 1).trim();
   return stripped.length > 0 ? stripped : rawLabel;
+}
+
+function normalizeMatchToken(input: string): string {
+  return input.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
 function getProviderBrandColor(providerName: string | null | undefined): string {
@@ -391,6 +411,7 @@ export function BenchmarkMatrix({ rows }: Props) {
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [isExportMenuHovered, setIsExportMenuHovered] = useState(false);
   const [suppressHoverMenu, setSuppressHoverMenu] = useState(false);
+  const [columnSortBenchmarkKey, setColumnSortBenchmarkKey] = useState<string | null>(null);
   const [rowSortState, setRowSortState] = useState<{ column: RowSortColumn; mode: RowSortMode }>({
     column: "benchmark",
     mode: "data"
@@ -628,13 +649,148 @@ export function BenchmarkMatrix({ rows }: Props) {
     });
   }, [rows, activeSource, selectedModelSet]);
 
+  const sourceModelHint = useMemo(() => {
+    if (activeSource === SOURCE_ALL) return "";
+    return normalizeMatchToken(sourceTabDisplayLabel(activeSource));
+  }, [activeSource]);
+
   const modelColumns = useMemo(() => {
-    return Array.from(new Set(filteredRows.map((row) => row.modelName))).sort((a, b) =>
-      a.localeCompare(b, "zh-Hans-CN")
+    const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+
+    const modelStats = new Map<string, { providerName: string; numericCount: number; totalCount: number }>();
+
+    filteredRows.forEach((row) => {
+      const current = modelStats.get(row.modelName) ?? {
+        providerName: row.providerName || "Unknown",
+        numericCount: 0,
+        totalCount: 0
+      };
+
+      current.totalCount += 1;
+      if (row.valueNum !== null) {
+        current.numericCount += 1;
+      }
+
+      if (!current.providerName) {
+        current.providerName = row.providerName || "Unknown";
+      }
+
+      modelStats.set(row.modelName, current);
+    });
+
+    const providerStats = new Map<string, { numericCount: number; totalCount: number; models: string[] }>();
+    for (const [modelName, stats] of modelStats.entries()) {
+      const providerName = stats.providerName || "Unknown";
+      const provider = providerStats.get(providerName) ?? { numericCount: 0, totalCount: 0, models: [] };
+      provider.numericCount += stats.numericCount;
+      provider.totalCount += stats.totalCount;
+      provider.models.push(modelName);
+      providerStats.set(providerName, provider);
+    }
+
+    const orderedProviders = Array.from(providerStats.entries()).sort((a, b) => {
+      const left = a[1];
+      const right = b[1];
+      if (right.numericCount !== left.numericCount) {
+        return right.numericCount - left.numericCount;
+      }
+      if (right.totalCount !== left.totalCount) {
+        return right.totalCount - left.totalCount;
+      }
+      return a[0].localeCompare(b[0], "zh-Hans-CN", { sensitivity: "base" });
+    });
+
+    const groupedModels = orderedProviders.flatMap(([, provider]) => {
+      return [...provider.models].sort((leftModel, rightModel) => {
+        const leftStats = modelStats.get(leftModel);
+        const rightStats = modelStats.get(rightModel);
+        if (!leftStats || !rightStats) return collator.compare(rightModel, leftModel);
+
+        if (rightStats.numericCount !== leftStats.numericCount) {
+          return rightStats.numericCount - leftStats.numericCount;
+        }
+        if (rightStats.totalCount !== leftStats.totalCount) {
+          return rightStats.totalCount - leftStats.totalCount;
+        }
+        return collator.compare(rightModel, leftModel);
+      });
+    });
+
+    const baseOrderedModels = (() => {
+      if (!sourceModelHint) return groupedModels;
+
+      const matched: string[] = [];
+      const others: string[] = [];
+
+      groupedModels.forEach((modelName) => {
+        const normalizedModel = normalizeMatchToken(modelName);
+        if (normalizedModel.includes(sourceModelHint)) {
+          matched.push(modelName);
+        } else {
+          others.push(modelName);
+        }
+      });
+
+      matched.sort((left, right) => collator.compare(right, left));
+      return [...matched, ...others];
+    })();
+
+    if (!columnSortBenchmarkKey) {
+      return baseOrderedModels;
+    }
+
+    const splitIndex = columnSortBenchmarkKey.indexOf("::");
+    if (splitIndex < 0) {
+      return baseOrderedModels;
+    }
+
+    const targetCategory = columnSortBenchmarkKey.slice(0, splitIndex);
+    const targetBenchmark = columnSortBenchmarkKey.slice(splitIndex + 2);
+
+    const benchmarkScoreMap = new Map<string, number>();
+    filteredRows.forEach((row) => {
+      const rowCategory = row.benchmarkType || "General";
+      if (rowCategory !== targetCategory || row.benchmarkName !== targetBenchmark || row.valueNum === null) {
+        return;
+      }
+
+      const comparableScore = getBenchmarkComparableScore(targetBenchmark, row.valueNum);
+      const previous = benchmarkScoreMap.get(row.modelName);
+      if (previous === undefined || comparableScore > previous) {
+        benchmarkScoreMap.set(row.modelName, comparableScore);
+      }
+    });
+
+    const baseOrderIndex = new Map(baseOrderedModels.map((modelName, index) => [modelName, index]));
+
+    return [...baseOrderedModels].sort((leftModel, rightModel) => {
+      const leftScore = benchmarkScoreMap.get(leftModel);
+      const rightScore = benchmarkScoreMap.get(rightModel);
+
+      if (leftScore === undefined && rightScore === undefined) {
+        return (baseOrderIndex.get(leftModel) ?? 0) - (baseOrderIndex.get(rightModel) ?? 0);
+      }
+      if (leftScore === undefined) return 1;
+      if (rightScore === undefined) return -1;
+      if (rightScore !== leftScore) return rightScore - leftScore;
+
+      return (baseOrderIndex.get(leftModel) ?? 0) - (baseOrderIndex.get(rightModel) ?? 0);
+    });
+  }, [filteredRows, sourceModelHint, columnSortBenchmarkKey]);
+
+  const sourceMatchedModelSet = useMemo(() => {
+    if (!sourceModelHint) return new Set<string>();
+
+    return new Set(
+      modelColumns.filter((modelName) => normalizeMatchToken(modelName).includes(sourceModelHint))
     );
-  }, [filteredRows]);
+  }, [modelColumns, sourceModelHint]);
 
   const modelColumnMeta = useMemo(() => {
+    const sourceMatchedOrderedModels = modelColumns.filter((modelName) => sourceMatchedModelSet.has(modelName));
+    const firstMatchedModel = sourceMatchedOrderedModels[0] ?? null;
+    const lastMatchedModel = sourceMatchedOrderedModels[sourceMatchedOrderedModels.length - 1] ?? null;
+
     return modelColumns.map((modelName) => {
       const providerName = modelProviderMap.get(modelName) ?? "Unknown";
       const columnWidth = Math.min(112, Math.max(72, Math.round(modelName.length * 6.8)));
@@ -643,10 +799,13 @@ export function BenchmarkMatrix({ rows }: Props) {
         modelName,
         providerName,
         color: getProviderBrandColor(providerName),
-        columnWidth
+        columnWidth,
+        isSourceMatched: sourceMatchedModelSet.has(modelName),
+        isSourceMatchedFirst: modelName === firstMatchedModel,
+        isSourceMatchedLast: modelName === lastMatchedModel
       };
     });
-  }, [modelColumns, modelProviderMap]);
+  }, [modelColumns, modelProviderMap, sourceMatchedModelSet]);
 
   const matrixRows = useMemo(() => {
     const matrixMap = new Map<string, MatrixRow>();
@@ -664,6 +823,8 @@ export function BenchmarkMatrix({ rows }: Props) {
           firstSeenIndex: rowIndex,
           rowDataCount: 0,
           rowNumericCount: 0,
+          minComparable: null,
+          maxComparable: null,
           minNum: null,
           maxNum: null
         });
@@ -711,6 +872,10 @@ export function BenchmarkMatrix({ rows }: Props) {
           .map((cell) => cell.valueNum)
           .filter((value): value is number => value !== null && Number.isFinite(value));
 
+        const comparableValues = numericValues.map((valueNum) =>
+          getBenchmarkComparableScore(matrixRow.benchmark, valueNum)
+        );
+
         const rowDataCount = matrixRow.cells.size;
         const rowNumericCount = numericValues.length;
 
@@ -718,6 +883,8 @@ export function BenchmarkMatrix({ rows }: Props) {
           ...matrixRow,
           rowDataCount,
           rowNumericCount,
+          minComparable: comparableValues.length > 0 ? Math.min(...comparableValues) : null,
+          maxComparable: comparableValues.length > 0 ? Math.max(...comparableValues) : null,
           minNum: numericValues.length > 0 ? Math.min(...numericValues) : null,
           maxNum: numericValues.length > 0 ? Math.max(...numericValues) : null
         };
@@ -1269,38 +1436,54 @@ export function BenchmarkMatrix({ rows }: Props) {
                 </button>
               </th>
 
-              {modelColumnMeta.map((model) => (
-                <th
-                  key={model.modelName}
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    zIndex: 20,
-                    width: model.columnWidth,
-                    minWidth: model.columnWidth,
-                    maxWidth: 120,
-                    padding: "6px 6px",
-                    background: "rgba(20, 27, 45, 0.96)",
-                    backdropFilter: "blur(6px)"
-                  }}
-                >
-                  <div
+              {modelColumnMeta.map((model) => {
+                const headerFrameShadows: string[] = [];
+                if (model.isSourceMatched) {
+                  headerFrameShadows.push(`inset 0 2px 0 ${SOURCE_MATCH_FRAME_COLOR}`);
+                }
+                if (model.isSourceMatchedFirst) {
+                  headerFrameShadows.push(`inset 2px 0 0 ${SOURCE_MATCH_FRAME_COLOR}`);
+                }
+                if (model.isSourceMatchedLast) {
+                  headerFrameShadows.push(`inset -2px 0 0 ${SOURCE_MATCH_FRAME_COLOR}`);
+                }
+
+                return (
+                  <th
+                    key={model.modelName}
                     style={{
-                      color: model.color,
-                      fontWeight: 700,
-                      lineHeight: 1.15,
-                      wordBreak: "break-word"
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 20,
+                      width: model.columnWidth,
+                      minWidth: model.columnWidth,
+                      maxWidth: 120,
+                      padding: "6px 6px",
+                      background: "rgba(20, 27, 45, 0.96)",
+                      backdropFilter: "blur(6px)",
+                      boxShadow: headerFrameShadows.length > 0 ? headerFrameShadows.join(", ") : undefined
                     }}
                   >
-                    {model.modelName}
-                  </div>
-                </th>
-              ))}
+                    <div
+                      style={{
+                        color: model.color,
+                        fontWeight: 700,
+                        lineHeight: 1.15,
+                        wordBreak: "break-word"
+                      }}
+                    >
+                      {model.modelName}
+                    </div>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
-            {sortedMatrixRows.map((matrixRow) => {
+            {sortedMatrixRows.map((matrixRow, rowIndex) => {
               const rowKey = `${matrixRow.category}::${matrixRow.benchmark}`;
+              const isLastMatrixRow = rowIndex === sortedMatrixRows.length - 1;
+              const isLowerBetterBenchmark = LOWER_IS_BETTER_RULES.some((rule) => rule.matcher.test(matrixRow.benchmark));
               const isHoveredRow = hoveredRowKey === rowKey;
               const isSelectedRow = selectedRowKey === rowKey;
               const rowBorderColor = isSelectedRow
@@ -1347,7 +1530,10 @@ export function BenchmarkMatrix({ rows }: Props) {
                 key={rowKey}
                 onMouseEnter={() => setHoveredRowKey(rowKey)}
                 onMouseLeave={() => setHoveredRowKey((prev) => (prev === rowKey ? null : prev))}
-                onClick={() => setSelectedRowKey((prev) => (prev === rowKey ? null : rowKey))}
+                onClick={() => {
+                  setSelectedRowKey((prev) => (prev === rowKey ? null : rowKey));
+                  setColumnSortBenchmarkKey((prev) => (prev === rowKey ? null : rowKey));
+                }}
                 style={{ cursor: "pointer", ...rowFrameStyle }}
               >
                 {showCategory ? (
@@ -1383,12 +1569,26 @@ export function BenchmarkMatrix({ rows }: Props) {
                     ...(showCategory ? {} : rowLeftEdgeStyle)
                   }}
                 >
-                  {matrixRow.benchmark}
+                  <span className="inline-flex items-center gap-1">
+                    <span>{matrixRow.benchmark}</span>
+                    {isLowerBetterBenchmark ? (
+                      <span
+                        className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
+                        title="该项目为低值更优"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        ↓
+                      </span>
+                    ) : null}
+                  </span>
                 </td>
 
                 {modelColumnMeta.map((model, modelIndex) => {
                   const cell = matrixRow.cells.get(model.modelName);
                   const cellNum = cell?.valueNum ?? null;
+                  const comparableCellNum = cellNum !== null
+                    ? getBenchmarkComparableScore(matrixRow.benchmark, cellNum)
+                    : null;
                   const rawText = cell?.valueRaw ?? "--";
                   const allEntries = cell?.allEntries ?? [];
                   const valueIdentitySet = new Set(
@@ -1406,18 +1606,37 @@ export function BenchmarkMatrix({ rows }: Props) {
                     ).values()
                   );
                   const isMaxCell =
-                    cellNum !== null &&
-                    matrixRow.maxNum !== null &&
-                    cellNum === matrixRow.maxNum;
-                  const heatStyle = getHeatCellStyle(cellNum, matrixRow.minNum, matrixRow.maxNum);
+                    comparableCellNum !== null &&
+                    matrixRow.maxComparable !== null &&
+                    comparableCellNum === matrixRow.maxComparable;
+                  const heatStyle = getHeatCellStyle(comparableCellNum, matrixRow.minComparable, matrixRow.maxComparable);
                   const heatBackground =
                     (heatStyle as { backgroundColor?: string }).backgroundColor ?? "rgba(20, 27, 45, 0.96)";
-                  const hasHeatColor = cellNum !== null && matrixRow.minNum !== null && matrixRow.maxNum !== null;
+                  const hasHeatColor =
+                    comparableCellNum !== null &&
+                    matrixRow.minComparable !== null &&
+                    matrixRow.maxComparable !== null;
+                  const rowCellBoxShadow =
+                    rowCellLineStyle && "boxShadow" in rowCellLineStyle
+                      ? (rowCellLineStyle.boxShadow as string | undefined)
+                      : undefined;
+                  const sourceFrameShadows: string[] = [];
+                  if (model.isSourceMatchedFirst) {
+                    sourceFrameShadows.push(`inset 2px 0 0 ${SOURCE_MATCH_FRAME_COLOR}`);
+                  }
+                  if (model.isSourceMatchedLast) {
+                    sourceFrameShadows.push(`inset -2px 0 0 ${SOURCE_MATCH_FRAME_COLOR}`);
+                  }
+                  if (model.isSourceMatched && isLastMatrixRow) {
+                    sourceFrameShadows.push(`inset 0 -2px 0 ${SOURCE_MATCH_FRAME_COLOR}`);
+                  }
+                  const mergedCellBoxShadow = [rowCellBoxShadow, ...sourceFrameShadows].filter(Boolean).join(", ");
 
                   return (
                     <td
                       key={`${matrixRow.category}::${matrixRow.benchmark}::${model.modelName}`}
                       style={{
+                        ...rowCellLineStyle,
                         ...heatStyle,
                         backgroundColor: heatBackground,
                         borderBottomColor: hasHeatColor ? "rgba(255, 255, 255, 0.08)" : undefined,
@@ -1432,7 +1651,7 @@ export function BenchmarkMatrix({ rows }: Props) {
                         textDecorationColor: isMaxCell ? "rgba(15, 23, 42, 0.35)" : undefined,
                         textDecorationThickness: isMaxCell ? "1px" : undefined,
                         textUnderlineOffset: isMaxCell ? "2px" : undefined,
-                        ...rowCellLineStyle,
+                        boxShadow: mergedCellBoxShadow || undefined,
                         ...(modelIndex === modelColumnMeta.length - 1 ? rowRightEdgeStyle ?? {} : {})
                       }}
                     >
