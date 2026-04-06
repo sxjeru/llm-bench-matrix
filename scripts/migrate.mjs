@@ -4,9 +4,20 @@ import { existsSync, readdirSync } from "node:fs";
 
 const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL || "";
 
+function printMissingDatabaseEnvError() {
+  console.error(
+    [
+      "[migrate] Missing database connection string.",
+      "[migrate] Set DATABASE_URL (preferred) or POSTGRES_URL in Vercel > Project > Settings > Environment Variables.",
+      "[migrate] For Neon, use the Neon connection string; DATABASE_DRIVER=neon is optional because .neon.tech URLs are auto-detected.",
+      "[migrate] The build script runs database migrations before Next.js builds, so deployment cannot continue until this is configured."
+    ].join("\n")
+  );
+}
+
 if (!connectionString) {
-  console.log("[migrate] DATABASE_URL is empty, skip migrations.");
-  process.exit(0);
+  printMissingDatabaseEnvError();
+  process.exit(1);
 }
 
 const useNeon =

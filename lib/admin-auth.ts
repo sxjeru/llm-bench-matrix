@@ -42,6 +42,16 @@ type AdminSessionEntry = {
 
 type AdminSessionMap = Record<string, AdminSessionEntry>;
 
+if (process.env.NODE_ENV === "production" && !process.env.ADMIN_PASSWORD) {
+  throw new Error(
+    [
+      "[auth] Missing ADMIN_PASSWORD in production.",
+      "Set ADMIN_PASSWORD in Vercel > Project > Settings > Environment Variables, or via `vercel env add ADMIN_PASSWORD production`.",
+      "Do not deploy the admin console with the default fallback password."
+    ].join("\n")
+  );
+}
+
 function getFallbackPassword(): string {
   return process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD_FALLBACK;
 }

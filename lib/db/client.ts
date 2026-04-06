@@ -19,13 +19,15 @@ function parseIntEnv(name: string, fallback: number, min = 0): number {
 
 const connectionString = getConnectionString();
 
-if (!connectionString && process.env.NODE_ENV !== "test") {
-  console.warn("[db] DATABASE_URL is empty, runtime queries will fail until env is set.");
-}
-
 function createDb() {
   if (!connectionString) {
-    throw new Error("DATABASE_URL (or POSTGRES_URL) is missing");
+    throw new Error(
+      [
+        "[db] Missing DATABASE_URL / POSTGRES_URL.",
+        "Set DATABASE_URL in Vercel > Project > Settings > Environment Variables (or POSTGRES_URL if that is the name you already use).",
+        "The database client is created at import time, so the app cannot start until this value is configured."
+      ].join("\n")
+    );
   }
 
   const useNeon = shouldUseNeon(connectionString);
