@@ -24,6 +24,7 @@ type MatrixInputRow = {
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
+  benchmarkCanonicalKey?: string | null;
   modalities?: string[];
   benchTime: string;
   valueRaw: string;
@@ -51,6 +52,7 @@ type MatrixCell = {
 };
 
 type MatrixRow = {
+  rowKey: string;
   category: string;
   benchmark: string;
   modalities: string[];
@@ -90,6 +92,7 @@ const SOURCE_ALL = "__ALL__";
 const SOURCE_EMPTY = "__EMPTY__";
 const MODALITY_OPTIONS = ["Text", "Vision", "Audio", "Video", "Multimodal"] as const;
 const SHOW_CATEGORY_STORAGE_KEY = "benchmark-matrix:show-category";
+const SHOW_DUPLICATE_STORAGE_KEY = "benchmark-matrix:show-duplicate";
 const EXPORT_PRESET_STORAGE_KEY = "benchmark-matrix:export-preset";
 const SOURCE_MATCH_FRAME_COLOR = "rgba(93, 167, 255, 0.42)";
 const WEBP_EXPORT_QUALITY = 0.94;
@@ -194,6 +197,43 @@ function sourceTabDisplayLabel(sourceKey: string): string {
 
   const stripped = rawLabel.slice(colonIndex + 1).trim();
   return stripped.length > 0 ? stripped : rawLabel;
+}
+
+function normalizeBenchmarkKeyFallback(input: string): string {
+  return input
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function getBenchmarkDuplicateKey(canonicalKey: string | null | undefined, benchmarkName: string): string {
+  const normalizedCanonical = canonicalKey?.trim().toLowerCase() ?? "";
+  if (normalizedCanonical.length > 0) {
+    const splitIndex = normalizedCanonical.indexOf(":");
+    if (splitIndex > 0) {
+      return normalizedCanonical.slice(0, splitIndex);
+    }
+    if (splitIndex < 0) {
+      return normalizedCanonical;
+    }
+  }
+
+  const fallback = normalizeBenchmarkKeyFallback(benchmarkName);
+  return fallback.length > 0 ? fallback : benchmarkName.trim().toLowerCase();
+}
+
+function getMatrixGroupingKey(
+  row: Pick<MatrixInputRow, "benchmarkType" | "benchmarkName" | "benchmarkCanonicalKey">,
+  showDuplicateRows: boolean
+): string {
+  if (showDuplicateRows) {
+    const category = row.benchmarkType || "General";
+    return `raw::${category}::${row.benchmarkName}`;
+  }
+
+  const duplicateKey = getBenchmarkDuplicateKey(row.benchmarkCanonicalKey, row.benchmarkName);
+  return `merged::${duplicateKey}`;
 }
 
 function normalizeModalityName(input: string): string {
@@ -506,12 +546,14 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const showCategoryLoadedRef = useRef(false);
+  const showDuplicateLoadedRef = useRef(false);
   const exportPresetLoadedRef = useRef(false);
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showCategory, setShowCategory] = useState(true);
+  const [showDuplicateRows, setShowDuplicateRows] = useState(false);
   const [exportPreset, setExportPreset] = useState<ExportPresetKey>(DEFAULT_EXPORT_PRESET);
   const [supportsWebpExport, setSupportsWebpExport] = useState(true);
   const [supportsAvifExport, setSupportsAvifExport] = useState(false);
@@ -577,6 +619,19 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
   }, []);
 
   useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(SHOW_DUPLICATE_STORAGE_KEY);
+      if (saved === "0" || saved === "1") {
+        setShowDuplicateRows(saved === "1");
+      }
+    } catch {
+      // ignore storage access errors gracefully
+    }
+
+    showDuplicateLoadedRef.current = true;
+  }, []);
+
+  useEffect(() => {
     if (!showCategoryLoadedRef.current) return;
 
     try {
@@ -585,6 +640,21 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
       // ignore storage access errors gracefully
     }
   }, [showCategory]);
+
+  useEffect(() => {
+    if (!showDuplicateLoadedRef.current) return;
+
+    try {
+      window.localStorage.setItem(SHOW_DUPLICATE_STORAGE_KEY, showDuplicateRows ? "1" : "0");
+    } catch {
+      // ignore storage access errors gracefully
+    }
+  }, [showDuplicateRows]);
+
+  useEffect(() => {
+    setSelectedRowKey(null);
+    setColumnSortBenchmarkKey(null);
+  }, [showDuplicateRows]);
 
   useEffect(() => {
     setSupportsWebpExport(canEncodeCanvasMimeType("image/webp"));
@@ -852,22 +922,13 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
       return baseOrderedModels;
     }
 
-    const splitIndex = columnSortBenchmarkKey.indexOf("::");
-    if (splitIndex < 0) {
-      return baseOrderedModels;
-    }
-
-    const targetCategory = columnSortBenchmarkKey.slice(0, splitIndex);
-    const targetBenchmark = columnSortBenchmarkKey.slice(splitIndex + 2);
-
     const benchmarkScoreMap = new Map<string, number>();
     filteredRows.forEach((row) => {
-      const rowCategory = row.benchmarkType || "General";
-      if (rowCategory !== targetCategory || row.benchmarkName !== targetBenchmark || row.valueNum === null) {
+      if (getMatrixGroupingKey(row, showDuplicateRows) !== columnSortBenchmarkKey || row.valueNum === null) {
         return;
       }
 
-      const comparableScore = getBenchmarkComparableScore(targetBenchmark, row.valueNum);
+      const comparableScore = getBenchmarkComparableScore(row.benchmarkName, row.valueNum);
       const previous = benchmarkScoreMap.get(row.modelName);
       if (previous === undefined || comparableScore > previous) {
         benchmarkScoreMap.set(row.modelName, comparableScore);
@@ -889,7 +950,7 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
 
       return (baseOrderIndex.get(leftModel) ?? 0) - (baseOrderIndex.get(rightModel) ?? 0);
     });
-  }, [filteredRows, sourceModelHint, columnSortBenchmarkKey]);
+  }, [filteredRows, sourceModelHint, columnSortBenchmarkKey, showDuplicateRows]);
 
   const sourceMatchedModelSet = useMemo(() => {
     if (!sourceModelHint) return new Set<string>();
@@ -921,18 +982,27 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
   }, [modelColumns, modelProviderMap, sourceMatchedModelSet]);
 
   const matrixRows = useMemo(() => {
-    const matrixMap = new Map<string, MatrixRow>();
+    const matrixMap = new Map<
+      string,
+      MatrixRow & {
+        categoryValues: string[];
+        benchmarkValues: string[];
+      }
+    >();
 
     filteredRows.forEach((row, rowIndex) => {
       const category = row.benchmarkType || "General";
       const benchmark = row.benchmarkName;
-      const matrixKey = `${category}::${benchmark}`;
+      const matrixKey = getMatrixGroupingKey(row, showDuplicateRows);
       const normalizedModalities = normalizeModalityList(row.modalities, row.benchmarkType);
 
       if (!matrixMap.has(matrixKey)) {
         matrixMap.set(matrixKey, {
+          rowKey: matrixKey,
           category,
           benchmark,
+          categoryValues: [category],
+          benchmarkValues: [benchmark],
           modalities: normalizedModalities,
           cells: new Map<string, MatrixCell>(),
           firstSeenIndex: rowIndex,
@@ -946,9 +1016,20 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
       }
 
       const matrixRow = matrixMap.get(matrixKey)!;
+
+      if (!matrixRow.categoryValues.includes(category)) {
+        matrixRow.categoryValues.push(category);
+        matrixRow.category = matrixRow.categoryValues.join(" / ");
+      }
+
+      if (!matrixRow.benchmarkValues.includes(benchmark)) {
+        matrixRow.benchmarkValues.push(benchmark);
+        matrixRow.benchmark = matrixRow.benchmarkValues.join(" / ");
+      }
+
       matrixRow.modalities = normalizeModalityList(
         [...matrixRow.modalities, ...normalizedModalities],
-        matrixRow.category
+        matrixRow.categoryValues[0] ?? "General"
       );
 
       if (!matrixRow.cells.has(row.modelName)) {
@@ -1014,7 +1095,7 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
         };
       })
       .sort((a, b) => a.firstSeenIndex - b.firstSeenIndex);
-  }, [filteredRows]);
+  }, [filteredRows, showDuplicateRows]);
 
   function getRowSortCycle(): RowSortMode[] {
     return activeSource === SOURCE_ALL
@@ -1443,6 +1524,15 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
           {showCategory ? <Eye size={14} /> : <EyeOff size={14} />}
           显示类别列
         </button>
+
+        <button
+          type="button"
+          className="btn btn-xs btn-ghost"
+          onClick={() => setShowDuplicateRows((prev) => !prev)}
+        >
+          {showDuplicateRows ? <Eye size={14} /> : <EyeOff size={14} />}
+          显示重名列
+        </button>
       </div>
 
       <div className={`${isFullscreen ? "mt-2" : ""} rounded-box border border-base-300/70 bg-base-200/35 p-3`}>
@@ -1697,7 +1787,7 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
           </thead>
           <tbody>
             {sortedMatrixRows.map((matrixRow, rowIndex) => {
-              const rowKey = `${matrixRow.category}::${matrixRow.benchmark}`;
+              const rowKey = matrixRow.rowKey;
               const isLastMatrixRow = rowIndex === sortedMatrixRows.length - 1;
               const isLowerBetterBenchmark = LOWER_IS_BETTER_RULES.some((rule) => rule.matcher.test(matrixRow.benchmark));
               const isHoveredRow = hoveredRowKey === rowKey;
@@ -1868,7 +1958,7 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
 
                   return (
                     <td
-                      key={`${matrixRow.category}::${matrixRow.benchmark}::${model.modelName}`}
+                      key={`${rowKey}::${model.modelName}`}
                       style={{
                         ...rowCellLineStyle,
                         ...heatStyle,

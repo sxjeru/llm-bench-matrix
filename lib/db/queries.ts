@@ -18,6 +18,7 @@ export type DashboardRow = {
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
+  benchmarkCanonicalKey: string;
   modalities: string[];
   benchTime: string;
   valueRaw: string;
@@ -123,6 +124,7 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
           modelName: models.modelName,
           benchmarkName: benchmarks.benchmarkName,
           benchmarkType: benchmarks.benchmarkType,
+          benchmarkCanonicalKey: benchmarks.canonicalKey,
           modalities: benchmarks.modalities,
           benchTime: benchmarkValues.benchTime,
           valueRaw: benchmarkValues.valueRaw,
@@ -146,6 +148,7 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
         modelName: row.modelName,
         benchmarkName: row.benchmarkName,
         benchmarkType: row.benchmarkType,
+        benchmarkCanonicalKey: row.benchmarkCanonicalKey,
         modalities: row.modalities ?? [],
         benchTime: row.benchTime.toISOString(),
         valueRaw: row.valueRaw,
