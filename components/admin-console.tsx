@@ -432,6 +432,8 @@ export function AdminConsole({
   );
   const [csvSource, setCsvSource] = useState("");
   const [confirmImportWithoutPreviewOpen, setConfirmImportWithoutPreviewOpen] = useState(false);
+  const [clearDatabaseConfirmOpen, setClearDatabaseConfirmOpen] = useState(false);
+  const [isClearingDatabase, setIsClearingDatabase] = useState(false);
   const [isPreviewingTextImport, setIsPreviewingTextImport] = useState(false);
   const [textImportPreviewRows, setTextImportPreviewRows] = useState<TextImportPreviewRow[]>([]);
   const [textImportDraftRows, setTextImportDraftRows] = useState<TextImportPreviewRow[]>([]);
@@ -1803,17 +1805,30 @@ export function AdminConsole({
     }
   }
 
-  async function onClearDatabase() {
-    const confirmed = window.confirm("该操作会清空除 settings 外所有表数据，仅用于调试。确认继续吗？");
-    if (!confirmed) return;
+  function onClearDatabase() {
+    setClearDatabaseConfirmOpen(true);
+  }
 
+  function closeClearDatabaseConfirm() {
+    if (isClearingDatabase) return;
+    setClearDatabaseConfirmOpen(false);
+  }
+
+  async function onConfirmClearDatabase() {
+    if (isClearingDatabase) return;
+
+    setIsClearingDatabase(true);
     try {
       await postJson("/api/admin/debug/clear-data", {
         confirm: "CLEAR_NON_SETTINGS_DATA"
       });
+
+      setClearDatabaseConfirmOpen(false);
       notifySuccess("已清空除 settings 外的所有表。若下拉项未更新，请刷新页面。");
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "清空数据库失败");
+    } finally {
+      setIsClearingDatabase(false);
     }
   }
 
@@ -1959,6 +1974,42 @@ export function AdminConsole({
               </button>
               <button type="button" className="btn btn-primary" onClick={onConfirmImportWithoutPreview}>
                 仍然导入
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {clearDatabaseConfirmOpen ? (
+        <div
+          className="fixed inset-0 z-[170] flex items-center justify-center bg-black/45 p-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              closeClearDatabaseConfirm();
+            }
+          }}
+        >
+          <div className="w-full max-w-xl rounded-2xl border border-error/35 bg-base-100/95 p-6 shadow-2xl backdrop-blur">
+            <h3 className="text-lg font-bold text-error">确认清空数据库？</h3>
+            <p className="mt-2 text-sm opacity-85">
+              该操作会删除除 <code>settings</code> 外所有表数据，且无法恢复。
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={closeClearDatabaseConfirm}
+                disabled={isClearingDatabase}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn btn-error"
+                onClick={onConfirmClearDatabase}
+                disabled={isClearingDatabase}
+              >
+                {isClearingDatabase ? "清空中..." : "确认清空"}
               </button>
             </div>
           </div>

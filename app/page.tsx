@@ -1,5 +1,4 @@
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
-import { DashboardCharts } from "@/components/charts";
 import { getDashboardRows } from "@/lib/db/queries";
 import { Suspense } from "react";
 
@@ -50,14 +49,6 @@ export default async function HomePage() {
         />
       </Suspense>
 
-      <DashboardCharts
-        rows={rows.map((row) => ({
-          benchmarkName: row.benchmarkName,
-          modelName: row.modelName,
-          benchTime: row.benchTime,
-          valueNum: row.valueNum
-        }))}
-      />
     </>
   );
 }

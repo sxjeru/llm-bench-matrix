@@ -37,6 +37,8 @@ type NormalizedTextImportRow = {
   sourceBenchmarkId?: string | null;
 };
 
+type DbExecutor = any;
+
 const EMPTY_VALUE_MARKERS = new Set(["", "-", "--", "—", "na", "n/a", "null", "none"]);
 const LOWER_IS_BETTER_BENCHMARK_RULES = [/fleurs/i, /omnidocbench\s*1\.5/i];
 const OMNIDOCBENCH_15_MATCHER = /omnidocbench\s*1\.5/i;
@@ -282,15 +284,17 @@ export async function rebuildModelCanonicalKeysByRule(rawRule: unknown) {
   };
 }
 
-export async function ensureProvider(name: string) {
+export async function ensureProvider(name: string, options?: { db?: DbExecutor }) {
   const cleanName = name.trim();
   if (!cleanName) {
     throw new Error("provider name is required");
   }
 
+  const executor = options?.db ?? db;
+
   const slug = toProviderSlug(cleanName);
 
-  const providerResult = await db
+  const providerResult = await executor
     .insert(providers)
     .values({
       name: cleanName,
@@ -317,13 +321,15 @@ export async function ensureModelByProviderId(input: {
   modelName: string;
   modelAlias?: string | null;
   sourceModelId?: string | null;
-}, options?: { dedupeRule?: ReturnType<typeof normalizeModelDedupeRule> }) {
+}, options?: { dedupeRule?: ReturnType<typeof normalizeModelDedupeRule>; db?: DbExecutor }) {
   const cleanName = input.modelName.trim();
   if (!cleanName) {
     throw new Error("modelName is required");
   }
 
-  const [provider] = await db.select().from(providers).where(eq(providers.id, input.providerId)).limit(1);
+  const executor = options?.db ?? db;
+
+  const [provider] = await executor.select().from(providers).where(eq(providers.id, input.providerId)).limit(1);
 
   if (!provider) {
     throw new Error(`provider not found: ${input.providerId}`);
@@ -331,13 +337,13 @@ export async function ensureModelByProviderId(input: {
 
   const rule = options?.dedupeRule ?? await getModelDedupeRule();
   const canonicalKey = buildModelCanonicalKey(cleanName, rule);
-  const [existing] = await db.select().from(models).where(eq(models.canonicalKey, canonicalKey)).limit(1);
+  const [existing] = await executor.select().from(models).where(eq(models.canonicalKey, canonicalKey)).limit(1);
 
   if (existing) {
     return existing;
   }
 
-  const createdResult = await db
+  const createdResult = await executor
     .insert(models)
     .values({
       providerId: provider.id,
@@ -356,7 +362,7 @@ export async function ensureModelByProviderId(input: {
   return created;
 }
 
-export async function ensureBenchmark(input: EnsureBenchmarkInput) {
+export async function ensureBenchmark(input: EnsureBenchmarkInput, options?: { db?: DbExecutor }) {
   const cleanName = input.benchmarkName.trim();
   const cleanType = input.benchmarkType.trim() || "general";
 
@@ -367,12 +373,13 @@ export async function ensureBenchmark(input: EnsureBenchmarkInput) {
   const canonicalKey = buildBenchmarkCanonicalKey(cleanName, cleanType);
   const modalities = normalizeModalities(input.modalities);
   const higherIsBetter = isLowerBetterBenchmark(cleanName) ? false : (input.higherIsBetter ?? true);
+  const executor = options?.db ?? db;
 
-  const [existing] = await db.select().from(benchmarks).where(eq(benchmarks.canonicalKey, canonicalKey)).limit(1);
+  const [existing] = await executor.select().from(benchmarks).where(eq(benchmarks.canonicalKey, canonicalKey)).limit(1);
 
   if (existing) {
     if (isLowerBetterBenchmark(cleanName) && existing.higherIsBetter) {
-      const updatedResult = await db
+      const updatedResult = await executor
         .update(benchmarks)
         .set({ higherIsBetter: false })
         .where(eq(benchmarks.id, existing.id))
@@ -384,7 +391,7 @@ export async function ensureBenchmark(input: EnsureBenchmarkInput) {
     return existing;
   }
 
-  const createdResult = await db
+  const createdResult = await executor
     .insert(benchmarks)
     .values({
       benchmarkName: cleanName,
@@ -565,81 +572,90 @@ export async function importParsedRecords(
 }
 
 async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
+  if (rows.length === 0) {
+    return { inserted: 0 };
+  }
+
   const dedupeRule = await getModelDedupeRule();
 
-  const providerCache = new Map<string, Awaited<ReturnType<typeof ensureProvider>>>();
-  const modelCache = new Map<string, Awaited<ReturnType<typeof ensureModelByProviderId>>>();
-  const benchmarkCache = new Map<string, Awaited<ReturnType<typeof ensureBenchmark>>>();
-  const valueRows: Array<typeof benchmarkValues.$inferInsert> = [];
+  return db.transaction(async (tx: any) => {
+    const providerCache = new Map<string, Awaited<ReturnType<typeof ensureProvider>>>();
+    const modelCache = new Map<string, Awaited<ReturnType<typeof ensureModelByProviderId>>>();
+    const benchmarkCache = new Map<string, Awaited<ReturnType<typeof ensureBenchmark>>>();
+    const valueRows: Array<typeof benchmarkValues.$inferInsert> = [];
 
-  for (const row of rows) {
-    try {
-      const providerName = row.providerName.trim() || "Unknown";
-      const providerKey = toProviderSlug(providerName);
-      let provider = providerCache.get(providerKey);
-      if (!provider) {
-        provider = await ensureProvider(providerName);
-        providerCache.set(providerKey, provider);
-      }
+    for (const row of rows) {
+      try {
+        const providerName = row.providerName.trim() || "Unknown";
+        const providerKey = toProviderSlug(providerName);
+        let provider = providerCache.get(providerKey);
+        if (!provider) {
+          provider = await ensureProvider(providerName, { db: tx });
+          providerCache.set(providerKey, provider);
+        }
 
-      const modelCanonicalKey = buildModelCanonicalKey(row.modelName, dedupeRule);
-      let model = modelCache.get(modelCanonicalKey);
-      if (!model) {
-        model = await ensureModelByProviderId(
-          {
-            providerId: provider.id,
-            modelName: row.modelName,
-            modelAlias: row.modelAlias,
-            sourceModelId: row.sourceModelId
-          },
-          { dedupeRule }
-        );
-        modelCache.set(modelCanonicalKey, model);
-      }
+        const modelCanonicalKey = buildModelCanonicalKey(row.modelName, dedupeRule);
+        let model = modelCache.get(modelCanonicalKey);
+        if (!model) {
+          model = await ensureModelByProviderId(
+            {
+              providerId: provider.id,
+              modelName: row.modelName,
+              modelAlias: row.modelAlias,
+              sourceModelId: row.sourceModelId
+            },
+            { dedupeRule, db: tx }
+          );
+          modelCache.set(modelCanonicalKey, model);
+        }
 
-      const benchmarkType = row.benchmarkType.trim() || "general";
-      const benchmarkCanonicalKey = buildBenchmarkCanonicalKey(row.benchmarkName, benchmarkType);
-      let benchmark = benchmarkCache.get(benchmarkCanonicalKey);
-      if (!benchmark) {
-        benchmark = await ensureBenchmark({
-          benchmarkName: row.benchmarkName,
-          benchmarkType,
-          unit: row.unit,
-          higherIsBetter: row.higherIsBetter,
-          modalities: row.modalities,
-          sourceBenchmarkId: row.sourceBenchmarkId
+        const benchmarkType = row.benchmarkType.trim() || "general";
+        const benchmarkCanonicalKey = buildBenchmarkCanonicalKey(row.benchmarkName, benchmarkType);
+        let benchmark = benchmarkCache.get(benchmarkCanonicalKey);
+        if (!benchmark) {
+          benchmark = await ensureBenchmark(
+            {
+              benchmarkName: row.benchmarkName,
+              benchmarkType,
+              unit: row.unit,
+              higherIsBetter: row.higherIsBetter,
+              modalities: row.modalities,
+              sourceBenchmarkId: row.sourceBenchmarkId
+            },
+            { db: tx }
+          );
+          benchmarkCache.set(benchmarkCanonicalKey, benchmark);
+        }
+
+        const parsedValue = parseBenchmarkValue(row.valueRaw);
+        const normalizedValue = normalizeStoredBenchmarkValue(benchmark.benchmarkName, parsedValue);
+        valueRows.push({
+          modelId: model.id,
+          benchmarkId: benchmark.id,
+          benchTime: row.benchTime,
+          valueRaw: normalizedValue.valueRaw,
+          valueNum: normalizedValue.valueNum !== null ? String(normalizedValue.valueNum) : null,
+          valueNum2: normalizedValue.valueNum2 !== null ? String(normalizedValue.valueNum2) : null,
+          valueNote: normalizedValue.valueNote,
+          source: row.source ?? null
         });
-        benchmarkCache.set(benchmarkCanonicalKey, benchmark);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "unknown import error";
+        throw new Error(
+          `导入失败：row=${row.rowNumber}，model=${row.modelName}，benchmark=${row.benchmarkName}，raw=${row.valueRaw}，原因=${message}`
+        );
       }
-
-      const parsedValue = parseBenchmarkValue(row.valueRaw);
-      const normalizedValue = normalizeStoredBenchmarkValue(benchmark.benchmarkName, parsedValue);
-      valueRows.push({
-        modelId: model.id,
-        benchmarkId: benchmark.id,
-        benchTime: row.benchTime,
-        valueRaw: normalizedValue.valueRaw,
-        valueNum: normalizedValue.valueNum !== null ? String(normalizedValue.valueNum) : null,
-        valueNum2: normalizedValue.valueNum2 !== null ? String(normalizedValue.valueNum2) : null,
-        valueNote: normalizedValue.valueNote,
-        source: row.source ?? null
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "unknown import error";
-      throw new Error(
-        `导入失败：row=${row.rowNumber}，model=${row.modelName}，benchmark=${row.benchmarkName}，raw=${row.valueRaw}，原因=${message}`
-      );
     }
-  }
 
-  const batchSize = 500;
-  for (let index = 0; index < valueRows.length; index += batchSize) {
-    const chunk = valueRows.slice(index, index + batchSize);
-    if (chunk.length === 0) continue;
-    await db.insert(benchmarkValues).values(chunk);
-  }
+    const batchSize = 500;
+    for (let index = 0; index < valueRows.length; index += batchSize) {
+      const chunk = valueRows.slice(index, index + batchSize);
+      if (chunk.length === 0) continue;
+      await tx.insert(benchmarkValues).values(chunk);
+    }
 
-  return { inserted: valueRows.length };
+    return { inserted: valueRows.length };
+  });
 }
 
 function parseStructuredCsvRows(inputText: string, defaultSource: string | null): {
