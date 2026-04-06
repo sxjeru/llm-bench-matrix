@@ -48,7 +48,8 @@ type RowSortColumn = "category" | "benchmark";
 type RowSortMode = "source" | "alpha" | "data";
 
 const LOWER_IS_BETTER_RULES: Array<{ matcher: RegExp; baseline: number }> = [
-  { matcher: /fleurs/i, baseline: 100 }
+  { matcher: /fleurs/i, baseline: 100 },
+  { matcher: /omnidocbench\s*1\.5/i, baseline: 100 }
 ];
 
 function getBenchmarkComparableScore(benchmarkName: string, valueNum: number): number {

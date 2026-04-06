@@ -4,14 +4,18 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   Database,
+  Eye,
   FileSpreadsheet,
+  Headphones,
+  Layers,
   Merge as MergeIcon,
   PlusCircle,
   Settings2,
   ShieldAlert,
   Table2,
   TriangleAlert,
-  Upload
+  Upload,
+  Video
 } from "lucide-react";
 
 type ProviderOption = {
@@ -94,12 +98,60 @@ type ModelDedupeRule = {
 
 type TabKey = "import" | "entry" | "merge" | "settings";
 
+type BenchmarkWarningLevel = "info" | "warn" | "danger";
+
+type BenchmarkWarningItem = {
+  key: string;
+  benchmarkName: string;
+  benchmarkType: string;
+  level: BenchmarkWarningLevel;
+  reasons: string[];
+  suggestedTargetId: number | null;
+  candidateTargetIds: number[];
+  hasParentheses: boolean;
+};
+
+type ModelWarningItem = {
+  key: string;
+  modelName: string;
+  level: BenchmarkWarningLevel;
+  reasons: string[];
+  suggestedTargetId: number | null;
+  candidateTargetIds: number[];
+  hasParentheses: boolean;
+};
+
+type MatrixPreviewRow = {
+  key: string;
+  benchmarkName: string;
+  benchmarkType: string;
+  modalities: string[];
+  cellRowIndexByModel: Record<string, number>;
+};
+
+type StructuredCsvImportRow = {
+  providerName: string;
+  modelName: string;
+  benchmarkName: string;
+  benchmarkType: string;
+  rawValue: string;
+  source: string | null;
+};
+
 const DEFAULT_MODEL_DEDUPE_RULE: ModelDedupeRule = {
   lowercase: true,
   removeHyphen: true,
   removeSpace: true,
   removeDot: true
 };
+
+const BENCHMARK_SUSPECT_KEYWORDS = ["last exam"];
+const BENCHMARK_NAME_REPLACERS = [/\bno\s*tools?\b/gi, /\bwith\s*search\b/gi, /\bw\/?\s*tools?\b/gi, /\bwith\s*tools?\b/gi];
+const HARDCODED_BENCHMARK_ALIAS_RULES: Array<{ pattern: RegExp; targetName: string }> = [
+  { pattern: /^\s*hle\s+with\s+tools?\s*$/i, targetName: "HLE w/ tool" }
+];
+const LOWER_IS_BETTER_PREVIEW_RULES = [/fleurs/i, /omnidocbench\s*1\.5/i];
+const OMNIDOCBENCH_15_MATCHER = /omnidocbench\s*1\.5/i;
 
 function normalizeModelDedupeRule(raw: unknown): ModelDedupeRule {
   if (!raw || typeof raw !== "object") {
@@ -192,6 +244,101 @@ async function postFormData(url: string, formData: FormData) {
   return data;
 }
 
+function getTextImportBenchmarkKey(benchmarkName: string, benchmarkType: string): string {
+  return `${benchmarkName}@@${benchmarkType}`;
+}
+
+function getBenchmarkExactLookupKey(benchmarkName: string, benchmarkType: string): string {
+  return `${benchmarkName.trim().toLowerCase()}@@${benchmarkType.trim().toLowerCase()}`;
+}
+
+function removeParenthesesContent(input: string): string {
+  return input.replace(/\([^)]*\)/g, " ").replace(/（[^）]*）/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function buildBenchmarkCompareKey(input: string): string {
+  let normalized = removeParenthesesContent(input).toLowerCase().trim();
+
+  BENCHMARK_NAME_REPLACERS.forEach((pattern) => {
+    normalized = normalized.replace(pattern, " ");
+  });
+
+  normalized = normalized
+    .replace(/[\/_-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return normalized;
+}
+
+function buildModelCompareKey(input: string): string {
+  return input.toLowerCase().replace(/[\-\s\.]/g, "").trim();
+}
+
+function isLowerBetterPreviewBenchmark(benchmarkName: string): boolean {
+  return LOWER_IS_BETTER_PREVIEW_RULES.some((rule) => rule.test(benchmarkName));
+}
+
+function getOmniDocBenchNormalizeHint(benchmarkName: string, rawValue: string): string | null {
+  if (!OMNIDOCBENCH_15_MATCHER.test(benchmarkName)) return null;
+
+  const numeric = Number.parseFloat(rawValue.trim().replace(/,/g, ""));
+  if (!Number.isFinite(numeric) || numeric <= 1) return null;
+
+  const normalized = Number(((100 - numeric) / 100).toFixed(6));
+  return String(normalized);
+}
+
+function normalizeModalityName(input: string): string {
+  const normalized = input.trim().toLowerCase();
+  if (!normalized) return "Text";
+  if (normalized.includes("vision")) return "Vision";
+  if (normalized.includes("audio")) return "Audio";
+  if (normalized.includes("video")) return "Video";
+  if (normalized.includes("multi")) return "Multimodal";
+  return "Text";
+}
+
+function resolveHardcodedBenchmarkAliasTarget(input: string): string | null {
+  for (const rule of HARDCODED_BENCHMARK_ALIAS_RULES) {
+    if (rule.pattern.test(input)) {
+      return rule.targetName;
+    }
+  }
+
+  return null;
+}
+
+function escapeCsvCell(input: string): string {
+  if (/[",\n\r]/.test(input)) {
+    return `"${input.replace(/"/g, '""')}"`;
+  }
+
+  return input;
+}
+
+function buildStructuredCsvText(rows: StructuredCsvImportRow[]): string {
+  const header = ["provider", "model", "benchmark", "benchmark_type", "value_raw", "source"];
+  const lines = [header.join(",")];
+
+  rows.forEach((row) => {
+    const line = [
+      row.providerName,
+      row.modelName,
+      row.benchmarkName,
+      row.benchmarkType,
+      row.rawValue,
+      row.source ?? ""
+    ]
+      .map((item) => escapeCsvCell(item))
+      .join(",");
+
+    lines.push(line);
+  });
+
+  return lines.join("\n");
+}
+
 export function AdminConsole({
   providers,
   models,
@@ -226,7 +373,18 @@ export function AdminConsole({
     ""
   );
   const [csvSource, setCsvSource] = useState("");
+  const [isPreviewingTextImport, setIsPreviewingTextImport] = useState(false);
   const [textImportPreviewRows, setTextImportPreviewRows] = useState<TextImportPreviewRow[]>([]);
+  const [textImportDraftRows, setTextImportDraftRows] = useState<TextImportPreviewRow[]>([]);
+  const [benchmarkMergeTargets, setBenchmarkMergeTargets] = useState<Record<string, string>>({});
+  const [benchmarkMergeFilters, setBenchmarkMergeFilters] = useState<Record<string, string>>({});
+  const [ignoredBenchmarkKeys, setIgnoredBenchmarkKeys] = useState<Record<string, boolean>>({});
+  const [parenthesesModes, setParenthesesModes] = useState<Record<string, "keep" | "remove" | "custom">>({});
+  const [parenthesesCustomNames, setParenthesesCustomNames] = useState<Record<string, string>>({});
+  const [modelMergeTargets, setModelMergeTargets] = useState<Record<string, string>>({});
+  const [modelMergeFilters, setModelMergeFilters] = useState<Record<string, string>>({});
+  const [modelParenthesesModes, setModelParenthesesModes] = useState<Record<string, "keep" | "remove" | "custom">>({});
+  const [modelParenthesesCustomNames, setModelParenthesesCustomNames] = useState<Record<string, string>>({});
   const [textImportPreviewMeta, setTextImportPreviewMeta] = useState<{
     format: string;
     total: number;
@@ -279,14 +437,488 @@ export function AdminConsole({
     return Object.entries(initialSettings).sort(([a], [b]) => a.localeCompare(b));
   }, [initialSettings]);
 
-  const visibleTextImportPreviewRows = useMemo(
-    () => textImportPreviewRows.slice(0, textImportPreviewVisibleCount),
-    [textImportPreviewRows, textImportPreviewVisibleCount]
-  );
+  const benchmarkById = useMemo(() => {
+    return new Map(benchmarks.map((item) => [item.id, item]));
+  }, [benchmarks]);
+
+  const existingBenchmarkExactMap = useMemo(() => {
+    const map = new Map<string, BenchmarkOption>();
+    benchmarks.forEach((item) => {
+      map.set(getBenchmarkExactLookupKey(item.benchmarkName, item.benchmarkType), item);
+    });
+    return map;
+  }, [benchmarks]);
+
+  const existingBenchmarkByNameMap = useMemo(() => {
+    const map = new Map<string, BenchmarkOption[]>();
+    benchmarks.forEach((item) => {
+      const key = item.benchmarkName.trim().toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, []);
+      }
+      map.get(key)?.push(item);
+    });
+    return map;
+  }, [benchmarks]);
+
+  const existingBenchmarkModalitiesMap = useMemo(() => {
+    const map = new Map<string, string[]>();
+    benchmarks.forEach((item) => {
+      map.set(
+        getBenchmarkExactLookupKey(item.benchmarkName, item.benchmarkType),
+        (item.modalities?.length ? item.modalities : ["Text"]).map((modality) => normalizeModalityName(modality))
+      );
+    });
+    return map;
+  }, [benchmarks]);
 
   const deleteSourceOptions = useMemo(
     () => Array.from(new Set(sourceOptions.map((item) => item.trim()).filter(Boolean))),
     [sourceOptions]
+  );
+
+  const modelById = useMemo(() => {
+    return new Map(models.map((item) => [item.id, item]));
+  }, [models]);
+
+  const existingModelExactMap = useMemo(() => {
+    const map = new Map<string, ModelOption>();
+    models.forEach((item) => {
+      map.set(item.modelName.trim().toLowerCase(), item);
+    });
+    return map;
+  }, [models]);
+
+  const existingModelByNameMap = useMemo(() => {
+    const map = new Map<string, ModelOption[]>();
+    models.forEach((item) => {
+      const key = item.modelName.trim().toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, []);
+      }
+      map.get(key)?.push(item);
+    });
+    return map;
+  }, [models]);
+
+  const existingModelByCompareKey = useMemo(() => {
+    const map = new Map<string, ModelOption[]>();
+    models.forEach((item) => {
+      const compareKey = buildModelCompareKey(item.modelName);
+      if (!compareKey) return;
+
+      if (!map.has(compareKey)) {
+        map.set(compareKey, []);
+      }
+      map.get(compareKey)?.push(item);
+    });
+    return map;
+  }, [models]);
+
+  const modelWarnings = useMemo(() => {
+    const importedModels = Array.from(new Set(textImportDraftRows.map((item) => item.modelName.trim()).filter(Boolean)));
+    const warnings: ModelWarningItem[] = [];
+
+    importedModels.forEach((modelName) => {
+      const exactExisting = existingModelExactMap.get(modelName.toLowerCase());
+      if (exactExisting) {
+        return;
+      }
+
+      const reasons: string[] = [];
+      let level: BenchmarkWarningLevel = "info";
+      let suggestedTargetId: number | null = null;
+
+      const hasParentheses = /[（(][^()（）]+[)）]/.test(modelName);
+      if (hasParentheses) {
+        reasons.push("包含括号内容（默认保留，可单独切换）");
+      }
+
+      const compareKey = buildModelCompareKey(modelName);
+      const candidates = compareKey ? (existingModelByCompareKey.get(compareKey) ?? []) : [];
+
+      if (candidates.length > 0) {
+        const candidateLabels = candidates
+          .slice(0, 3)
+          .map((item) => item.modelName)
+          .join("、");
+
+        reasons.push(`与库内 model 相似：${candidateLabels}`);
+        level = "warn";
+        suggestedTargetId = candidates[0]?.id ?? null;
+      }
+
+      if (reasons.length === 0) return;
+
+      warnings.push({
+        key: modelName,
+        modelName,
+        level,
+        reasons,
+        suggestedTargetId,
+        candidateTargetIds: Array.from(new Set(candidates.map((item) => item.id))),
+        hasParentheses
+      });
+    });
+
+    const levelRank: Record<BenchmarkWarningLevel, number> = {
+      danger: 0,
+      warn: 1,
+      info: 2
+    };
+
+    return warnings.sort((a, b) => {
+      const rankGap = levelRank[a.level] - levelRank[b.level];
+      if (rankGap !== 0) return rankGap;
+      return a.modelName.localeCompare(b.modelName, "zh-Hans-CN");
+    });
+  }, [textImportDraftRows, existingModelByCompareKey, existingModelExactMap]);
+
+  const modelsWithParentheses = useMemo(() => {
+    return Array.from(
+      new Set(textImportDraftRows.map((item) => item.modelName).filter((name) => /[（(][^()（）]+[)）]/.test(name)))
+    ).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+  }, [textImportDraftRows]);
+
+  const modelWarningSet = useMemo(
+    () => new Set([...modelWarnings.map((item) => item.modelName), ...modelsWithParentheses]),
+    [modelWarnings, modelsWithParentheses]
+  );
+
+  const benchmarkWarnings = useMemo(() => {
+    const existingByCompareKey = new Map<string, BenchmarkOption[]>();
+
+    benchmarks.forEach((item) => {
+      const compareKey = buildBenchmarkCompareKey(item.benchmarkName);
+      if (!compareKey) return;
+
+      if (!existingByCompareKey.has(compareKey)) {
+        existingByCompareKey.set(compareKey, []);
+      }
+
+      existingByCompareKey.get(compareKey)?.push(item);
+    });
+
+    const importedBenchmarks = new Map<string, { benchmarkName: string; benchmarkType: string }>();
+    textImportDraftRows.forEach((item) => {
+      const key = getTextImportBenchmarkKey(item.benchmarkName, item.benchmarkType);
+      if (!importedBenchmarks.has(key)) {
+        importedBenchmarks.set(key, {
+          benchmarkName: item.benchmarkName,
+          benchmarkType: item.benchmarkType
+        });
+      }
+    });
+
+    const warnings: BenchmarkWarningItem[] = [];
+
+    importedBenchmarks.forEach(({ benchmarkName, benchmarkType }, key) => {
+      const exactExisting = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(benchmarkName, benchmarkType));
+      if (exactExisting) {
+        return;
+      }
+
+      const sameNameExisting = existingBenchmarkByNameMap.get(benchmarkName.trim().toLowerCase()) ?? [];
+      if (sameNameExisting.length > 0) {
+        return;
+      }
+
+      const reasons: string[] = [];
+      let level: BenchmarkWarningLevel = "info";
+      let suggestedTargetId: number | null = null;
+
+      const hasParentheses = /[（(][^()（）]+[)）]/.test(benchmarkName);
+      if (hasParentheses) {
+        reasons.push("包含括号内容（默认保留，可单独切换）");
+      }
+
+      const matchedKeyword = BENCHMARK_SUSPECT_KEYWORDS.find((keyword) =>
+        benchmarkName.toLowerCase().includes(keyword)
+      );
+      if (matchedKeyword) {
+        reasons.push(`命中高亮词：${matchedKeyword}`);
+      }
+
+      const aliasTargetName = resolveHardcodedBenchmarkAliasTarget(benchmarkName);
+      if (aliasTargetName) {
+        const aliasTarget = benchmarks.find((item) => item.benchmarkName.toLowerCase() === aliasTargetName.toLowerCase());
+        if (aliasTarget) {
+          reasons.push(`命中硬编码别名，建议合并到 ${aliasTarget.benchmarkName} (${aliasTarget.benchmarkType})`);
+          suggestedTargetId = aliasTarget.id;
+          level = "danger";
+        } else {
+          reasons.push(`命中硬编码别名：${aliasTargetName}`);
+          level = "warn";
+        }
+      }
+
+      const compareKey = buildBenchmarkCompareKey(benchmarkName);
+      const candidates = compareKey ? (existingByCompareKey.get(compareKey) ?? []) : [];
+      if (candidates.length > 0) {
+        const candidateLabels = candidates
+          .slice(0, 3)
+          .map((item) => `${item.benchmarkName} (${item.benchmarkType})`)
+          .join("、");
+
+        reasons.push(`与库内 benchmark 相似：${candidateLabels}`);
+
+        if (level !== "danger") {
+          level = "warn";
+        }
+
+        if (!suggestedTargetId) {
+          suggestedTargetId = candidates[0]?.id ?? null;
+        }
+      }
+
+      if (reasons.length === 0) return;
+
+      warnings.push({
+        key,
+        benchmarkName,
+        benchmarkType,
+        level,
+        reasons,
+        suggestedTargetId,
+        candidateTargetIds: Array.from(new Set(candidates.map((item) => item.id))),
+        hasParentheses
+      });
+    });
+
+    const levelRank: Record<BenchmarkWarningLevel, number> = {
+      danger: 0,
+      warn: 1,
+      info: 2
+    };
+
+    return warnings.sort((a, b) => {
+      const rankGap = levelRank[a.level] - levelRank[b.level];
+      if (rankGap !== 0) return rankGap;
+      return a.benchmarkName.localeCompare(b.benchmarkName, "zh-Hans-CN");
+    });
+  }, [benchmarks, textImportDraftRows, existingBenchmarkExactMap, existingBenchmarkByNameMap]);
+
+  const benchmarkWarningMap = useMemo(
+    () => new Map(benchmarkWarnings.map((item) => [item.key, item])),
+    [benchmarkWarnings]
+  );
+
+  const benchmarksWithParentheses = useMemo(() => {
+    const found = new Map<string, { key: string; benchmarkName: string; benchmarkType: string }>();
+
+    textImportDraftRows.forEach((row) => {
+      if (!/[（(][^()（）]+[)）]/.test(row.benchmarkName)) return;
+      const key = getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType);
+      if (!found.has(key)) {
+        found.set(key, {
+          key,
+          benchmarkName: row.benchmarkName,
+          benchmarkType: row.benchmarkType
+        });
+      }
+    });
+
+    return Array.from(found.values()).sort((a, b) => a.benchmarkName.localeCompare(b.benchmarkName, "zh-Hans-CN"));
+  }, [textImportDraftRows]);
+
+  const matrixPreview = useMemo(() => {
+    const modelNames: string[] = [];
+    const seenModelNames = new Set<string>();
+    textImportDraftRows.forEach((row) => {
+      const modelName = row.modelName;
+      if (!modelName || seenModelNames.has(modelName)) return;
+      seenModelNames.add(modelName);
+      modelNames.push(modelName);
+    });
+    const rowMap = new Map<string, MatrixPreviewRow>();
+
+    textImportDraftRows.forEach((row, rowIndex) => {
+      const key = getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType);
+      if (!rowMap.has(key)) {
+        const modalities =
+          existingBenchmarkModalitiesMap.get(getBenchmarkExactLookupKey(row.benchmarkName, row.benchmarkType)) ??
+          [normalizeModalityName(row.benchmarkType)];
+
+        rowMap.set(key, {
+          key,
+          benchmarkName: row.benchmarkName,
+          benchmarkType: row.benchmarkType,
+          modalities,
+          cellRowIndexByModel: {}
+        });
+      }
+
+      const entry = rowMap.get(key);
+      if (!entry) return;
+
+      if (entry.cellRowIndexByModel[row.modelName] === undefined) {
+        entry.cellRowIndexByModel[row.modelName] = rowIndex;
+      }
+    });
+
+    const rows = Array.from(rowMap.values()).sort((a, b) => a.benchmarkName.localeCompare(b.benchmarkName, "zh-Hans-CN"));
+
+    return {
+      modelNames,
+      rows
+    };
+  }, [textImportDraftRows, existingBenchmarkModalitiesMap]);
+
+  const finalizedTextImportRows = useMemo(() => {
+    return textImportDraftRows
+      .map<StructuredCsvImportRow | null>((row) => {
+        const benchmarkKey = getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType);
+        const originalModelKey = row.modelName;
+        if (ignoredBenchmarkKeys[benchmarkKey]) {
+          return null;
+        }
+
+        const rawValue = row.rawValue.trim();
+        if (!rawValue) {
+          return null;
+        }
+
+        let benchmarkName = row.benchmarkName;
+        let benchmarkType = row.benchmarkType;
+        let modelName = row.modelName;
+
+        const modelParenthesesMode = modelParenthesesModes[originalModelKey] ?? "keep";
+        if (modelParenthesesMode === "remove") {
+          const noParentheses = removeParenthesesContent(modelName);
+          if (noParentheses) {
+            modelName = noParentheses;
+          }
+        } else if (modelParenthesesMode === "custom") {
+          const customName = (modelParenthesesCustomNames[originalModelKey] ?? "").trim();
+          if (customName) {
+            modelName = customName;
+          }
+        }
+
+        const modelMergeTargetId = Number(modelMergeTargets[originalModelKey]);
+        if (Number.isFinite(modelMergeTargetId) && modelMergeTargetId > 0) {
+          const target = modelById.get(modelMergeTargetId);
+          if (target) {
+            modelName = target.modelName;
+          }
+        }
+
+        modelName = modelName.trim();
+
+        const exactModel = existingModelExactMap.get(modelName.toLowerCase());
+        if (exactModel) {
+          modelName = exactModel.modelName;
+        } else {
+          const sameNameModels = existingModelByNameMap.get(modelName.toLowerCase()) ?? [];
+          if (sameNameModels.length > 0) {
+            modelName = sameNameModels[0].modelName;
+          }
+        }
+
+        if (!modelName) {
+          return null;
+        }
+
+        const parenthesesMode = parenthesesModes[benchmarkKey] ?? "keep";
+        if (parenthesesMode === "remove") {
+          const noParentheses = removeParenthesesContent(benchmarkName);
+          if (noParentheses) {
+            benchmarkName = noParentheses;
+          }
+        } else if (parenthesesMode === "custom") {
+          const customName = (parenthesesCustomNames[benchmarkKey] ?? "").trim();
+          if (customName) {
+            benchmarkName = customName;
+          }
+        }
+
+        benchmarkName = benchmarkName.trim();
+        benchmarkType = benchmarkType.trim() || "general";
+
+        if (!benchmarkName) {
+          return null;
+        }
+
+        const exactExisting = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(benchmarkName, benchmarkType));
+        if (exactExisting) {
+          benchmarkName = exactExisting.benchmarkName;
+          benchmarkType = exactExisting.benchmarkType;
+        } else {
+          const sameNameExisting = existingBenchmarkByNameMap.get(benchmarkName.trim().toLowerCase()) ?? [];
+          if (sameNameExisting.length > 0) {
+            const exactTypeMatch = sameNameExisting.find(
+              (item) => item.benchmarkType.trim().toLowerCase() === benchmarkType.trim().toLowerCase()
+            );
+            const autoTarget = exactTypeMatch ?? sameNameExisting[0];
+            benchmarkName = autoTarget.benchmarkName;
+            benchmarkType = autoTarget.benchmarkType;
+          }
+        }
+
+        const mergeTargetId = Number(benchmarkMergeTargets[benchmarkKey]);
+        if (Number.isFinite(mergeTargetId) && mergeTargetId > 0) {
+          const target = benchmarkById.get(mergeTargetId);
+          if (target) {
+            benchmarkName = target.benchmarkName;
+            benchmarkType = target.benchmarkType;
+          }
+        }
+
+        return {
+          providerName: row.providerName.trim() || "Unknown",
+          modelName,
+          benchmarkName,
+          benchmarkType,
+          rawValue,
+          source: row.source?.trim() || null
+        };
+      })
+      .filter((item): item is StructuredCsvImportRow => item !== null);
+  }, [
+    textImportDraftRows,
+    ignoredBenchmarkKeys,
+    parenthesesModes,
+    parenthesesCustomNames,
+    modelParenthesesModes,
+    modelParenthesesCustomNames,
+    modelMergeTargets,
+    benchmarkMergeTargets,
+    modelById,
+    benchmarkById,
+    existingModelExactMap,
+    existingModelByNameMap,
+    existingBenchmarkExactMap,
+    existingBenchmarkByNameMap
+  ]);
+
+  const ignoredTextImportCount = useMemo(() => {
+    if (textImportDraftRows.length === 0) return 0;
+    return Math.max(0, textImportDraftRows.length - finalizedTextImportRows.length);
+  }, [textImportDraftRows.length, finalizedTextImportRows.length]);
+
+  const textImportPreviewTableRows = useMemo<TextImportPreviewRow[]>(() => {
+    if (textImportDraftRows.length === 0) {
+      return textImportPreviewRows;
+    }
+
+    return finalizedTextImportRows.map((row, index) => ({
+      rowNumber: index + 1,
+      providerName: row.providerName,
+      modelName: row.modelName,
+      benchmarkName: row.benchmarkName,
+      benchmarkType: row.benchmarkType,
+      rawValue: row.rawValue,
+      valueNum: null,
+      valueNum2: null,
+      valueNote: null,
+      source: row.source,
+      valid: row.rawValue.trim().length > 0
+    }));
+  }, [textImportDraftRows.length, textImportPreviewRows, finalizedTextImportRows]);
+
+  const visibleResolvedTextImportPreviewRows = useMemo(
+    () => textImportPreviewTableRows.slice(0, textImportPreviewVisibleCount),
+    [textImportPreviewTableRows, textImportPreviewVisibleCount]
   );
 
   const modelEntityOptions = useMemo(
@@ -583,13 +1215,191 @@ export function AdminConsole({
     }
   }
 
+  function onUpdateTextImportDraftValue(rowIndex: number, rawValue: string) {
+    setTextImportDraftRows((prev) =>
+      prev.map((row, idx) =>
+        idx === rowIndex
+          ? {
+              ...row,
+              rawValue
+            }
+          : row
+      )
+    );
+  }
+
+  function onRenameTextImportBenchmark(benchmarkKey: string, nextBenchmarkName: string) {
+    const splitIndex = benchmarkKey.lastIndexOf("@@");
+    if (splitIndex < 0) return;
+    const benchmarkType = benchmarkKey.slice(splitIndex + 2);
+    const nextKey = getTextImportBenchmarkKey(nextBenchmarkName, benchmarkType);
+
+    setTextImportDraftRows((prev) =>
+      prev.map((row) =>
+        getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType) === benchmarkKey
+          ? {
+              ...row,
+              benchmarkName: nextBenchmarkName
+            }
+          : row
+      )
+    );
+
+    if (nextKey === benchmarkKey) return;
+
+    setBenchmarkMergeTargets((prev) => {
+      if (!(benchmarkKey in prev)) return prev;
+      const next = { ...prev };
+      next[nextKey] = prev[benchmarkKey];
+      delete next[benchmarkKey];
+      return next;
+    });
+
+    setBenchmarkMergeFilters((prev) => {
+      if (!(benchmarkKey in prev)) return prev;
+      const next = { ...prev };
+      next[nextKey] = prev[benchmarkKey];
+      delete next[benchmarkKey];
+      return next;
+    });
+
+    setIgnoredBenchmarkKeys((prev) => {
+      if (!(benchmarkKey in prev)) return prev;
+      const next = { ...prev };
+      next[nextKey] = prev[benchmarkKey];
+      delete next[benchmarkKey];
+      return next;
+    });
+
+    setParenthesesModes((prev) => {
+      if (!(benchmarkKey in prev)) return prev;
+      const next = { ...prev };
+      next[nextKey] = prev[benchmarkKey];
+      delete next[benchmarkKey];
+      return next;
+    });
+
+    setParenthesesCustomNames((prev) => {
+      if (!(benchmarkKey in prev)) return prev;
+      const next = { ...prev };
+      next[nextKey] = prev[benchmarkKey];
+      delete next[benchmarkKey];
+      return next;
+    });
+  }
+
+  function onRenameTextImportModel(modelName: string, nextModelName: string) {
+    setTextImportDraftRows((prev) =>
+      prev.map((row) =>
+        row.modelName === modelName
+          ? {
+              ...row,
+              modelName: nextModelName
+            }
+          : row
+      )
+    );
+
+    if (nextModelName === modelName) return;
+
+    setModelMergeTargets((prev) => {
+      if (!(modelName in prev)) return prev;
+      const next = { ...prev };
+      next[nextModelName] = prev[modelName];
+      delete next[modelName];
+      return next;
+    });
+
+    setModelMergeFilters((prev) => {
+      if (!(modelName in prev)) return prev;
+      const next = { ...prev };
+      next[nextModelName] = prev[modelName];
+      delete next[modelName];
+      return next;
+    });
+
+    setModelParenthesesModes((prev) => {
+      if (!(modelName in prev)) return prev;
+      const next = { ...prev };
+      next[nextModelName] = prev[modelName];
+      delete next[modelName];
+      return next;
+    });
+
+    setModelParenthesesCustomNames((prev) => {
+      if (!(modelName in prev)) return prev;
+      const next = { ...prev };
+      next[nextModelName] = prev[modelName];
+      delete next[modelName];
+      return next;
+    });
+  }
+
+  function renderModalityBadge(modalityInput: string, key: string) {
+    const modality = normalizeModalityName(modalityInput);
+
+    if (modality === "Text") {
+      return null;
+    }
+
+    if (modality === "Vision") {
+      return (
+        <span key={key} className="inline-flex items-center rounded-md bg-cyan-500/15 px-1.5 py-0.5 text-cyan-300" title="Vision">
+          <Eye size={12} />
+        </span>
+      );
+    }
+
+    if (modality === "Audio") {
+      return (
+        <span key={key} className="inline-flex items-center rounded-md bg-purple-500/15 px-1.5 py-0.5 text-purple-300" title="Audio">
+          <Headphones size={12} />
+        </span>
+      );
+    }
+
+    if (modality === "Video") {
+      return (
+        <span key={key} className="inline-flex items-center rounded-md bg-pink-500/15 px-1.5 py-0.5 text-pink-300" title="Video">
+          <Video size={12} />
+        </span>
+      );
+    }
+
+    if (modality === "Multimodal") {
+      return (
+        <span
+          key={key}
+          className="inline-flex items-center rounded-md bg-amber-500/15 px-1.5 py-0.5 text-amber-300"
+          title="Multimodal"
+        >
+          <Layers size={12} />
+        </span>
+      );
+    }
+
+    return null;
+  }
+
   async function onPreviewCsvImport() {
+    setIsPreviewingTextImport(true);
     try {
       const result = await postJson("/api/admin/import-csv/preview", {
         csvText,
         source: csvSource || undefined
       });
-      setTextImportPreviewRows((result.previewRows ?? []) as TextImportPreviewRow[]);
+      const previewRows = (result.previewRows ?? []) as TextImportPreviewRow[];
+      setTextImportPreviewRows(previewRows);
+      setTextImportDraftRows(previewRows.map((row) => ({ ...row })));
+      setBenchmarkMergeTargets({});
+      setBenchmarkMergeFilters({});
+      setIgnoredBenchmarkKeys({});
+      setParenthesesModes({});
+      setParenthesesCustomNames({});
+      setModelMergeTargets({});
+      setModelMergeFilters({});
+      setModelParenthesesModes({});
+      setModelParenthesesCustomNames({});
       setTextImportPreviewMeta({
         format: result.format ?? "matrix-table",
         total: result.total ?? 0,
@@ -599,12 +1409,32 @@ export function AdminConsole({
       notifySuccess(`文本预览完成：可导入 ${result.total ?? 0} 条，跳过 ${result.skipped ?? 0} 条`);
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "文本预览失败");
+    } finally {
+      setIsPreviewingTextImport(false);
     }
   }
 
   async function onImportCsv(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
+      if (textImportDraftRows.length > 0) {
+        if (finalizedTextImportRows.length === 0) {
+          notifyError("处理后无可导入数据，请检查忽略项或编辑值");
+          return;
+        }
+
+        const generatedCsvText = buildStructuredCsvText(finalizedTextImportRows);
+        const result = await postJson("/api/admin/import-csv", {
+          csvText: generatedCsvText,
+          source: csvSource || undefined
+        });
+
+        notifySuccess(
+          `文本导入完成：${result.inserted ?? 0}/${result.total ?? 0}（忽略 ${ignoredTextImportCount}，格式 ${result.format ?? "structured-csv"}）`
+        );
+        return;
+      }
+
       const result = await postJson("/api/admin/import-csv", {
         csvText,
         source: csvSource || undefined
@@ -1096,8 +1926,13 @@ export function AdminConsole({
                   required
                 />
                 <div className="flex flex-wrap gap-2">
-                  <button type="button" className="btn btn-outline" onClick={onPreviewCsvImport}>
-                    预览导入结果
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={onPreviewCsvImport}
+                    disabled={isPreviewingTextImport}
+                  >
+                    {isPreviewingTextImport ? "预览中..." : "预览导入结果"}
                   </button>
                   <button type="submit" className="btn btn-primary">
                     执行导入
@@ -1110,16 +1945,406 @@ export function AdminConsole({
                   <div>
                     <div>识别格式：{textImportPreviewMeta.format}</div>
                     <div>可导入：{textImportPreviewMeta.total} 条，跳过：{textImportPreviewMeta.skipped} 条</div>
+                    {textImportDraftRows.length > 0 ? (
+                      <div>
+                        当前草稿：{finalizedTextImportRows.length} 条可提交，忽略/空值 {ignoredTextImportCount} 条
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               ) : null}
 
-              {textImportPreviewRows.length > 0 ? (
+              {matrixPreview.rows.length > 0 ? (
+                <div className="mt-4 space-y-2">
+                  <h4 className="font-semibold">矩阵预览（可编辑）</h4>
+                  <div className="overflow-x-auto rounded-box border border-base-300 max-h-[420px]">
+                    <table className="table table-zebra table-sm">
+                      <thead>
+                        <tr>
+                          <th className="w-[56px]">模态</th>
+                          <th className="min-w-[240px]">Benchmark</th>
+                          <th className="min-w-[120px]">Type</th>
+                          {matrixPreview.modelNames.map((modelName) => (
+                            <th
+                              key={`matrix-model-${modelName}`}
+                              className={modelWarningSet.has(modelName) ? "bg-warning/20 text-warning-content" : ""}
+                            >
+                              <input
+                                className="input input-bordered input-xs w-full min-w-[120px]"
+                                value={modelName}
+                                onChange={(e) => onRenameTextImportModel(modelName, e.target.value)}
+                              />
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {matrixPreview.rows.map((matrixRow) => {
+                          const warning = benchmarkWarningMap.get(matrixRow.key);
+                          const hasVisibleModality = matrixRow.modalities.some(
+                            (modality) => normalizeModalityName(modality) !== "Text"
+                          );
+                          const isLowerBetter = isLowerBetterPreviewBenchmark(matrixRow.benchmarkName);
+
+                          return (
+                            <tr key={matrixRow.key}>
+                              <td>
+                                <div className="flex flex-wrap items-center gap-1">
+                                  {hasVisibleModality
+                                    ? matrixRow.modalities.map((modality, idx) =>
+                                        renderModalityBadge(modality, `${matrixRow.key}-mod-${modality}-${idx}`)
+                                      )
+                                    : <span className="text-xs opacity-40">-</span>}
+                                </div>
+                              </td>
+                              <th
+                                className={`min-w-[240px] ${
+                                  warning?.level === "danger"
+                                    ? "bg-error/15 text-error"
+                                    : warning?.level === "warn"
+                                      ? "bg-warning/15 text-warning-content"
+                                      : warning?.level === "info"
+                                        ? "bg-info/15 text-info-content"
+                                        : ""
+                                }`}
+                              >
+                                <div className="space-y-1">
+                                  <input
+                                    className="input input-bordered input-xs w-full"
+                                    value={matrixRow.benchmarkName}
+                                    onChange={(e) => onRenameTextImportBenchmark(matrixRow.key, e.target.value)}
+                                  />
+                                </div>
+                              </th>
+                              <td className="whitespace-nowrap text-sm">
+                                <div className="flex items-center gap-1">
+                                  <span>{matrixRow.benchmarkType}</span>
+                                  {isLowerBetter ? <span className="text-xs opacity-80">↓</span> : null}
+                                </div>
+                              </td>
+                              {matrixPreview.modelNames.map((modelName) => {
+                                const rowIndex = matrixRow.cellRowIndexByModel[modelName];
+                                const normalizedHint =
+                                  rowIndex === undefined
+                                    ? null
+                                    : getOmniDocBenchNormalizeHint(
+                                        matrixRow.benchmarkName,
+                                        textImportDraftRows[rowIndex]?.rawValue ?? ""
+                                      );
+
+                                return (
+                                  <td key={`${matrixRow.key}-${modelName}`}>
+                                    {rowIndex === undefined ? (
+                                      <span className="opacity-40">-</span>
+                                    ) : (
+                                      <div className="space-y-1">
+                                        <input
+                                          className="input input-bordered input-xs w-full min-w-[90px]"
+                                          value={textImportDraftRows[rowIndex]?.rawValue ?? ""}
+                                          onChange={(e) => onUpdateTextImportDraftValue(rowIndex, e.target.value)}
+                                        />
+                                        {normalizedHint ? (
+                                          <div className="text-[10px] text-warning">入库校对→{normalizedHint}</div>
+                                        ) : null}
+                                      </div>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+
+              {benchmarkWarnings.length > 0 ? (
+                <div className="mt-4 space-y-3">
+                  <h4 className="font-semibold">重复嫌疑与快捷合并</h4>
+                  <div className="space-y-3">
+                    {benchmarkWarnings.map((warning) => (
+                      <div
+                        key={`warning-${warning.key}`}
+                        className={`rounded-box border p-3 ${
+                          warning.level === "danger"
+                            ? "border-error/40 bg-error/5"
+                            : warning.level === "warn"
+                              ? "border-warning/40 bg-warning/5"
+                              : "border-info/40 bg-info/5"
+                        }`}
+                      >
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                          <span className="font-semibold">{warning.benchmarkName}</span>
+                          <span className="text-xs opacity-70">({warning.benchmarkType})</span>
+                          <span className="badge badge-sm">{warning.level}</span>
+                        </div>
+                        <ul className="mb-2 list-disc pl-5 text-sm opacity-85">
+                          {warning.reasons.map((reason, idx) => (
+                            <li key={`${warning.key}-reason-${idx}`}>{reason}</li>
+                          ))}
+                        </ul>
+                        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(320px,1fr)_auto_auto] lg:items-center">
+                          <input
+                            className="input input-bordered input-sm"
+                            value={benchmarkMergeFilters[warning.key] ?? ""}
+                            list={`benchmark-merge-options-${warning.key}`}
+                            onChange={(e) => {
+                              const nextInput = e.target.value;
+                              const parsedTargetId = parseMergeEntityId(nextInput, benchmarkEntityOptions);
+
+                              setBenchmarkMergeFilters((prev) => ({
+                                ...prev,
+                                [warning.key]: nextInput
+                              }));
+
+                              setBenchmarkMergeTargets((prev) => ({
+                                ...prev,
+                                [warning.key]: parsedTargetId !== null ? String(parsedTargetId) : ""
+                              }));
+                            }}
+                            placeholder="输入 benchmark 名称并选择候选"
+                          />
+                          <datalist id={`benchmark-merge-options-${warning.key}`}>
+                            {benchmarkEntityOptions.map((option) => (
+                              <option key={`warning-target-${warning.key}-${option.id}`} value={`${option.label} [${option.id}]`} />
+                            ))}
+                          </datalist>
+
+                          {warning.suggestedTargetId ? (
+                            <button
+                              type="button"
+                              className="btn btn-xs btn-outline"
+                              onClick={() => {
+                                const suggested = benchmarkEntityOptions.find((item) => item.id === warning.suggestedTargetId);
+                                const suggestedInput = suggested
+                                  ? `${suggested.label} [${warning.suggestedTargetId}]`
+                                  : String(warning.suggestedTargetId);
+
+                                setBenchmarkMergeFilters((prev) => ({
+                                  ...prev,
+                                  [warning.key]: suggestedInput
+                                }));
+
+                                setBenchmarkMergeTargets((prev) => ({
+                                  ...prev,
+                                  [warning.key]: String(warning.suggestedTargetId)
+                                }));
+                              }}
+                            >
+                              采用建议
+                            </button>
+                          ) : (
+                            <span className="hidden lg:block" />
+                          )}
+
+                          <label className="label cursor-pointer justify-start gap-2">
+                            <input
+                              type="checkbox"
+                              className="checkbox checkbox-xs"
+                              checked={Boolean(ignoredBenchmarkKeys[warning.key])}
+                              onChange={(e) =>
+                                setIgnoredBenchmarkKeys((prev) => ({
+                                  ...prev,
+                                  [warning.key]: e.target.checked
+                                }))
+                              }
+                            />
+                            <span className="label-text text-xs">忽略该 benchmark</span>
+                          </label>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {benchmarksWithParentheses.length > 0 ? (
+                <div className="mt-4 space-y-2 rounded-box border border-base-300 p-3">
+                  <h4 className="font-semibold">Benchmark 括号处理（默认保留）</h4>
+                  <div className="space-y-2">
+                    {benchmarksWithParentheses.map((item) => {
+                      const mode = parenthesesModes[item.key] ?? "keep";
+
+                      return (
+                        <div key={`paren-${item.key}`} className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(260px,1fr)_200px_minmax(220px,1fr)] lg:items-center">
+                          <div className="text-sm">
+                            <span className="font-medium">{item.benchmarkName}</span>
+                            <span className="ml-1 opacity-70">({item.benchmarkType})</span>
+                          </div>
+                          <select
+                            className="select select-bordered select-sm"
+                            value={mode}
+                            onChange={(e) =>
+                              setParenthesesModes((prev) => ({
+                                ...prev,
+                                [item.key]: e.target.value as "keep" | "remove" | "custom"
+                              }))
+                            }
+                          >
+                            <option value="keep">保留括号（默认）</option>
+                            <option value="remove">去掉括号内容</option>
+                            <option value="custom">自定义名称</option>
+                          </select>
+                          {mode === "custom" ? (
+                            <input
+                              className="input input-bordered input-sm"
+                              value={parenthesesCustomNames[item.key] ?? ""}
+                              onChange={(e) =>
+                                setParenthesesCustomNames((prev) => ({
+                                  ...prev,
+                                  [item.key]: e.target.value
+                                }))
+                              }
+                              placeholder="输入自定义 benchmark 名称"
+                            />
+                          ) : (
+                            <div className="text-xs opacity-70">当前模式：{mode === "remove" ? "去括号" : "保留"}</div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              {modelWarnings.length > 0 ? (
+                <div className="mt-4 space-y-3">
+                  <h4 className="font-semibold">模型重名嫌疑与快捷合并</h4>
+                  <div className="space-y-3">
+                    {modelWarnings.map((warning) => (
+                      <div
+                        key={`model-warning-${warning.key}`}
+                        className={`rounded-box border p-3 ${
+                          warning.level === "danger"
+                            ? "border-error/40 bg-error/5"
+                            : warning.level === "warn"
+                              ? "border-warning/40 bg-warning/5"
+                              : "border-info/40 bg-info/5"
+                        }`}
+                      >
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                          <span className="font-semibold">{warning.modelName}</span>
+                          <span className="badge badge-sm">{warning.level}</span>
+                        </div>
+                        <ul className="mb-2 list-disc pl-5 text-sm opacity-85">
+                          {warning.reasons.map((reason, idx) => (
+                            <li key={`${warning.key}-model-reason-${idx}`}>{reason}</li>
+                          ))}
+                        </ul>
+                        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(320px,1fr)_auto] lg:items-center">
+                          <input
+                            className="input input-bordered input-sm"
+                            value={modelMergeFilters[warning.key] ?? ""}
+                            list={`model-merge-options-${warning.key}`}
+                            onChange={(e) => {
+                              const nextInput = e.target.value;
+                              const parsedTargetId = parseMergeEntityId(nextInput, modelEntityOptions);
+
+                              setModelMergeFilters((prev) => ({
+                                ...prev,
+                                [warning.key]: nextInput
+                              }));
+
+                              setModelMergeTargets((prev) => ({
+                                ...prev,
+                                [warning.key]: parsedTargetId !== null ? String(parsedTargetId) : ""
+                              }));
+                            }}
+                            placeholder="输入 model 名称并选择候选"
+                          />
+                          <datalist id={`model-merge-options-${warning.key}`}>
+                            {modelEntityOptions.map((option) => (
+                              <option key={`model-warning-target-${warning.key}-${option.id}`} value={`${option.label} [${option.id}]`} />
+                            ))}
+                          </datalist>
+
+                          {warning.suggestedTargetId ? (
+                            <button
+                              type="button"
+                              className="btn btn-xs btn-outline"
+                              onClick={() => {
+                                const suggested = modelEntityOptions.find((item) => item.id === warning.suggestedTargetId);
+                                const suggestedInput = suggested
+                                  ? `${suggested.label} [${warning.suggestedTargetId}]`
+                                  : String(warning.suggestedTargetId);
+
+                                setModelMergeFilters((prev) => ({
+                                  ...prev,
+                                  [warning.key]: suggestedInput
+                                }));
+
+                                setModelMergeTargets((prev) => ({
+                                  ...prev,
+                                  [warning.key]: String(warning.suggestedTargetId)
+                                }));
+                              }}
+                            >
+                              采用建议
+                            </button>
+                          ) : (
+                            <span className="hidden lg:block" />
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {modelsWithParentheses.length > 0 ? (
+                <div className="mt-4 space-y-2 rounded-box border border-base-300 p-3">
+                  <h4 className="font-semibold">模型括号处理（默认保留）</h4>
+                  <div className="space-y-2">
+                    {modelsWithParentheses.map((modelName) => {
+                      const mode = modelParenthesesModes[modelName] ?? "keep";
+
+                      return (
+                        <div key={`model-paren-${modelName}`} className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(260px,1fr)_200px_minmax(220px,1fr)] lg:items-center">
+                          <div className="text-sm font-medium">{modelName}</div>
+                          <select
+                            className="select select-bordered select-sm"
+                            value={mode}
+                            onChange={(e) =>
+                              setModelParenthesesModes((prev) => ({
+                                ...prev,
+                                [modelName]: e.target.value as "keep" | "remove" | "custom"
+                              }))
+                            }
+                          >
+                            <option value="keep">保留括号（默认）</option>
+                            <option value="remove">去掉括号内容</option>
+                            <option value="custom">自定义名称</option>
+                          </select>
+                          {mode === "custom" ? (
+                            <input
+                              className="input input-bordered input-sm"
+                              value={modelParenthesesCustomNames[modelName] ?? ""}
+                              onChange={(e) =>
+                                setModelParenthesesCustomNames((prev) => ({
+                                  ...prev,
+                                  [modelName]: e.target.value
+                                }))
+                              }
+                              placeholder="输入自定义 model 名称"
+                            />
+                          ) : (
+                            <div className="text-xs opacity-70">当前模式：{mode === "remove" ? "去括号" : "保留"}</div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              {textImportPreviewTableRows.length > 0 ? (
                 <div className="mt-4 space-y-2">
                   <h4 className="flex items-center justify-between gap-3 font-semibold">
                     <span>文本导入预览</span>
                     <span className="text-xs opacity-70">
-                      已显示 {visibleTextImportPreviewRows.length} / {textImportPreviewRows.length}
+                      已显示 {visibleResolvedTextImportPreviewRows.length} / {textImportPreviewTableRows.length}
                     </span>
                   </h4>
                   <div className="overflow-x-auto rounded-box border border-base-300 max-h-[420px]">
@@ -1140,7 +2365,7 @@ export function AdminConsole({
                         </tr>
                       </thead>
                       <tbody>
-                        {visibleTextImportPreviewRows.map((row, idx) => (
+                        {visibleResolvedTextImportPreviewRows.map((row, idx) => (
                           <tr key={`${row.rowNumber}-${row.modelName}-${row.benchmarkName}-${idx}`}>
                             <td>{row.rowNumber}</td>
                             <td>{row.providerName}</td>
@@ -1150,7 +2375,11 @@ export function AdminConsole({
                             <td>{row.rawValue}</td>
                             <td>{row.valueNum ?? "-"}</td>
                             <td>{row.valueNum2 ?? "-"}</td>
-                            <td>{row.valueNote ?? "-"}</td>
+                            <td>
+                              {getOmniDocBenchNormalizeHint(row.benchmarkName, row.rawValue)
+                                ? `入库校对 → ${getOmniDocBenchNormalizeHint(row.benchmarkName, row.rawValue)}`
+                                : row.valueNote ?? "-"}
+                            </td>
                             <td>{row.source ?? "-"}</td>
                             <td>{row.valid ? "✅" : "⚠️"}</td>
                           </tr>
@@ -1159,7 +2388,7 @@ export function AdminConsole({
                     </table>
                   </div>
 
-                  {visibleTextImportPreviewRows.length < textImportPreviewRows.length ? (
+                  {visibleResolvedTextImportPreviewRows.length < textImportPreviewTableRows.length ? (
                     <button
                       type="button"
                       className="btn btn-outline btn-sm"

@@ -7,7 +7,7 @@ import {
   normalizeModelDedupeRule,
   toProviderSlug
 } from "@/lib/db/normalize";
-import { parseBenchmarkValue } from "@/lib/db/parse-value";
+import { parseBenchmarkValue, type ParsedBenchmarkValue } from "@/lib/db/parse-value";
 import type { ParsedImportRecord } from "@/lib/import/xlsm";
 import { benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 
@@ -38,6 +38,41 @@ type NormalizedTextImportRow = {
 };
 
 const EMPTY_VALUE_MARKERS = new Set(["", "-", "--", "—", "na", "n/a", "null", "none"]);
+const LOWER_IS_BETTER_BENCHMARK_RULES = [/fleurs/i, /omnidocbench\s*1\.5/i];
+const OMNIDOCBENCH_15_MATCHER = /omnidocbench\s*1\.5/i;
+
+function isLowerBetterBenchmark(benchmarkName: string): boolean {
+  return LOWER_IS_BETTER_BENCHMARK_RULES.some((rule) => rule.test(benchmarkName));
+}
+
+function normalizeStoredBenchmarkValue(benchmarkName: string, parsed: ParsedBenchmarkValue): ParsedBenchmarkValue {
+  if (!OMNIDOCBENCH_15_MATCHER.test(benchmarkName)) {
+    return parsed;
+  }
+
+  const toNormalized = (value: number | null) => {
+    if (value === null || value <= 1) return value;
+    return Number(((100 - value) / 100).toFixed(6));
+  };
+
+  const normalizedNum = toNormalized(parsed.valueNum);
+  const normalizedNum2 = toNormalized(parsed.valueNum2);
+
+  if (normalizedNum === parsed.valueNum && normalizedNum2 === parsed.valueNum2) {
+    return parsed;
+  }
+
+  const normalizedNote = parsed.valueNote
+    ? `${parsed.valueNote}; normalized-omnidocbench-1.5`
+    : "normalized-omnidocbench-1.5";
+
+  return {
+    valueRaw: parsed.valueRaw,
+    valueNum: normalizedNum,
+    valueNum2: normalizedNum2,
+    valueNote: normalizedNote
+  };
+}
 
 function normalizeImportedValueRaw(rawInput: string): string {
   return rawInput.replace(/[％%]/g, "").trim();
@@ -256,10 +291,21 @@ export async function ensureBenchmark(input: EnsureBenchmarkInput) {
 
   const canonicalKey = buildBenchmarkCanonicalKey(cleanName, cleanType);
   const modalities = normalizeModalities(input.modalities);
+  const higherIsBetter = isLowerBetterBenchmark(cleanName) ? false : (input.higherIsBetter ?? true);
 
   const [existing] = await db.select().from(benchmarks).where(eq(benchmarks.canonicalKey, canonicalKey)).limit(1);
 
   if (existing) {
+    if (isLowerBetterBenchmark(cleanName) && existing.higherIsBetter) {
+      const updatedResult = await db
+        .update(benchmarks)
+        .set({ higherIsBetter: false })
+        .where(eq(benchmarks.id, existing.id))
+        .returning();
+      const updated = firstResultRow<typeof benchmarks.$inferSelect>(updatedResult);
+      return updated ?? { ...existing, higherIsBetter: false };
+    }
+
     return existing;
   }
 
@@ -269,7 +315,7 @@ export async function ensureBenchmark(input: EnsureBenchmarkInput) {
       benchmarkName: cleanName,
       benchmarkType: cleanType,
       unit: input.unit?.trim() || "score",
-      higherIsBetter: input.higherIsBetter ?? true,
+      higherIsBetter,
       modalities,
       canonicalKey,
       sourceBenchmarkId: input.sourceBenchmarkId ?? null
@@ -290,8 +336,21 @@ export async function createBenchmarkValue(input: {
   benchTime: Date;
   valueRaw: string;
   source?: string | null;
+  benchmarkName?: string | null;
 }) {
-  const parsed = parseBenchmarkValue(input.valueRaw);
+  let benchmarkName = input.benchmarkName?.trim();
+  if (!benchmarkName) {
+    const [benchmark] = await db
+      .select({ benchmarkName: benchmarks.benchmarkName })
+      .from(benchmarks)
+      .where(eq(benchmarks.id, input.benchmarkId))
+      .limit(1);
+    benchmarkName = benchmark?.benchmarkName;
+  }
+
+  const parsed = benchmarkName
+    ? normalizeStoredBenchmarkValue(benchmarkName, parseBenchmarkValue(input.valueRaw))
+    : parseBenchmarkValue(input.valueRaw);
 
   const createdResult = await db
     .insert(benchmarkValues)
@@ -478,14 +537,15 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
     }
 
     const parsedValue = parseBenchmarkValue(row.valueRaw);
+    const normalizedValue = normalizeStoredBenchmarkValue(benchmark.benchmarkName, parsedValue);
     valueRows.push({
       modelId: model.id,
       benchmarkId: benchmark.id,
       benchTime: row.benchTime,
-      valueRaw: parsedValue.valueRaw,
-      valueNum: parsedValue.valueNum !== null ? String(parsedValue.valueNum) : null,
-      valueNum2: parsedValue.valueNum2 !== null ? String(parsedValue.valueNum2) : null,
-      valueNote: parsedValue.valueNote,
+      valueRaw: normalizedValue.valueRaw,
+      valueNum: normalizedValue.valueNum !== null ? String(normalizedValue.valueNum) : null,
+      valueNum2: normalizedValue.valueNum2 !== null ? String(normalizedValue.valueNum2) : null,
+      valueNote: normalizedValue.valueNote,
       source: row.source ?? null
     });
   }
