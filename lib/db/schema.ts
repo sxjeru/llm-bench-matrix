@@ -83,7 +83,8 @@ export const benchmarkValues = pgTable(
       table.benchmarkId,
       table.benchTime
     ),
-    benchmarkTimeIdx: index("benchmark_values_benchmark_time_idx").on(table.benchmarkId, table.benchTime)
+    benchmarkTimeIdx: index("benchmark_values_benchmark_time_idx").on(table.benchmarkId, table.benchTime),
+    sourceIdx: index("benchmark_values_source_idx").on(table.source)
   })
 );
 
