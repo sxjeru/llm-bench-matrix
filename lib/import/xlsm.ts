@@ -47,6 +47,15 @@ function normalizeHeader(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function normalizeNameParenthesisSpacing(rawName: string): string {
+  const trimmed = rawName.trim();
+  if (!trimmed) return "";
+
+  return trimmed
+    .replace(/([^\s（(])([（(])/g, "$1 $2")
+    .replace(/\s+([（(])/g, " $1");
+}
+
 function isEmptyMarker(value: string): boolean {
   const normalized = value.trim().toLowerCase();
   return EMPTY_MARKERS.has(normalized);
@@ -119,7 +128,7 @@ export function parseWorkbookBuffer(buffer: Buffer, sheetName?: string): Workboo
 
   for (let rowIndex = 1; rowIndex < rawRows.length; rowIndex += 1) {
     const row = rawRows[rowIndex] ?? [];
-    const benchmarkName = normalizeCell(row[benchmarkIndex]);
+    const benchmarkName = normalizeNameParenthesisSpacing(normalizeCell(row[benchmarkIndex]));
 
     if (!benchmarkName) {
       continue;
@@ -128,7 +137,7 @@ export function parseWorkbookBuffer(buffer: Buffer, sheetName?: string): Workboo
     const category = categoryIndex !== null ? normalizeCell(row[categoryIndex]) || null : null;
 
     for (const modelIndex of modelIndices) {
-      const modelName = normalizeCell(headerRow[modelIndex]);
+      const modelName = normalizeNameParenthesisSpacing(normalizeCell(headerRow[modelIndex]));
       if (!modelName) continue;
 
       const rawValue = normalizeCell(row[modelIndex]);
@@ -166,7 +175,7 @@ export function parseWorkbookBuffer(buffer: Buffer, sheetName?: string): Workboo
     selectedSheet,
     benchmarkColumn,
     categoryColumn,
-    modelColumns: modelIndices.map((idx) => headerRow[idx]),
+    modelColumns: modelIndices.map((idx) => normalizeNameParenthesisSpacing(headerRow[idx])),
     records,
     warnings
   };

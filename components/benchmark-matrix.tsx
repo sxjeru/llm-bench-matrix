@@ -519,11 +519,11 @@ export function BenchmarkMatrix({ rows }: Props) {
 
     const hideTimer = window.setTimeout(() => {
       setCopyNoticeVisible(false);
-    }, 2200);
+    }, 15000);
 
     const clearTimer = window.setTimeout(() => {
       setCopyNotice(null);
-    }, 2520);
+    }, 15500);
 
     return () => {
       window.clearTimeout(hideTimer);

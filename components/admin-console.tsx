@@ -72,6 +72,7 @@ type TextImportPreviewRow = {
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
+  modalities?: string[];
   rawValue: string;
   valueNum: number | null;
   valueNum2: number | null;
@@ -134,6 +135,7 @@ type StructuredCsvImportRow = {
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
+  modalities: string[];
   rawValue: string;
   valueNote: string | null;
   source: string | null;
@@ -153,6 +155,9 @@ const HARDCODED_BENCHMARK_ALIAS_RULES: Array<{ pattern: RegExp; targetName: stri
 ];
 const LOWER_IS_BETTER_PREVIEW_RULES = [/fleurs/i, /omnidocbench\s*1\.5/i];
 const OMNIDOCBENCH_15_MATCHER = /omnidocbench\s*1\.5/i;
+const MULTIMODAL_HINT_PATTERN = /(\bmultimodal(?:ity)?\b|\bmulti[\s-_]?modal(?:ity)?\b|多模态)/i;
+const PAIR_NOTE_HISTORY_STORAGE_KEY = "admin-console:pair-note-history";
+const MODALITY_OPTIONS = ["Text", "Vision", "Audio", "Video", "Multimodal"] as const;
 
 function normalizeModelDedupeRule(raw: unknown): ModelDedupeRule {
   if (!raw || typeof raw !== "object") {
@@ -296,8 +301,31 @@ function normalizeModalityName(input: string): string {
   if (normalized.includes("vision")) return "Vision";
   if (normalized.includes("audio")) return "Audio";
   if (normalized.includes("video")) return "Video";
-  if (normalized.includes("multi")) return "Multimodal";
+  if (MULTIMODAL_HINT_PATTERN.test(normalized)) return "Multimodal";
   return "Text";
+}
+
+function normalizeModalityList(input: string[] | undefined): string[] {
+  if (!input || input.length === 0) return ["Text"];
+
+  const normalized = input
+    .map((item) => normalizeModalityName(item))
+    .filter(Boolean);
+
+  const unique = normalized.length > 0 ? Array.from(new Set(normalized)) : ["Text"];
+  const withoutText = unique.some((item) => item !== "Text")
+    ? unique.filter((item) => item !== "Text")
+    : unique;
+
+  const withoutVision = withoutText.includes("Video")
+    ? withoutText.filter((item) => item !== "Vision")
+    : withoutText;
+
+  if (withoutVision.length === 0) {
+    return ["Text"];
+  }
+
+  return withoutVision;
 }
 
 function resolveHardcodedBenchmarkAliasTarget(input: string): string | null {
@@ -319,7 +347,7 @@ function escapeCsvCell(input: string): string {
 }
 
 function buildStructuredCsvText(rows: StructuredCsvImportRow[]): string {
-  const header = ["provider", "model", "benchmark", "benchmark_type", "value_raw", "source"];
+  const header = ["provider", "model", "benchmark", "benchmark_type", "value_raw", "modalities", "source"];
   const lines = [header.join(",")];
 
   rows.forEach((row) => {
@@ -329,6 +357,7 @@ function buildStructuredCsvText(rows: StructuredCsvImportRow[]): string {
       row.benchmarkName,
       row.benchmarkType,
       row.rawValue,
+      row.modalities.join(","),
       row.source ?? ""
     ]
       .map((item) => escapeCsvCell(item))
@@ -432,11 +461,13 @@ export function AdminConsole({
   );
   const [csvSource, setCsvSource] = useState("");
   const [confirmImportWithoutPreviewOpen, setConfirmImportWithoutPreviewOpen] = useState(false);
+  const [confirmImportWithoutSourceOpen, setConfirmImportWithoutSourceOpen] = useState(false);
   const [clearDatabaseConfirmOpen, setClearDatabaseConfirmOpen] = useState(false);
   const [isClearingDatabase, setIsClearingDatabase] = useState(false);
   const [isPreviewingTextImport, setIsPreviewingTextImport] = useState(false);
   const [textImportPreviewRows, setTextImportPreviewRows] = useState<TextImportPreviewRow[]>([]);
   const [textImportDraftRows, setTextImportDraftRows] = useState<TextImportPreviewRow[]>([]);
+  const [pairNoteHistory, setPairNoteHistory] = useState<string[]>([]);
   const [benchmarkMergeTargets, setBenchmarkMergeTargets] = useState<Record<string, string>>({});
   const [benchmarkMergeFilters, setBenchmarkMergeFilters] = useState<Record<string, string>>({});
   const [ignoredBenchmarkKeys, setIgnoredBenchmarkKeys] = useState<Record<string, boolean>>({});
@@ -471,7 +502,12 @@ export function AdminConsole({
   const [importProgress, setImportProgress] = useState(0);
   const [importStatus, setImportStatus] = useState<"idle" | "running" | "success" | "error">("idle");
   const [importStatusText, setImportStatusText] = useState("等待导入");
+  const [isImportingTextCsv, setIsImportingTextCsv] = useState(false);
+  const [textImportProgress, setTextImportProgress] = useState(0);
+  const [textImportStatus, setTextImportStatus] = useState<"idle" | "running" | "success" | "error">("idle");
+  const [textImportStatusText, setTextImportStatusText] = useState("等待导入");
   const importProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const textImportProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const noticeHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noticeClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -491,6 +527,8 @@ export function AdminConsole({
   const [settingNote, setSettingNote] = useState("");
   const [deleteModelInput, setDeleteModelInput] = useState("");
   const [deleteSourceInput, setDeleteSourceInput] = useState("");
+  const [confirmDeleteSourceOpen, setConfirmDeleteSourceOpen] = useState(false);
+  const [isDeletingSourceData, setIsDeletingSourceData] = useState(false);
   const [modelDedupeRule, setModelDedupeRule] = useState<ModelDedupeRule>(() =>
     normalizeModelDedupeRule(initialSettings.model_dedupe_rule)
   );
@@ -592,9 +630,6 @@ export function AdminConsole({
       let suggestedTargetId: number | null = null;
 
       const hasParentheses = /[（(][^()（）]+[)）]/.test(modelName);
-      if (hasParentheses) {
-        reasons.push("包含括号内容（默认保留，可单独切换）");
-      }
 
       const compareKey = buildModelCompareKey(modelName);
       const candidates = compareKey ? (existingModelByCompareKey.get(compareKey) ?? []) : [];
@@ -690,9 +725,6 @@ export function AdminConsole({
       let suggestedTargetId: number | null = null;
 
       const hasParentheses = /[（(][^()（）]+[)）]/.test(benchmarkName);
-      if (hasParentheses) {
-        reasons.push("包含括号内容（默认保留，可单独切换）");
-      }
 
       const matchedKeyword = BENCHMARK_SUSPECT_KEYWORDS.find((keyword) =>
         benchmarkName.toLowerCase().includes(keyword)
@@ -770,6 +802,12 @@ export function AdminConsole({
 
     textImportDraftRows.forEach((row) => {
       if (!/[（(][^()（）]+[)）]/.test(row.benchmarkName)) return;
+
+      const hasExactExisting = existingBenchmarkExactMap.has(
+        getBenchmarkExactLookupKey(row.benchmarkName, row.benchmarkType)
+      );
+      if (hasExactExisting) return;
+
       const key = getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType);
       if (!found.has(key)) {
         found.set(key, {
@@ -781,7 +819,12 @@ export function AdminConsole({
     });
 
     return Array.from(found.values()).sort((a, b) => a.benchmarkName.localeCompare(b.benchmarkName, "zh-Hans-CN"));
-  }, [textImportDraftRows]);
+  }, [textImportDraftRows, existingBenchmarkExactMap]);
+
+  const benchmarkParenthesesSet = useMemo(
+    () => new Set(benchmarksWithParentheses.map((item) => item.key)),
+    [benchmarksWithParentheses]
+  );
 
   const matrixPreview = useMemo(() => {
     const modelNames: string[] = [];
@@ -797,9 +840,12 @@ export function AdminConsole({
     textImportDraftRows.forEach((row, rowIndex) => {
       const key = getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType);
       if (!rowMap.has(key)) {
-        const modalities =
-          existingBenchmarkModalitiesMap.get(getBenchmarkExactLookupKey(row.benchmarkName, row.benchmarkType)) ??
-          [normalizeModalityName(row.benchmarkType)];
+        const modalities = row.modalities?.length
+          ? normalizeModalityList(row.modalities)
+          : (
+            existingBenchmarkModalitiesMap.get(getBenchmarkExactLookupKey(row.benchmarkName, row.benchmarkType))
+            ?? [normalizeModalityName(row.benchmarkType)]
+          );
 
         rowMap.set(key, {
           key,
@@ -1014,11 +1060,16 @@ export function AdminConsole({
           }
         }
 
+        const normalizedModalities = normalizeModalityList(
+          row.modalities?.length ? row.modalities : [benchmarkType]
+        );
+
         return {
           providerName: row.providerName.trim() || "Unknown",
           modelName,
           benchmarkName,
           benchmarkType,
+          modalities: normalizedModalities,
           rawValue,
           valueNote,
           source: row.source?.trim() || null
@@ -1058,6 +1109,7 @@ export function AdminConsole({
       modelName: row.modelName,
       benchmarkName: row.benchmarkName,
       benchmarkType: row.benchmarkType,
+      modalities: row.modalities,
       rawValue: row.rawValue,
       valueNum: null,
       valueNum2: null,
@@ -1115,6 +1167,11 @@ export function AdminConsole({
         importProgressTimerRef.current = null;
       }
 
+      if (textImportProgressTimerRef.current) {
+        clearInterval(textImportProgressTimerRef.current);
+        textImportProgressTimerRef.current = null;
+      }
+
       if (noticeHideTimerRef.current) {
         clearTimeout(noticeHideTimerRef.current);
         noticeHideTimerRef.current = null;
@@ -1152,8 +1209,8 @@ export function AdminConsole({
 
     setNoticeVisible(true);
 
-    const hideDelay = notice.type === "error" ? 30000 : 2300;
-    const clearDelay = notice.type === "error" ? 30500 : 2750;
+    const hideDelay = notice.type === "error" ? 30000 : 15000;
+    const clearDelay = notice.type === "error" ? 30500 : 15000;
 
     noticeHideTimerRef.current = setTimeout(() => {
       setNoticeVisible(false);
@@ -1164,6 +1221,46 @@ export function AdminConsole({
       setNoticeVisible(false);
     }, clearDelay);
   }, [notice]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(PAIR_NOTE_HISTORY_STORAGE_KEY);
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return;
+
+      const normalized = parsed
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, 30);
+
+      setPairNoteHistory(normalized);
+    } catch {
+      // ignore storage read errors gracefully
+    }
+  }, []);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+
+      const openedDropdowns = document.querySelectorAll<HTMLDetailsElement>(
+        'details[data-modality-dropdown="true"][open]'
+      );
+
+      openedDropdowns.forEach((dropdown) => {
+        if (!dropdown.contains(target)) {
+          dropdown.removeAttribute("open");
+        }
+      });
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, []);
 
   function notifySuccess(message: string) {
     setNotice({ type: "success", message });
@@ -1403,7 +1500,7 @@ export function AdminConsole({
         idx === rowIndex
           ? {
               ...row,
-              valueNote: valueNote.trim().length > 0 ? valueNote.trim() : null
+              valueNote: valueNote.length > 0 ? valueNote : null
             }
           : row
       )
@@ -1425,9 +1522,27 @@ export function AdminConsole({
     );
   }
 
+  function recordPairNoteHistory(valueNote: string) {
+    const normalizedNote = valueNote.trim();
+    if (!normalizedNote) return;
+
+    setPairNoteHistory((prev) => {
+      const next = [normalizedNote, ...prev.filter((item) => item !== normalizedNote)].slice(0, 30);
+      try {
+        window.localStorage.setItem(PAIR_NOTE_HISTORY_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore storage write errors gracefully
+      }
+      return next;
+    });
+  }
+
   function onPairNoteInputBlur(rowIndex: number, benchmarkKey: string, valueNote: string) {
     const normalizedNote = valueNote.trim();
     if (!normalizedNote) return;
+
+    recordPairNoteHistory(normalizedNote);
+
     if (pairNoteAutoFillAppliedByBenchmark[benchmarkKey]) return;
 
     setTextImportDraftRows((prev) =>
@@ -1452,6 +1567,47 @@ export function AdminConsole({
       ...prev,
       [benchmarkKey]: true
     }));
+  }
+
+  function onToggleMatrixBenchmarkModality(benchmarkKey: string, modality: string, checked: boolean) {
+    setTextImportDraftRows((prev) => {
+      const matchedRows = prev.filter(
+        (row) => getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType) === benchmarkKey
+      );
+
+      if (matchedRows.length === 0) {
+        return prev;
+      }
+
+      const currentModalities = normalizeModalityList(
+        matchedRows[0].modalities?.length ? matchedRows[0].modalities : [matchedRows[0].benchmarkType]
+      );
+
+      let nextRawModalities = checked
+        ? [...currentModalities, modality]
+        : currentModalities.filter((item) => item !== modality);
+
+      if (checked && modality === "Vision") {
+        nextRawModalities = nextRawModalities.filter((item) => item !== "Video");
+      }
+
+      if (checked && modality === "Video") {
+        nextRawModalities = nextRawModalities.filter((item) => item !== "Vision");
+      }
+
+      const nextModalities = normalizeModalityList(
+        nextRawModalities.length > 0 ? nextRawModalities : ["Text"]
+      );
+
+      return prev.map((row) =>
+        getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType) === benchmarkKey
+          ? {
+              ...row,
+              modalities: nextModalities
+            }
+          : row
+      );
+    });
   }
 
   function onRenameTextImportBenchmark(benchmarkKey: string, nextBenchmarkName: string) {
@@ -1642,13 +1798,39 @@ export function AdminConsole({
   }
 
   async function executeImportCsv() {
+    if (isImportingTextCsv) {
+      return;
+    }
+
+    if (textImportDraftRows.length > 0 && finalizedTextImportRows.length === 0) {
+      notifyError("处理后无可导入数据，请检查忽略项或编辑值");
+      return;
+    }
+
+    if (textImportProgressTimerRef.current) {
+      clearInterval(textImportProgressTimerRef.current);
+      textImportProgressTimerRef.current = null;
+    }
+
+    setIsImportingTextCsv(true);
+    setTextImportStatus("running");
+    setTextImportStatusText("正在导入文本...");
+    setTextImportProgress(8);
+
+    let finalStatus: "success" | "error" = "error";
+    let finalStatusText = "导入失败";
+    let finalProgress = 6;
+
+    textImportProgressTimerRef.current = setInterval(() => {
+      setTextImportProgress((prev) => {
+        if (prev >= 90) return prev;
+        const next = prev + Math.floor(Math.random() * 7) + 2;
+        return next > 90 ? 90 : next;
+      });
+    }, 260);
+
     try {
       if (textImportDraftRows.length > 0) {
-        if (finalizedTextImportRows.length === 0) {
-          notifyError("处理后无可导入数据，请检查忽略项或编辑值");
-          return;
-        }
-
         const generatedCsvText = buildStructuredCsvText(finalizedTextImportRows);
         const result = await postJson("/api/admin/import-csv", {
           csvText: generatedCsvText,
@@ -1658,23 +1840,61 @@ export function AdminConsole({
         notifySuccess(
           `文本导入完成：${result.inserted ?? 0}/${result.total ?? 0}（忽略 ${ignoredTextImportCount}，格式 ${result.format ?? "structured-csv"}）`
         );
-        return;
+        finalStatus = "success";
+        finalProgress = 100;
+        finalStatusText = `导入成功：${result.inserted ?? 0}/${result.total ?? 0}`;
+      } else {
+        const result = await postJson("/api/admin/import-csv", {
+          csvText,
+          source: csvSource || undefined
+        });
+        notifySuccess(
+          `文本导入完成：${result.inserted ?? 0}/${result.total ?? 0}（跳过 ${result.skipped ?? 0}，格式 ${result.format ?? "auto"}）`
+        );
+        finalStatus = "success";
+        finalProgress = 100;
+        finalStatusText = `导入成功：${result.inserted ?? 0}/${result.total ?? 0}`;
       }
-
-      const result = await postJson("/api/admin/import-csv", {
-        csvText,
-        source: csvSource || undefined
-      });
-      notifySuccess(
-        `文本导入完成：${result.inserted ?? 0}/${result.total ?? 0}（跳过 ${result.skipped ?? 0}，格式 ${result.format ?? "auto"}）`
-      );
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "文本导入失败");
+      finalStatus = "error";
+      finalProgress = 6;
+      finalStatusText = error instanceof Error ? `导入失败：${error.message}` : "导入失败";
+    } finally {
+      if (textImportProgressTimerRef.current) {
+        clearInterval(textImportProgressTimerRef.current);
+        textImportProgressTimerRef.current = null;
+      }
+      setTextImportStatus(finalStatus);
+      setTextImportStatusText(finalStatusText);
+      setTextImportProgress(finalProgress);
+      setIsImportingTextCsv(false);
     }
   }
 
   async function onImportCsv(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (isImportingTextCsv) {
+      return;
+    }
+
+    const hasAnySource = textImportDraftRows.length > 0
+      ? finalizedTextImportRows.some((row) => (row.source ?? "").trim().length > 0)
+      : csvSource.trim().length > 0;
+
+    if (!hasAnySource) {
+      setConfirmImportWithoutSourceOpen(true);
+      return;
+    }
+
+    await continueImportCsvFlow();
+  }
+
+  async function continueImportCsvFlow() {
+    if (isImportingTextCsv) {
+      return;
+    }
 
     if (!textImportPreviewMeta) {
       setConfirmImportWithoutPreviewOpen(true);
@@ -1682,6 +1902,11 @@ export function AdminConsole({
     }
 
     await executeImportCsv();
+  }
+
+  async function onConfirmImportWithoutSource() {
+    setConfirmImportWithoutSourceOpen(false);
+    await continueImportCsvFlow();
   }
 
   async function onConfirmImportWithoutPreview() {
@@ -1854,24 +2079,48 @@ export function AdminConsole({
   }
 
   async function onDeleteSourceData() {
-    const source = deleteSourceInput.trim();
-    if (!source) {
-      notifyError("请先输入 source");
+    if (isDeletingSourceData) {
       return;
     }
 
-    const normalizedSource = source.toLowerCase().startsWith("text:") ? `text:${source.slice(5).trim()}` : `text:${source}`;
-    const confirmed = window.confirm(
-      `确认删除 source = ${normalizedSource} 的全部数据吗？\n将删除 benchmark_values 中匹配该 source 的所有记录（不可恢复）。`
-    );
-    if (!confirmed) return;
+    setConfirmDeleteSourceOpen(true);
+  }
+
+  function getDeleteSourceDisplayLabel(sourceInput: string): string {
+    const source = sourceInput.trim();
+    if (!source) {
+      return "空 source（NULL/空字符串）";
+    }
+
+    return source.toLowerCase().startsWith("text:")
+      ? `text:${source.slice(5).trim()}`
+      : `text:${source}`;
+  }
+
+  async function onConfirmDeleteSourceData() {
+    if (isDeletingSourceData) {
+      return;
+    }
+
+    const source = deleteSourceInput.trim();
+    const normalizedSourceLabel = getDeleteSourceDisplayLabel(source);
+
+    setIsDeletingSourceData(true);
 
     try {
       const result = await postJson("/api/admin/debug/delete-source", { source });
       setDeleteSourceInput("");
-      notifySuccess(`已删除 source=${result.normalizedSource ?? normalizedSource} 的 ${result.deleted ?? 0} 条记录`);
+      setConfirmDeleteSourceOpen(false);
+
+      const deletedSourceLabel = result.deletedEmptySource
+        ? "空 source（NULL/空字符串）"
+        : (result.normalizedSource ?? normalizedSourceLabel);
+
+      notifySuccess(`已删除 source=${deletedSourceLabel} 的 ${result.deleted ?? 0} 条记录`);
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "删除 source 数据失败");
+    } finally {
+      setIsDeletingSourceData(false);
     }
   }
 
@@ -1969,11 +2218,53 @@ export function AdminConsole({
                 type="button"
                 className="btn btn-ghost"
                 onClick={() => setConfirmImportWithoutPreviewOpen(false)}
+                disabled={isImportingTextCsv}
               >
                 取消
               </button>
-              <button type="button" className="btn btn-primary" onClick={onConfirmImportWithoutPreview}>
-                仍然导入
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={onConfirmImportWithoutPreview}
+                disabled={isImportingTextCsv}
+              >
+                {isImportingTextCsv ? "导入中..." : "仍然导入"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {confirmImportWithoutSourceOpen ? (
+        <div
+          className="fixed inset-0 z-[170] flex items-center justify-center bg-black/45 p-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setConfirmImportWithoutSourceOpen(false);
+            }
+          }}
+        >
+          <div className="w-full max-w-xl rounded-2xl border border-base-300/80 bg-base-100/95 p-6 shadow-2xl backdrop-blur">
+            <h3 className="text-lg font-bold">Source 为空，确认继续导入？</h3>
+            <p className="mt-2 text-sm opacity-80">
+              当前导入将不会带统一 source 标记，后续按 source 筛选/删除会更困难。
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setConfirmImportWithoutSourceOpen(false)}
+                disabled={isImportingTextCsv}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={onConfirmImportWithoutSource}
+                disabled={isImportingTextCsv}
+              >
+                {isImportingTextCsv ? "导入中..." : "继续导入"}
               </button>
             </div>
           </div>
@@ -2010,6 +2301,42 @@ export function AdminConsole({
                 disabled={isClearingDatabase}
               >
                 {isClearingDatabase ? "清空中..." : "确认清空"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {confirmDeleteSourceOpen ? (
+        <div
+          className="fixed inset-0 z-[170] flex items-center justify-center bg-black/45 p-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget && !isDeletingSourceData) {
+              setConfirmDeleteSourceOpen(false);
+            }
+          }}
+        >
+          <div className="w-full max-w-xl rounded-2xl border border-base-300/80 bg-base-100/95 p-6 shadow-2xl backdrop-blur">
+            <h3 className="text-lg font-bold text-error">确认删除 source 数据？</h3>
+            <p className="mt-2 text-sm opacity-85">
+              将删除 <code>{getDeleteSourceDisplayLabel(deleteSourceInput)}</code> 匹配的所有 benchmark_values 记录（不可恢复）。
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setConfirmDeleteSourceOpen(false)}
+                disabled={isDeletingSourceData}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn btn-error"
+                onClick={onConfirmDeleteSourceData}
+                disabled={isDeletingSourceData}
+              >
+                {isDeletingSourceData ? "删除中..." : "确认删除"}
               </button>
             </div>
           </div>
@@ -2254,18 +2581,34 @@ export function AdminConsole({
                   onChange={(e) => setCsvText(e.target.value)}
                   required
                 />
-                <div className="flex flex-wrap gap-2">
+                <div className="mt-1 grid grid-cols-1 gap-3 xl:grid-cols-[auto_auto_minmax(320px,1fr)] xl:items-center">
                   <button
                     type="button"
                     className="btn btn-outline"
                     onClick={onPreviewCsvImport}
-                    disabled={isPreviewingTextImport}
+                    disabled={isPreviewingTextImport || isImportingTextCsv}
                   >
                     {isPreviewingTextImport ? "预览中..." : "预览导入结果"}
                   </button>
-                  <button type="submit" className="btn btn-primary">
-                    执行导入
+                  <button type="submit" className="btn btn-primary" disabled={isImportingTextCsv}>
+                    {isImportingTextCsv ? "导入中..." : "执行导入"}
                   </button>
+                  {textImportStatus !== "idle" ? (
+                    <div className="w-full xl:justify-self-end">
+                      <progress
+                        className={`progress w-full ${
+                          textImportStatus === "error"
+                            ? "progress-error"
+                            : textImportStatus === "success"
+                              ? "progress-success"
+                              : "progress-primary"
+                        }`}
+                        value={textImportProgress}
+                        max={100}
+                      />
+                      <div className="mt-1 text-xs opacity-80 xl:text-right">{textImportStatusText}</div>
+                    </div>
+                  ) : null}
                 </div>
               </form>
 
@@ -2303,6 +2646,7 @@ export function AdminConsole({
                         </div>
                         <input
                           className="input input-bordered input-sm"
+                          list="pair-note-history-options"
                           value={item.note ?? ""}
                           onChange={(e) => onUpdateTextImportDraftNote(item.rowIndex, e.target.value)}
                           onBlur={(e) => onPairNoteInputBlur(item.rowIndex, item.benchmarkKey, e.target.value)}
@@ -2310,6 +2654,11 @@ export function AdminConsole({
                       </div>
                     ))}
                   </div>
+                  <datalist id="pair-note-history-options">
+                    {pairNoteHistory.map((note) => (
+                      <option key={`pair-note-history-${note}`} value={note} />
+                    ))}
+                  </datalist>
                 </div>
               ) : null}
 
@@ -2370,7 +2719,9 @@ export function AdminConsole({
                       <tbody>
                         {matrixPreview.rows.map((matrixRow) => {
                           const warning = benchmarkWarningMap.get(matrixRow.key);
-                          const hasVisibleModality = matrixRow.modalities.some(
+                          const hasParenthesesHighlight = benchmarkParenthesesSet.has(matrixRow.key);
+                          const rowModalities = normalizeModalityList(matrixRow.modalities);
+                          const hasVisibleModality = rowModalities.some(
                             (modality) => normalizeModalityName(modality) !== "Text"
                           );
                           const isLowerBetter = isLowerBetterPreviewBenchmark(matrixRow.benchmarkName);
@@ -2378,13 +2729,38 @@ export function AdminConsole({
                           return (
                             <tr key={matrixRow.key}>
                               <td>
-                                <div className="flex flex-wrap items-center gap-1">
-                                  {hasVisibleModality
-                                    ? matrixRow.modalities.map((modality, idx) =>
-                                        renderModalityBadge(modality, `${matrixRow.key}-mod-${modality}-${idx}`)
-                                      )
-                                    : <span className="text-xs opacity-40">-</span>}
-                                </div>
+                                <details className="dropdown dropdown-bottom" data-modality-dropdown="true">
+                                  <summary className="btn btn-ghost btn-xs h-7 min-h-0 px-1">
+                                    <div className="flex flex-wrap items-center gap-1">
+                                      {hasVisibleModality
+                                        ? rowModalities.map((modality, idx) =>
+                                            renderModalityBadge(modality, `${matrixRow.key}-mod-${modality}-${idx}`)
+                                          )
+                                        : <span className="text-xs opacity-60">Text</span>}
+                                    </div>
+                                  </summary>
+                                  <div className="dropdown-content z-[90] mt-1 w-44 rounded-box border border-base-300 bg-base-100 p-2 shadow-xl">
+                                    <div className="mb-1 text-[11px] opacity-75">选择模态</div>
+                                    <div className="space-y-1">
+                                      {MODALITY_OPTIONS.map((modality) => (
+                                        <label
+                                          key={`${matrixRow.key}-modality-option-${modality}`}
+                                          className="label cursor-pointer justify-start gap-2 py-0.5"
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            className="checkbox checkbox-xs"
+                                            checked={rowModalities.includes(modality)}
+                                            onChange={(e) =>
+                                              onToggleMatrixBenchmarkModality(matrixRow.key, modality, e.target.checked)
+                                            }
+                                          />
+                                          <span className="label-text text-xs">{modality}</span>
+                                        </label>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </details>
                               </td>
                               <th
                                 className={`min-w-[240px] ${
@@ -2392,7 +2768,7 @@ export function AdminConsole({
                                     ? "bg-error/15 text-error"
                                     : warning?.level === "warn"
                                       ? "bg-warning/15 text-warning-content"
-                                      : warning?.level === "info"
+                                      : warning?.level === "info" || hasParenthesesHighlight
                                         ? "bg-info/15 text-info-content"
                                         : ""
                                 }`}
@@ -2445,7 +2821,7 @@ export function AdminConsole({
                                           </span>
                                         ) : null}
                                         {normalizedHint ? (
-                                          <div className="text-[10px] text-warning">入库校对→{normalizedHint}</div>
+                                          <div className="text-[10px] text-warning">入库校对 → {normalizedHint}</div>
                                         ) : null}
                                       </div>
                                     )}
@@ -3174,7 +3550,7 @@ export function AdminConsole({
             <div className="mb-5 rounded-box border border-error/40 bg-base-200/50 p-4">
               <h4 className="mb-2 font-semibold text-error">删除 source</h4>
               <p className="mb-3 text-sm opacity-80">
-                会删除 benchmark_values 中该 source 对应的所有记录（不可恢复）。输入 llm-benchmark 会按 text:llm-benchmark 删除。
+                会删除 benchmark_values 中该 source 对应的所有记录（不可恢复）。输入 llm-benchmark 会按 text:llm-benchmark 删除；留空可删除 source 为空（NULL/空字符串）的记录。
               </p>
               <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(420px,1fr)_auto] md:items-center">
                 <input
@@ -3182,7 +3558,7 @@ export function AdminConsole({
                   list="delete-source-options"
                   value={deleteSourceInput}
                   onChange={(e) => setDeleteSourceInput(e.target.value)}
-                  placeholder="输入 source，例如 llm-benchmark 或 text:llm-benchmark"
+                  placeholder="输入 source（留空表示删除空 source）"
                 />
                 <datalist id="delete-source-options">
                   {deleteSourceOptions.map((item) => (

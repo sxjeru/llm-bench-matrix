@@ -4,7 +4,7 @@ import { requireAdmin } from "../../../../../lib/admin-auth";
 import { deleteBenchmarkValuesBySource } from "../../../../../lib/admin-service";
 
 const schema = z.object({
-  source: z.string().min(1)
+  source: z.string().optional().default("")
 });
 
 export async function POST(request: Request) {

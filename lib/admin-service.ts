@@ -1,5 +1,5 @@
 import { parse } from "csv-parse/sync";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
   buildBenchmarkCanonicalKey,
@@ -42,6 +42,7 @@ type DbExecutor = any;
 const EMPTY_VALUE_MARKERS = new Set(["", "-", "--", "—", "na", "n/a", "null", "none"]);
 const LOWER_IS_BETTER_BENCHMARK_RULES = [/fleurs/i, /omnidocbench\s*1\.5/i];
 const OMNIDOCBENCH_15_MATCHER = /omnidocbench\s*1\.5/i;
+const MULTIMODAL_HINT_PATTERN = /(\bmultimodal(?:ity)?\b|\bmulti[\s-_]?modal(?:ity)?\b|多模态)/i;
 
 function isLowerBetterBenchmark(benchmarkName: string): boolean {
   return LOWER_IS_BETTER_BENCHMARK_RULES.some((rule) => rule.test(benchmarkName));
@@ -76,8 +77,21 @@ function normalizeStoredBenchmarkValue(benchmarkName: string, parsed: ParsedBenc
   };
 }
 
+function isMultimodalHint(input: string): boolean {
+  return MULTIMODAL_HINT_PATTERN.test(input);
+}
+
 function normalizeImportedValueRaw(rawInput: string): string {
   return rawInput.replace(/[％%]/g, "").trim();
+}
+
+function normalizeNameParenthesisSpacing(rawName: string): string {
+  const trimmed = rawName.trim();
+  if (!trimmed) return "";
+
+  return trimmed
+    .replace(/([^\s（(])([（(])/g, "$1 $2")
+    .replace(/\s+([（(])/g, " $1");
 }
 
 function isEmptyImportValue(rawInput: string | undefined): boolean {
@@ -114,7 +128,20 @@ function normalizeModalities(modalities?: string[]): string[] {
     .filter(Boolean)
     .map((item) => item[0].toUpperCase() + item.slice(1).toLowerCase());
 
-  return normalized.length > 0 ? Array.from(new Set(normalized)) : ["Text"];
+  const unique = normalized.length > 0 ? Array.from(new Set(normalized)) : ["Text"];
+  const withoutText = unique.some((item) => item !== "Text")
+    ? unique.filter((item) => item !== "Text")
+    : unique;
+
+  const withoutVision = withoutText.includes("Video")
+    ? withoutText.filter((item) => item !== "Vision")
+    : withoutText;
+
+  if (withoutVision.length === 0) {
+    return ["Text"];
+  }
+
+  return withoutVision;
 }
 
 function parseBoolean(input: string | undefined, fallback = true): boolean {
@@ -169,7 +196,7 @@ function inferModalitiesFromCategory(category: string | null): string[] {
   if (normalized.includes("vision")) return ["Vision"];
   if (normalized.includes("audio")) return ["Audio"];
   if (normalized.includes("video")) return ["Video"];
-  if (normalized.includes("multimodal") || normalized.includes("multi")) return ["Multimodal"];
+  if (isMultimodalHint(normalized)) return ["Multimodal"];
 
   return ["Text"];
 }
@@ -322,7 +349,7 @@ export async function ensureModelByProviderId(input: {
   modelAlias?: string | null;
   sourceModelId?: string | null;
 }, options?: { dedupeRule?: ReturnType<typeof normalizeModelDedupeRule>; db?: DbExecutor }) {
-  const cleanName = input.modelName.trim();
+  const cleanName = normalizeNameParenthesisSpacing(input.modelName);
   if (!cleanName) {
     throw new Error("modelName is required");
   }
@@ -363,7 +390,7 @@ export async function ensureModelByProviderId(input: {
 }
 
 export async function ensureBenchmark(input: EnsureBenchmarkInput, options?: { db?: DbExecutor }) {
-  const cleanName = input.benchmarkName.trim();
+  const cleanName = normalizeNameParenthesisSpacing(input.benchmarkName);
   const cleanType = input.benchmarkType.trim() || "general";
 
   if (!cleanName) {
@@ -548,9 +575,9 @@ export async function importParsedRecords(
     .filter((record) => record.valid)
     .map((record, index) => ({
       rowNumber: record.rowNumber ?? index + 1,
-      providerName: inferProviderNameFromModel(record.modelName),
-      modelName: record.modelName,
-      benchmarkName: record.benchmarkName,
+      providerName: inferProviderNameFromModel(normalizeNameParenthesisSpacing(record.modelName)),
+      modelName: normalizeNameParenthesisSpacing(record.modelName),
+      benchmarkName: normalizeNameParenthesisSpacing(record.benchmarkName),
       benchmarkType: (record.category || "general").trim() || "general",
       valueRaw: record.rawValue,
       benchTime: options?.benchTime ?? new Date(),
@@ -674,8 +701,8 @@ function parseStructuredCsvRows(inputText: string, defaultSource: string | null)
 
   parsedRows.forEach((row, index) => {
     const rowNumber = index + 2;
-    const modelName = (row.model || row.model_name || "").trim();
-    const benchmarkName = (row.benchmark || row.benchmark_name || "").trim();
+    const modelName = normalizeNameParenthesisSpacing((row.model || row.model_name || ""));
+    const benchmarkName = normalizeNameParenthesisSpacing((row.benchmark || row.benchmark_name || ""));
     const valueRawInput = row.value_raw || row.value || "";
 
     if (!modelName || !benchmarkName || isEmptyImportValue(valueRawInput)) {
@@ -728,7 +755,7 @@ function inferTypeFromPreambleLine(line: string): string | null {
   if (normalized.includes("vision")) return "Vision";
   if (normalized.includes("audio")) return "Audio";
   if (normalized.includes("video")) return "Video";
-  if (normalized.includes("multimodal") || normalized.includes("multi")) return "Multimodal";
+  if (isMultimodalHint(normalized)) return "Multimodal";
   return null;
 }
 
@@ -784,7 +811,10 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): {
     || /benchmark|type|category|指标|类别|分类/i.test(firstHeaderCell);
 
   const modelStartIndex = startsWithBenchmarkLabel ? 1 : 0;
-  const modelNames = headerCells.slice(modelStartIndex).map((cell) => cell.trim()).filter(Boolean);
+  const modelNames = headerCells
+    .slice(modelStartIndex)
+    .map((cell) => normalizeNameParenthesisSpacing(cell))
+    .filter(Boolean);
 
   if (modelNames.length === 0) {
     return {
@@ -796,11 +826,13 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): {
 
   const rows: NormalizedTextImportRow[] = [];
   let skipped = 0;
+  const defaultModalities = preambleTypeHint ? inferModalitiesFromCategory(preambleTypeHint) : ["Text"];
   let currentBenchmarkType = preambleTypeHint ?? "General";
+  let currentModalities = defaultModalities;
 
   for (let lineIndex = headerLineIndex + 1; lineIndex < rawLines.length; lineIndex += 1) {
     const cells = splitTableLine(rawLines[lineIndex]);
-    const benchmarkName = (cells[0] || "").trim();
+    const benchmarkName = normalizeNameParenthesisSpacing(cells[0] || "");
 
     if (!benchmarkName) {
       skipped += 1;
@@ -813,6 +845,14 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): {
 
     if (allModelValuesEmpty && isMatrixTypeMarker(benchmarkName)) {
       currentBenchmarkType = benchmarkName;
+
+      const sectionTypeHint = inferTypeFromPreambleLine(benchmarkName);
+      if (sectionTypeHint) {
+        currentModalities = inferModalitiesFromCategory(sectionTypeHint);
+      } else {
+        currentModalities = defaultModalities;
+      }
+
       continue;
     }
 
@@ -834,7 +874,7 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): {
         benchTime: new Date(),
         unit: "score",
         higherIsBetter: true,
-        modalities: inferModalitiesFromCategory(currentBenchmarkType),
+        modalities: currentModalities,
         source: defaultSource,
         modelAlias: null,
         sourceModelId: null,
@@ -876,6 +916,7 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
       modelName: row.modelName,
       benchmarkName: row.benchmarkName,
       benchmarkType: row.benchmarkType,
+      modalities: normalizeModalities(row.modalities),
       rawValue: parsedValue.valueRaw,
       valueNum: parsedValue.valueNum,
       valueNum2: parsedValue.valueNum2,
@@ -935,7 +976,19 @@ export async function deleteModelAndAllValues(modelId: number) {
 export async function deleteBenchmarkValuesBySource(sourceInput: string) {
   const rawSource = sourceInput.trim();
   if (!rawSource) {
-    throw new Error("source is required");
+    const deletedRows = await db
+      .delete(benchmarkValues)
+      .where(or(isNull(benchmarkValues.source), eq(benchmarkValues.source, "")))
+      .returning({ id: benchmarkValues.id });
+
+    return {
+      ok: true,
+      source: "",
+      normalizedSource: null,
+      matchedSources: ["", "<NULL>"],
+      deleted: deletedRows.length,
+      deletedEmptySource: true
+    };
   }
 
   const normalizedSource = normalizeTextImportSource(rawSource);
@@ -960,7 +1013,8 @@ export async function deleteBenchmarkValuesBySource(sourceInput: string) {
     source: rawSource,
     normalizedSource,
     matchedSources,
-    deleted: deletedRows.length
+    deleted: deletedRows.length,
+    deletedEmptySource: false
   };
 }
 
