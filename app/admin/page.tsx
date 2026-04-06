@@ -1,6 +1,6 @@
 import { AdminConsole } from "@/components/admin-console";
 import { isAdminAuthorized } from "../../lib/admin-auth";
-import { getActiveEntities, getMergedEntityRecords, getSettings } from "../../lib/db/queries";
+import { getActiveEntities, getMergedEntityRecords, getSettings, getSourceOptions } from "../../lib/db/queries";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
@@ -16,9 +16,12 @@ export default async function AdminPage() {
     redirect("/admin/login?from=/admin");
   }
 
-  const { providers, models, benchmarks } = await getActiveEntities();
-  const settings = await getSettings();
-  const mergedRecords = await getMergedEntityRecords();
+  const [{ providers, models, benchmarks }, settings, mergedRecords, sourceOptions] = await Promise.all([
+    getActiveEntities(),
+    getSettings(),
+    getMergedEntityRecords(),
+    getSourceOptions()
+  ]);
 
   return (
     <AdminConsole
@@ -39,6 +42,7 @@ export default async function AdminPage() {
         benchmarkType: item.benchmarkType,
         modalities: item.modalities
       }))}
+      sourceOptions={sourceOptions ?? []}
       mergedRecords={mergedRecords}
       initialSettings={settings}
     />

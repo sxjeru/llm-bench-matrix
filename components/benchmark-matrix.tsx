@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronUp, Expand, Eye, EyeOff, Filter, Layers, Minimize2 } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Copy, Expand, Eye, EyeOff, Filter, ImageDown, Layers, Minimize2, TriangleAlert } from "lucide-react";
 
 type MatrixInputRow = {
   providerName: string;
@@ -35,11 +35,15 @@ type MatrixRow = {
   category: string;
   benchmark: string;
   cells: Map<string, MatrixCell>;
+  firstSeenIndex: number;
   rowDataCount: number;
   rowNumericCount: number;
   minNum: number | null;
   maxNum: number | null;
 };
+
+type RowSortColumn = "category" | "benchmark";
+type RowSortMode = "source" | "alpha" | "data";
 
 type Props = {
   rows: MatrixInputRow[];
@@ -48,6 +52,97 @@ type Props = {
 const SOURCE_ALL = "__ALL__";
 const SOURCE_EMPTY = "__EMPTY__";
 const SHOW_CATEGORY_STORAGE_KEY = "benchmark-matrix:show-category";
+const EXPORT_PRESET_STORAGE_KEY = "benchmark-matrix:export-preset";
+const HTML2CANVAS_PRO_CDN = "https://cdn.jsdelivr.net/npm/html2canvas-pro@2.0.2/dist/html2canvas-pro.min.js";
+const WEBP_EXPORT_QUALITY = 0.94;
+const AVIF_EXPORT_QUALITY = 0.9;
+const EXPORT_PRESET_MAP = {
+  "1x-png": { label: "1x PNG", scale: 1, format: "png", mimeType: "image/png" },
+  "2x-png": { label: "2x PNG", scale: 2, format: "png", mimeType: "image/png" },
+  "3x-png": { label: "3x PNG", scale: 3, format: "png", mimeType: "image/png" },
+  "1x-webp": { label: "1x WEBP", scale: 1, format: "webp", mimeType: "image/webp" },
+  "2x-webp": { label: "2x WEBP", scale: 2, format: "webp", mimeType: "image/webp" },
+  "3x-webp": { label: "3x WEBP", scale: 3, format: "webp", mimeType: "image/webp" },
+  "1x-avif": { label: "1x AVIF", scale: 1, format: "avif", mimeType: "image/avif" },
+  "2x-avif": { label: "2x AVIF", scale: 2, format: "avif", mimeType: "image/avif" },
+  "3x-avif": { label: "3x AVIF", scale: 3, format: "avif", mimeType: "image/avif" }
+} as const;
+const DEFAULT_EXPORT_PRESET: ExportPresetKey = "2x-webp";
+
+type ExportPresetKey = keyof typeof EXPORT_PRESET_MAP;
+type ExportMimeType = (typeof EXPORT_PRESET_MAP)[ExportPresetKey]["mimeType"];
+type ExportFormat = (typeof EXPORT_PRESET_MAP)[ExportPresetKey]["format"];
+
+function isExportPresetKey(value: string): value is ExportPresetKey {
+  return value in EXPORT_PRESET_MAP;
+}
+
+function canEncodeCanvasMimeType(mimeType: ExportMimeType): boolean {
+  if (typeof document === "undefined") return false;
+
+  const probeCanvas = document.createElement("canvas");
+  probeCanvas.width = 2;
+  probeCanvas.height = 2;
+  const context = probeCanvas.getContext("2d");
+  if (!context) return false;
+
+  context.fillStyle = "#111827";
+  context.fillRect(0, 0, 2, 2);
+
+  try {
+    return probeCanvas.toDataURL(mimeType, 0.9).startsWith(`data:${mimeType}`);
+  } catch {
+    return false;
+  }
+}
+
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [header, base64 = ""] = dataUrl.split(",");
+  const mimeMatch = header.match(/^data:(.*?);base64$/);
+  const mimeType = mimeMatch?.[1] ?? "application/octet-stream";
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+
+  return new Blob([bytes], { type: mimeType });
+}
+
+function getMimeTypeFallbackChain(mimeType: ExportMimeType): ExportMimeType[] {
+  if (mimeType === "image/avif") {
+    return ["image/avif", "image/webp", "image/png"];
+  }
+  if (mimeType === "image/webp") {
+    return ["image/webp", "image/png"];
+  }
+  return ["image/png"];
+}
+
+function getEncoderQuality(mimeType: ExportMimeType): number | undefined {
+  if (mimeType === "image/webp") return WEBP_EXPORT_QUALITY;
+  if (mimeType === "image/avif") return AVIF_EXPORT_QUALITY;
+  return undefined;
+}
+
+function mimeTypeToFormat(mimeType: string): ExportFormat {
+  const normalized = mimeType.toLowerCase();
+  if (normalized.includes("avif")) return "avif";
+  if (normalized.includes("webp")) return "webp";
+  return "png";
+}
+
+type Html2CanvasFn = (element: HTMLElement, options?: Record<string, unknown>) => Promise<HTMLCanvasElement>;
+
+declare global {
+  interface Window {
+    html2canvas?: Html2CanvasFn;
+    __html2canvasProLoaded__?: boolean;
+  }
+}
+
+let html2canvasLoaderPromise: Promise<Html2CanvasFn> | null = null;
 
 function getSourceKey(source: string | null): string {
   const cleaned = source?.trim();
@@ -138,17 +233,174 @@ function formatTooltipTime(input: string): string {
   return date.toISOString().slice(0, 16).replace("T", " ");
 }
 
+async function loadHtml2Canvas(): Promise<Html2CanvasFn> {
+  if (typeof window === "undefined") {
+    throw new Error("当前环境不支持图片导出");
+  }
+
+  if (window.html2canvas && window.__html2canvasProLoaded__) {
+    return window.html2canvas;
+  }
+
+  if (html2canvasLoaderPromise) {
+    return html2canvasLoaderPromise;
+  }
+
+  html2canvasLoaderPromise = new Promise<Html2CanvasFn>((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = HTML2CANVAS_PRO_CDN;
+    script.async = true;
+    script.onload = () => {
+      if (window.html2canvas) {
+        window.__html2canvasProLoaded__ = true;
+        resolve(window.html2canvas);
+      } else {
+        html2canvasLoaderPromise = null;
+        reject(new Error("截图引擎加载失败"));
+      }
+    };
+    script.onerror = () => {
+      html2canvasLoaderPromise = null;
+      reject(new Error("无法加载截图引擎，请检查网络"));
+    };
+    document.head.appendChild(script);
+  });
+
+  return html2canvasLoaderPromise;
+}
+
+async function renderElementToImageBlob(
+  element: HTMLElement,
+  scale: number,
+  mimeType: ExportMimeType
+): Promise<Blob> {
+  const html2canvas = await loadHtml2Canvas();
+
+  const width = Math.max(1, Math.round(element.scrollWidth));
+  const height = Math.max(1, Math.round(element.scrollHeight));
+  const captureAttr = "data-h2c-export-root";
+
+  element.setAttribute(captureAttr, "1");
+
+  const canvas = await (async () => {
+    try {
+      return await html2canvas(element, {
+        backgroundColor: "#0b1020",
+        scale,
+        foreignObjectRendering: false,
+        useCORS: true,
+        allowTaint: false,
+        logging: false,
+        scrollX: 0,
+        scrollY: 0,
+        width,
+        height,
+        windowWidth: width,
+        windowHeight: height,
+        onclone: (clonedDoc: Document) => {
+          const clonedRoot = clonedDoc.querySelector(`[${captureAttr}="1"]`) as HTMLElement | null;
+          if (!clonedRoot) return;
+
+          clonedRoot.style.overflow = "visible";
+          clonedRoot.style.maxHeight = "none";
+          clonedRoot.style.height = `${height}px`;
+          clonedRoot.style.width = `${width}px`;
+
+          const clonedTable = clonedRoot.querySelector("table") as HTMLTableElement | null;
+          if (clonedTable) {
+            clonedTable.style.width = `${width}px`;
+          }
+        }
+      });
+    } finally {
+      element.removeAttribute(captureAttr);
+    }
+  })();
+
+  const mimeCandidates = getMimeTypeFallbackChain(mimeType);
+
+  let blob: Blob | null = null;
+  for (const candidateMimeType of mimeCandidates) {
+    const quality = getEncoderQuality(candidateMimeType);
+
+    const blobFromCanvas = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(
+        (result) => resolve(result),
+        candidateMimeType,
+        quality
+      );
+    });
+
+    if (blobFromCanvas) {
+      const actualType = blobFromCanvas.type.toLowerCase();
+      if (actualType.includes(candidateMimeType.replace("image/", "")) || candidateMimeType === "image/png") {
+        blob = blobFromCanvas;
+        break;
+      }
+    }
+
+    try {
+      const dataUrl = canvas.toDataURL(candidateMimeType, quality);
+      if (dataUrl.startsWith(`data:${candidateMimeType}`)) {
+        blob = dataUrlToBlob(dataUrl);
+        break;
+      }
+    } catch {
+      // try next fallback type
+    }
+  }
+
+  if (!blob) {
+    throw new Error("图片导出失败");
+  }
+
+  return blob;
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+  let timer: number | null = null;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = window.setTimeout(() => {
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timer !== null) {
+      window.clearTimeout(timer);
+    }
+  }) as Promise<T>;
+}
+
 export function BenchmarkMatrix({ rows }: Props) {
   const sectionRef = useRef<HTMLElement | null>(null);
+  const tableViewportRef = useRef<HTMLDivElement | null>(null);
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const showCategoryLoadedRef = useRef(false);
+  const exportPresetLoadedRef = useRef(false);
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showCategory, setShowCategory] = useState(true);
+  const [exportPreset, setExportPreset] = useState<ExportPresetKey>(DEFAULT_EXPORT_PRESET);
+  const [supportsWebpExport, setSupportsWebpExport] = useState(true);
+  const [supportsAvifExport, setSupportsAvifExport] = useState(false);
   const [isModelFilterExpanded, setIsModelFilterExpanded] = useState(false);
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  const [isExportMenuHovered, setIsExportMenuHovered] = useState(false);
+  const [suppressHoverMenu, setSuppressHoverMenu] = useState(false);
+  const [rowSortState, setRowSortState] = useState<{ column: RowSortColumn; mode: RowSortMode }>({
+    column: "benchmark",
+    mode: "data"
+  });
   const [hoveredRowKey, setHoveredRowKey] = useState<string | null>(null);
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
+  const [isDownloadingTableImage, setIsDownloadingTableImage] = useState(false);
+  const [isCopyingTableImage, setIsCopyingTableImage] = useState(false);
+  const [copyNotice, setCopyNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [copyNoticeVisible, setCopyNoticeVisible] = useState(false);
   const [activeCellTooltip, setActiveCellTooltip] = useState<{
     x: number;
     y: number;
@@ -202,8 +454,101 @@ export function BenchmarkMatrix({ rows }: Props) {
     }
   }, [showCategory]);
 
+  useEffect(() => {
+    setSupportsWebpExport(canEncodeCanvasMimeType("image/webp"));
+    setSupportsAvifExport(canEncodeCanvasMimeType("image/avif"));
+  }, []);
+
+  const availableExportPresetKeys = useMemo(() => {
+    return (Object.keys(EXPORT_PRESET_MAP) as ExportPresetKey[]).filter((key) => {
+      const mimeType = EXPORT_PRESET_MAP[key].mimeType;
+      if (mimeType === "image/webp" && !supportsWebpExport) return false;
+      if (mimeType === "image/avif" && !supportsAvifExport) return false;
+      return true;
+    });
+  }, [supportsWebpExport, supportsAvifExport]);
+
+  useEffect(() => {
+    if (availableExportPresetKeys.includes(exportPreset)) return;
+
+    if (availableExportPresetKeys.includes(DEFAULT_EXPORT_PRESET)) {
+      setExportPreset(DEFAULT_EXPORT_PRESET);
+      return;
+    }
+
+    const fallback = availableExportPresetKeys[0];
+    if (fallback) {
+      setExportPreset(fallback);
+    }
+  }, [availableExportPresetKeys, exportPreset]);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(EXPORT_PRESET_STORAGE_KEY);
+      if (saved && isExportPresetKey(saved)) {
+        setExportPreset(saved);
+      }
+    } catch {
+      // ignore storage access errors gracefully
+    }
+
+    exportPresetLoadedRef.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!exportPresetLoadedRef.current) return;
+
+    try {
+      window.localStorage.setItem(EXPORT_PRESET_STORAGE_KEY, exportPreset);
+    } catch {
+      // ignore storage access errors gracefully
+    }
+  }, [exportPreset]);
+
+  useEffect(() => {
+    if (!copyNotice) return;
+
+    setCopyNoticeVisible(true);
+
+    const hideTimer = window.setTimeout(() => {
+      setCopyNoticeVisible(false);
+    }, 2200);
+
+    const clearTimer = window.setTimeout(() => {
+      setCopyNotice(null);
+    }, 2520);
+
+    return () => {
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [copyNotice]);
+
+  useEffect(() => {
+    if (!isExportMenuOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (!exportMenuRef.current?.contains(target)) {
+        setIsExportMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [isExportMenuOpen]);
+
+  const isImageActionBusy = isDownloadingTableImage || isCopyingTableImage;
+  const showExportMenu = isExportMenuOpen || (!suppressHoverMenu && isExportMenuHovered);
+
   function setSourceAndUrl(nextSource: string) {
     setActiveSource(nextSource);
+    if (nextSource === SOURCE_ALL) {
+      setRowSortState({ column: "benchmark", mode: "data" });
+    } else {
+      setRowSortState((prev) => ({ ...prev, mode: "source" }));
+    }
 
     const params = new URLSearchParams(searchParams.toString());
     if (nextSource === SOURCE_ALL) {
@@ -306,7 +651,7 @@ export function BenchmarkMatrix({ rows }: Props) {
   const matrixRows = useMemo(() => {
     const matrixMap = new Map<string, MatrixRow>();
 
-    filteredRows.forEach((row) => {
+    filteredRows.forEach((row, rowIndex) => {
       const category = row.benchmarkType || "General";
       const benchmark = row.benchmarkName;
       const matrixKey = `${category}::${benchmark}`;
@@ -316,6 +661,7 @@ export function BenchmarkMatrix({ rows }: Props) {
           category,
           benchmark,
           cells: new Map<string, MatrixCell>(),
+          firstSeenIndex: rowIndex,
           rowDataCount: 0,
           rowNumericCount: 0,
           minNum: null,
@@ -376,20 +722,116 @@ export function BenchmarkMatrix({ rows }: Props) {
           maxNum: numericValues.length > 0 ? Math.max(...numericValues) : null
         };
       })
-      .sort((a, b) => {
+      .sort((a, b) => a.firstSeenIndex - b.firstSeenIndex);
+  }, [filteredRows]);
+
+  function getRowSortCycle(): RowSortMode[] {
+    return activeSource === SOURCE_ALL
+      ? ["data", "alpha"]
+      : ["source", "alpha", "data"];
+  }
+
+  function nextRowSortMode(mode: RowSortMode): RowSortMode {
+    const cycle = getRowSortCycle();
+    const index = cycle.indexOf(mode);
+    if (index < 0) return cycle[0] ?? "source";
+    return cycle[(index + 1) % cycle.length] ?? "source";
+  }
+
+  function getInactiveColumnBaseMode(): RowSortMode {
+    return activeSource === SOURCE_ALL ? "data" : "source";
+  }
+
+  function getEffectiveSortMode(mode: RowSortMode): RowSortMode {
+    if (activeSource === SOURCE_ALL && mode === "source") {
+      return "data";
+    }
+    return mode;
+  }
+
+  function toggleRowSort(column: RowSortColumn) {
+    const baseMode = getInactiveColumnBaseMode();
+    setRowSortState((prev) => {
+      if (prev.column === column) {
+        return { column, mode: nextRowSortMode(getEffectiveSortMode(prev.mode)) };
+      }
+      return { column, mode: nextRowSortMode(baseMode) };
+    });
+  }
+
+  const sortedMatrixRows = useMemo(() => {
+    const rowsCopy = [...matrixRows];
+    const effectiveMode = getEffectiveSortMode(rowSortState.mode);
+
+    if (effectiveMode === "source") {
+      rowsCopy.sort((a, b) => b.firstSeenIndex - a.firstSeenIndex);
+      return rowsCopy;
+    }
+
+    if (effectiveMode === "data") {
+      if (rowSortState.column === "category") {
+        const categoryDataTotals = new Map<string, number>();
+        rowsCopy.forEach((row) => {
+          categoryDataTotals.set(row.category, (categoryDataTotals.get(row.category) ?? 0) + row.rowDataCount);
+        });
+
+        rowsCopy.sort((a, b) => {
+          const totalDiff = (categoryDataTotals.get(b.category) ?? 0) - (categoryDataTotals.get(a.category) ?? 0);
+          if (totalDiff !== 0) return totalDiff;
+
+          const categoryCompare = a.category.localeCompare(b.category, "zh-Hans-CN", { sensitivity: "base" });
+          if (categoryCompare !== 0) return categoryCompare;
+
+          if (a.rowDataCount !== b.rowDataCount) {
+            return b.rowDataCount - a.rowDataCount;
+          }
+
+          return a.firstSeenIndex - b.firstSeenIndex;
+        });
+        return rowsCopy;
+      }
+
+      rowsCopy.sort((a, b) => {
         if (a.rowDataCount !== b.rowDataCount) {
           return b.rowDataCount - a.rowDataCount;
         }
-
         if (a.rowNumericCount !== b.rowNumericCount) {
           return b.rowNumericCount - a.rowNumericCount;
         }
-
-        const categoryCompare = a.category.localeCompare(b.category, "zh-Hans-CN");
-        if (categoryCompare !== 0) return categoryCompare;
-        return a.benchmark.localeCompare(b.benchmark, "zh-Hans-CN");
+        return a.firstSeenIndex - b.firstSeenIndex;
       });
-  }, [filteredRows]);
+      return rowsCopy;
+    }
+
+    const sortField: RowSortColumn = rowSortState.column;
+    rowsCopy.sort((a, b) => {
+      const left = sortField === "category" ? a.category : a.benchmark;
+      const right = sortField === "category" ? b.category : b.benchmark;
+      const compare = left.localeCompare(right, "zh-Hans-CN", { sensitivity: "base" });
+      if (compare !== 0) return compare;
+      return a.firstSeenIndex - b.firstSeenIndex;
+    });
+    return rowsCopy;
+  }, [matrixRows, rowSortState]);
+
+  function getSortModeLabel(column: RowSortColumn): string {
+    if (rowSortState.column !== column) return "";
+    const effectiveMode = getEffectiveSortMode(rowSortState.mode);
+    if (effectiveMode === "alpha") return "A↑";
+    if (effectiveMode === "data") return "↓";
+    return "";
+  }
+
+  function getSortModeTitle(column: RowSortColumn): string {
+    const current = rowSortState.column === column
+      ? getEffectiveSortMode(rowSortState.mode)
+      : getInactiveColumnBaseMode();
+    const next = nextRowSortMode(current);
+    if (next === "alpha") return "点击按首字母升序";
+    if (next === "data") return "点击按数据量降序";
+    if (next === "source") return "点击按 source 导入顺序（倒序）";
+    return "点击按首字母升序";
+  }
 
   function toggleModel(modelName: string, checked: boolean) {
     setSelectedModels((prev) => {
@@ -442,8 +884,126 @@ export function BenchmarkMatrix({ rows }: Props) {
     }
   }
 
+  async function copyTableImageToClipboard() {
+    if (!tableViewportRef.current || isImageActionBusy) return;
+
+    setIsExportMenuOpen(false);
+    setSuppressHoverMenu(true);
+    setIsCopyingTableImage(true);
+    setCopyNotice(null);
+    setCopyNoticeVisible(false);
+
+    try {
+      const { scale } = EXPORT_PRESET_MAP[exportPreset];
+      const pngBlob = await withTimeout(
+        renderElementToImageBlob(tableViewportRef.current, scale, "image/png"),
+        12000,
+        "导出超时，请稍后重试"
+      );
+
+      if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+        throw new Error("当前浏览器不支持图片剪贴板");
+      }
+
+      await withTimeout(
+        navigator.clipboard.write([
+          new ClipboardItem({
+            "image/png": pngBlob
+          })
+        ]),
+        5000,
+        "复制超时，请检查剪贴板权限"
+      );
+
+      setCopyNotice({ type: "success", message: "已复制表格 PNG 到剪贴板" });
+    } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : "";
+      const message = rawMessage.includes("Tainted canvases")
+        ? "复制失败：检测到跨域资源，请重试或切换到无扩展干扰窗口"
+        : rawMessage || "复制失败，请检查浏览器剪贴板权限";
+      setCopyNotice({ type: "error", message });
+    } finally {
+      setIsCopyingTableImage(false);
+    }
+  }
+
+  async function downloadTableImage() {
+    if (!tableViewportRef.current || isImageActionBusy) return;
+
+    setIsExportMenuOpen(false);
+    setSuppressHoverMenu(true);
+    setIsDownloadingTableImage(true);
+    setCopyNotice(null);
+    setCopyNoticeVisible(false);
+
+    try {
+      const preset = EXPORT_PRESET_MAP[exportPreset];
+      const imageBlob = await withTimeout(
+        renderElementToImageBlob(tableViewportRef.current, preset.scale, preset.mimeType),
+        12000,
+        "导出超时，请稍后重试"
+      );
+
+      const outputFormat = mimeTypeToFormat(imageBlob.type);
+      const requestedFormat = preset.format;
+
+      const fileTime = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+      const fileName = `benchmark-matrix-${fileTime}.${outputFormat}`;
+      const objectUrl = URL.createObjectURL(imageBlob);
+
+      try {
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+
+      setCopyNotice({
+        type: "success",
+        message: outputFormat === requestedFormat
+          ? `已导出表格 ${outputFormat.toUpperCase()}`
+          : `已自动回退导出 ${outputFormat.toUpperCase()}（原选择 ${requestedFormat.toUpperCase()}）`
+      });
+    } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : "";
+      const message = rawMessage.includes("Tainted canvases")
+        ? "下载失败：检测到跨域资源，请重试或切换到无扩展干扰窗口"
+        : rawMessage || "下载失败，请稍后重试";
+      setCopyNotice({ type: "error", message });
+    } finally {
+      setIsDownloadingTableImage(false);
+    }
+  }
+
   return (
     <section className="card" ref={sectionRef} style={isFullscreen ? { paddingTop: 8 } : undefined}>
+      {copyNotice ? (
+        <div className="pointer-events-none fixed right-6 top-20 z-[140]">
+          <div
+            className={`pointer-events-auto flex min-w-[260px] max-w-[520px] items-center gap-3 rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-md transition-all duration-300 ease-out ${
+              copyNoticeVisible ? "translate-y-0 opacity-100" : "-translate-y-2 opacity-0"
+            } ${
+              copyNotice.type === "success"
+                ? "border-emerald-500/45 bg-emerald-900/80 text-emerald-100"
+                : "border-rose-500/45 bg-rose-900/80 text-rose-100"
+            }`}
+          >
+            <span
+              className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                copyNotice.type === "success" ? "bg-emerald-500/25 text-emerald-200" : "bg-rose-500/25 text-rose-200"
+              }`}
+            >
+              {copyNotice.type === "success" ? <Check size={18} /> : <TriangleAlert size={18} />}
+            </span>
+            <span className="text-sm font-semibold tracking-wide">{copyNotice.message}</span>
+          </div>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center gap-3">
         <div role="tablist" className="tabs tabs-boxed bg-base-200/70 p-1">
           {sourceOptions.map((source) => (
@@ -467,6 +1027,92 @@ export function BenchmarkMatrix({ rows }: Props) {
           {isFullscreen ? <Minimize2 size={15} /> : <Expand size={15} />}
           {isFullscreen ? "退出全屏" : "全屏显示表格"}
         </button>
+
+        <div
+          className="relative"
+          ref={exportMenuRef}
+          onMouseEnter={() => setIsExportMenuHovered(true)}
+          onMouseLeave={() => {
+            setIsExportMenuHovered(false);
+            setSuppressHoverMenu(false);
+          }}
+        >
+          <div className="inline-flex h-8 items-center overflow-hidden rounded-lg border border-base-300/80 bg-base-100/55 shadow-sm">
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost h-8 gap-1 rounded-none border-0 px-1.5"
+              aria-label="导出图片"
+              onClick={downloadTableImage}
+              disabled={isImageActionBusy}
+            >
+              <ImageDown size={15} />
+              {isDownloadingTableImage ? "下载中..." : "导出图片"}
+            </button>
+
+            <span className="h-4 w-px bg-base-300/70" />
+
+            <label className="inline-flex h-full items-center px-0">
+              <select
+                className="select select-ghost select-xs h-6 min-h-6 w-[82px] border-0 bg-base-200/45 px-0.5 pr-4 text-[11px] font-medium text-base-content shadow-none focus:bg-base-200/60 focus:outline-none"
+                aria-label="导出规格"
+                value={exportPreset}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  if (isExportPresetKey(next)) {
+                    setExportPreset(next);
+                  }
+                }}
+                disabled={isImageActionBusy}
+              >
+                {availableExportPresetKeys.map((key) => (
+                  <option
+                    key={key}
+                    value={key}
+                    style={{ backgroundColor: "#0f172a", color: "#e2e8f0" }}
+                  >
+                    {EXPORT_PRESET_MAP[key].label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <span className="h-4 w-px bg-base-300/70" />
+
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost h-8 rounded-none border-0 px-1.5"
+              aria-label="导出图片菜单"
+              aria-haspopup="menu"
+              aria-expanded={isExportMenuOpen}
+              onClick={() => {
+                setSuppressHoverMenu(false);
+                setIsExportMenuOpen((prev) => !prev);
+              }}
+              disabled={isImageActionBusy}
+            >
+              <ChevronDown size={14} />
+            </button>
+          </div>
+
+          <div
+            role="menu"
+            onMouseEnter={() => setIsExportMenuHovered(true)}
+            className={`absolute right-0 top-full z-40 min-w-[170px] rounded-lg border border-base-300/80 bg-base-100/95 p-1 shadow-xl backdrop-blur transition-all duration-150 ${
+              showExportMenu ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+            }`}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              className="btn btn-sm btn-ghost w-full justify-start"
+              onClick={copyTableImageToClipboard}
+              disabled={isImageActionBusy}
+            >
+              <Copy size={14} />
+              {isCopyingTableImage ? "复制中..." : "复制到剪贴板"}
+            </button>
+          </div>
+        </div>
 
         <button
           type="button"
@@ -554,6 +1200,7 @@ export function BenchmarkMatrix({ rows }: Props) {
       </div>
 
       <div
+        ref={tableViewportRef}
         style={{
           overflow: "auto",
           maxHeight: isFullscreen
@@ -581,7 +1228,17 @@ export function BenchmarkMatrix({ rows }: Props) {
                     whiteSpace: "nowrap"
                   }}
                 >
-                  Category
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-xs h-auto min-h-0 rounded-none p-0 normal-case text-inherit hover:bg-transparent"
+                    onClick={() => toggleRowSort("category")}
+                    title={getSortModeTitle("category")}
+                  >
+                    <span>Category</span>
+                    {getSortModeLabel("category") ? (
+                      <span className="text-[10px] opacity-70">{getSortModeLabel("category")}</span>
+                    ) : null}
+                  </button>
                 </th>
               ) : null}
 
@@ -599,7 +1256,17 @@ export function BenchmarkMatrix({ rows }: Props) {
                   whiteSpace: "nowrap"
                 }}
               >
-                Benchmark
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs h-auto min-h-0 rounded-none p-0 normal-case text-inherit hover:bg-transparent"
+                  onClick={() => toggleRowSort("benchmark")}
+                  title={getSortModeTitle("benchmark")}
+                >
+                  <span>Benchmark</span>
+                  {getSortModeLabel("benchmark") ? (
+                    <span className="text-[10px] opacity-70">{getSortModeLabel("benchmark")}</span>
+                  ) : null}
+                </button>
               </th>
 
               {modelColumnMeta.map((model) => (
@@ -632,7 +1299,7 @@ export function BenchmarkMatrix({ rows }: Props) {
             </tr>
           </thead>
           <tbody>
-            {matrixRows.map((matrixRow) => {
+            {sortedMatrixRows.map((matrixRow) => {
               const rowKey = `${matrixRow.category}::${matrixRow.benchmark}`;
               const isHoveredRow = hoveredRowKey === rowKey;
               const isSelectedRow = selectedRowKey === rowKey;

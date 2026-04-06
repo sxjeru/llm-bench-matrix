@@ -80,6 +80,7 @@ type Props = {
   providers: ProviderOption[];
   models: ModelOption[];
   benchmarks: BenchmarkOption[];
+  sourceOptions?: string[];
   mergedRecords: MergedRecord[];
   initialSettings: Record<string, unknown>;
 };
@@ -191,7 +192,14 @@ async function postFormData(url: string, formData: FormData) {
   return data;
 }
 
-export function AdminConsole({ providers, models, benchmarks, mergedRecords, initialSettings }: Props) {
+export function AdminConsole({
+  providers,
+  models,
+  benchmarks,
+  sourceOptions = [],
+  mergedRecords,
+  initialSettings
+}: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>("import");
   const [notice, setNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [noticeVisible, setNoticeVisible] = useState(false);
@@ -217,6 +225,7 @@ export function AdminConsole({ providers, models, benchmarks, mergedRecords, ini
   const [csvText, setCsvText] = useState(
     ""
   );
+  const [csvSource, setCsvSource] = useState("");
   const [textImportPreviewRows, setTextImportPreviewRows] = useState<TextImportPreviewRow[]>([]);
   const [textImportPreviewMeta, setTextImportPreviewMeta] = useState<{
     format: string;
@@ -261,6 +270,7 @@ export function AdminConsole({ providers, models, benchmarks, mergedRecords, ini
   const [settingValue, setSettingValue] = useState("{}");
   const [settingNote, setSettingNote] = useState("");
   const [deleteModelInput, setDeleteModelInput] = useState("");
+  const [deleteSourceInput, setDeleteSourceInput] = useState("");
   const [modelDedupeRule, setModelDedupeRule] = useState<ModelDedupeRule>(() =>
     normalizeModelDedupeRule(initialSettings.model_dedupe_rule)
   );
@@ -269,20 +279,14 @@ export function AdminConsole({ providers, models, benchmarks, mergedRecords, ini
     return Object.entries(initialSettings).sort(([a], [b]) => a.localeCompare(b));
   }, [initialSettings]);
 
-  const summary = useMemo(
-    () => ({
-      providers: providers.length,
-      models: models.length,
-      benchmarks: benchmarks.length,
-      parsed: previewMeta?.parsedCount ?? 0,
-      warnings: previewMeta?.warningCount ?? 0
-    }),
-    [providers.length, models.length, benchmarks.length, previewMeta]
-  );
-
   const visibleTextImportPreviewRows = useMemo(
     () => textImportPreviewRows.slice(0, textImportPreviewVisibleCount),
     [textImportPreviewRows, textImportPreviewVisibleCount]
+  );
+
+  const deleteSourceOptions = useMemo(
+    () => Array.from(new Set(sourceOptions.map((item) => item.trim()).filter(Boolean))),
+    [sourceOptions]
   );
 
   const modelEntityOptions = useMemo(
@@ -581,7 +585,10 @@ export function AdminConsole({ providers, models, benchmarks, mergedRecords, ini
 
   async function onPreviewCsvImport() {
     try {
-      const result = await postJson("/api/admin/import-csv/preview", { csvText });
+      const result = await postJson("/api/admin/import-csv/preview", {
+        csvText,
+        source: csvSource || undefined
+      });
       setTextImportPreviewRows((result.previewRows ?? []) as TextImportPreviewRow[]);
       setTextImportPreviewMeta({
         format: result.format ?? "matrix-table",
@@ -598,7 +605,10 @@ export function AdminConsole({ providers, models, benchmarks, mergedRecords, ini
   async function onImportCsv(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
-      const result = await postJson("/api/admin/import-csv", { csvText });
+      const result = await postJson("/api/admin/import-csv", {
+        csvText,
+        source: csvSource || undefined
+      });
       notifySuccess(
         `文本导入完成：${result.inserted ?? 0}/${result.total ?? 0}（跳过 ${result.skipped ?? 0}，格式 ${result.format ?? "auto"}）`
       );
@@ -758,6 +768,28 @@ export function AdminConsole({ providers, models, benchmarks, mergedRecords, ini
     }
   }
 
+  async function onDeleteSourceData() {
+    const source = deleteSourceInput.trim();
+    if (!source) {
+      notifyError("请先输入 source");
+      return;
+    }
+
+    const normalizedSource = source.toLowerCase().startsWith("text:") ? `text:${source.slice(5).trim()}` : `text:${source}`;
+    const confirmed = window.confirm(
+      `确认删除 source = ${normalizedSource} 的全部数据吗？\n将删除 benchmark_values 中匹配该 source 的所有记录（不可恢复）。`
+    );
+    if (!confirmed) return;
+
+    try {
+      const result = await postJson("/api/admin/debug/delete-source", { source });
+      setDeleteSourceInput("");
+      notifySuccess(`已删除 source=${result.normalizedSource ?? normalizedSource} 的 ${result.deleted ?? 0} 条记录`);
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "删除 source 数据失败");
+    }
+  }
+
   async function onSaveModelDedupeRule() {
     try {
       await postJson("/api/admin/settings", {
@@ -826,29 +858,6 @@ export function AdminConsole({ providers, models, benchmarks, mergedRecords, ini
       ) : null}
 
       <div className="space-y-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="stats stats-vertical lg:stats-horizontal bg-base-200 shadow flex-1 min-w-[320px]">
-            <div className="stat">
-              <div className="stat-title">Providers</div>
-              <div className="stat-value text-primary">{summary.providers}</div>
-            </div>
-            <div className="stat">
-              <div className="stat-title">Models</div>
-              <div className="stat-value text-secondary">{summary.models}</div>
-            </div>
-            <div className="stat">
-              <div className="stat-title">Benchmarks</div>
-              <div className="stat-value">{summary.benchmarks}</div>
-            </div>
-            <div className="stat">
-              <div className="stat-title">Preview / Warnings</div>
-              <div className="stat-value text-sm md:text-xl">
-                {summary.parsed} / {summary.warnings}
-              </div>
-            </div>
-          </div>
-        </div>
-
         <div
           role="tablist"
           className="inline-flex w-full max-w-3xl flex-wrap items-center gap-1 rounded-2xl border border-base-300/70 bg-base-200/70 p-1.5 shadow-inner backdrop-blur"
@@ -1064,7 +1073,7 @@ export function AdminConsole({ providers, models, benchmarks, mergedRecords, ini
             <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
               <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold">
                 <Upload size={18} />
-                表格文本导入（CSV / TSV / 粘贴表格）
+                表格文本导入（CSV / TSV / 粘贴文本）
               </h3>
               <p className="mb-3 text-sm opacity-80">
                 支持两种格式：
@@ -1072,6 +1081,14 @@ export function AdminConsole({ providers, models, benchmarks, mergedRecords, ini
                 ② 矩阵文本（首行模型，首列 benchmark，如从表格直接复制粘贴）。
               </p>
               <form onSubmit={onImportCsv} className="space-y-3">
+                <div className="space-y-1">
+                  <input
+                    className="input input-bordered w-full"
+                    value={csvSource}
+                    onChange={(e) => setCsvSource(e.target.value)}
+                    placeholder="source（可选，指明该 benchmark 数据来源）"
+                  />
+                </div>
                 <textarea
                   className="textarea textarea-bordered min-h-[180px] w-full"
                   value={csvText}
@@ -1488,7 +1505,7 @@ export function AdminConsole({ providers, models, benchmarks, mergedRecords, ini
             </div>
 
             <div className="mb-5 rounded-box border border-error/40 bg-base-200/50 p-4">
-              <h4 className="mb-2 font-semibold text-error">删除单模型及其全部数据</h4>
+              <h4 className="mb-2 font-semibold text-error">删除单个模型</h4>
               <p className="mb-3 text-sm opacity-80">
                 会删除该模型记录与其所有 benchmark_values（不可恢复）。
               </p>
@@ -1507,6 +1524,30 @@ export function AdminConsole({ providers, models, benchmarks, mergedRecords, ini
                 </datalist>
                 <button type="button" className="btn btn-outline btn-error" onClick={onDeleteModelData}>
                   删除模型及数据
+                </button>
+              </div>
+            </div>
+
+            <div className="mb-5 rounded-box border border-error/40 bg-base-200/50 p-4">
+              <h4 className="mb-2 font-semibold text-error">删除 source</h4>
+              <p className="mb-3 text-sm opacity-80">
+                会删除 benchmark_values 中该 source 对应的所有记录（不可恢复）。输入 llm-benchmark 会按 text:llm-benchmark 删除。
+              </p>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(420px,1fr)_auto] md:items-center">
+                <input
+                  className="input input-bordered w-full"
+                  list="delete-source-options"
+                  value={deleteSourceInput}
+                  onChange={(e) => setDeleteSourceInput(e.target.value)}
+                  placeholder="输入 source，例如 llm-benchmark 或 text:llm-benchmark"
+                />
+                <datalist id="delete-source-options">
+                  {deleteSourceOptions.map((item) => (
+                    <option key={`delete-source-${item}`} value={item} />
+                  ))}
+                </datalist>
+                <button type="button" className="btn btn-outline btn-error" onClick={onDeleteSourceData}>
+                  删除 source 数据
                 </button>
               </div>
             </div>

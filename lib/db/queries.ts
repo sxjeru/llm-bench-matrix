@@ -89,6 +89,22 @@ export async function getActiveEntities() {
   };
 }
 
+export async function getSourceOptions(): Promise<string[]> {
+  const rows = await db
+    .select({ source: benchmarkValues.source })
+    .from(benchmarkValues)
+    .where(isNotNull(benchmarkValues.source))
+    .orderBy(benchmarkValues.source);
+
+  return Array.from(
+    new Set(
+      rows
+        .map((item) => item.source?.trim() ?? "")
+        .filter((item): item is string => item.length > 0)
+    )
+  );
+}
+
 export async function getSettings() {
   const rows = await db.select().from(settings);
 

@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "../../../../../lib/admin-auth";
-import { previewBenchmarkTextImport } from "../../../../../lib/admin-service";
+import { deleteBenchmarkValuesBySource } from "../../../../../lib/admin-service";
 
 const schema = z.object({
-  csvText: z.string().min(1),
-  source: z.string().optional()
+  source: z.string().min(1)
 });
 
 export async function POST(request: Request) {
@@ -19,6 +18,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const result = await previewBenchmarkTextImport(parsed.data.csvText, parsed.data.source);
+  const result = await deleteBenchmarkValuesBySource(parsed.data.source);
   return NextResponse.json(result);
 }

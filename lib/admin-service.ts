@@ -1,5 +1,5 @@
 import { parse } from "csv-parse/sync";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
   buildBenchmarkCanonicalKey,
@@ -93,6 +93,19 @@ function toNullableText(value: string | undefined): string | null {
   if (!value) return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeTextImportSource(value: string | undefined | null): string | null {
+  if (value === undefined || value === null) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.toLowerCase().startsWith("text:")) {
+    const plain = trimmed.slice(5).trim();
+    return plain ? `text:${plain}` : "text:";
+  }
+
+  return `text:${trimmed}`;
 }
 
 function inferProviderNameFromModel(modelName: string): string {
@@ -417,7 +430,7 @@ export async function importParsedRecords(
   };
 }
 
-function parseStructuredCsvRows(inputText: string): {
+function parseStructuredCsvRows(inputText: string, defaultSource: string | null): {
   format: "structured-csv";
   rows: NormalizedTextImportRow[];
   skipped: number;
@@ -464,7 +477,7 @@ function parseStructuredCsvRows(inputText: string): {
       unit: (row.unit || "score").trim() || "score",
       higherIsBetter: parseBoolean(row.higher_is_better, true),
       modalities: (row.modalities || "Text").split(",").map((item) => item.trim()).filter(Boolean),
-      source: toNullableText(row.source),
+      source: normalizeTextImportSource(toNullableText(row.source)) ?? defaultSource,
       modelAlias: toNullableText(row.model_alias),
       sourceModelId: toNullableText(row.source_model_id),
       sourceBenchmarkId: toNullableText(row.source_benchmark_id)
@@ -478,7 +491,7 @@ function parseStructuredCsvRows(inputText: string): {
   };
 }
 
-function parseMatrixTextRows(inputText: string): {
+function parseMatrixTextRows(inputText: string, defaultSource: string | null): {
   format: "matrix-table";
   rows: NormalizedTextImportRow[];
   skipped: number;
@@ -538,7 +551,7 @@ function parseMatrixTextRows(inputText: string): {
         unit: "score",
         higherIsBetter: true,
         modalities: ["Text"],
-        source: null,
+        source: defaultSource,
         modelAlias: null,
         sourceModelId: null,
         sourceBenchmarkId: null
@@ -553,21 +566,22 @@ function parseMatrixTextRows(inputText: string): {
   };
 }
 
-function parseBenchmarkTextRows(inputText: string) {
+function parseBenchmarkTextRows(inputText: string, sourceInput?: string | null) {
+  const defaultSource = normalizeTextImportSource(sourceInput);
   const firstLine = inputText
     .split(/\r?\n/)
     .find((line) => line.trim().length > 0)
     ?.trim() || "";
 
   if (looksLikeStructuredCsv(firstLine)) {
-    return parseStructuredCsvRows(inputText);
+    return parseStructuredCsvRows(inputText, defaultSource);
   }
 
-  return parseMatrixTextRows(inputText);
+  return parseMatrixTextRows(inputText, defaultSource);
 }
 
-export async function previewBenchmarkTextImport(inputText: string) {
-  const parsed = parseBenchmarkTextRows(inputText);
+export async function previewBenchmarkTextImport(inputText: string, sourceInput?: string | null) {
+  const parsed = parseBenchmarkTextRows(inputText, sourceInput);
 
   const previewRows = parsed.rows.map((row) => {
     const parsedValue = parseBenchmarkValue(row.valueRaw);
@@ -595,8 +609,8 @@ export async function previewBenchmarkTextImport(inputText: string) {
   };
 }
 
-export async function importBenchmarkCsv(inputText: string) {
-  const parsed = parseBenchmarkTextRows(inputText);
+export async function importBenchmarkCsv(inputText: string, sourceInput?: string | null) {
+  const parsed = parseBenchmarkTextRows(inputText, sourceInput);
   let inserted = 0;
 
   for (const row of parsed.rows) {
@@ -660,6 +674,38 @@ export async function deleteModelAndAllValues(modelId: number) {
     ok: true,
     modelId: existing.id,
     modelName: existing.modelName
+  };
+}
+
+export async function deleteBenchmarkValuesBySource(sourceInput: string) {
+  const rawSource = sourceInput.trim();
+  if (!rawSource) {
+    throw new Error("source is required");
+  }
+
+  const normalizedSource = normalizeTextImportSource(rawSource);
+  if (!normalizedSource) {
+    throw new Error("source is required");
+  }
+
+  const unprefixed = normalizedSource.slice(5).trim();
+  const candidates = new Set<string>([normalizedSource, rawSource]);
+  if (unprefixed) {
+    candidates.add(unprefixed);
+  }
+
+  const matchedSources = Array.from(candidates).filter(Boolean);
+  const deletedRows = await db
+    .delete(benchmarkValues)
+    .where(inArray(benchmarkValues.source, matchedSources))
+    .returning({ id: benchmarkValues.id });
+
+  return {
+    ok: true,
+    source: rawSource,
+    normalizedSource,
+    matchedSources,
+    deleted: deletedRows.length
   };
 }
 

@@ -4,7 +4,8 @@ import { requireAdmin } from "../../../../lib/admin-auth";
 import { importBenchmarkCsv } from "../../../../lib/admin-service";
 
 const schema = z.object({
-  csvText: z.string().min(1)
+  csvText: z.string().min(1),
+  source: z.string().optional()
 });
 
 export async function POST(request: Request) {
@@ -18,6 +19,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const result = await importBenchmarkCsv(parsed.data.csvText);
+  const result = await importBenchmarkCsv(parsed.data.csvText, parsed.data.source);
   return NextResponse.json(result);
 }
