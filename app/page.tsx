@@ -1,6 +1,7 @@
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
 import { DashboardCharts } from "@/components/charts";
 import { getDashboardRows } from "@/lib/db/queries";
+import { Suspense } from "react";
 
 export default async function HomePage() {
   const rows = await getDashboardRows(800);
@@ -33,19 +34,21 @@ export default async function HomePage() {
         </article>
       </section>
 
-      <BenchmarkMatrix
-        rows={rows.map((row) => ({
-          providerName: row.providerName,
-          modelName: row.modelName,
-          benchmarkName: row.benchmarkName,
-          benchmarkType: row.benchmarkType,
-          benchTime: row.benchTime,
-          valueRaw: row.valueRaw,
-          valueNum: row.valueNum,
-          valueNote: row.valueNote,
-          source: row.source
-        }))}
-      />
+      <Suspense fallback={null}>
+        <BenchmarkMatrix
+          rows={rows.map((row) => ({
+            providerName: row.providerName,
+            modelName: row.modelName,
+            benchmarkName: row.benchmarkName,
+            benchmarkType: row.benchmarkType,
+            benchTime: row.benchTime,
+            valueRaw: row.valueRaw,
+            valueNum: row.valueNum,
+            valueNote: row.valueNote,
+            source: row.source
+          }))}
+        />
+      </Suspense>
 
       <DashboardCharts
         rows={rows.map((row) => ({
