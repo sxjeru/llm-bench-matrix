@@ -40,7 +40,7 @@ export function TopbarActions() {
         </button>
       ) : null}
 
-      <Link href="/admin" className="nav-icon" aria-label="后台管理">
+      <Link href="/admin" className="nav-icon" aria-label="后台管理" suppressHydrationWarning>
         <Shield size={18} />
       </Link>
     </nav>

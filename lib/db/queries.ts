@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 
@@ -27,8 +27,30 @@ export type DashboardRow = {
   source: string | null;
 };
 
-export async function getDashboardRows(limit = 300): Promise<DashboardRow[]> {
-  const rows = await db
+const SOURCE_EMPTY_KEY = "__EMPTY__";
+
+function resolveDashboardWhereClause(sourceFilter?: string | null) {
+  const normalizedSourceFilter = sourceFilter?.trim();
+  const baseFilter = and(isNull(models.mergedIntoModelId), isNull(benchmarks.mergedIntoBenchmarkId));
+
+  if (!normalizedSourceFilter) {
+    return baseFilter;
+  }
+
+  if (normalizedSourceFilter === SOURCE_EMPTY_KEY) {
+    return and(
+      baseFilter,
+      or(isNull(benchmarkValues.source), eq(benchmarkValues.source, ""))
+    );
+  }
+
+  return and(baseFilter, eq(benchmarkValues.source, normalizedSourceFilter));
+}
+
+export async function getDashboardRows(limit: number | null = null, sourceFilter?: string | null): Promise<DashboardRow[]> {
+  const whereClause = resolveDashboardWhereClause(sourceFilter);
+
+  const baseQuery = db
     .select({
       id: benchmarkValues.id,
       providerName: providers.name,
@@ -47,9 +69,13 @@ export async function getDashboardRows(limit = 300): Promise<DashboardRow[]> {
     .innerJoin(models, eq(benchmarkValues.modelId, models.id))
     .innerJoin(providers, eq(models.providerId, providers.id))
     .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-    .where(and(isNull(models.mergedIntoModelId), isNull(benchmarks.mergedIntoBenchmarkId)))
-    .orderBy(desc(benchmarkValues.benchTime), desc(benchmarkValues.id))
-    .limit(limit);
+    .where(whereClause)
+    .orderBy(desc(benchmarkValues.benchTime), desc(benchmarkValues.id));
+
+  const rows =
+    typeof limit === "number" && Number.isFinite(limit) && limit > 0
+      ? await baseQuery.limit(limit)
+      : await baseQuery;
 
   return rows.map((row) => ({
     id: row.id,
@@ -65,6 +91,55 @@ export async function getDashboardRows(limit = 300): Promise<DashboardRow[]> {
     valueNote: row.valueNote,
     source: row.source
   }));
+}
+
+export type DashboardStats = {
+  providerCount: number;
+  modelCount: number;
+  benchmarkCount: number;
+  totalRecords: number;
+};
+
+export async function getDashboardStats(sourceFilter?: string | null): Promise<DashboardStats> {
+  const whereClause = resolveDashboardWhereClause(sourceFilter);
+
+  const [providerResult, modelResult, benchmarkResult, totalResult] = await Promise.all([
+    db
+      .select({ count: sql<number>`count(distinct ${providers.id})` })
+      .from(benchmarkValues)
+      .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+      .innerJoin(providers, eq(models.providerId, providers.id))
+      .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+      .where(whereClause),
+    db
+      .select({ count: sql<number>`count(distinct ${models.id})` })
+      .from(benchmarkValues)
+      .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+      .innerJoin(providers, eq(models.providerId, providers.id))
+      .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+      .where(whereClause),
+    db
+      .select({ count: sql<number>`count(distinct ${benchmarks.id})` })
+      .from(benchmarkValues)
+      .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+      .innerJoin(providers, eq(models.providerId, providers.id))
+      .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+      .where(whereClause),
+    db
+      .select({ count: count() })
+      .from(benchmarkValues)
+      .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+      .innerJoin(providers, eq(models.providerId, providers.id))
+      .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+      .where(whereClause)
+  ]);
+
+  return {
+    providerCount: Number(providerResult[0]?.count ?? 0),
+    modelCount: Number(modelResult[0]?.count ?? 0),
+    benchmarkCount: Number(benchmarkResult[0]?.count ?? 0),
+    totalRecords: Number(totalResult[0]?.count ?? 0)
+  };
 }
 
 export async function getActiveEntities() {

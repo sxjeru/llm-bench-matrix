@@ -2,13 +2,29 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Check, ChevronDown, ChevronUp, Copy, Expand, Eye, EyeOff, Filter, ImageDown, Layers, Minimize2, TriangleAlert } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Expand,
+  Eye,
+  EyeOff,
+  Filter,
+  Headphones,
+  ImageDown,
+  Layers,
+  Minimize2,
+  TriangleAlert,
+  Video
+} from "lucide-react";
 
 type MatrixInputRow = {
   providerName: string;
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
+  modalities?: string[];
   benchTime: string;
   valueRaw: string;
   valueNum: number | null;
@@ -37,6 +53,7 @@ type MatrixCell = {
 type MatrixRow = {
   category: string;
   benchmark: string;
+  modalities: string[];
   cells: Map<string, MatrixCell>;
   firstSeenIndex: number;
   rowDataCount: number;
@@ -66,10 +83,12 @@ function getBenchmarkComparableScore(benchmarkName: string, valueNum: number): n
 
 type Props = {
   rows: MatrixInputRow[];
+  sourceOptions?: string[];
 };
 
 const SOURCE_ALL = "__ALL__";
 const SOURCE_EMPTY = "__EMPTY__";
+const MODALITY_OPTIONS = ["Text", "Vision", "Audio", "Video", "Multimodal"] as const;
 const SHOW_CATEGORY_STORAGE_KEY = "benchmark-matrix:show-category";
 const EXPORT_PRESET_STORAGE_KEY = "benchmark-matrix:export-preset";
 const SOURCE_MATCH_FRAME_COLOR = "rgba(93, 167, 255, 0.42)";
@@ -177,6 +196,83 @@ function sourceTabDisplayLabel(sourceKey: string): string {
   return stripped.length > 0 ? stripped : rawLabel;
 }
 
+function normalizeModalityName(input: string): string {
+  const normalized = input.trim().toLowerCase();
+  if (!normalized) return "Text";
+  if (normalized.includes("vision") || normalized.includes("vlm")) return "Vision";
+  if (normalized.includes("audio")) return "Audio";
+  if (normalized.includes("video")) return "Video";
+  if (normalized.includes("multimodal") || normalized.includes("multi-modal") || normalized.includes("多模态")) {
+    return "Multimodal";
+  }
+  return "Text";
+}
+
+function normalizeModalityList(input: string[] | undefined, benchmarkType: string): string[] {
+  const source = input && input.length > 0 ? input : [benchmarkType];
+
+  const normalized = source
+    .map((item) => normalizeModalityName(item))
+    .filter(Boolean);
+
+  const unique = normalized.length > 0 ? Array.from(new Set(normalized)) : ["Text"];
+  const withoutText = unique.some((item) => item !== "Text")
+    ? unique.filter((item) => item !== "Text")
+    : unique;
+
+  const withoutVision = withoutText.includes("Video")
+    ? withoutText.filter((item) => item !== "Vision")
+    : withoutText;
+
+  return withoutVision.length > 0 ? withoutVision : ["Text"];
+}
+
+function renderModalityBadge(modalityInput: string, key: string) {
+  const modality = normalizeModalityName(modalityInput);
+
+  if (modality === "Text") {
+    return (
+      <span key={key} className="inline-flex items-center rounded-md px-1 text-[10px] opacity-70" title="Text">
+        T
+      </span>
+    );
+  }
+
+  if (modality === "Vision") {
+    return (
+      <span key={key} className="inline-flex items-center rounded-md bg-cyan-500/15 px-1.5 py-0.5 text-cyan-300" title="Vision">
+        <Eye size={11} />
+      </span>
+    );
+  }
+
+  if (modality === "Audio") {
+    return (
+      <span key={key} className="inline-flex items-center rounded-md bg-purple-500/15 px-1.5 py-0.5 text-purple-300" title="Audio">
+        <Headphones size={11} />
+      </span>
+    );
+  }
+
+  if (modality === "Video") {
+    return (
+      <span key={key} className="inline-flex items-center rounded-md bg-pink-500/15 px-1.5 py-0.5 text-pink-300" title="Video">
+        <Video size={11} />
+      </span>
+    );
+  }
+
+  return (
+    <span
+      key={key}
+      className="inline-flex items-center rounded-md bg-amber-500/15 px-1.5 py-0.5 text-amber-300"
+      title="Multimodal"
+    >
+      <Layers size={11} />
+    </span>
+  );
+}
+
 function normalizeMatchToken(input: string): string {
   return input.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
@@ -247,6 +343,33 @@ function formatTooltipTime(input: string): string {
     return input;
   }
   return date.toISOString().slice(0, 16).replace("T", " ");
+}
+
+function getMatrixCellDisplayValue(rawValue: string, valueNote: string | null): string {
+  const raw = rawValue.trim();
+  if (!raw) return "--";
+
+  const pairMatch = raw.match(
+    /^([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/
+  );
+  if (pairMatch) {
+    const [, first, second] = pairMatch;
+    return `${first} / ${second}`;
+  }
+
+  const singleMatch = raw.match(/^([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/);
+  if (singleMatch) {
+    const [, value, tail] = singleMatch;
+    const tailText = tail.trim();
+
+    if (!tailText) return value;
+    if (tailText === "*" || tailText.startsWith("*")) return `${value}*`;
+    if (valueNote && valueNote.trim().length > 0) return value;
+
+    return `${value}${tailText}`;
+  }
+
+  return raw;
 }
 
 async function loadHtml2Canvas(): Promise<Html2CanvasFn> {
@@ -378,7 +501,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: 
   }) as Promise<T>;
 }
 
-export function BenchmarkMatrix({ rows }: Props) {
+export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: Props) {
   const sectionRef = useRef<HTMLElement | null>(null);
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
@@ -415,7 +538,9 @@ export function BenchmarkMatrix({ rows }: Props) {
   } | null>(null);
 
   const sourceOptions = useMemo(() => {
-    const keys = Array.from(new Set(rows.map((row) => getSourceKey(row.source)))).sort((a, b) =>
+    const rowSourceKeys = rows.map((row) => getSourceKey(row.source));
+    const externalSourceKeys = allSourceOptions.map((source) => getSourceKey(source));
+    const keys = Array.from(new Set([...rowSourceKeys, ...externalSourceKeys])).sort((a, b) =>
       getSourceLabel(a).localeCompare(getSourceLabel(b), "zh-Hans-CN")
     );
 
@@ -423,7 +548,7 @@ export function BenchmarkMatrix({ rows }: Props) {
       { key: SOURCE_ALL, label: "全部" },
       ...keys.map((key) => ({ key, label: getSourceLabel(key) }))
     ];
-  }, [rows]);
+  }, [rows, allSourceOptions]);
 
   const [activeSource, setActiveSource] = useState(SOURCE_ALL);
 
@@ -592,6 +717,7 @@ export function BenchmarkMatrix({ rows }: Props) {
     [providerGroups]
   );
 
+  const [selectedModalities, setSelectedModalities] = useState<string[]>([...MODALITY_OPTIONS]);
   const [selectedModels, setSelectedModels] = useState<string[]>(allModelNames);
 
   useEffect(() => {
@@ -616,6 +742,7 @@ export function BenchmarkMatrix({ rows }: Props) {
   }, []);
 
   const selectedModelSet = useMemo(() => new Set(selectedModels), [selectedModels]);
+  const selectedModalitySet = useMemo(() => new Set(selectedModalities), [selectedModalities]);
 
   const modelProviderMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -800,11 +927,13 @@ export function BenchmarkMatrix({ rows }: Props) {
       const category = row.benchmarkType || "General";
       const benchmark = row.benchmarkName;
       const matrixKey = `${category}::${benchmark}`;
+      const normalizedModalities = normalizeModalityList(row.modalities, row.benchmarkType);
 
       if (!matrixMap.has(matrixKey)) {
         matrixMap.set(matrixKey, {
           category,
           benchmark,
+          modalities: normalizedModalities,
           cells: new Map<string, MatrixCell>(),
           firstSeenIndex: rowIndex,
           rowDataCount: 0,
@@ -817,6 +946,11 @@ export function BenchmarkMatrix({ rows }: Props) {
       }
 
       const matrixRow = matrixMap.get(matrixKey)!;
+      matrixRow.modalities = normalizeModalityList(
+        [...matrixRow.modalities, ...normalizedModalities],
+        matrixRow.category
+      );
+
       if (!matrixRow.cells.has(row.modelName)) {
         matrixRow.cells.set(row.modelName, {
           valueRaw: row.valueRaw,
@@ -916,8 +1050,14 @@ export function BenchmarkMatrix({ rows }: Props) {
     });
   }
 
+  const modalityFilteredMatrixRows = useMemo(() => {
+    if (selectedModalitySet.size === 0) return [];
+
+    return matrixRows.filter((row) => row.modalities.some((modality) => selectedModalitySet.has(modality)));
+  }, [matrixRows, selectedModalitySet]);
+
   const sortedMatrixRows = useMemo(() => {
-    const rowsCopy = [...matrixRows];
+    const rowsCopy = [...modalityFilteredMatrixRows];
     const effectiveMode = getEffectiveSortMode(rowSortState.mode);
 
     if (effectiveMode === "source") {
@@ -969,7 +1109,7 @@ export function BenchmarkMatrix({ rows }: Props) {
       return a.firstSeenIndex - b.firstSeenIndex;
     });
     return rowsCopy;
-  }, [matrixRows, rowSortState]);
+  }, [modalityFilteredMatrixRows, rowSortState]);
 
   function getSortModeLabel(column: RowSortColumn): string {
     if (rowSortState.column !== column) return "";
@@ -1025,6 +1165,26 @@ export function BenchmarkMatrix({ rows }: Props) {
 
   function clearAllModels() {
     setSelectedModels([]);
+  }
+
+  function toggleModality(modality: string, checked: boolean) {
+    setSelectedModalities((prev) => {
+      const set = new Set(prev);
+      if (checked) {
+        set.add(modality);
+      } else {
+        set.delete(modality);
+      }
+      return MODALITY_OPTIONS.filter((item) => set.has(item));
+    });
+  }
+
+  function selectAllModalities() {
+    setSelectedModalities([...MODALITY_OPTIONS]);
+  }
+
+  function clearAllModalities() {
+    setSelectedModalities([]);
   }
 
   async function toggleFullscreen() {
@@ -1162,7 +1322,10 @@ export function BenchmarkMatrix({ rows }: Props) {
       ) : null}
 
       <div className="flex flex-wrap items-center gap-3">
-        <div role="tablist" className="tabs tabs-boxed bg-base-200/70 p-1">
+        <div
+          role="tablist"
+          className="tabs tabs-boxed max-w-full overflow-x-auto whitespace-nowrap bg-base-200/70 p-1"
+        >
           {sourceOptions.map((source) => (
             <button
               key={source.key}
@@ -1174,6 +1337,7 @@ export function BenchmarkMatrix({ rows }: Props) {
                   : "hover:!rounded-xl hover:bg-base-100/60"
               }`}
               onClick={() => setSourceAndUrl(source.key)}
+              title={source.key === SOURCE_ALL ? source.label : sourceTabDisplayLabel(source.key)}
             >
               {source.key === SOURCE_ALL ? source.label : sourceTabDisplayLabel(source.key)}
             </button>
@@ -1370,6 +1534,68 @@ export function BenchmarkMatrix({ rows }: Props) {
         <table>
           <thead>
             <tr>
+              <th
+                style={{
+                  position: "sticky",
+                  top: 0,
+                  zIndex: 22,
+                  width: 72,
+                  minWidth: 72,
+                  maxWidth: 72,
+                  padding: "6px 6px",
+                  background: "rgba(20, 27, 45, 0.96)",
+                  backdropFilter: "blur(6px)",
+                  whiteSpace: "nowrap"
+                }}
+              >
+                <details className="dropdown dropdown-bottom" data-modality-filter="true">
+                  <summary className="btn btn-ghost btn-xs h-auto min-h-0 px-1 normal-case text-inherit">Modality</summary>
+                  <div className="dropdown-content z-[90] mt-1 w-44 rounded-box border border-base-300 bg-base-100 p-2 shadow-xl">
+                    <div className="mb-1 text-[11px] opacity-75">勾选筛选模态</div>
+                    <div className="space-y-1">
+                      {MODALITY_OPTIONS.map((modality) => (
+                        <label
+                          key={`matrix-modality-filter-${modality}`}
+                          className="label cursor-pointer justify-start gap-2 py-0.5"
+                        >
+                          <input
+                            type="checkbox"
+                            className="checkbox checkbox-xs"
+                            checked={selectedModalitySet.has(modality)}
+                            onChange={(e) => toggleModality(modality, e.target.checked)}
+                          />
+                          <span className="label-text text-xs">{modality}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="mt-2 flex gap-1">
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-xs"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          selectAllModalities();
+                        }}
+                      >
+                        全选
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-xs"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          clearAllModalities();
+                        }}
+                      >
+                        清空
+                      </button>
+                    </div>
+                  </div>
+                </details>
+              </th>
+
               {showCategory ? (
                 <th
                   style={{
@@ -1526,6 +1752,24 @@ export function BenchmarkMatrix({ rows }: Props) {
                 }}
                 style={{ cursor: "pointer", ...rowFrameStyle }}
               >
+                <td
+                  style={{
+                    width: 72,
+                    minWidth: 72,
+                    maxWidth: 72,
+                    padding: "4px 6px",
+                    textAlign: "center",
+                    ...rowCellLineStyle,
+                    ...rowLeftEdgeStyle
+                  }}
+                >
+                  <div className="flex flex-wrap items-center justify-center gap-1">
+                    {matrixRow.modalities.map((modality, idx) =>
+                      renderModalityBadge(modality, `${rowKey}-modality-${modality}-${idx}`)
+                    )}
+                  </div>
+                </td>
+
                 {showCategory ? (
                   <td
                     style={{
@@ -1536,8 +1780,7 @@ export function BenchmarkMatrix({ rows }: Props) {
                       whiteSpace: "nowrap",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
-                      ...rowCellLineStyle,
-                      ...rowLeftEdgeStyle
+                      ...rowCellLineStyle
                     }}
                     title={matrixRow.category}
                   >
@@ -1555,8 +1798,7 @@ export function BenchmarkMatrix({ rows }: Props) {
                     backgroundColor: "rgba(20, 27, 45, 0.96)",
                     boxShadow: "8px 0 12px rgba(2, 6, 23, 0.28)",
                     whiteSpace: "nowrap",
-                    ...rowCellLineStyle,
-                    ...(showCategory ? {} : rowLeftEdgeStyle)
+                    ...rowCellLineStyle
                   }}
                 >
                   <span className="inline-flex items-center gap-1">
@@ -1579,7 +1821,7 @@ export function BenchmarkMatrix({ rows }: Props) {
                   const comparableCellNum = cellNum !== null
                     ? getBenchmarkComparableScore(matrixRow.benchmark, cellNum)
                     : null;
-                  const rawText = cell?.valueRaw ?? "--";
+                  const rawText = cell ? getMatrixCellDisplayValue(cell.valueRaw, cell.valueNote) : "--";
                   const noteText = (cell?.valueNote ?? "").trim();
                   const allEntries = cell?.allEntries ?? [];
                   const valueIdentitySet = new Set(
@@ -1633,7 +1875,7 @@ export function BenchmarkMatrix({ rows }: Props) {
                         backgroundColor: heatBackground,
                         borderBottomColor: hasHeatColor ? "rgba(255, 255, 255, 0.08)" : undefined,
                         padding: "4px 6px",
-                        paddingRight: hasMultipleValues ? "22px" : "6px",
+                        paddingRight: shouldShowQuestionMark ? "22px" : "6px",
                         fontSize: "14px",
                         lineHeight: 1.2,
                         whiteSpace: "nowrap",
@@ -1699,7 +1941,7 @@ export function BenchmarkMatrix({ rows }: Props) {
                 key={`${entry.valueRaw}-${entry.valueNote ?? ""}-${entry.source ?? "-"}-${entry.benchTime}`}
                 className="block rounded-md bg-white/5 px-2 py-1 leading-4"
               >
-                {entry.valueRaw}
+                {getMatrixCellDisplayValue(entry.valueRaw, entry.valueNote)}
                 {entry.valueNote ? <span className="opacity-80"> · note: {entry.valueNote}</span> : null}
                 <span className="opacity-80"> · {entry.source ?? "unknown-source"} · {formatTooltipTime(entry.benchTime)}</span>
               </span>
@@ -1708,7 +1950,7 @@ export function BenchmarkMatrix({ rows }: Props) {
         </div>
       ) : null}
 
-      {matrixRows.length === 0 ? (
+      {sortedMatrixRows.length === 0 ? (
         <div className="mt-3 text-sm opacity-75">当前筛选条件下暂无数据。</div>
       ) : null}
     </section>

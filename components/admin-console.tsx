@@ -141,6 +141,12 @@ type StructuredCsvImportRow = {
   source: string | null;
 };
 
+type NoticeState = {
+  type: "success" | "error";
+  message: string;
+  details?: string[];
+};
+
 const DEFAULT_MODEL_DEDUPE_RULE: ModelDedupeRule = {
   lowercase: true,
   removeHyphen: true,
@@ -299,7 +305,7 @@ function getOmniDocBenchNormalizeHint(benchmarkName: string, rawValue: string): 
 function normalizeModalityName(input: string): string {
   const normalized = input.trim().toLowerCase();
   if (!normalized) return "Text";
-  if (normalized.includes("vision")) return "Vision";
+  if (normalized.includes("vision") || normalized.includes("vlm")) return "Vision";
   if (normalized.includes("audio")) return "Audio";
   if (normalized.includes("video")) return "Video";
   if (MULTIMODAL_HINT_PATTERN.test(normalized)) return "Multimodal";
@@ -427,6 +433,67 @@ function composeStarRawValue(value: string, note?: string | null): string {
   return normalized ? `${value}* ${normalized}` : `${value}*`;
 }
 
+function formatTextImportWarningDetail(warning: unknown): string | null {
+  if (!warning || typeof warning !== "object") return null;
+
+  const candidate = warning as Record<string, unknown>;
+  const contextParts: string[] = [];
+
+  if (typeof candidate.rowNumber === "number") {
+    contextParts.push(`行 ${candidate.rowNumber}`);
+  }
+
+  if (Array.isArray(candidate.rowNumbers)) {
+    const rowNumbers = Array.from(
+      new Set(
+        candidate.rowNumbers
+          .filter((item): item is number => typeof item === "number" && Number.isFinite(item))
+          .sort((a, b) => a - b)
+      )
+    );
+
+    if (rowNumbers.length > 0) {
+      contextParts.push(`行 ${rowNumbers.join(", ")}`);
+    }
+  }
+
+  if (typeof candidate.modelName === "string" && candidate.modelName.trim()) {
+    contextParts.push(`模型 ${candidate.modelName.trim()}`);
+  }
+
+  if (typeof candidate.benchmarkName === "string" && candidate.benchmarkName.trim()) {
+    contextParts.push(`指标 ${candidate.benchmarkName.trim()}`);
+  }
+
+  if (typeof candidate.benchmarkType === "string" && candidate.benchmarkType.trim()) {
+    contextParts.push(`类型 ${candidate.benchmarkType.trim()}`);
+  }
+
+  const reason = typeof candidate.reason === "string" ? candidate.reason.trim() : "";
+  const action = typeof candidate.action === "string" ? candidate.action.trim() : "";
+  const mainText = [reason, action].filter(Boolean).join("；");
+
+  if (!mainText) return null;
+  if (contextParts.length === 0) return mainText;
+
+  return `${contextParts.join(" / ")}：${mainText}`;
+}
+
+function extractTextImportWarningDetails(rawWarnings: unknown): string[] {
+  if (!Array.isArray(rawWarnings)) return [];
+
+  const details = rawWarnings
+    .map((item) => formatTextImportWarningDetail(item))
+    .filter((item): item is string => Boolean(item));
+
+  const LIMIT = 50;
+  if (details.length <= LIMIT) {
+    return details;
+  }
+
+  return [...details.slice(0, LIMIT), `...其余 ${details.length - LIMIT} 条未展开`];
+}
+
 export function AdminConsole({
   providers,
   models,
@@ -436,7 +503,7 @@ export function AdminConsole({
   initialSettings
 }: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>("import");
-  const [notice, setNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [notice, setNotice] = useState<NoticeState | null>(null);
   const [noticeVisible, setNoticeVisible] = useState(false);
 
   const [providerName, setProviderName] = useState("");
@@ -470,6 +537,9 @@ export function AdminConsole({
   const [textImportDraftRows, setTextImportDraftRows] = useState<TextImportPreviewRow[]>([]);
   const [pairNoteHistory, setPairNoteHistory] = useState<string[]>([]);
   const [starNoteHistory, setStarNoteHistory] = useState<string[]>([]);
+  const [matrixBenchmarkNameDrafts, setMatrixBenchmarkNameDrafts] = useState<Record<string, string>>({});
+  const [matrixBenchmarkTypeDrafts, setMatrixBenchmarkTypeDrafts] = useState<Record<string, string>>({});
+  const [matrixModelNameDrafts, setMatrixModelNameDrafts] = useState<Record<string, string>>({});
   const [globalStarSupplement, setGlobalStarSupplement] = useState("");
   const [benchmarkMergeTargets, setBenchmarkMergeTargets] = useState<Record<string, string>>({});
   const [benchmarkMergeFilters, setBenchmarkMergeFilters] = useState<Record<string, string>>({});
@@ -1297,12 +1367,20 @@ export function AdminConsole({
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, []);
 
-  function notifySuccess(message: string) {
-    setNotice({ type: "success", message });
+  function notifySuccess(message: string, details?: string[]) {
+    setNotice({
+      type: "success",
+      message,
+      details: details && details.length > 0 ? details : undefined
+    });
   }
 
-  function notifyError(message: string) {
-    setNotice({ type: "error", message });
+  function notifyError(message: string, details?: string[]) {
+    setNotice({
+      type: "error",
+      message,
+      details: details && details.length > 0 ? details : undefined
+    });
   }
 
   function buildWorkbookFormData(sheetName?: string, allowWarnings?: boolean) {
@@ -1759,6 +1837,83 @@ export function AdminConsole({
       delete next[benchmarkKey];
       return next;
     });
+
+    setPairNoteAutoFillAppliedByBenchmark((prev) => {
+      if (!(benchmarkKey in prev)) return prev;
+      const next = { ...prev };
+      next[nextKey] = prev[benchmarkKey];
+      delete next[benchmarkKey];
+      return next;
+    });
+  }
+
+  function onRenameTextImportBenchmarkType(benchmarkKey: string, nextBenchmarkType: string) {
+    const splitIndex = benchmarkKey.lastIndexOf("@@");
+    if (splitIndex < 0) return;
+
+    const benchmarkName = benchmarkKey.slice(0, splitIndex);
+    const nextKey = getTextImportBenchmarkKey(benchmarkName, nextBenchmarkType);
+
+    setTextImportDraftRows((prev) =>
+      prev.map((row) =>
+        getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType) === benchmarkKey
+          ? {
+              ...row,
+              benchmarkType: nextBenchmarkType
+            }
+          : row
+      )
+    );
+
+    if (nextKey === benchmarkKey) return;
+
+    setBenchmarkMergeTargets((prev) => {
+      if (!(benchmarkKey in prev)) return prev;
+      const next = { ...prev };
+      next[nextKey] = prev[benchmarkKey];
+      delete next[benchmarkKey];
+      return next;
+    });
+
+    setBenchmarkMergeFilters((prev) => {
+      if (!(benchmarkKey in prev)) return prev;
+      const next = { ...prev };
+      next[nextKey] = prev[benchmarkKey];
+      delete next[benchmarkKey];
+      return next;
+    });
+
+    setIgnoredBenchmarkKeys((prev) => {
+      if (!(benchmarkKey in prev)) return prev;
+      const next = { ...prev };
+      next[nextKey] = prev[benchmarkKey];
+      delete next[benchmarkKey];
+      return next;
+    });
+
+    setParenthesesModes((prev) => {
+      if (!(benchmarkKey in prev)) return prev;
+      const next = { ...prev };
+      next[nextKey] = prev[benchmarkKey];
+      delete next[benchmarkKey];
+      return next;
+    });
+
+    setParenthesesCustomNames((prev) => {
+      if (!(benchmarkKey in prev)) return prev;
+      const next = { ...prev };
+      next[nextKey] = prev[benchmarkKey];
+      delete next[benchmarkKey];
+      return next;
+    });
+
+    setPairNoteAutoFillAppliedByBenchmark((prev) => {
+      if (!(benchmarkKey in prev)) return prev;
+      const next = { ...prev };
+      next[nextKey] = prev[benchmarkKey];
+      delete next[benchmarkKey];
+      return next;
+    });
   }
 
   function onRenameTextImportModel(modelName: string, nextModelName: string) {
@@ -1806,6 +1961,83 @@ export function AdminConsole({
       delete next[modelName];
       return next;
     });
+  }
+
+  function onMatrixBenchmarkNameInputChange(benchmarkKey: string, nextBenchmarkName: string) {
+    setMatrixBenchmarkNameDrafts((prev) => ({
+      ...prev,
+      [benchmarkKey]: nextBenchmarkName
+    }));
+  }
+
+  function onMatrixBenchmarkNameInputBlur(
+    benchmarkKey: string,
+    currentBenchmarkName: string,
+    inputValue: string
+  ) {
+    const normalized = inputValue.trim();
+    const committedName = normalized.length > 0 ? normalized : currentBenchmarkName;
+
+    setMatrixBenchmarkNameDrafts((prev) => {
+      if (!(benchmarkKey in prev)) return prev;
+      const next = { ...prev };
+      delete next[benchmarkKey];
+      return next;
+    });
+
+    if (committedName !== currentBenchmarkName) {
+      onRenameTextImportBenchmark(benchmarkKey, committedName);
+    }
+  }
+
+  function onMatrixBenchmarkTypeInputChange(benchmarkKey: string, nextBenchmarkType: string) {
+    setMatrixBenchmarkTypeDrafts((prev) => ({
+      ...prev,
+      [benchmarkKey]: nextBenchmarkType
+    }));
+  }
+
+  function onMatrixBenchmarkTypeInputBlur(
+    benchmarkKey: string,
+    currentBenchmarkType: string,
+    inputValue: string
+  ) {
+    const normalized = inputValue.trim();
+    const committedType = normalized.length > 0 ? normalized : currentBenchmarkType;
+
+    setMatrixBenchmarkTypeDrafts((prev) => {
+      if (!(benchmarkKey in prev)) return prev;
+      const next = { ...prev };
+      delete next[benchmarkKey];
+      return next;
+    });
+
+    if (committedType !== currentBenchmarkType) {
+      onRenameTextImportBenchmarkType(benchmarkKey, committedType);
+    }
+  }
+
+  function onMatrixModelNameInputChange(modelName: string, nextModelName: string) {
+    setMatrixModelNameDrafts((prev) => ({
+      ...prev,
+      [modelName]: nextModelName
+    }));
+  }
+
+  function onMatrixModelNameInputBlur(modelName: string, inputValue: string) {
+    const normalized = inputValue.trim();
+    const committedModelName = normalized.length > 0 ? normalized : modelName;
+
+    setMatrixModelNameDrafts((prev) => {
+      if (!(modelName in prev)) return prev;
+      const next = { ...prev };
+      delete next[modelName];
+      return next;
+    });
+
+    if (committedModelName !== modelName) {
+      onRenameTextImportModel(modelName, committedModelName);
+    }
   }
 
   function renderModalityBadge(modalityInput: string, key: string) {
@@ -1875,6 +2107,9 @@ export function AdminConsole({
       setModelParenthesesModes({});
       setModelParenthesesCustomNames({});
       setPairNoteAutoFillAppliedByBenchmark({});
+      setMatrixBenchmarkNameDrafts({});
+      setMatrixBenchmarkTypeDrafts({});
+      setMatrixModelNameDrafts({});
       setTextImportPreviewMeta({
         format: result.format ?? "matrix-table",
         total: result.total ?? 0,
@@ -1883,9 +2118,11 @@ export function AdminConsole({
       setTextImportPreviewVisibleCount(200);
 
       const directionWarningCount = Number(result.warningCount ?? 0);
+      const warningDetails = extractTextImportWarningDetails(result.warnings);
       if (directionWarningCount > 0) {
         notifyError(
-          `文本预览完成：可导入 ${result.total ?? 0} 条，跳过 ${result.skipped ?? 0} 条；检测到 ${directionWarningCount} 条解析警告（导入时会自动清洗/修正）`
+          `文本预览完成：可导入 ${result.total ?? 0} 条，跳过 ${result.skipped ?? 0} 条；检测到 ${directionWarningCount} 条解析警告（导入时会自动清洗/修正）`,
+          warningDetails
         );
       } else {
         notifySuccess(`文本预览完成：可导入 ${result.total ?? 0} 条，跳过 ${result.skipped ?? 0} 条`);
@@ -1938,9 +2175,11 @@ export function AdminConsole({
         });
 
         const directionWarningCount = Number(result.warningCount ?? 0);
+        const warningDetails = extractTextImportWarningDetails(result.warnings);
         if (directionWarningCount > 0) {
           notifyError(
-            `文本导入完成：${result.inserted ?? 0}/${result.total ?? 0}（忽略 ${ignoredTextImportCount}，格式 ${result.format ?? "structured-csv"}）；已自动处理 ${directionWarningCount} 条解析警告`
+            `文本导入完成：${result.inserted ?? 0}/${result.total ?? 0}（忽略 ${ignoredTextImportCount}，格式 ${result.format ?? "structured-csv"}）；已自动处理 ${directionWarningCount} 条解析警告`,
+            warningDetails
           );
         } else {
           notifySuccess(
@@ -1957,9 +2196,11 @@ export function AdminConsole({
         });
 
         const directionWarningCount = Number(result.warningCount ?? 0);
+        const warningDetails = extractTextImportWarningDetails(result.warnings);
         if (directionWarningCount > 0) {
           notifyError(
-            `文本导入完成：${result.inserted ?? 0}/${result.total ?? 0}（跳过 ${result.skipped ?? 0}，格式 ${result.format ?? "auto"}）；已自动处理 ${directionWarningCount} 条解析警告`
+            `文本导入完成：${result.inserted ?? 0}/${result.total ?? 0}（跳过 ${result.skipped ?? 0}，格式 ${result.format ?? "auto"}）；已自动处理 ${directionWarningCount} 条解析警告`,
+            warningDetails
           );
         } else {
           notifySuccess(
@@ -2273,7 +2514,7 @@ export function AdminConsole({
       {notice ? (
         <div className="pointer-events-none fixed right-6 top-20 z-[120]">
           <div
-            className={`pointer-events-auto flex min-w-[260px] max-w-[520px] items-center gap-3 rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-md transition-all duration-300 ease-out ${
+            className={`pointer-events-auto flex min-w-[260px] max-w-[640px] items-start gap-3 rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-md transition-all duration-300 ease-out ${
               noticeVisible ? "translate-y-0 opacity-100" : "-translate-y-2 opacity-0"
             } ${
               notice.type === "success"
@@ -2288,7 +2529,24 @@ export function AdminConsole({
             >
               {notice.type === "success" ? <Check size={18} /> : <TriangleAlert size={18} />}
             </span>
-            <span className="text-sm font-semibold tracking-wide">{notice.message}</span>
+            <div className="min-w-0">
+              <div className="break-words text-sm font-semibold tracking-wide">{notice.message}</div>
+              {notice.details && notice.details.length > 0 ? (
+                <ul
+                  className={`mt-2 max-h-56 list-disc space-y-1 overflow-auto rounded-lg border px-3 py-2 text-xs leading-5 ${
+                    notice.type === "success"
+                      ? "border-emerald-300/35 bg-emerald-950/25"
+                      : "border-rose-300/35 bg-rose-950/25"
+                  }`}
+                >
+                  {notice.details.map((detail, index) => (
+                    <li key={`notice-detail-${index}`} className="break-words">
+                      {detail}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
           </div>
         </div>
       ) : null}
@@ -2857,8 +3115,9 @@ export function AdminConsole({
                             >
                               <input
                                 className="input input-bordered input-xs w-full min-w-[120px]"
-                                value={modelName}
-                                onChange={(e) => onRenameTextImportModel(modelName, e.target.value)}
+                                value={matrixModelNameDrafts[modelName] ?? modelName}
+                                onChange={(e) => onMatrixModelNameInputChange(modelName, e.target.value)}
+                                onBlur={(e) => onMatrixModelNameInputBlur(modelName, e.target.value)}
                               />
                             </th>
                           ))}
@@ -2924,14 +3183,32 @@ export function AdminConsole({
                                 <div className="space-y-1">
                                   <input
                                     className="input input-bordered input-xs w-full"
-                                    value={matrixRow.benchmarkName}
-                                    onChange={(e) => onRenameTextImportBenchmark(matrixRow.key, e.target.value)}
+                                    value={matrixBenchmarkNameDrafts[matrixRow.key] ?? matrixRow.benchmarkName}
+                                    onChange={(e) => onMatrixBenchmarkNameInputChange(matrixRow.key, e.target.value)}
+                                    onBlur={(e) =>
+                                      onMatrixBenchmarkNameInputBlur(
+                                        matrixRow.key,
+                                        matrixRow.benchmarkName,
+                                        e.target.value
+                                      )
+                                    }
                                   />
                                 </div>
                               </th>
                               <td className="whitespace-nowrap text-sm">
                                 <div className="flex items-center gap-1">
-                                  <span>{matrixRow.benchmarkType}</span>
+                                  <input
+                                    className="input input-bordered input-xs w-full min-w-[90px]"
+                                    value={matrixBenchmarkTypeDrafts[matrixRow.key] ?? matrixRow.benchmarkType}
+                                    onChange={(e) => onMatrixBenchmarkTypeInputChange(matrixRow.key, e.target.value)}
+                                    onBlur={(e) =>
+                                      onMatrixBenchmarkTypeInputBlur(
+                                        matrixRow.key,
+                                        matrixRow.benchmarkType,
+                                        e.target.value
+                                      )
+                                    }
+                                  />
                                   {isLowerBetter ? <span className="text-xs opacity-80">↓</span> : null}
                                 </div>
                               </td>

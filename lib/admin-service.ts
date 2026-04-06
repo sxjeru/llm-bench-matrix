@@ -89,6 +89,7 @@ const PAPER_HEADER_CONTINUATION_TOKENS = new Set([
 const PAPER_MODALITY_HINT_TOKENS = new Set([
   "text",
   "vision",
+  "vlm",
   "audio",
   "video",
   "multimodal",
@@ -104,6 +105,7 @@ const PAPER_MODALITY_HINT_TOKENS = new Set([
 ]);
 const PAPER_HEADER_LABEL_REGEX = /\b(capability|benchmark|benchmarks|category|categories|type|types|model|models)\b/gi;
 const UNSUPPORTED_SPECIAL_VALUE_SYMBOL_REGEX = /[‡†§¶※¤]/g;
+const UNSUPPORTED_SPECIAL_VALUE_SYMBOL_TEST_REGEX = /[‡†§¶※¤]/;
 
 function isLowerBetterBenchmark(benchmarkName: string): boolean {
   return LOWER_IS_BETTER_BENCHMARK_RULES.some((rule) => rule.test(benchmarkName));
@@ -259,10 +261,54 @@ function isPaperTableValueToken(token: string): boolean {
   const normalized = normalizePaperValueToken(token);
   const withoutUnsupportedSymbols = normalized.replace(UNSUPPORTED_SPECIAL_VALUE_SYMBOL_REGEX, "").trim();
   if (!withoutUnsupportedSymbols) return false;
+
   if (isPaperTableNumericToken(withoutUnsupportedSymbols)) return true;
+
+  if (withoutUnsupportedSymbols.includes("/")) {
+    const pairParts = withoutUnsupportedSymbols
+      .split("/")
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    if (pairParts.length === 2 && pairParts.every((part) => isPaperTableNumericToken(part))) {
+      return true;
+    }
+  }
 
   const lower = normalizeImportedValueRaw(withoutUnsupportedSymbols).toLowerCase();
   return EMPTY_VALUE_MARKERS.has(lower);
+}
+
+function splitPaperTableTokens(line: string): string[] {
+  const rawTokens = splitWhitespaceTokens(line);
+  if (rawTokens.length === 0) return [];
+
+  const mergedTokens: string[] = [];
+
+  for (let index = 0; index < rawTokens.length; index += 1) {
+    const currentToken = rawTokens[index] ?? "";
+    const nextToken = rawTokens[index + 1] ?? "";
+    const currentNormalized = normalizePaperValueToken(currentToken);
+    const nextTrimmed = nextToken.trim();
+
+    const wrappedParentheses = (
+      (nextTrimmed.startsWith("(") && nextTrimmed.endsWith(")"))
+      || (nextTrimmed.startsWith("（") && nextTrimmed.endsWith("）"))
+    );
+
+    if (isPaperTableNumericToken(currentNormalized) && wrappedParentheses) {
+      const parenthesizedInner = normalizePaperValueToken(nextTrimmed.slice(1, -1));
+      if (isPaperTableNumericToken(parenthesizedInner)) {
+        mergedTokens.push(`${currentNormalized} / ${parenthesizedInner}`);
+        index += 1;
+        continue;
+      }
+    }
+
+    mergedTokens.push(currentToken);
+  }
+
+  return mergedTokens;
 }
 
 function getTrailingPaperValueTokenCount(tokens: string[]): number {
@@ -284,7 +330,7 @@ function getTrailingPaperValueTokenCount(tokens: string[]): number {
 
 function inferPaperTableModelCount(lines: string[]): number | null {
   const trailingCounts = lines
-    .map((line) => getTrailingPaperValueTokenCount(splitWhitespaceTokens(line)))
+    .map((line) => getTrailingPaperValueTokenCount(splitPaperTableTokens(line)))
     .filter((count) => count >= 2);
 
   if (trailingCounts.length === 0) {
@@ -309,6 +355,35 @@ function inferPaperTableModelCount(lines: string[]): number | null {
   }
 
   return bestCandidate;
+}
+
+function mergeSplitBenchmarkPrefixLines(lines: string[]): string[] {
+  const mergedLines: string[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const current = (lines[index] ?? "").trim();
+    const next = (lines[index + 1] ?? "").trim();
+    const nextNext = (lines[index + 2] ?? "").trim();
+
+    const canMergeThreeLines =
+      current.length > 0
+      && next.length > 0
+      && nextNext.length > 0
+      && !/\s/.test(current)
+      && /^\d+$/.test(next)
+      && /^[-–—]/.test(nextNext)
+      && getTrailingPaperValueTokenCount(splitPaperTableTokens(nextNext)) >= 2;
+
+    if (canMergeThreeLines) {
+      mergedLines.push(`${current}${next}${nextNext}`.replace(/\s+/g, " ").trim());
+      index += 2;
+      continue;
+    }
+
+    mergedLines.push(current);
+  }
+
+  return mergedLines.filter(Boolean);
 }
 
 function cleanPaperHeaderFragment(line: string): string {
@@ -518,6 +593,7 @@ function sanitizeUnsupportedValueSymbols(rows: NormalizedTextImportRow[]): {
   warnings: TextParseWarning[];
 } {
   const warnings: TextParseWarning[] = [];
+  const benchmarkWarningKeys = new Set<string>();
 
   const sanitizedRows = rows.map((row) => {
     let nextRow = row;
@@ -530,17 +606,27 @@ function sanitizeUnsupportedValueSymbols(rows: NormalizedTextImportRow[]): {
         .replace(/\s+/g, " ")
         .trim();
 
-      warnings.push({
-        type: "unsupported-special-symbol",
-        rowNumber: row.rowNumber,
-        modelName: row.modelName,
-        benchmarkName: row.benchmarkName,
-        field: "benchmark",
-        before: row.benchmarkName,
-        after: cleanedBenchmarkName,
-        symbols,
-        reason: `检测到 benchmark 中不支持的特殊符号 ${symbols.join(" ")}，已在解析时移除`
-      });
+      const benchmarkWarningKey = [
+        row.rowNumber,
+        row.benchmarkName,
+        cleanedBenchmarkName,
+        symbols.join("|")
+      ].join("::");
+
+      if (!benchmarkWarningKeys.has(benchmarkWarningKey)) {
+        benchmarkWarningKeys.add(benchmarkWarningKey);
+        warnings.push({
+          type: "unsupported-special-symbol",
+          rowNumber: row.rowNumber,
+          modelName: "",
+          benchmarkName: row.benchmarkName,
+          field: "benchmark",
+          before: row.benchmarkName,
+          after: cleanedBenchmarkName,
+          symbols,
+          reason: `检测到 benchmark 中不支持的特殊符号 ${symbols.join(" ")}，已在解析时移除`
+        });
+      }
 
       nextRow = {
         ...nextRow,
@@ -665,7 +751,7 @@ function inferModalitiesFromCategory(category: string | null): string[] {
   if (!category) return ["Text"];
   const normalized = category.toLowerCase();
 
-  if (normalized.includes("vision")) return ["Vision"];
+  if (normalized.includes("vision") || normalized.includes("vlm")) return ["Vision"];
   if (normalized.includes("audio")) return ["Audio"];
   if (normalized.includes("video")) return ["Video"];
   if (isMultimodalHint(normalized)) return ["Multimodal"];
@@ -1226,7 +1312,7 @@ function parseStructuredCsvRows(inputText: string, defaultSource: string | null)
 function inferTypeFromPreambleLine(line: string): string | null {
   const normalized = line.trim().toLowerCase();
   if (!normalized) return null;
-  if (normalized.includes("vision")) return "Vision";
+  if (normalized.includes("vision") || normalized.includes("vlm")) return "Vision";
   if (normalized.includes("audio")) return "Audio";
   if (normalized.includes("video")) return "Video";
   if (isMultimodalHint(normalized)) return "Multimodal";
@@ -1364,11 +1450,13 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
 }
 
 function parsePaperCopiedTableRows(inputText: string, defaultSource: string | null): ParsedTextImportResult {
-  const lines = inputText
+  const normalizedLines = inputText
     .split(/\r?\n/)
     .map((line) => line.replace(/\r/g, ""))
     .map(normalizePaperTableLine)
     .filter(Boolean);
+
+  const lines = mergeSplitBenchmarkPrefixLines(normalizedLines);
 
   if (lines.length < 2) {
     return {
@@ -1389,7 +1477,7 @@ function parsePaperCopiedTableRows(inputText: string, defaultSource: string | nu
     };
   }
 
-  const tokenizedLines = lines.map(splitWhitespaceTokens);
+  const tokenizedLines = lines.map(splitPaperTableTokens);
   const firstDataLineIndex = tokenizedLines.findIndex((tokens) => {
     const trailingCount = getTrailingPaperValueTokenCount(tokens);
     return trailingCount >= dataModelCount && tokens.length > dataModelCount;
@@ -1466,9 +1554,15 @@ function parsePaperCopiedTableRows(inputText: string, defaultSource: string | nu
       if (isPaperCategoryFragment(line)) {
         const normalizedCategoryPart = normalizeNameParenthesisSpacing(cleanPaperHeaderFragment(line));
         if (normalizedCategoryPart) {
-          pendingCategoryParts.push(normalizedCategoryPart);
+          if (UNSUPPORTED_SPECIAL_VALUE_SYMBOL_TEST_REGEX.test(normalizedCategoryPart)) {
+            pendingBenchmarkPrefix = pendingBenchmarkPrefix
+              ? `${pendingBenchmarkPrefix} ${normalizedCategoryPart}`.replace(/\s+/g, " ").trim()
+              : normalizedCategoryPart;
+          } else {
+            pendingCategoryParts.push(normalizedCategoryPart);
+            pendingBenchmarkPrefix = null;
+          }
         }
-        pendingBenchmarkPrefix = null;
       } else {
         const benchmarkPrefixCandidate = normalizeBenchmarkImportName(normalizeNameParenthesisSpacing(line));
         if (benchmarkPrefixCandidate && /[A-Za-z\u4e00-\u9fa5]/.test(benchmarkPrefixCandidate)) {
@@ -1482,15 +1576,30 @@ function parsePaperCopiedTableRows(inputText: string, defaultSource: string | nu
       continue;
     }
 
+    const benchmarkInput = normalizeNameParenthesisSpacing(extracted.benchmarkName);
+    const normalizedBenchmarkInput = normalizeBenchmarkImportName(benchmarkInput);
+
     if (pendingCategoryParts.length > 0) {
-      currentBenchmarkType = pendingCategoryParts.join(" ");
-      const sectionTypeHint = inferTypeFromPreambleLine(currentBenchmarkType);
-      currentModalities = sectionTypeHint ? inferModalitiesFromCategory(sectionTypeHint) : defaultModalities;
+      if (!normalizedBenchmarkInput) {
+        if (pendingBenchmarkPrefix) {
+          currentBenchmarkType = pendingCategoryParts.join(" ");
+          const sectionTypeHint = inferTypeFromPreambleLine(currentBenchmarkType);
+          currentModalities = sectionTypeHint ? inferModalitiesFromCategory(sectionTypeHint) : defaultModalities;
+        } else {
+          const pendingPrefix = pendingCategoryParts.join(" ").trim();
+          if (pendingPrefix) {
+            pendingBenchmarkPrefix = pendingPrefix;
+          }
+        }
+      } else {
+        currentBenchmarkType = pendingCategoryParts.join(" ");
+        const sectionTypeHint = inferTypeFromPreambleLine(currentBenchmarkType);
+        currentModalities = sectionTypeHint ? inferModalitiesFromCategory(sectionTypeHint) : defaultModalities;
+      }
+
       pendingCategoryParts = [];
     }
 
-    const benchmarkInput = normalizeNameParenthesisSpacing(extracted.benchmarkName);
-    const normalizedBenchmarkInput = normalizeBenchmarkImportName(benchmarkInput);
     const benchmarkSource = normalizedBenchmarkInput || pendingBenchmarkPrefix || "";
     const benchmarkDirection = parseBenchmarkNameAndDirection(benchmarkSource);
     const benchmarkName = benchmarkDirection.benchmarkName;
@@ -1568,12 +1677,28 @@ function parseBenchmarkTextRows(inputText: string, sourceInput?: string | null):
 
     const paperParsed = parsePaperCopiedTableRows(inputText, defaultSource);
     const matrixParsed = parseMatrixTextRows(inputText, defaultSource);
+    const hasTabSeparatedLayout = inputText.includes("\t");
 
     if (paperParsed.rows.length === 0) {
       return matrixParsed;
     }
 
     if (matrixParsed.rows.length === 0) {
+      return paperParsed;
+    }
+
+    if (hasTabSeparatedLayout) {
+      return matrixParsed;
+    }
+
+    const paperHasTypedCategories = paperParsed.rows.some(
+      (row) => row.benchmarkType.trim().toLowerCase() !== "general"
+    );
+    const matrixHasTypedCategories = matrixParsed.rows.some(
+      (row) => row.benchmarkType.trim().toLowerCase() !== "general"
+    );
+
+    if (paperHasTypedCategories && !matrixHasTypedCategories) {
       return paperParsed;
     }
 
@@ -1589,6 +1714,10 @@ function parseBenchmarkTextRows(inputText: string, sourceInput?: string | null):
     rows: sanitized.rows,
     warnings: [...(selectedParsed.warnings ?? []), ...sanitized.warnings]
   };
+}
+
+export function __parseBenchmarkTextRowsForTest(inputText: string, sourceInput?: string | null): ParsedTextImportResult {
+  return parseBenchmarkTextRows(inputText, sourceInput);
 }
 
 type BenchmarkDirectionWarning = {
