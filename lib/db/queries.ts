@@ -28,6 +28,59 @@ export type DashboardRow = {
 };
 
 const SOURCE_EMPTY_KEY = "__EMPTY__";
+const DASHBOARD_CACHE_TTL_MS = 60_000;
+
+type TimedCacheEntry<T> = {
+  value: T;
+  expiresAt: number;
+};
+
+const dashboardRowsCache = new Map<string, TimedCacheEntry<DashboardRow[]>>();
+const dashboardRowsInFlight = new Map<string, Promise<DashboardRow[]>>();
+const dashboardStatsCache = new Map<string, TimedCacheEntry<DashboardStats>>();
+const dashboardStatsInFlight = new Map<string, Promise<DashboardStats>>();
+const sourceOptionsCache = new Map<string, TimedCacheEntry<string[]>>();
+const sourceOptionsInFlight = new Map<string, Promise<string[]>>();
+
+function normalizeSourceFilterKey(sourceFilter?: string | null): string {
+  const normalized = sourceFilter?.trim();
+  return normalized && normalized.length > 0 ? normalized : "__ALL__";
+}
+
+async function withTimedCache<T>(
+  cache: Map<string, TimedCacheEntry<T>>,
+  inFlight: Map<string, Promise<T>>,
+  key: string,
+  ttlMs: number,
+  loader: () => Promise<T>
+): Promise<T> {
+  const now = Date.now();
+  const cached = cache.get(key);
+
+  if (cached && cached.expiresAt > now) {
+    return cached.value;
+  }
+
+  const pending = inFlight.get(key);
+  if (pending) {
+    return pending;
+  }
+
+  const promise = loader()
+    .then((value) => {
+      cache.set(key, {
+        value,
+        expiresAt: Date.now() + ttlMs
+      });
+      return value;
+    })
+    .finally(() => {
+      inFlight.delete(key);
+    });
+
+  inFlight.set(key, promise);
+  return promise;
+}
 
 function resolveDashboardWhereClause(sourceFilter?: string | null) {
   const normalizedSourceFilter = sourceFilter?.trim();
@@ -48,49 +101,61 @@ function resolveDashboardWhereClause(sourceFilter?: string | null) {
 }
 
 export async function getDashboardRows(limit: number | null = null, sourceFilter?: string | null): Promise<DashboardRow[]> {
-  const whereClause = resolveDashboardWhereClause(sourceFilter);
-
-  const baseQuery = db
-    .select({
-      id: benchmarkValues.id,
-      providerName: providers.name,
-      modelName: models.modelName,
-      benchmarkName: benchmarks.benchmarkName,
-      benchmarkType: benchmarks.benchmarkType,
-      modalities: benchmarks.modalities,
-      benchTime: benchmarkValues.benchTime,
-      valueRaw: benchmarkValues.valueRaw,
-      valueNum: benchmarkValues.valueNum,
-      valueNum2: benchmarkValues.valueNum2,
-      valueNote: benchmarkValues.valueNote,
-      source: benchmarkValues.source
-    })
-    .from(benchmarkValues)
-    .innerJoin(models, eq(benchmarkValues.modelId, models.id))
-    .innerJoin(providers, eq(models.providerId, providers.id))
-    .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-    .where(whereClause)
-    .orderBy(desc(benchmarkValues.benchTime), desc(benchmarkValues.id));
-
-  const rows =
+  const normalizedLimit =
     typeof limit === "number" && Number.isFinite(limit) && limit > 0
-      ? await baseQuery.limit(limit)
-      : await baseQuery;
+      ? Math.trunc(limit)
+      : null;
+  const normalizedSourceFilter = sourceFilter?.trim() || null;
+  const cacheKey = `${normalizedLimit ?? "all"}::${normalizeSourceFilterKey(normalizedSourceFilter)}`;
 
-  return rows.map((row) => ({
-    id: row.id,
-    providerName: row.providerName,
-    modelName: row.modelName,
-    benchmarkName: row.benchmarkName,
-    benchmarkType: row.benchmarkType,
-    modalities: row.modalities ?? [],
-    benchTime: row.benchTime.toISOString(),
-    valueRaw: row.valueRaw,
-    valueNum: toNullableNumber(row.valueNum),
-    valueNum2: toNullableNumber(row.valueNum2),
-    valueNote: row.valueNote,
-    source: row.source
-  }));
+  return withTimedCache(
+    dashboardRowsCache,
+    dashboardRowsInFlight,
+    cacheKey,
+    DASHBOARD_CACHE_TTL_MS,
+    async () => {
+      const whereClause = resolveDashboardWhereClause(normalizedSourceFilter);
+
+      const baseQuery = db
+        .select({
+          id: benchmarkValues.id,
+          providerName: providers.name,
+          modelName: models.modelName,
+          benchmarkName: benchmarks.benchmarkName,
+          benchmarkType: benchmarks.benchmarkType,
+          modalities: benchmarks.modalities,
+          benchTime: benchmarkValues.benchTime,
+          valueRaw: benchmarkValues.valueRaw,
+          valueNum: benchmarkValues.valueNum,
+          valueNum2: benchmarkValues.valueNum2,
+          valueNote: benchmarkValues.valueNote,
+          source: benchmarkValues.source
+        })
+        .from(benchmarkValues)
+        .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+        .innerJoin(providers, eq(models.providerId, providers.id))
+        .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+        .where(whereClause)
+        .orderBy(desc(benchmarkValues.benchTime), desc(benchmarkValues.id));
+
+      const rows = normalizedLimit !== null ? await baseQuery.limit(normalizedLimit) : await baseQuery;
+
+      return rows.map((row) => ({
+        id: row.id,
+        providerName: row.providerName,
+        modelName: row.modelName,
+        benchmarkName: row.benchmarkName,
+        benchmarkType: row.benchmarkType,
+        modalities: row.modalities ?? [],
+        benchTime: row.benchTime.toISOString(),
+        valueRaw: row.valueRaw,
+        valueNum: toNullableNumber(row.valueNum),
+        valueNum2: toNullableNumber(row.valueNum2),
+        valueNote: row.valueNote,
+        source: row.source
+      }));
+    }
+  );
 }
 
 export type DashboardStats = {
@@ -101,45 +166,56 @@ export type DashboardStats = {
 };
 
 export async function getDashboardStats(sourceFilter?: string | null): Promise<DashboardStats> {
-  const whereClause = resolveDashboardWhereClause(sourceFilter);
+  const normalizedSourceFilter = sourceFilter?.trim() || null;
+  const cacheKey = normalizeSourceFilterKey(normalizedSourceFilter);
 
-  const [providerResult, modelResult, benchmarkResult, totalResult] = await Promise.all([
-    db
-      .select({ count: sql<number>`count(distinct ${providers.id})` })
-      .from(benchmarkValues)
-      .innerJoin(models, eq(benchmarkValues.modelId, models.id))
-      .innerJoin(providers, eq(models.providerId, providers.id))
-      .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-      .where(whereClause),
-    db
-      .select({ count: sql<number>`count(distinct ${models.id})` })
-      .from(benchmarkValues)
-      .innerJoin(models, eq(benchmarkValues.modelId, models.id))
-      .innerJoin(providers, eq(models.providerId, providers.id))
-      .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-      .where(whereClause),
-    db
-      .select({ count: sql<number>`count(distinct ${benchmarks.id})` })
-      .from(benchmarkValues)
-      .innerJoin(models, eq(benchmarkValues.modelId, models.id))
-      .innerJoin(providers, eq(models.providerId, providers.id))
-      .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-      .where(whereClause),
-    db
-      .select({ count: count() })
-      .from(benchmarkValues)
-      .innerJoin(models, eq(benchmarkValues.modelId, models.id))
-      .innerJoin(providers, eq(models.providerId, providers.id))
-      .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-      .where(whereClause)
-  ]);
+  return withTimedCache(
+    dashboardStatsCache,
+    dashboardStatsInFlight,
+    cacheKey,
+    DASHBOARD_CACHE_TTL_MS,
+    async () => {
+      const whereClause = resolveDashboardWhereClause(normalizedSourceFilter);
 
-  return {
-    providerCount: Number(providerResult[0]?.count ?? 0),
-    modelCount: Number(modelResult[0]?.count ?? 0),
-    benchmarkCount: Number(benchmarkResult[0]?.count ?? 0),
-    totalRecords: Number(totalResult[0]?.count ?? 0)
-  };
+      const [providerResult, modelResult, benchmarkResult, totalResult] = await Promise.all([
+        db
+          .select({ count: sql<number>`count(distinct ${providers.id})` })
+          .from(benchmarkValues)
+          .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+          .innerJoin(providers, eq(models.providerId, providers.id))
+          .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+          .where(whereClause),
+        db
+          .select({ count: sql<number>`count(distinct ${models.id})` })
+          .from(benchmarkValues)
+          .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+          .innerJoin(providers, eq(models.providerId, providers.id))
+          .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+          .where(whereClause),
+        db
+          .select({ count: sql<number>`count(distinct ${benchmarks.id})` })
+          .from(benchmarkValues)
+          .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+          .innerJoin(providers, eq(models.providerId, providers.id))
+          .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+          .where(whereClause),
+        db
+          .select({ count: count() })
+          .from(benchmarkValues)
+          .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+          .innerJoin(providers, eq(models.providerId, providers.id))
+          .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+          .where(whereClause)
+      ]);
+
+      return {
+        providerCount: Number(providerResult[0]?.count ?? 0),
+        modelCount: Number(modelResult[0]?.count ?? 0),
+        benchmarkCount: Number(benchmarkResult[0]?.count ?? 0),
+        totalRecords: Number(totalResult[0]?.count ?? 0)
+      };
+    }
+  );
 }
 
 export async function getActiveEntities() {
@@ -165,18 +241,26 @@ export async function getActiveEntities() {
 }
 
 export async function getSourceOptions(): Promise<string[]> {
-  const rows = await db
-    .select({ source: benchmarkValues.source })
-    .from(benchmarkValues)
-    .where(isNotNull(benchmarkValues.source))
-    .orderBy(benchmarkValues.source);
+  return withTimedCache(
+    sourceOptionsCache,
+    sourceOptionsInFlight,
+    "all",
+    DASHBOARD_CACHE_TTL_MS,
+    async () => {
+      const rows = await db
+        .select({ source: benchmarkValues.source })
+        .from(benchmarkValues)
+        .where(isNotNull(benchmarkValues.source))
+        .orderBy(benchmarkValues.source);
 
-  return Array.from(
-    new Set(
-      rows
-        .map((item) => item.source?.trim() ?? "")
-        .filter((item): item is string => item.length > 0)
-    )
+      return Array.from(
+        new Set(
+          rows
+            .map((item) => item.source?.trim() ?? "")
+            .filter((item): item is string => item.length > 0)
+        )
+      );
+    }
   );
 }
 
