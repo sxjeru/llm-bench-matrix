@@ -157,6 +157,7 @@ const LOWER_IS_BETTER_PREVIEW_RULES = [/fleurs/i, /omnidocbench\s*1\.5/i];
 const OMNIDOCBENCH_15_MATCHER = /omnidocbench\s*1\.5/i;
 const MULTIMODAL_HINT_PATTERN = /(\bmultimodal(?:ity)?\b|\bmulti[\s-_]?modal(?:ity)?\b|多模态)/i;
 const PAIR_NOTE_HISTORY_STORAGE_KEY = "admin-console:pair-note-history";
+const STAR_NOTE_HISTORY_STORAGE_KEY = "admin-console:star-note-history";
 const MODALITY_OPTIONS = ["Text", "Vision", "Audio", "Video", "Multimodal"] as const;
 
 function normalizeModelDedupeRule(raw: unknown): ModelDedupeRule {
@@ -468,6 +469,8 @@ export function AdminConsole({
   const [textImportPreviewRows, setTextImportPreviewRows] = useState<TextImportPreviewRow[]>([]);
   const [textImportDraftRows, setTextImportDraftRows] = useState<TextImportPreviewRow[]>([]);
   const [pairNoteHistory, setPairNoteHistory] = useState<string[]>([]);
+  const [starNoteHistory, setStarNoteHistory] = useState<string[]>([]);
+  const [globalStarSupplement, setGlobalStarSupplement] = useState("");
   const [benchmarkMergeTargets, setBenchmarkMergeTargets] = useState<Record<string, string>>({});
   const [benchmarkMergeFilters, setBenchmarkMergeFilters] = useState<Record<string, string>>({});
   const [ignoredBenchmarkKeys, setIgnoredBenchmarkKeys] = useState<Record<string, boolean>>({});
@@ -872,6 +875,18 @@ export function AdminConsole({
     };
   }, [textImportDraftRows, existingBenchmarkModalitiesMap]);
 
+  const matrixPreviewHeaderCounts = useMemo(() => {
+    const rowCount = matrixPreview.rows.length;
+    const benchmarkUniqueCount = new Set(matrixPreview.rows.map((row) => row.benchmarkName)).size;
+    const typeUniqueCount = new Set(matrixPreview.rows.map((row) => row.benchmarkType)).size;
+
+    return {
+      benchmarkCount: rowCount,
+      benchmarkUniqueCount,
+      typeUniqueCount
+    };
+  }, [matrixPreview.rows]);
+
   const pairValueRows = useMemo(() => {
     return textImportDraftRows
       .map((row, rowIndex) => {
@@ -1243,6 +1258,26 @@ export function AdminConsole({
   }, []);
 
   useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(STAR_NOTE_HISTORY_STORAGE_KEY);
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return;
+
+      const normalized = parsed
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, 30);
+
+      setStarNoteHistory(normalized);
+    } catch {
+      // ignore storage read errors gracefully
+    }
+  }, []);
+
+  useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node | null;
       if (!target) return;
@@ -1508,18 +1543,74 @@ export function AdminConsole({
   }
 
   function onUpdateTextImportDraftStarSupplement(rowIndex: number, supplement: string) {
-    const trimmedSupplement = supplement.trim();
+    setTextImportDraftRows((prev) =>
+      prev.map((row, idx) =>
+        idx === rowIndex
+          ? {
+              ...row,
+              valueNote: supplement.length > 0 ? supplement : null
+            }
+          : row
+      )
+    );
+  }
+
+  function recordStarNoteHistory(valueNote: string) {
+    const normalizedNote = valueNote.trim();
+    if (!normalizedNote) return;
+
+    setStarNoteHistory((prev) => {
+      const next = [normalizedNote, ...prev.filter((item) => item !== normalizedNote)].slice(0, 30);
+      try {
+        window.localStorage.setItem(STAR_NOTE_HISTORY_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore storage write errors gracefully
+      }
+      return next;
+    });
+  }
+
+  function onStarSupplementInputBlur(rowIndex: number, supplement: string) {
+    const normalized = supplement.trim();
 
     setTextImportDraftRows((prev) =>
       prev.map((row, idx) =>
         idx === rowIndex
           ? {
               ...row,
-              valueNote: trimmedSupplement.length > 0 ? trimmedSupplement : null
+              valueNote: normalized.length > 0 ? normalized : null
             }
           : row
       )
     );
+
+    if (normalized.length > 0) {
+      recordStarNoteHistory(normalized);
+    }
+  }
+
+  function onApplyGlobalStarSupplement() {
+    const trimmedSupplement = globalStarSupplement.trim();
+
+    setTextImportDraftRows((prev) =>
+      prev.map((row) => {
+        if (!parseStarSingleRawValue(row.rawValue)) {
+          return row;
+        }
+
+        return {
+          ...row,
+          valueNote: trimmedSupplement.length > 0 ? trimmedSupplement : null
+        };
+      })
+    );
+
+    if (trimmedSupplement.length > 0) {
+      recordStarNoteHistory(trimmedSupplement);
+      notifySuccess(`已为全部 * 数值设置统一注释：${trimmedSupplement}`);
+    } else {
+      notifySuccess("已清空全部 * 数值注释");
+    }
   }
 
   function recordPairNoteHistory(valueNote: string) {
@@ -1773,6 +1864,7 @@ export function AdminConsole({
       const previewRows = (result.previewRows ?? []) as TextImportPreviewRow[];
       setTextImportPreviewRows(previewRows);
       setTextImportDraftRows(previewRows.map((row) => ({ ...row })));
+      setGlobalStarSupplement("");
       setBenchmarkMergeTargets({});
       setBenchmarkMergeFilters({});
       setIgnoredBenchmarkKeys({});
@@ -1789,7 +1881,15 @@ export function AdminConsole({
         skipped: result.skipped ?? 0
       });
       setTextImportPreviewVisibleCount(200);
-      notifySuccess(`文本预览完成：可导入 ${result.total ?? 0} 条，跳过 ${result.skipped ?? 0} 条`);
+
+      const directionWarningCount = Number(result.warningCount ?? 0);
+      if (directionWarningCount > 0) {
+        notifyError(
+          `文本预览完成：可导入 ${result.total ?? 0} 条，跳过 ${result.skipped ?? 0} 条；检测到 ${directionWarningCount} 条解析警告（导入时会自动清洗/修正）`
+        );
+      } else {
+        notifySuccess(`文本预览完成：可导入 ${result.total ?? 0} 条，跳过 ${result.skipped ?? 0} 条`);
+      }
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "文本预览失败");
     } finally {
@@ -1837,9 +1937,16 @@ export function AdminConsole({
           source: csvSource || undefined
         });
 
-        notifySuccess(
-          `文本导入完成：${result.inserted ?? 0}/${result.total ?? 0}（忽略 ${ignoredTextImportCount}，格式 ${result.format ?? "structured-csv"}）`
-        );
+        const directionWarningCount = Number(result.warningCount ?? 0);
+        if (directionWarningCount > 0) {
+          notifyError(
+            `文本导入完成：${result.inserted ?? 0}/${result.total ?? 0}（忽略 ${ignoredTextImportCount}，格式 ${result.format ?? "structured-csv"}）；已自动处理 ${directionWarningCount} 条解析警告`
+          );
+        } else {
+          notifySuccess(
+            `文本导入完成：${result.inserted ?? 0}/${result.total ?? 0}（忽略 ${ignoredTextImportCount}，格式 ${result.format ?? "structured-csv"}）`
+          );
+        }
         finalStatus = "success";
         finalProgress = 100;
         finalStatusText = `导入成功：${result.inserted ?? 0}/${result.total ?? 0}`;
@@ -1848,9 +1955,17 @@ export function AdminConsole({
           csvText,
           source: csvSource || undefined
         });
-        notifySuccess(
-          `文本导入完成：${result.inserted ?? 0}/${result.total ?? 0}（跳过 ${result.skipped ?? 0}，格式 ${result.format ?? "auto"}）`
-        );
+
+        const directionWarningCount = Number(result.warningCount ?? 0);
+        if (directionWarningCount > 0) {
+          notifyError(
+            `文本导入完成：${result.inserted ?? 0}/${result.total ?? 0}（跳过 ${result.skipped ?? 0}，格式 ${result.format ?? "auto"}）；已自动处理 ${directionWarningCount} 条解析警告`
+          );
+        } else {
+          notifySuccess(
+            `文本导入完成：${result.inserted ?? 0}/${result.total ?? 0}（跳过 ${result.skipped ?? 0}，格式 ${result.format ?? "auto"}）`
+          );
+        }
         finalStatus = "success";
         finalProgress = 100;
         finalStatusText = `导入成功：${result.inserted ?? 0}/${result.total ?? 0}`;
@@ -2671,6 +2786,22 @@ export function AdminConsole({
                     </div>
                   ) : null}
 
+                  <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                    <input
+                      className="input input-bordered input-sm w-full md:max-w-md"
+                      value={globalStarSupplement}
+                      onChange={(e) => setGlobalStarSupplement(e.target.value)}
+                      placeholder="为全部 * 数值设置同一注释"
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm md:shrink-0"
+                      onClick={onApplyGlobalStarSupplement}
+                    >
+                      应用到全部 *
+                    </button>
+                  </div>
+
                   <div className="space-y-2">
                     {starValueRows.map((item) => (
                       <div
@@ -2683,12 +2814,19 @@ export function AdminConsole({
                         <input
                           className="input input-bordered input-sm"
                           value={item.supplement}
+                          list="star-note-history-options"
                           onChange={(e) => onUpdateTextImportDraftStarSupplement(item.rowIndex, e.target.value)}
-                          placeholder="可选补充注释：with CI / without CI"
+                          onBlur={(e) => onStarSupplementInputBlur(item.rowIndex, e.target.value)}
+                          placeholder="可选补充注释"
                         />
                       </div>
                     ))}
                   </div>
+                  <datalist id="star-note-history-options">
+                    {starNoteHistory.map((note) => (
+                      <option key={`star-note-history-${note}`} value={note} />
+                    ))}
+                  </datalist>
                 </div>
               ) : null}
 
@@ -2700,8 +2838,18 @@ export function AdminConsole({
                       <thead>
                         <tr>
                           <th className="w-[56px]">模态</th>
-                          <th className="min-w-[240px]">Benchmark</th>
-                          <th className="min-w-[120px]">Type</th>
+                          <th className="min-w-[240px]">
+                            Benchmark
+                            <span className="ml-1 text-[11px] opacity-70">
+                              ({matrixPreviewHeaderCounts.benchmarkUniqueCount})
+                            </span>
+                          </th>
+                          <th className="min-w-[120px]">
+                            Type
+                            <span className="ml-1 text-[11px] opacity-70">
+                              ({matrixPreviewHeaderCounts.typeUniqueCount})
+                            </span>
+                          </th>
                           {matrixPreview.modelNames.map((modelName) => (
                             <th
                               key={`matrix-model-${modelName}`}
