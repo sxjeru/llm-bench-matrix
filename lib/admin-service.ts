@@ -137,6 +137,18 @@ function inferModalitiesFromCategory(category: string | null): string[] {
   return ["Text"];
 }
 
+function isMatrixTypeMarker(label: string): boolean {
+  const trimmed = label.trim();
+  if (!trimmed) return false;
+
+  // 常见“分组标题行”特征：短文本、无数值特征、通常独立一行
+  if (/[\d%/()]/.test(trimmed)) return false;
+
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length === 1) return true;
+  return words.length <= 3 && trimmed.length <= 28;
+}
+
 function firstResultRow<T>(result: unknown): T | undefined {
   if (Array.isArray(result)) {
     return result[0] as T | undefined;
@@ -516,6 +528,7 @@ function parseStructuredCsvRows(inputText: string, defaultSource: string | null)
     const valueRaw = normalizeImportedValueRaw(valueRawInput);
     const providerName = (row.provider || row.provider_name || "").trim() || inferProviderNameFromModel(modelName);
     const benchmarkType = (row.benchmark_type || row.type || "general").trim() || "general";
+    const modalitiesInput = (row.modalities || "").trim();
     const benchTimeRaw = row.bench_time || row.time || row.date || new Date().toISOString();
     const benchTime = new Date(benchTimeRaw);
 
@@ -534,7 +547,9 @@ function parseStructuredCsvRows(inputText: string, defaultSource: string | null)
       benchTime,
       unit: (row.unit || "score").trim() || "score",
       higherIsBetter: parseBoolean(row.higher_is_better, true),
-      modalities: (row.modalities || "Text").split(",").map((item) => item.trim()).filter(Boolean),
+      modalities: modalitiesInput
+        ? modalitiesInput.split(",").map((item) => item.trim()).filter(Boolean)
+        : inferModalitiesFromCategory(benchmarkType),
       source: normalizeTextImportSource(toNullableText(row.source)) ?? defaultSource,
       modelAlias: toNullableText(row.model_alias),
       sourceModelId: toNullableText(row.source_model_id),
@@ -547,6 +562,30 @@ function parseStructuredCsvRows(inputText: string, defaultSource: string | null)
     rows,
     skipped
   };
+}
+
+function inferTypeFromPreambleLine(line: string): string | null {
+  const normalized = line.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized.includes("vision")) return "Vision";
+  if (normalized.includes("audio")) return "Audio";
+  if (normalized.includes("video")) return "Video";
+  if (normalized.includes("multimodal") || normalized.includes("multi")) return "Multimodal";
+  return null;
+}
+
+function looksLikeModelHeaderRow(cells: string[]): boolean {
+  const nonEmpty = cells.map((cell) => cell.trim()).filter(Boolean);
+  if (nonEmpty.length < 2) return false;
+
+  const numericLikeCount = nonEmpty.filter((cell) => {
+    const normalized = normalizeImportedValueRaw(cell);
+    if (!/\d/.test(normalized)) return false;
+    const parsed = parseBenchmarkValue(normalized);
+    return parsed.valueNum !== null || parsed.valueNum2 !== null;
+  }).length;
+
+  return numericLikeCount <= 1;
 }
 
 function parseMatrixTextRows(inputText: string, defaultSource: string | null): {
@@ -567,8 +606,27 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): {
     };
   }
 
-  const headerCells = splitTableLine(rawLines[0]);
-  const modelNames = headerCells.slice(1).map((cell) => cell.trim()).filter(Boolean);
+  let headerLineIndex = rawLines.findIndex((line) => looksLikeModelHeaderRow(splitTableLine(line)));
+  if (headerLineIndex < 0) {
+    headerLineIndex = 0;
+  }
+
+  let preambleTypeHint: string | null = null;
+  for (let index = 0; index < headerLineIndex; index += 1) {
+    const hint = inferTypeFromPreambleLine(rawLines[index]);
+    if (hint) {
+      preambleTypeHint = hint;
+    }
+  }
+
+  const headerCells = splitTableLine(rawLines[headerLineIndex]);
+  const firstHeaderCell = (headerCells[0] || "").trim();
+  const startsWithBenchmarkLabel =
+    !firstHeaderCell
+    || /benchmark|type|category|指标|类别|分类/i.test(firstHeaderCell);
+
+  const modelStartIndex = startsWithBenchmarkLabel ? 1 : 0;
+  const modelNames = headerCells.slice(modelStartIndex).map((cell) => cell.trim()).filter(Boolean);
 
   if (modelNames.length === 0) {
     return {
@@ -580,13 +638,23 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): {
 
   const rows: NormalizedTextImportRow[] = [];
   let skipped = 0;
+  let currentBenchmarkType = preambleTypeHint ?? "General";
 
-  for (let lineIndex = 1; lineIndex < rawLines.length; lineIndex += 1) {
+  for (let lineIndex = headerLineIndex + 1; lineIndex < rawLines.length; lineIndex += 1) {
     const cells = splitTableLine(rawLines[lineIndex]);
     const benchmarkName = (cells[0] || "").trim();
 
     if (!benchmarkName) {
       skipped += 1;
+      continue;
+    }
+
+    const allModelValuesEmpty = modelNames.every((_, modelIndex) =>
+      isEmptyImportValue((cells[modelIndex + 1] || "").trim())
+    );
+
+    if (allModelValuesEmpty && isMatrixTypeMarker(benchmarkName)) {
+      currentBenchmarkType = benchmarkName;
       continue;
     }
 
@@ -603,12 +671,12 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): {
         providerName: inferProviderNameFromModel(modelName),
         modelName,
         benchmarkName,
-        benchmarkType: "general",
+        benchmarkType: currentBenchmarkType,
         valueRaw: normalizeImportedValueRaw(rawInput),
         benchTime: new Date(),
         unit: "score",
         higherIsBetter: true,
-        modalities: ["Text"],
+        modalities: inferModalitiesFromCategory(currentBenchmarkType),
         source: defaultSource,
         modelAlias: null,
         sourceModelId: null,
