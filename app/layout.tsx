@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import { TopbarActions } from "@/components/topbar-actions";
 import "./globals.css";
 
@@ -23,6 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <main className="page">
           <div className="container">{children}</div>
         </main>
+        <Analytics />
       </body>
     </html>
   );
