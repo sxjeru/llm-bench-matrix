@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "../../../../lib/admin-auth";
+import { rebuildModelCanonicalKeysByRule } from "../../../../lib/admin-service";
 import { getSettings, saveSetting } from "../../../../lib/db/queries";
 
 const SENSITIVE_SETTING_KEYS = new Set([
@@ -40,5 +41,11 @@ export async function POST(request: Request) {
   }
 
   await saveSetting(parsed.data);
+
+  if (parsed.data.key === "model_dedupe_rule") {
+    const rebuildResult = await rebuildModelCanonicalKeysByRule(parsed.data.valueJson);
+    return NextResponse.json({ ok: true, rebuildResult });
+  }
+
   return NextResponse.json({ ok: true });
 }

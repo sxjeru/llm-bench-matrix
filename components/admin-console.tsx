@@ -135,6 +135,7 @@ type StructuredCsvImportRow = {
   benchmarkName: string;
   benchmarkType: string;
   rawValue: string;
+  valueNote: string | null;
   source: string | null;
 };
 
@@ -142,7 +143,7 @@ const DEFAULT_MODEL_DEDUPE_RULE: ModelDedupeRule = {
   lowercase: true,
   removeHyphen: true,
   removeSpace: true,
-  removeDot: true
+  removeDot: false
 };
 
 const BENCHMARK_SUSPECT_KEYWORDS = ["last exam"];
@@ -339,6 +340,63 @@ function buildStructuredCsvText(rows: StructuredCsvImportRow[]): string {
   return lines.join("\n");
 }
 
+function parsePairRawValue(rawValue: string): { first: string; second: string; note: string | null } | null {
+  const normalized = rawValue.trim();
+  const pairMatch = normalized.match(
+    /^([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/
+  );
+
+  if (!pairMatch) return null;
+
+  const [, first, second, tail] = pairMatch;
+  const note = tail.trim();
+
+  return {
+    first: first.trim(),
+    second: second.trim(),
+    note: note.length > 0 ? note : null
+  };
+}
+
+function composePairRawValue(first: string, second: string, note?: string | null): string {
+  const normalizedNote = note?.trim();
+  return normalizedNote ? `${first} / ${second} ${normalizedNote}` : `${first} / ${second}`;
+}
+
+function parseSingleRawValue(rawValue: string): { value: string; tail: string } | null {
+  if (parsePairRawValue(rawValue)) return null;
+
+  const normalized = rawValue.trim();
+  const singleMatch = normalized.match(/^([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/);
+  if (!singleMatch) return null;
+
+  return {
+    value: singleMatch[1].trim(),
+    tail: singleMatch[2].trim()
+  };
+}
+
+function parseStarSingleRawValue(rawValue: string): { value: string; note: string | null } | null {
+  const parsedSingle = parseSingleRawValue(rawValue);
+  if (!parsedSingle) return null;
+
+  const tail = parsedSingle.tail.trim();
+  if (!tail.startsWith("*")) return null;
+
+  const afterStar = tail.slice(1).trim();
+  const note = afterStar.startsWith("://") ? afterStar.slice(3).trim() : afterStar;
+
+  return {
+    value: parsedSingle.value,
+    note: note.length > 0 ? note : null
+  };
+}
+
+function composeStarRawValue(value: string, note?: string | null): string {
+  const normalized = note?.trim();
+  return normalized ? `${value}* ${normalized}` : `${value}*`;
+}
+
 export function AdminConsole({
   providers,
   models,
@@ -373,6 +431,7 @@ export function AdminConsole({
     ""
   );
   const [csvSource, setCsvSource] = useState("");
+  const [confirmImportWithoutPreviewOpen, setConfirmImportWithoutPreviewOpen] = useState(false);
   const [isPreviewingTextImport, setIsPreviewingTextImport] = useState(false);
   const [textImportPreviewRows, setTextImportPreviewRows] = useState<TextImportPreviewRow[]>([]);
   const [textImportDraftRows, setTextImportDraftRows] = useState<TextImportPreviewRow[]>([]);
@@ -385,6 +444,7 @@ export function AdminConsole({
   const [modelMergeFilters, setModelMergeFilters] = useState<Record<string, string>>({});
   const [modelParenthesesModes, setModelParenthesesModes] = useState<Record<string, "keep" | "remove" | "custom">>({});
   const [modelParenthesesCustomNames, setModelParenthesesCustomNames] = useState<Record<string, string>>({});
+  const [pairNoteAutoFillAppliedByBenchmark, setPairNoteAutoFillAppliedByBenchmark] = useState<Record<string, boolean>>({});
   const [textImportPreviewMeta, setTextImportPreviewMeta] = useState<{
     format: string;
     total: number;
@@ -756,13 +816,85 @@ export function AdminConsole({
       }
     });
 
-    const rows = Array.from(rowMap.values()).sort((a, b) => a.benchmarkName.localeCompare(b.benchmarkName, "zh-Hans-CN"));
+    const rows = Array.from(rowMap.values());
 
     return {
       modelNames,
       rows
     };
   }, [textImportDraftRows, existingBenchmarkModalitiesMap]);
+
+  const pairValueRows = useMemo(() => {
+    return textImportDraftRows
+      .map((row, rowIndex) => {
+        const parsedPair = parsePairRawValue(row.rawValue);
+        if (!parsedPair) return null;
+
+        return {
+          rowIndex,
+          benchmarkKey: getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType),
+          benchmarkName: row.benchmarkName,
+          benchmarkType: row.benchmarkType,
+          modelName: row.modelName,
+          first: parsedPair.first,
+          second: parsedPair.second,
+          note: row.valueNote ?? parsedPair.note
+        };
+      })
+      .filter(
+        (
+          item
+        ): item is {
+          rowIndex: number;
+          benchmarkKey: string;
+          benchmarkName: string;
+          benchmarkType: string;
+          modelName: string;
+          first: string;
+          second: string;
+          note: string | null;
+        } => item !== null
+      );
+  }, [textImportDraftRows]);
+
+  const pairRowsMissingNoteCount = useMemo(
+    () => pairValueRows.filter((item) => !(item.note && item.note.trim().length > 0)).length,
+    [pairValueRows]
+  );
+
+  const starValueRows = useMemo(() => {
+    return textImportDraftRows
+      .map((row, rowIndex) => {
+        const parsedStar = parseStarSingleRawValue(row.rawValue);
+        if (!parsedStar) return null;
+
+        const supplement = (row.valueNote ?? parsedStar.note ?? "").trim();
+
+        return {
+          rowIndex,
+          benchmarkName: row.benchmarkName,
+          modelName: row.modelName,
+          value: parsedStar.value,
+          supplement
+        };
+      })
+      .filter(
+        (
+          item
+        ): item is {
+          rowIndex: number;
+          benchmarkName: string;
+          modelName: string;
+          value: string;
+          supplement: string;
+        } => item !== null
+      );
+  }, [textImportDraftRows]);
+
+  const starRowsMissingSupplementCount = useMemo(
+    () => starValueRows.filter((item) => item.supplement.length === 0).length,
+    [starValueRows]
+  );
 
   const finalizedTextImportRows = useMemo(() => {
     return textImportDraftRows
@@ -773,9 +905,25 @@ export function AdminConsole({
           return null;
         }
 
-        const rawValue = row.rawValue.trim();
-        if (!rawValue) {
+        const rawValueInput = row.rawValue.trim();
+        if (!rawValueInput) {
           return null;
+        }
+
+        const pairValue = parsePairRawValue(rawValueInput);
+        const starSingleValue = pairValue ? null : parseStarSingleRawValue(rawValueInput);
+
+        let rawValue = rawValueInput;
+        let valueNote: string | null = row.valueNote?.trim() || null;
+
+        if (pairValue) {
+          const normalizedNote = row.valueNote?.trim() || pairValue.note || null;
+          rawValue = composePairRawValue(pairValue.first, pairValue.second, normalizedNote);
+          valueNote = normalizedNote;
+        } else if (starSingleValue) {
+          const starNote = row.valueNote?.trim() || starSingleValue.note || null;
+          rawValue = composeStarRawValue(starSingleValue.value, starNote);
+          valueNote = starNote;
         }
 
         let benchmarkName = row.benchmarkName;
@@ -870,6 +1018,7 @@ export function AdminConsole({
           benchmarkName,
           benchmarkType,
           rawValue,
+          valueNote,
           source: row.source?.trim() || null
         };
       })
@@ -910,7 +1059,7 @@ export function AdminConsole({
       rawValue: row.rawValue,
       valueNum: null,
       valueNum2: null,
-      valueNote: null,
+      valueNote: row.valueNote,
       source: row.source,
       valid: row.rawValue.trim().length > 0
     }));
@@ -1001,14 +1150,17 @@ export function AdminConsole({
 
     setNoticeVisible(true);
 
+    const hideDelay = notice.type === "error" ? 30000 : 2300;
+    const clearDelay = notice.type === "error" ? 30500 : 2750;
+
     noticeHideTimerRef.current = setTimeout(() => {
       setNoticeVisible(false);
-    }, 2300);
+    }, hideDelay);
 
     noticeClearTimerRef.current = setTimeout(() => {
       setNotice(null);
       setNoticeVisible(false);
-    }, 2750);
+    }, clearDelay);
   }, [notice]);
 
   function notifySuccess(message: string) {
@@ -1219,13 +1371,85 @@ export function AdminConsole({
     setTextImportDraftRows((prev) =>
       prev.map((row, idx) =>
         idx === rowIndex
+          ? (() => {
+              const pair = parsePairRawValue(rawValue);
+              const starSingle = parseStarSingleRawValue(rawValue);
+
+              let nextValueNote: string | null;
+              if (pair) {
+                nextValueNote = pair.note ?? row.valueNote ?? null;
+              } else if (starSingle) {
+                nextValueNote = starSingle.note ?? row.valueNote ?? null;
+              } else {
+                nextValueNote = null;
+              }
+
+              return {
+                ...row,
+                rawValue,
+                valueNote: nextValueNote
+              };
+            })()
+          : row
+      )
+    );
+  }
+
+  function onUpdateTextImportDraftNote(rowIndex: number, valueNote: string) {
+    setTextImportDraftRows((prev) =>
+      prev.map((row, idx) =>
+        idx === rowIndex
           ? {
               ...row,
-              rawValue
+              valueNote: valueNote.trim().length > 0 ? valueNote.trim() : null
             }
           : row
       )
     );
+  }
+
+  function onUpdateTextImportDraftStarSupplement(rowIndex: number, supplement: string) {
+    const trimmedSupplement = supplement.trim();
+
+    setTextImportDraftRows((prev) =>
+      prev.map((row, idx) =>
+        idx === rowIndex
+          ? {
+              ...row,
+              valueNote: trimmedSupplement.length > 0 ? trimmedSupplement : null
+            }
+          : row
+      )
+    );
+  }
+
+  function onPairNoteInputBlur(rowIndex: number, benchmarkKey: string, valueNote: string) {
+    const normalizedNote = valueNote.trim();
+    if (!normalizedNote) return;
+    if (pairNoteAutoFillAppliedByBenchmark[benchmarkKey]) return;
+
+    setTextImportDraftRows((prev) =>
+      prev.map((row, idx) => {
+        if (idx === rowIndex) return row;
+
+        const rowBenchmarkKey = getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType);
+        if (rowBenchmarkKey !== benchmarkKey) return row;
+        if (!parsePairRawValue(row.rawValue)) return row;
+
+        const currentNote = row.valueNote?.trim() ?? "";
+        if (currentNote.length > 0) return row;
+
+        return {
+          ...row,
+          valueNote: normalizedNote
+        };
+      })
+    );
+
+    setPairNoteAutoFillAppliedByBenchmark((prev) => ({
+      ...prev,
+      [benchmarkKey]: true
+    }));
   }
 
   function onRenameTextImportBenchmark(benchmarkKey: string, nextBenchmarkName: string) {
@@ -1400,6 +1624,7 @@ export function AdminConsole({
       setModelMergeFilters({});
       setModelParenthesesModes({});
       setModelParenthesesCustomNames({});
+      setPairNoteAutoFillAppliedByBenchmark({});
       setTextImportPreviewMeta({
         format: result.format ?? "matrix-table",
         total: result.total ?? 0,
@@ -1414,8 +1639,7 @@ export function AdminConsole({
     }
   }
 
-  async function onImportCsv(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function executeImportCsv() {
     try {
       if (textImportDraftRows.length > 0) {
         if (finalizedTextImportRows.length === 0) {
@@ -1445,6 +1669,22 @@ export function AdminConsole({
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "文本导入失败");
     }
+  }
+
+  async function onImportCsv(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!textImportPreviewMeta) {
+      setConfirmImportWithoutPreviewOpen(true);
+      return;
+    }
+
+    await executeImportCsv();
+  }
+
+  async function onConfirmImportWithoutPreview() {
+    setConfirmImportWithoutPreviewOpen(false);
+    await executeImportCsv();
   }
 
   async function onMerge(event: FormEvent<HTMLFormElement>) {
@@ -1622,13 +1862,21 @@ export function AdminConsole({
 
   async function onSaveModelDedupeRule() {
     try {
-      await postJson("/api/admin/settings", {
+      const result = await postJson("/api/admin/settings", {
         key: "model_dedupe_rule",
         valueJson: modelDedupeRule,
         note: "模型重复识别规则",
         updatedBy: "admin"
       });
-      notifySuccess("模型重复识别规则已保存。新导入与新增模型会按此规则判重。");
+
+      const mergedCount =
+        typeof result?.rebuildResult?.mergedCount === "number" ? result.rebuildResult.mergedCount : null;
+
+      notifySuccess(
+        mergedCount !== null
+          ? `模型重复识别规则已保存，并已重算 canonical_key（合并 ${mergedCount} 条重复模型）。`
+          : "模型重复识别规则已保存。新导入与新增模型会按此规则判重。"
+      );
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "保存模型规则失败");
     }
@@ -1681,6 +1929,36 @@ export function AdminConsole({
             <div className="modal-action">
               <button type="button" className="btn" onClick={() => setSheetPickerOpen(false)}>
                 关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {confirmImportWithoutPreviewOpen ? (
+        <div
+          className="fixed inset-0 z-[170] flex items-center justify-center bg-black/45 p-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setConfirmImportWithoutPreviewOpen(false);
+            }
+          }}
+        >
+          <div className="w-full max-w-xl rounded-2xl border border-base-300/80 bg-base-100/95 p-6 shadow-2xl backdrop-blur">
+            <h3 className="text-lg font-bold">尚未预览，确认直接导入？</h3>
+            <p className="mt-2 text-sm opacity-80">
+              你还没有点击“预览导入结果”。建议先预览再导入，以检查重复嫌疑、注释和合并策略。
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setConfirmImportWithoutPreviewOpen(false)}
+              >
+                取消
+              </button>
+              <button type="button" className="btn btn-primary" onClick={onConfirmImportWithoutPreview}>
+                仍然导入
               </button>
             </div>
           </div>
@@ -1954,6 +2232,66 @@ export function AdminConsole({
                 </div>
               ) : null}
 
+              {pairValueRows.length > 0 ? (
+                <div className="mt-4 space-y-2 rounded-box border border-warning/40 bg-warning/5 p-3">
+                  <h4 className="font-semibold">成对数值注释</h4>
+                  {pairRowsMissingNoteCount > 0 ? (
+                    <div className="text-sm text-warning">
+                      检测到 {pairRowsMissingNoteCount} 条成对值暂未注释，可补充（允许留空）
+                    </div>
+                  ) : null}
+
+                  <div className="space-y-2">
+                    {pairValueRows.map((item) => (
+                      <div
+                        key={`pair-note-${item.rowIndex}-${item.modelName}-${item.benchmarkName}`}
+                        className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(280px,1fr)_minmax(220px,1fr)] lg:items-center"
+                      >
+                        <div className="text-xs opacity-80">
+                          {item.benchmarkName} / {item.modelName} ：{item.first} / {item.second}
+                        </div>
+                        <input
+                          className="input input-bordered input-sm"
+                          value={item.note ?? ""}
+                          onChange={(e) => onUpdateTextImportDraftNote(item.rowIndex, e.target.value)}
+                          onBlur={(e) => onPairNoteInputBlur(item.rowIndex, item.benchmarkKey, e.target.value)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {starValueRows.length > 0 ? (
+                <div className="mt-4 space-y-2 rounded-box border border-warning/40 bg-warning/5 p-3">
+                  <h4 className="font-semibold">星号数值注释补充</h4>
+                  {starRowsMissingSupplementCount > 0 ? (
+                    <div className="text-sm text-warning">
+                      检测到 {starRowsMissingSupplementCount} 条含 `*` 数值建议补充注释（可留空）
+                    </div>
+                  ) : null}
+
+                  <div className="space-y-2">
+                    {starValueRows.map((item) => (
+                      <div
+                        key={`star-note-${item.rowIndex}-${item.modelName}-${item.benchmarkName}`}
+                        className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(280px,1fr)_minmax(220px,1fr)] lg:items-center"
+                      >
+                        <div className="text-xs opacity-80">
+                          {item.benchmarkName} / {item.modelName} ：{item.value}*
+                        </div>
+                        <input
+                          className="input input-bordered input-sm"
+                          value={item.supplement}
+                          onChange={(e) => onUpdateTextImportDraftStarSupplement(item.rowIndex, e.target.value)}
+                          placeholder="可选补充注释：with CI / without CI"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
               {matrixPreview.rows.length > 0 ? (
                 <div className="mt-4 space-y-2">
                   <h4 className="font-semibold">矩阵预览（可编辑）</h4>
@@ -2031,6 +2369,10 @@ export function AdminConsole({
                                         matrixRow.benchmarkName,
                                         textImportDraftRows[rowIndex]?.rawValue ?? ""
                                       );
+                                const noteText =
+                                  rowIndex === undefined
+                                    ? ""
+                                    : (textImportDraftRows[rowIndex]?.valueNote?.trim() ?? "");
 
                                 return (
                                   <td key={`${matrixRow.key}-${modelName}`}>
@@ -2043,6 +2385,14 @@ export function AdminConsole({
                                           value={textImportDraftRows[rowIndex]?.rawValue ?? ""}
                                           onChange={(e) => onUpdateTextImportDraftValue(rowIndex, e.target.value)}
                                         />
+                                        {noteText ? (
+                                          <span
+                                            className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
+                                            title={noteText}
+                                          >
+                                            ?
+                                          </span>
+                                        ) : null}
                                         {normalizedHint ? (
                                           <div className="text-[10px] text-warning">入库校对→{normalizedHint}</div>
                                         ) : null}
@@ -2365,25 +2715,38 @@ export function AdminConsole({
                         </tr>
                       </thead>
                       <tbody>
-                        {visibleResolvedTextImportPreviewRows.map((row, idx) => (
-                          <tr key={`${row.rowNumber}-${row.modelName}-${row.benchmarkName}-${idx}`}>
-                            <td>{row.rowNumber}</td>
-                            <td>{row.providerName}</td>
-                            <td>{row.modelName}</td>
-                            <td>{row.benchmarkName}</td>
-                            <td>{row.benchmarkType}</td>
-                            <td>{row.rawValue}</td>
-                            <td>{row.valueNum ?? "-"}</td>
-                            <td>{row.valueNum2 ?? "-"}</td>
-                            <td>
-                              {getOmniDocBenchNormalizeHint(row.benchmarkName, row.rawValue)
-                                ? `入库校对 → ${getOmniDocBenchNormalizeHint(row.benchmarkName, row.rawValue)}`
-                                : row.valueNote ?? "-"}
-                            </td>
-                            <td>{row.source ?? "-"}</td>
-                            <td>{row.valid ? "✅" : "⚠️"}</td>
-                          </tr>
-                        ))}
+                        {visibleResolvedTextImportPreviewRows.map((row, idx) => {
+                          const noteText = row.valueNote?.trim() ?? "";
+                          const omniHint = getOmniDocBenchNormalizeHint(row.benchmarkName, row.rawValue);
+
+                          return (
+                            <tr key={`${row.rowNumber}-${row.modelName}-${row.benchmarkName}-${idx}`}>
+                              <td>{row.rowNumber}</td>
+                              <td>{row.providerName}</td>
+                              <td>{row.modelName}</td>
+                              <td>{row.benchmarkName}</td>
+                              <td>{row.benchmarkType}</td>
+                              <td>
+                                <span className="inline-flex items-center gap-1">
+                                  <span>{row.rawValue}</span>
+                                  {noteText ? (
+                                    <span
+                                      className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
+                                      title={noteText}
+                                    >
+                                      ?
+                                    </span>
+                                  ) : null}
+                                </span>
+                              </td>
+                              <td>{row.valueNum ?? "-"}</td>
+                              <td>{row.valueNum2 ?? "-"}</td>
+                              <td>{omniHint ? `入库校对 → ${omniHint}` : noteText || "-"}</td>
+                              <td>{row.source ?? "-"}</td>
+                              <td>{row.valid ? "✅" : "⚠️"}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

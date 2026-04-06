@@ -17,7 +17,7 @@ export const DEFAULT_MODEL_DEDUPE_RULE: ModelDedupeRule = {
   lowercase: true,
   removeHyphen: true,
   removeSpace: true,
-  removeDot: true
+  removeDot: false
 };
 
 export function normalizeModelDedupeRule(raw: unknown): ModelDedupeRule {

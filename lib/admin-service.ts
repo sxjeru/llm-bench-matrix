@@ -207,6 +207,81 @@ async function getModelDedupeRule() {
   return normalizeModelDedupeRule(setting?.valueJson);
 }
 
+export async function rebuildModelCanonicalKeysByRule(rawRule: unknown) {
+  const dedupeRule = normalizeModelDedupeRule(rawRule);
+  const allModels = await db
+    .select({
+      id: models.id,
+      modelName: models.modelName,
+      mergedIntoModelId: models.mergedIntoModelId
+    })
+    .from(models)
+    .orderBy(models.id);
+
+  const groupMap = new Map<string, Array<{ id: number; modelName: string; mergedIntoModelId: number | null }>>();
+
+  allModels.forEach((model) => {
+    const canonicalKey = buildModelCanonicalKey(model.modelName, dedupeRule);
+    if (!groupMap.has(canonicalKey)) {
+      groupMap.set(canonicalKey, []);
+    }
+    groupMap.get(canonicalKey)?.push(model);
+  });
+
+  const tempSuffix = Date.now();
+  let mergedCount = 0;
+
+  await db.transaction(async (tx: any) => {
+    for (const model of allModels) {
+      await tx
+        .update(models)
+        .set({ canonicalKey: `tmp-model-${model.id}-${tempSuffix}` })
+        .where(eq(models.id, model.id));
+    }
+
+    for (const [canonicalKey, groupedModels] of groupMap.entries()) {
+      const keeper = groupedModels.find((item) => item.mergedIntoModelId === null) ?? groupedModels[0];
+      if (!keeper) continue;
+
+      await tx
+        .update(models)
+        .set({ canonicalKey, mergedIntoModelId: null })
+        .where(eq(models.id, keeper.id));
+
+      for (const duplicate of groupedModels) {
+        if (duplicate.id === keeper.id) continue;
+
+        await tx
+          .update(benchmarkValues)
+          .set({ modelId: keeper.id })
+          .where(eq(benchmarkValues.modelId, duplicate.id));
+
+        await tx
+          .update(models)
+          .set({ mergedIntoModelId: keeper.id })
+          .where(eq(models.mergedIntoModelId, duplicate.id));
+
+        await tx
+          .update(models)
+          .set({
+            canonicalKey: `${canonicalKey}#merged-${duplicate.id}`,
+            mergedIntoModelId: keeper.id
+          })
+          .where(eq(models.id, duplicate.id));
+
+        mergedCount += 1;
+      }
+    }
+  });
+
+  return {
+    ok: true,
+    totalModels: allModels.length,
+    canonicalGroups: groupMap.size,
+    mergedCount
+  };
+}
+
 export async function ensureProvider(name: string) {
   const cleanName = name.trim();
   if (!cleanName) {
@@ -498,56 +573,63 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
   const valueRows: Array<typeof benchmarkValues.$inferInsert> = [];
 
   for (const row of rows) {
-    const providerName = row.providerName.trim() || "Unknown";
-    const providerKey = toProviderSlug(providerName);
-    let provider = providerCache.get(providerKey);
-    if (!provider) {
-      provider = await ensureProvider(providerName);
-      providerCache.set(providerKey, provider);
-    }
+    try {
+      const providerName = row.providerName.trim() || "Unknown";
+      const providerKey = toProviderSlug(providerName);
+      let provider = providerCache.get(providerKey);
+      if (!provider) {
+        provider = await ensureProvider(providerName);
+        providerCache.set(providerKey, provider);
+      }
 
-    const modelCanonicalKey = buildModelCanonicalKey(row.modelName, dedupeRule);
-    let model = modelCache.get(modelCanonicalKey);
-    if (!model) {
-      model = await ensureModelByProviderId(
-        {
-          providerId: provider.id,
-          modelName: row.modelName,
-          modelAlias: row.modelAlias,
-          sourceModelId: row.sourceModelId
-        },
-        { dedupeRule }
-      );
-      modelCache.set(modelCanonicalKey, model);
-    }
+      const modelCanonicalKey = buildModelCanonicalKey(row.modelName, dedupeRule);
+      let model = modelCache.get(modelCanonicalKey);
+      if (!model) {
+        model = await ensureModelByProviderId(
+          {
+            providerId: provider.id,
+            modelName: row.modelName,
+            modelAlias: row.modelAlias,
+            sourceModelId: row.sourceModelId
+          },
+          { dedupeRule }
+        );
+        modelCache.set(modelCanonicalKey, model);
+      }
 
-    const benchmarkType = row.benchmarkType.trim() || "general";
-    const benchmarkCanonicalKey = buildBenchmarkCanonicalKey(row.benchmarkName, benchmarkType);
-    let benchmark = benchmarkCache.get(benchmarkCanonicalKey);
-    if (!benchmark) {
-      benchmark = await ensureBenchmark({
-        benchmarkName: row.benchmarkName,
-        benchmarkType,
-        unit: row.unit,
-        higherIsBetter: row.higherIsBetter,
-        modalities: row.modalities,
-        sourceBenchmarkId: row.sourceBenchmarkId
+      const benchmarkType = row.benchmarkType.trim() || "general";
+      const benchmarkCanonicalKey = buildBenchmarkCanonicalKey(row.benchmarkName, benchmarkType);
+      let benchmark = benchmarkCache.get(benchmarkCanonicalKey);
+      if (!benchmark) {
+        benchmark = await ensureBenchmark({
+          benchmarkName: row.benchmarkName,
+          benchmarkType,
+          unit: row.unit,
+          higherIsBetter: row.higherIsBetter,
+          modalities: row.modalities,
+          sourceBenchmarkId: row.sourceBenchmarkId
+        });
+        benchmarkCache.set(benchmarkCanonicalKey, benchmark);
+      }
+
+      const parsedValue = parseBenchmarkValue(row.valueRaw);
+      const normalizedValue = normalizeStoredBenchmarkValue(benchmark.benchmarkName, parsedValue);
+      valueRows.push({
+        modelId: model.id,
+        benchmarkId: benchmark.id,
+        benchTime: row.benchTime,
+        valueRaw: normalizedValue.valueRaw,
+        valueNum: normalizedValue.valueNum !== null ? String(normalizedValue.valueNum) : null,
+        valueNum2: normalizedValue.valueNum2 !== null ? String(normalizedValue.valueNum2) : null,
+        valueNote: normalizedValue.valueNote,
+        source: row.source ?? null
       });
-      benchmarkCache.set(benchmarkCanonicalKey, benchmark);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown import error";
+      throw new Error(
+        `导入失败：row=${row.rowNumber}，model=${row.modelName}，benchmark=${row.benchmarkName}，raw=${row.valueRaw}，原因=${message}`
+      );
     }
-
-    const parsedValue = parseBenchmarkValue(row.valueRaw);
-    const normalizedValue = normalizeStoredBenchmarkValue(benchmark.benchmarkName, parsedValue);
-    valueRows.push({
-      modelId: model.id,
-      benchmarkId: benchmark.id,
-      benchTime: row.benchTime,
-      valueRaw: normalizedValue.valueRaw,
-      valueNum: normalizedValue.valueNum !== null ? String(normalizedValue.valueNum) : null,
-      valueNum2: normalizedValue.valueNum2 !== null ? String(normalizedValue.valueNum2) : null,
-      valueNote: normalizedValue.valueNote,
-      source: row.source ?? null
-    });
   }
 
   const batchSize = 500;

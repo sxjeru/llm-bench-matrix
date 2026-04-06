@@ -42,6 +42,7 @@ export default async function HomePage() {
           benchTime: row.benchTime,
           valueRaw: row.valueRaw,
           valueNum: row.valueNum,
+          valueNote: row.valueNote,
           source: row.source
         }))}
       />

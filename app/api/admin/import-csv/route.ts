@@ -19,6 +19,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const result = await importBenchmarkCsv(parsed.data.csvText, parsed.data.source);
-  return NextResponse.json(result);
+  try {
+    const result = await importBenchmarkCsv(parsed.data.csvText, parsed.data.source);
+    return NextResponse.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "文本导入失败";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

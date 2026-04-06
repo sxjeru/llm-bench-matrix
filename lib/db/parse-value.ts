@@ -10,6 +10,27 @@ function toNumber(input: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizeSingleTailToNote(tail: string): string | null {
+  const normalized = tail.trim();
+  if (!normalized) return null;
+
+  if (normalized === "*") {
+    return null;
+  }
+
+  if (normalized.startsWith("*://")) {
+    const note = normalized.slice(4).trim();
+    return note.length > 0 ? note : null;
+  }
+
+  if (normalized.startsWith("*")) {
+    const note = normalized.slice(1).trim();
+    return note.length > 0 ? note : null;
+  }
+
+  return normalized;
+}
+
 export function parseBenchmarkValue(rawInput: string): ParsedBenchmarkValue {
   const raw = rawInput.trim();
 
@@ -33,14 +54,14 @@ export function parseBenchmarkValue(rawInput: string): ParsedBenchmarkValue {
       valueRaw: raw,
       valueNum: toNumber(first),
       valueNum2: toNumber(second),
-      valueNote: note || "/"
+      valueNote: note || null
     };
   }
 
   const singleMatch = raw.match(/^([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/);
   if (singleMatch) {
     const [, value, tail] = singleMatch;
-    const note = tail.trim();
+    const note = normalizeSingleTailToNote(tail);
 
     return {
       valueRaw: raw,
