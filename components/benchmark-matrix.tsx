@@ -93,6 +93,7 @@ const SOURCE_EMPTY = "__EMPTY__";
 const MODALITY_OPTIONS = ["Text", "Vision", "Audio", "Video", "Multimodal"] as const;
 const SHOW_CATEGORY_STORAGE_KEY = "benchmark-matrix:show-category";
 const SHOW_DUPLICATE_STORAGE_KEY = "benchmark-matrix:show-duplicate";
+const MODEL_SELECTION_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:model-selection-by-source";
 const EXPORT_PRESET_STORAGE_KEY = "benchmark-matrix:export-preset";
 const SOURCE_MATCH_FRAME_COLOR = "rgba(93, 167, 255, 0.42)";
 const WEBP_EXPORT_QUALITY = 0.94;
@@ -547,6 +548,7 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const showCategoryLoadedRef = useRef(false);
   const showDuplicateLoadedRef = useRef(false);
+  const modelSelectionBySourceRef = useRef<Record<string, string[]>>({});
   const exportPresetLoadedRef = useRef(false);
   const pathname = usePathname();
   const router = useRouter();
@@ -554,6 +556,7 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showCategory, setShowCategory] = useState(true);
   const [showDuplicateRows, setShowDuplicateRows] = useState(false);
+  const [isModelSelectionLoaded, setIsModelSelectionLoaded] = useState(false);
   const [exportPreset, setExportPreset] = useState<ExportPresetKey>(DEFAULT_EXPORT_PRESET);
   const [supportsWebpExport, setSupportsWebpExport] = useState(true);
   const [supportsAvifExport, setSupportsAvifExport] = useState(false);
@@ -593,6 +596,7 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
   }, [rows, allSourceOptions]);
 
   const [activeSource, setActiveSource] = useState(SOURCE_ALL);
+  const activeSourceRef = useRef(SOURCE_ALL);
 
   useEffect(() => {
     const sourceFromUrl = searchParams.get("source");
@@ -604,6 +608,38 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
     const isKnown = sourceOptions.some((item) => item.key === sourceFromUrl);
     setActiveSource(isKnown ? sourceFromUrl : SOURCE_ALL);
   }, [searchParams, sourceOptions]);
+
+  useEffect(() => {
+    activeSourceRef.current = activeSource;
+  }, [activeSource]);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(MODEL_SELECTION_BY_SOURCE_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as Record<string, unknown>;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          const normalizedBySource: Record<string, string[]> = {};
+
+          Object.entries(parsed).forEach(([sourceKey, value]) => {
+            if (!Array.isArray(value)) return;
+
+            const normalized = Array.from(
+              new Set(value.filter((item): item is string => typeof item === "string"))
+            ).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+
+            normalizedBySource[sourceKey] = normalized;
+          });
+
+          modelSelectionBySourceRef.current = normalizedBySource;
+        }
+      }
+    } catch {
+      // ignore storage access errors gracefully
+    }
+
+    setIsModelSelectionLoaded(true);
+  }, []);
 
   useEffect(() => {
     try {
@@ -791,16 +827,53 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
   const [selectedModels, setSelectedModels] = useState<string[]>(allModelNames);
 
   useEffect(() => {
-    setSelectedModels((prev) => {
-      if (prev.length === 0) {
-        return allModelNames;
-      }
+    if (!isModelSelectionLoaded) return;
 
-      const allSet = new Set(allModelNames);
-      const kept = prev.filter((model) => allSet.has(model));
-      return kept.length > 0 ? kept : allModelNames;
+    const allModelSet = new Set(allModelNames);
+    const savedForSource = modelSelectionBySourceRef.current[activeSource];
+    let nextSelected: string[];
+
+    if (!savedForSource) {
+      nextSelected = [...allModelNames];
+    } else if (savedForSource.length === 0) {
+      nextSelected = [];
+    } else {
+      const kept = savedForSource.filter((modelName) => allModelSet.has(modelName));
+      nextSelected = kept.length > 0 ? kept : [...allModelNames];
+    }
+
+    const normalized = Array.from(new Set(nextSelected)).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+
+    setSelectedModels((prev) => {
+      if (prev.length === normalized.length && prev.every((item, index) => item === normalized[index])) {
+        return prev;
+      }
+      return normalized;
     });
-  }, [allModelNames]);
+  }, [activeSource, allModelNames, isModelSelectionLoaded]);
+
+  useEffect(() => {
+    if (!isModelSelectionLoaded) return;
+
+    const sourceKey = activeSourceRef.current;
+    const normalized = Array.from(new Set(selectedModels)).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+    const previous = modelSelectionBySourceRef.current[sourceKey] ?? [];
+
+    if (previous.length === normalized.length && previous.every((item, index) => item === normalized[index])) {
+      return;
+    }
+
+    modelSelectionBySourceRef.current = {
+      ...modelSelectionBySourceRef.current,
+      [sourceKey]: normalized
+    };
+
+    try {
+      window.localStorage.setItem(MODEL_SELECTION_BY_SOURCE_STORAGE_KEY, JSON.stringify(modelSelectionBySourceRef.current));
+    } catch {
+      // ignore storage access errors gracefully
+    }
+  }, [selectedModels, isModelSelectionLoaded]);
 
   useEffect(() => {
     const listener = () => {

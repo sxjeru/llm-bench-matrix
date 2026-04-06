@@ -1,0 +1,108 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, test, vi } from "vitest";
+
+import { BenchmarkMatrix } from "@/components/benchmark-matrix";
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/",
+  useRouter: () => ({
+    replace: vi.fn()
+  }),
+  useSearchParams: () => new URLSearchParams()
+}));
+
+const rows = [
+  {
+    providerName: "OpenAI",
+    modelName: "Model A",
+    benchmarkName: "Bench-1",
+    benchmarkType: "General",
+    benchmarkCanonicalKey: "bench-1:general",
+    benchTime: "2026-04-06T00:00:00.000Z",
+    valueRaw: "70",
+    valueNum: 70,
+    valueNote: null,
+    source: "text:S1"
+  },
+  {
+    providerName: "OpenAI",
+    modelName: "Model B",
+    benchmarkName: "Bench-1",
+    benchmarkType: "General",
+    benchmarkCanonicalKey: "bench-1:general",
+    benchTime: "2026-04-06T00:00:00.000Z",
+    valueRaw: "71",
+    valueNum: 71,
+    valueNote: null,
+    source: "text:S1"
+  },
+  {
+    providerName: "OpenAI",
+    modelName: "Model C",
+    benchmarkName: "Bench-1",
+    benchmarkType: "General",
+    benchmarkCanonicalKey: "bench-1:general",
+    benchTime: "2026-04-06T00:00:00.000Z",
+    valueRaw: "72",
+    valueNum: 72,
+    valueNote: null,
+    source: "text:S2"
+  }
+] as const;
+
+function renderMatrix() {
+  return render(
+    <BenchmarkMatrix
+      sourceOptions={["text:S1", "text:S2"]}
+      rows={[...rows]}
+    />
+  );
+}
+
+describe("BenchmarkMatrix 模型筛选按页签记忆", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  test("不同页签默认全选，并独立记忆各自模型筛选", () => {
+    renderMatrix();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开模型筛选" }));
+    expect(screen.getByText(/已选模型/)).toHaveTextContent("已选模型 3/3");
+
+    fireEvent.click(screen.getByLabelText("Model C"));
+    expect(screen.getByText(/已选模型/)).toHaveTextContent("已选模型 2/3");
+
+    fireEvent.click(screen.getByRole("tab", { name: "S1" }));
+    expect(screen.getByText(/已选模型/)).toHaveTextContent("已选模型 3/3");
+
+    fireEvent.click(screen.getByLabelText("Model B"));
+    expect(screen.getByText(/已选模型/)).toHaveTextContent("已选模型 2/3");
+
+    fireEvent.click(screen.getByRole("tab", { name: "S2" }));
+    expect(screen.getByText(/已选模型/)).toHaveTextContent("已选模型 3/3");
+
+    fireEvent.click(screen.getByRole("tab", { name: "S1" }));
+    expect(screen.getByText(/已选模型/)).toHaveTextContent("已选模型 2/3");
+
+    fireEvent.click(screen.getByRole("tab", { name: "全部" }));
+    expect(screen.getByText(/已选模型/)).toHaveTextContent("已选模型 2/3");
+  });
+
+  test("刷新后可从浏览器恢复页签对应的模型筛选", () => {
+    const first = renderMatrix();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开模型筛选" }));
+    fireEvent.click(screen.getByRole("tab", { name: "S1" }));
+    fireEvent.click(screen.getByLabelText("Model A"));
+    expect(screen.getByText(/已选模型/)).toHaveTextContent("已选模型 2/3");
+
+    first.unmount();
+
+    renderMatrix();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开模型筛选" }));
+    fireEvent.click(screen.getByRole("tab", { name: "S1" }));
+    expect(screen.getByText(/已选模型/)).toHaveTextContent("已选模型 2/3");
+  });
+});
