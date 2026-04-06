@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 
@@ -123,11 +123,7 @@ export type MergedEntityRecord = {
 };
 
 export async function getMergedEntityRecords(): Promise<MergedEntityRecord[]> {
-  const [allModels, allBenchmarks, mergedModels, mergedBenchmarks] = await Promise.all([
-    db.select({ id: models.id, modelName: models.modelName }).from(models),
-    db
-      .select({ id: benchmarks.id, benchmarkName: benchmarks.benchmarkName, benchmarkType: benchmarks.benchmarkType })
-      .from(benchmarks),
+  const [mergedModels, mergedBenchmarks] = await Promise.all([
     db
       .select({ sourceId: models.id, sourceName: models.modelName, targetId: models.mergedIntoModelId })
       .from(models)
@@ -138,9 +134,28 @@ export async function getMergedEntityRecords(): Promise<MergedEntityRecord[]> {
       .where(isNotNull(benchmarks.mergedIntoBenchmarkId))
   ]);
 
-  const modelNameById = new Map(allModels.map((item) => [item.id, item.modelName]));
+  const modelTargetIds = Array.from(
+    new Set(mergedModels.map((item) => item.targetId).filter((id): id is number => id !== null))
+  );
+  const benchmarkTargetIds = Array.from(
+    new Set(mergedBenchmarks.map((item) => item.targetId).filter((id): id is number => id !== null))
+  );
+
+  const [targetModels, targetBenchmarks] = await Promise.all([
+    modelTargetIds.length > 0
+      ? db.select({ id: models.id, modelName: models.modelName }).from(models).where(inArray(models.id, modelTargetIds))
+      : Promise.resolve([]),
+    benchmarkTargetIds.length > 0
+      ? db
+          .select({ id: benchmarks.id, benchmarkName: benchmarks.benchmarkName, benchmarkType: benchmarks.benchmarkType })
+          .from(benchmarks)
+          .where(inArray(benchmarks.id, benchmarkTargetIds))
+      : Promise.resolve([])
+  ]);
+
+  const modelNameById = new Map(targetModels.map((item) => [item.id, item.modelName]));
   const benchmarkNameById = new Map(
-    allBenchmarks.map((item) => [item.id, `${item.benchmarkName} (${item.benchmarkType})`])
+    targetBenchmarks.map((item) => [item.id, `${item.benchmarkName} (${item.benchmarkType})`])
   );
 
   const modelRecords: MergedEntityRecord[] = mergedModels

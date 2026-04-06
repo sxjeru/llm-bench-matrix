@@ -6,3 +6,5 @@ dist
 .env.local
 *.log
 .DS_Store
+
+codealike.json

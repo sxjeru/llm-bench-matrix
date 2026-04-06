@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
+  createAdminSessionToken,
   checkLoginAllowed,
   getLoginClientKey,
   persistAdminPassword,
@@ -37,7 +38,7 @@ export async function POST(request: Request) {
   }
 
   const result = await verifyLoginPassword(parsed.data.password);
-  if (!result.ok || !result.sessionToken) {
+  if (!result.ok) {
     const failure = await registerLoginFailure(clientKey);
 
     if (failure.ipBlocked) {
@@ -72,10 +73,11 @@ export async function POST(request: Request) {
 
   await resetLoginFailures(clientKey);
 
-  let sessionToken = result.sessionToken;
   if (result.source === "env" && !result.defaultPasswordInUse) {
-    sessionToken = await persistAdminPassword(parsed.data.password, "admin-auto-bootstrap");
+    await persistAdminPassword(parsed.data.password, "admin-auto-bootstrap");
   }
+
+  const sessionToken = await createAdminSessionToken();
 
   const response = NextResponse.json({
     ok: true,

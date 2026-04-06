@@ -3,6 +3,12 @@ import { z } from "zod";
 import { requireAdmin } from "../../../../lib/admin-auth";
 import { getSettings, saveSetting } from "../../../../lib/db/queries";
 
+const SENSITIVE_SETTING_KEYS = new Set([
+  "admin_password_hash",
+  "admin_login_guard",
+  "admin_sessions"
+]);
+
 const schema = z.object({
   key: z.string().min(1),
   valueJson: z.unknown(),
@@ -15,7 +21,11 @@ export async function GET(request: Request) {
   if (denied) return denied;
 
   const settings = await getSettings();
-  return NextResponse.json({ settings });
+  const safeSettings = Object.fromEntries(
+    Object.entries(settings).filter(([key]) => !SENSITIVE_SETTING_KEYS.has(key))
+  );
+
+  return NextResponse.json({ settings: safeSettings });
 }
 
 export async function POST(request: Request) {

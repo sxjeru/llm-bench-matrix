@@ -68,7 +68,6 @@ const SOURCE_ALL = "__ALL__";
 const SOURCE_EMPTY = "__EMPTY__";
 const SHOW_CATEGORY_STORAGE_KEY = "benchmark-matrix:show-category";
 const EXPORT_PRESET_STORAGE_KEY = "benchmark-matrix:export-preset";
-const HTML2CANVAS_PRO_CDN = "https://cdn.jsdelivr.net/npm/html2canvas-pro@2.0.2/dist/html2canvas-pro.min.js";
 const SOURCE_MATCH_FRAME_COLOR = "rgba(93, 167, 255, 0.42)";
 const WEBP_EXPORT_QUALITY = 0.94;
 const AVIF_EXPORT_QUALITY = 0.9;
@@ -150,13 +149,6 @@ function mimeTypeToFormat(mimeType: string): ExportFormat {
 }
 
 type Html2CanvasFn = (element: HTMLElement, options?: Record<string, unknown>) => Promise<HTMLCanvasElement>;
-
-declare global {
-  interface Window {
-    html2canvas?: Html2CanvasFn;
-    __html2canvasProLoaded__?: boolean;
-  }
-}
 
 let html2canvasLoaderPromise: Promise<Html2CanvasFn> | null = null;
 
@@ -258,33 +250,22 @@ async function loadHtml2Canvas(): Promise<Html2CanvasFn> {
     throw new Error("当前环境不支持图片导出");
   }
 
-  if (window.html2canvas && window.__html2canvasProLoaded__) {
-    return window.html2canvas;
-  }
-
   if (html2canvasLoaderPromise) {
     return html2canvasLoaderPromise;
   }
 
-  html2canvasLoaderPromise = new Promise<Html2CanvasFn>((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = HTML2CANVAS_PRO_CDN;
-    script.async = true;
-    script.onload = () => {
-      if (window.html2canvas) {
-        window.__html2canvasProLoaded__ = true;
-        resolve(window.html2canvas);
-      } else {
-        html2canvasLoaderPromise = null;
-        reject(new Error("截图引擎加载失败"));
+  html2canvasLoaderPromise = import("html2canvas-pro")
+    .then((module) => {
+      const html2canvas = module.default as Html2CanvasFn | undefined;
+      if (typeof html2canvas !== "function") {
+        throw new Error("截图引擎加载失败");
       }
-    };
-    script.onerror = () => {
+      return html2canvas;
+    })
+    .catch((error) => {
       html2canvasLoaderPromise = null;
-      reject(new Error("无法加载截图引擎，请检查网络"));
-    };
-    document.head.appendChild(script);
-  });
+      throw error instanceof Error ? error : new Error("无法加载截图引擎");
+    });
 
   return html2canvasLoaderPromise;
 }

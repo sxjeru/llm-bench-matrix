@@ -195,7 +195,7 @@ export async function ensureModelByProviderId(input: {
   modelName: string;
   modelAlias?: string | null;
   sourceModelId?: string | null;
-}) {
+}, options?: { dedupeRule?: ReturnType<typeof normalizeModelDedupeRule> }) {
   const cleanName = input.modelName.trim();
   if (!cleanName) {
     throw new Error("modelName is required");
@@ -207,7 +207,7 @@ export async function ensureModelByProviderId(input: {
     throw new Error(`provider not found: ${input.providerId}`);
   }
 
-  const rule = await getModelDedupeRule();
+  const rule = options?.dedupeRule ?? await getModelDedupeRule();
   const canonicalKey = buildModelCanonicalKey(cleanName, rule);
   const [existing] = await db.select().from(models).where(eq(models.canonicalKey, canonicalKey)).limit(1);
 
@@ -391,43 +391,101 @@ export async function importParsedRecords(
     source?: string | null;
   }
 ) {
-  let inserted = 0;
-
-  for (const record of records) {
-    if (!record.valid) continue;
-
-    const providerName = inferProviderNameFromModel(record.modelName);
-    const provider = await ensureProvider(providerName);
-
-    const model = await ensureModelByProviderId({
-      providerId: provider.id,
-      modelName: record.modelName
-    });
-
-    const benchmarkType = (record.category || "general").trim() || "general";
-    const benchmark = await ensureBenchmark({
+  const rows: NormalizedTextImportRow[] = records
+    .filter((record) => record.valid)
+    .map((record, index) => ({
+      rowNumber: record.rowNumber ?? index + 1,
+      providerName: inferProviderNameFromModel(record.modelName),
+      modelName: record.modelName,
       benchmarkName: record.benchmarkName,
-      benchmarkType,
+      benchmarkType: (record.category || "general").trim() || "general",
+      valueRaw: record.rawValue,
+      benchTime: options?.benchTime ?? new Date(),
       unit: "score",
       higherIsBetter: true,
-      modalities: inferModalitiesFromCategory(record.category)
-    });
+      modalities: inferModalitiesFromCategory(record.category),
+      source: options?.source ?? "xlsm-import",
+      modelAlias: null,
+      sourceModelId: null,
+      sourceBenchmarkId: null
+    }));
 
-    await createBenchmarkValue({
-      modelId: model.id,
-      benchmarkId: benchmark.id,
-      benchTime: options?.benchTime ?? new Date(),
-      valueRaw: record.rawValue,
-      source: options?.source ?? "xlsm-import"
-    });
-
-    inserted += 1;
-  }
+  const { inserted } = await importNormalizedRows(rows);
 
   return {
     total: records.length,
     inserted
   };
+}
+
+async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
+  const dedupeRule = await getModelDedupeRule();
+
+  const providerCache = new Map<string, Awaited<ReturnType<typeof ensureProvider>>>();
+  const modelCache = new Map<string, Awaited<ReturnType<typeof ensureModelByProviderId>>>();
+  const benchmarkCache = new Map<string, Awaited<ReturnType<typeof ensureBenchmark>>>();
+  const valueRows: Array<typeof benchmarkValues.$inferInsert> = [];
+
+  for (const row of rows) {
+    const providerName = row.providerName.trim() || "Unknown";
+    const providerKey = toProviderSlug(providerName);
+    let provider = providerCache.get(providerKey);
+    if (!provider) {
+      provider = await ensureProvider(providerName);
+      providerCache.set(providerKey, provider);
+    }
+
+    const modelCanonicalKey = buildModelCanonicalKey(row.modelName, dedupeRule);
+    let model = modelCache.get(modelCanonicalKey);
+    if (!model) {
+      model = await ensureModelByProviderId(
+        {
+          providerId: provider.id,
+          modelName: row.modelName,
+          modelAlias: row.modelAlias,
+          sourceModelId: row.sourceModelId
+        },
+        { dedupeRule }
+      );
+      modelCache.set(modelCanonicalKey, model);
+    }
+
+    const benchmarkType = row.benchmarkType.trim() || "general";
+    const benchmarkCanonicalKey = buildBenchmarkCanonicalKey(row.benchmarkName, benchmarkType);
+    let benchmark = benchmarkCache.get(benchmarkCanonicalKey);
+    if (!benchmark) {
+      benchmark = await ensureBenchmark({
+        benchmarkName: row.benchmarkName,
+        benchmarkType,
+        unit: row.unit,
+        higherIsBetter: row.higherIsBetter,
+        modalities: row.modalities,
+        sourceBenchmarkId: row.sourceBenchmarkId
+      });
+      benchmarkCache.set(benchmarkCanonicalKey, benchmark);
+    }
+
+    const parsedValue = parseBenchmarkValue(row.valueRaw);
+    valueRows.push({
+      modelId: model.id,
+      benchmarkId: benchmark.id,
+      benchTime: row.benchTime,
+      valueRaw: parsedValue.valueRaw,
+      valueNum: parsedValue.valueNum !== null ? String(parsedValue.valueNum) : null,
+      valueNum2: parsedValue.valueNum2 !== null ? String(parsedValue.valueNum2) : null,
+      valueNote: parsedValue.valueNote,
+      source: row.source ?? null
+    });
+  }
+
+  const batchSize = 500;
+  for (let index = 0; index < valueRows.length; index += batchSize) {
+    const chunk = valueRows.slice(index, index + batchSize);
+    if (chunk.length === 0) continue;
+    await db.insert(benchmarkValues).values(chunk);
+  }
+
+  return { inserted: valueRows.length };
 }
 
 function parseStructuredCsvRows(inputText: string, defaultSource: string | null): {
@@ -611,36 +669,7 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
 
 export async function importBenchmarkCsv(inputText: string, sourceInput?: string | null) {
   const parsed = parseBenchmarkTextRows(inputText, sourceInput);
-  let inserted = 0;
-
-  for (const row of parsed.rows) {
-    const provider = await ensureProvider(row.providerName);
-    const model = await ensureModelByProviderId({
-      providerId: provider.id,
-      modelName: row.modelName,
-      modelAlias: row.modelAlias,
-      sourceModelId: row.sourceModelId
-    });
-
-    const benchmark = await ensureBenchmark({
-      benchmarkName: row.benchmarkName,
-      benchmarkType: row.benchmarkType,
-      unit: row.unit,
-      higherIsBetter: row.higherIsBetter,
-      modalities: row.modalities,
-      sourceBenchmarkId: row.sourceBenchmarkId
-    });
-
-    await createBenchmarkValue({
-      modelId: model.id,
-      benchmarkId: benchmark.id,
-      benchTime: row.benchTime,
-      valueRaw: row.valueRaw,
-      source: row.source
-    });
-
-    inserted += 1;
-  }
+  const { inserted } = await importNormalizedRows(parsed.rows);
 
   return {
     format: parsed.format,

@@ -1,14 +1,21 @@
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { ADMIN_COOKIE_NAME, ADMIN_PASSWORD_SETTING_KEY, DEFAULT_ADMIN_PASSWORD_FALLBACK } from "@/lib/admin-constants";
+import {
+  ADMIN_COOKIE_NAME,
+  ADMIN_PASSWORD_SETTING_KEY,
+  ADMIN_SESSION_MAX_AGE_SECONDS,
+  DEFAULT_ADMIN_PASSWORD_FALLBACK
+} from "@/lib/admin-constants";
 import { db } from "@/lib/db/client";
 import { settings } from "@/lib/db/schema";
 
 const LOGIN_GUARD_KEY = "admin_login_guard";
+const ADMIN_SESSIONS_KEY = "admin_sessions";
 const LOGIN_FAIL_LIMIT = 5;
 const BASE_LOCK_SECONDS = 5 * 60;
 const MAX_LOCK_SECONDS = 60 * 60;
 const LOGIN_GUARD_MAX_CLIENTS = 200;
+const ADMIN_SESSION_MAX_COUNT = 500;
 
 type PasswordSource = "db" | "env";
 
@@ -28,6 +35,13 @@ type LoginGuardEntry = {
 
 type LoginGuardMap = Record<string, LoginGuardEntry>;
 
+type AdminSessionEntry = {
+  expiresAt: number;
+  createdAt: number;
+};
+
+type AdminSessionMap = Record<string, AdminSessionEntry>;
+
 function getFallbackPassword(): string {
   return process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD_FALLBACK;
 }
@@ -38,7 +52,12 @@ function parseCookieHeader(cookieHeader: string | null): Record<string, string> 
   return cookieHeader.split(";").reduce<Record<string, string>>((acc, pair) => {
     const [rawKey, ...rawValue] = pair.trim().split("=");
     if (!rawKey) return acc;
-    acc[rawKey] = decodeURIComponent(rawValue.join("="));
+    const joined = rawValue.join("=");
+    try {
+      acc[rawKey] = decodeURIComponent(joined);
+    } catch {
+      acc[rawKey] = joined;
+    }
     return acc;
   }, {});
 }
@@ -93,12 +112,44 @@ function parseLoginGuard(valueJson: unknown): LoginGuardMap {
   return guard;
 }
 
+function parseAdminSessionMap(valueJson: unknown): AdminSessionMap {
+  if (!valueJson || typeof valueJson !== "object") return {};
+
+  const sessions: AdminSessionMap = {};
+  for (const [key, value] of Object.entries(valueJson as Record<string, unknown>)) {
+    if (!value || typeof value !== "object") continue;
+
+    const row = value as Record<string, unknown>;
+    const expiresAt = Number(row.expiresAt ?? 0);
+    const createdAt = Number(row.createdAt ?? Date.now());
+
+    if (!Number.isFinite(expiresAt) || expiresAt <= 0) continue;
+
+    sessions[key] = {
+      expiresAt,
+      createdAt: Number.isFinite(createdAt) ? createdAt : Date.now()
+    };
+  }
+
+  return sessions;
+}
+
 function pruneLoginGuard(guard: LoginGuardMap): LoginGuardMap {
   const entries = Object.entries(guard);
   if (entries.length <= LOGIN_GUARD_MAX_CLIENTS) return guard;
 
   const sorted = entries.sort((a, b) => b[1].updatedAt - a[1].updatedAt);
   return Object.fromEntries(sorted.slice(0, LOGIN_GUARD_MAX_CLIENTS));
+}
+
+function pruneAdminSessions(sessions: AdminSessionMap, now = Date.now()): AdminSessionMap {
+  const activeEntries = Object.entries(sessions).filter(([, entry]) => entry.expiresAt > now);
+  if (activeEntries.length <= ADMIN_SESSION_MAX_COUNT) {
+    return Object.fromEntries(activeEntries);
+  }
+
+  const sorted = activeEntries.sort((a, b) => b[1].createdAt - a[1].createdAt);
+  return Object.fromEntries(sorted.slice(0, ADMIN_SESSION_MAX_COUNT));
 }
 
 async function readSettingJson(key: string): Promise<unknown> {
@@ -137,9 +188,19 @@ async function getLoginGuardMap(): Promise<LoginGuardMap> {
   return parseLoginGuard(valueJson);
 }
 
+async function getAdminSessionMap(): Promise<AdminSessionMap> {
+  const valueJson = await readSettingJson(ADMIN_SESSIONS_KEY);
+  return parseAdminSessionMap(valueJson);
+}
+
 async function saveLoginGuardMap(guard: LoginGuardMap) {
   const pruned = pruneLoginGuard(guard);
   await upsertSettingJson(LOGIN_GUARD_KEY, pruned, "Admin login guard state", "admin-system");
+}
+
+async function saveAdminSessionMap(sessionMap: AdminSessionMap) {
+  const pruned = pruneAdminSessions(sessionMap);
+  await upsertSettingJson(ADMIN_SESSIONS_KEY, pruned, "Admin session tokens", "admin-system");
 }
 
 export async function hashValue(value: string): Promise<string> {
@@ -147,6 +208,59 @@ export async function hashValue(value: string): Promise<string> {
   const hashBuffer = await crypto.subtle.digest("SHA-256", data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function createRandomSessionToken(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function isAdminSessionTokenValid(sessionToken: string): Promise<boolean> {
+  if (!sessionToken) return false;
+
+  const sessionHash = await hashValue(sessionToken);
+  const now = Date.now();
+  const before = await getAdminSessionMap();
+  const pruned = pruneAdminSessions(before, now);
+  const exists = pruned[sessionHash];
+
+  if (Object.keys(before).length !== Object.keys(pruned).length) {
+    await saveAdminSessionMap(pruned);
+  }
+
+  return Boolean(exists && exists.expiresAt > now);
+}
+
+export async function createAdminSessionToken(): Promise<string> {
+  const sessionToken = createRandomSessionToken();
+  const sessionHash = await hashValue(sessionToken);
+  const now = Date.now();
+
+  const sessions = await getAdminSessionMap();
+  sessions[sessionHash] = {
+    createdAt: now,
+    expiresAt: now + ADMIN_SESSION_MAX_AGE_SECONDS * 1000
+  };
+
+  await saveAdminSessionMap(sessions);
+  return sessionToken;
+}
+
+export async function invalidateAdminSessionToken(sessionToken: string | null | undefined) {
+  if (!sessionToken) return;
+
+  const sessionHash = await hashValue(sessionToken);
+  const sessions = await getAdminSessionMap();
+
+  if (!sessions[sessionHash]) return;
+
+  delete sessions[sessionHash];
+  await saveAdminSessionMap(sessions);
+}
+
+export async function invalidateAllAdminSessions() {
+  await saveAdminSessionMap({});
 }
 
 async function getPasswordInfo(): Promise<PasswordInfo> {
@@ -287,7 +401,6 @@ export async function needsPasswordRotation(): Promise<boolean> {
 
 export async function verifyLoginPassword(password: string): Promise<{
   ok: boolean;
-  sessionToken?: string;
   mustChangePassword: boolean;
   source: PasswordSource;
   defaultPasswordInUse: boolean;
@@ -299,7 +412,6 @@ export async function verifyLoginPassword(password: string): Promise<{
     const ok = inputHash === info.hash;
     return {
       ok,
-      sessionToken: ok ? info.hash : undefined,
       mustChangePassword: false,
       source: "db",
       defaultPasswordInUse: false
@@ -311,7 +423,6 @@ export async function verifyLoginPassword(password: string): Promise<{
 
   return {
     ok,
-    sessionToken: ok ? info.hash : undefined,
     mustChangePassword: ok && info.defaultPasswordInUse,
     source: "env",
     defaultPasswordInUse: info.defaultPasswordInUse
@@ -335,21 +446,21 @@ export async function persistAdminPassword(newPassword: string, updatedBy = "adm
 }
 
 export async function isAdminAuthorized(request: Request): Promise<boolean> {
-  const info = await getPasswordInfo();
-
   const authHeader = request.headers.get("authorization") || "";
   if (authHeader.startsWith("Bearer ")) {
     const token = authHeader.slice("Bearer ".length).trim();
     if (token) {
-      const tokenHash = await hashValue(token);
-      if (tokenHash === info.hash) {
+      if (await isAdminSessionTokenValid(token)) {
         return true;
       }
     }
   }
 
   const cookies = parseCookieHeader(request.headers.get("cookie"));
-  return cookies[ADMIN_COOKIE_NAME] === info.hash;
+  const sessionToken = cookies[ADMIN_COOKIE_NAME];
+  if (!sessionToken) return false;
+
+  return isAdminSessionTokenValid(sessionToken);
 }
 
 export async function requireAdmin(request: Request): Promise<NextResponse | null> {
