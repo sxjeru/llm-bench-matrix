@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 export default function AdminLoginPage() {
   const [password, setPassword] = useState("");
@@ -14,7 +14,12 @@ export default function AdminLoginPage() {
   const [changingPassword, setChangingPassword] = useState(false);
 
   const router = useRouter();
-  const searchParams = useSearchParams();
+
+  function getRedirectTarget() {
+    if (typeof window === "undefined") return "/admin";
+
+    return new URLSearchParams(window.location.search).get("from") || "/admin";
+  }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -41,8 +46,7 @@ export default function AdminLoginPage() {
         return;
       }
 
-      const redirectTo = searchParams.get("from") || "/admin";
-      router.push(redirectTo);
+      router.push(getRedirectTarget());
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "登录失败");
@@ -86,8 +90,7 @@ export default function AdminLoginPage() {
       }
 
       setShowChangeDialog(false);
-      const redirectTo = searchParams.get("from") || "/admin";
-      router.push(redirectTo);
+      router.push(getRedirectTarget());
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "修改密码失败");
