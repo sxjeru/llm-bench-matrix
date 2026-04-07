@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Check,
@@ -114,7 +114,19 @@ const MODALITY_OPTIONS = ["Text", "Vision", "Audio", "Video", "Multimodal"] as c
 const SHOW_CATEGORY_STORAGE_KEY = "benchmark-matrix:show-category";
 const SHOW_DUPLICATE_STORAGE_KEY = "benchmark-matrix:show-duplicate";
 const MODEL_SELECTION_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:model-selection-by-source";
+const COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:column-width-by-source";
 const EXPORT_PRESET_STORAGE_KEY = "benchmark-matrix:export-preset";
+const CATEGORY_COLUMN_WIDTH_KEY = "__CATEGORY__";
+const BENCHMARK_COLUMN_WIDTH_KEY = "__BENCHMARK__";
+const DEFAULT_CATEGORY_COLUMN_WIDTH = 150;
+const DEFAULT_BENCHMARK_COLUMN_WIDTH = 180;
+const MIN_CATEGORY_COLUMN_WIDTH = 120;
+const MAX_CATEGORY_COLUMN_WIDTH = 420;
+const MIN_BENCHMARK_COLUMN_WIDTH = 140;
+const MAX_BENCHMARK_COLUMN_WIDTH = 560;
+const DEFAULT_MODEL_COLUMN_BASELINE_WIDTH = 88;
+const MIN_MODEL_COLUMN_RESIZE_WIDTH = 24;
+const MAX_MODEL_COLUMN_WIDTH = 320;
 const SOURCE_MATCH_FRAME_COLOR = "rgba(93, 167, 255, 0.42)";
 const WEBP_EXPORT_QUALITY = 0.94;
 const AVIF_EXPORT_QUALITY = 0.9;
@@ -130,6 +142,50 @@ const EXPORT_PRESET_MAP = {
   "3x-avif": { label: "3x AVIF", scale: 3, format: "avif", mimeType: "image/avif" }
 } as const;
 const DEFAULT_EXPORT_PRESET: ExportPresetKey = "2x-webp";
+
+function getModelColumnWidthKey(modelName: string): string {
+  return `model:${modelName}`;
+}
+
+function clampColumnWidth(width: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, Math.round(width)));
+}
+
+function normalizeColumnWidthBySource(input: unknown): Record<string, Record<string, number>> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return {};
+  }
+
+  const normalizedBySource: Record<string, Record<string, number>> = {};
+
+  Object.entries(input as Record<string, unknown>).forEach(([sourceKey, widthMapRaw]) => {
+    if (!widthMapRaw || typeof widthMapRaw !== "object" || Array.isArray(widthMapRaw)) return;
+
+    const normalizedMap: Record<string, number> = {};
+
+    Object.entries(widthMapRaw as Record<string, unknown>).forEach(([columnKey, value]) => {
+      if (typeof value !== "number" || !Number.isFinite(value)) return;
+      normalizedMap[columnKey] = Math.max(1, Math.round(value));
+    });
+
+    normalizedBySource[sourceKey] = normalizedMap;
+  });
+
+  return normalizedBySource;
+}
+
+function areColumnWidthMapsEqual(left: Record<string, number>, right: Record<string, number>): boolean {
+  const leftEntries = Object.entries(left);
+  const rightEntries = Object.entries(right);
+
+  if (leftEntries.length !== rightEntries.length) return false;
+
+  for (const [key, value] of leftEntries) {
+    if (right[key] !== value) return false;
+  }
+
+  return true;
+}
 
 type SourceFrameShadowBuildInput = {
   isMatched: boolean;
@@ -824,6 +880,14 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const showCategoryLoadedRef = useRef(false);
   const showDuplicateLoadedRef = useRef(false);
   const modelSelectionBySourceRef = useRef<Record<string, string[]>>({});
+  const columnWidthBySourceRef = useRef<Record<string, Record<string, number>>>({});
+  const columnResizeStateRef = useRef<{
+    columnKey: string;
+    startX: number;
+    startWidth: number;
+    minWidth: number;
+    maxWidth: number;
+  } | null>(null);
   const exportPresetLoadedRef = useRef(false);
   const pathname = usePathname();
   const router = useRouter();
@@ -833,6 +897,9 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const [showDuplicateRows, setShowDuplicateRows] = useState(false);
   const [isClientReady, setIsClientReady] = useState(false);
   const [isModelSelectionLoaded, setIsModelSelectionLoaded] = useState(false);
+  const [isColumnWidthLoaded, setIsColumnWidthLoaded] = useState(false);
+  const [activeColumnWidthMap, setActiveColumnWidthMap] = useState<Record<string, number>>({});
+  const [resizingColumnKey, setResizingColumnKey] = useState<string | null>(null);
   const [exportPreset, setExportPreset] = useState<ExportPresetKey>(DEFAULT_EXPORT_PRESET);
   const [supportsWebpExport, setSupportsWebpExport] = useState(true);
   const [supportsAvifExport, setSupportsAvifExport] = useState(false);
@@ -923,6 +990,20 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     }
 
     setIsModelSelectionLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as unknown;
+        columnWidthBySourceRef.current = normalizeColumnWidthBySource(parsed);
+      }
+    } catch {
+      // ignore storage access errors gracefully
+    }
+
+    setIsColumnWidthLoaded(true);
   }, []);
 
   useEffect(() => {
@@ -1061,8 +1142,71 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, [isExportMenuOpen]);
 
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      const resizeState = columnResizeStateRef.current;
+      if (!resizeState) return;
+
+      const nextWidth = clampColumnWidth(
+        resizeState.startWidth + (event.clientX - resizeState.startX),
+        resizeState.minWidth,
+        resizeState.maxWidth
+      );
+
+      setActiveColumnWidthMap((prev) => {
+        if (prev[resizeState.columnKey] === nextWidth) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [resizeState.columnKey]: nextWidth
+        };
+      });
+    };
+
+    const stopResize = () => {
+      if (!columnResizeStateRef.current) return;
+      columnResizeStateRef.current = null;
+      setResizingColumnKey(null);
+      document.body.classList.remove("column-resizing");
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+      document.body.classList.remove("column-resizing");
+    };
+  }, []);
+
   const isImageActionBusy = isDownloadingTableImage || isCopyingTableImage;
   const showExportMenu = isExportMenuOpen || (!suppressHoverMenu && isExportMenuHovered);
+
+  function beginColumnResize(
+    event: ReactPointerEvent<HTMLElement>,
+    columnKey: string,
+    currentWidth: number,
+    minWidth: number,
+    maxWidth: number
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    columnResizeStateRef.current = {
+      columnKey,
+      startX: event.clientX,
+      startWidth: currentWidth,
+      minWidth,
+      maxWidth
+    };
+
+    setResizingColumnKey(columnKey);
+    document.body.classList.add("column-resizing");
+  }
 
   function setSourceAndUrl(nextSource: string) {
     setActiveSource(nextSource);
@@ -1518,6 +1662,123 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     });
   }, [filteredRows, sourceModelHint, columnSortBenchmarkKey, showDuplicateRows]);
 
+  const autoModelWidthMap = useMemo(() => {
+    const map = new Map<string, number>();
+    const valueWidthByModel = new Map<string, number>();
+
+    const measureTextWidth = (() => {
+      if (typeof document === "undefined") {
+        return (text: string) => text.length * 7;
+      }
+
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+
+      if (!context) {
+        return (text: string) => text.length * 7;
+      }
+
+      return (text: string, font: string) => {
+        context.font = font;
+        return context.measureText(text).width;
+      };
+    })();
+
+    filteredRows.forEach((row) => {
+      const displayValue = getMatrixCellDisplayValue(row.valueNum, row.valueNum2 ?? null, row.valueRaw, row.valueNote);
+      const notePadding = row.valueNote && row.valueNote.trim().length > 0 ? 18 : 0;
+      const measured = measureTextWidth(displayValue, "600 14px Inter, ui-sans-serif, system-ui") + 18 + notePadding;
+      const previous = valueWidthByModel.get(row.modelName) ?? 0;
+
+      if (measured > previous) {
+        valueWidthByModel.set(row.modelName, measured);
+      }
+    });
+
+    modelColumns.forEach((modelName) => {
+      const valueWidth = valueWidthByModel.get(modelName) ?? 0;
+      const autoWidth = clampColumnWidth(
+        Math.max(DEFAULT_MODEL_COLUMN_BASELINE_WIDTH, valueWidth),
+        MIN_MODEL_COLUMN_RESIZE_WIDTH,
+        MAX_MODEL_COLUMN_WIDTH
+      );
+
+      map.set(getModelColumnWidthKey(modelName), autoWidth);
+    });
+
+    return map;
+  }, [modelColumns, filteredRows]);
+
+  useEffect(() => {
+    if (!isColumnWidthLoaded) return;
+
+    const savedForSource = columnWidthBySourceRef.current[activeSource] ?? {};
+    const nextMap: Record<string, number> = {
+      ...savedForSource,
+      [CATEGORY_COLUMN_WIDTH_KEY]: clampColumnWidth(
+        savedForSource[CATEGORY_COLUMN_WIDTH_KEY] ?? DEFAULT_CATEGORY_COLUMN_WIDTH,
+        MIN_CATEGORY_COLUMN_WIDTH,
+        MAX_CATEGORY_COLUMN_WIDTH
+      ),
+      [BENCHMARK_COLUMN_WIDTH_KEY]: clampColumnWidth(
+        savedForSource[BENCHMARK_COLUMN_WIDTH_KEY] ?? DEFAULT_BENCHMARK_COLUMN_WIDTH,
+        MIN_BENCHMARK_COLUMN_WIDTH,
+        MAX_BENCHMARK_COLUMN_WIDTH
+      )
+    };
+
+    autoModelWidthMap.forEach((autoWidth, modelWidthKey) => {
+      const stored = savedForSource[modelWidthKey];
+      nextMap[modelWidthKey] = clampColumnWidth(
+        stored ?? autoWidth,
+        MIN_MODEL_COLUMN_RESIZE_WIDTH,
+        MAX_MODEL_COLUMN_WIDTH
+      );
+    });
+
+    setActiveColumnWidthMap((prev) => (areColumnWidthMapsEqual(prev, nextMap) ? prev : nextMap));
+  }, [activeSource, autoModelWidthMap, isColumnWidthLoaded]);
+
+  useEffect(() => {
+    if (!isColumnWidthLoaded) return;
+
+    const sourceKey = activeSourceRef.current;
+    const previousForSource = columnWidthBySourceRef.current[sourceKey] ?? {};
+
+    if (areColumnWidthMapsEqual(previousForSource, activeColumnWidthMap)) {
+      return;
+    }
+
+    columnWidthBySourceRef.current = {
+      ...columnWidthBySourceRef.current,
+      [sourceKey]: activeColumnWidthMap
+    };
+
+    try {
+      window.localStorage.setItem(COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY, JSON.stringify(columnWidthBySourceRef.current));
+    } catch {
+      // ignore storage access errors gracefully
+    }
+  }, [activeColumnWidthMap, isColumnWidthLoaded]);
+
+  const categoryColumnWidth = useMemo(
+    () => clampColumnWidth(
+      activeColumnWidthMap[CATEGORY_COLUMN_WIDTH_KEY] ?? DEFAULT_CATEGORY_COLUMN_WIDTH,
+      MIN_CATEGORY_COLUMN_WIDTH,
+      MAX_CATEGORY_COLUMN_WIDTH
+    ),
+    [activeColumnWidthMap]
+  );
+
+  const benchmarkColumnWidth = useMemo(
+    () => clampColumnWidth(
+      activeColumnWidthMap[BENCHMARK_COLUMN_WIDTH_KEY] ?? DEFAULT_BENCHMARK_COLUMN_WIDTH,
+      MIN_BENCHMARK_COLUMN_WIDTH,
+      MAX_BENCHMARK_COLUMN_WIDTH
+    ),
+    [activeColumnWidthMap]
+  );
+
   const sourceMatchedModelSet = useMemo(() => {
     if (!sourceModelHint) return new Set<string>();
 
@@ -1533,10 +1794,17 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
     return modelColumns.map((modelName) => {
       const providerName = modelProviderMap.get(modelName) ?? "Unknown";
-      const columnWidth = Math.min(112, Math.max(72, Math.round(modelName.length * 6.8)));
+      const columnWidthKey = getModelColumnWidthKey(modelName);
+      const autoWidth = autoModelWidthMap.get(columnWidthKey) ?? DEFAULT_MODEL_COLUMN_BASELINE_WIDTH;
+      const columnWidth = clampColumnWidth(
+        activeColumnWidthMap[columnWidthKey] ?? autoWidth,
+        MIN_MODEL_COLUMN_RESIZE_WIDTH,
+        MAX_MODEL_COLUMN_WIDTH
+      );
 
       return {
         modelName,
+        columnWidthKey,
         providerName,
         color: getProviderBrandColor(providerName),
         columnWidth,
@@ -1545,7 +1813,30 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         isSourceMatchedLast: modelName === lastMatchedModel
       };
     });
-  }, [modelColumns, modelProviderMap, sourceMatchedModelSet]);
+  }, [modelColumns, modelProviderMap, sourceMatchedModelSet, autoModelWidthMap, activeColumnWidthMap]);
+
+  const hiddenResizeHandleKeys = useMemo(() => {
+    const hidden = new Set<string>();
+
+    const firstMatchedModelIndex = modelColumnMeta.findIndex((model) => model.isSourceMatchedFirst);
+    if (firstMatchedModelIndex >= 0) {
+      if (firstMatchedModelIndex === 0) {
+        hidden.add(BENCHMARK_COLUMN_WIDTH_KEY);
+      } else {
+        const previousModel = modelColumnMeta[firstMatchedModelIndex - 1];
+        if (previousModel) {
+          hidden.add(previousModel.columnWidthKey);
+        }
+      }
+    }
+
+    const lastMatchedModel = modelColumnMeta.find((model) => model.isSourceMatchedLast);
+    if (lastMatchedModel) {
+      hidden.add(lastMatchedModel.columnWidthKey);
+    }
+
+    return hidden;
+  }, [modelColumnMeta]);
 
   const matrixRows = useMemo(() => {
     const matrixMap = new Map<
@@ -2402,9 +2693,9 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     position: "sticky",
                     top: 0,
                     zIndex: 20,
-                    width: 150,
-                    minWidth: 150,
-                    maxWidth: 150,
+                    width: categoryColumnWidth,
+                    minWidth: categoryColumnWidth,
+                    maxWidth: categoryColumnWidth,
                     padding: "6px 8px",
                     background: "rgba(20, 27, 45, 0.96)",
                     backdropFilter: "blur(6px)",
@@ -2425,6 +2716,23 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                       <span className="text-[10px] opacity-70">{getSortModeLabel("category")}</span>
                     ) : null}
                   </button>
+                  <span
+                    className="column-resize-handle"
+                    data-active={resizingColumnKey === CATEGORY_COLUMN_WIDTH_KEY ? "1" : undefined}
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="调整 Category 列宽"
+                    onPointerDown={(event) =>
+                      beginColumnResize(
+                        event,
+                        CATEGORY_COLUMN_WIDTH_KEY,
+                        categoryColumnWidth,
+                        MIN_CATEGORY_COLUMN_WIDTH,
+                        MAX_CATEGORY_COLUMN_WIDTH
+                      )
+                    }
+                    onClick={(event) => event.stopPropagation()}
+                  />
                 </th>
               ) : null}
 
@@ -2434,7 +2742,9 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                   top: 0,
                   left: 0,
                   zIndex: 35,
-                  minWidth: 180,
+                  width: benchmarkColumnWidth,
+                  minWidth: benchmarkColumnWidth,
+                  maxWidth: benchmarkColumnWidth,
                   padding: "6px 8px",
                   background: "rgba(20, 27, 45, 0.98)",
                   backdropFilter: "blur(6px)",
@@ -2456,6 +2766,23 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     <span className="text-[10px] opacity-70">{getSortModeLabel("benchmark")}</span>
                   ) : null}
                 </button>
+                <span
+                  className={`column-resize-handle${hiddenResizeHandleKeys.has(BENCHMARK_COLUMN_WIDTH_KEY) ? " column-resize-handle-transparent" : ""}`}
+                  data-active={resizingColumnKey === BENCHMARK_COLUMN_WIDTH_KEY ? "1" : undefined}
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="调整 Benchmark 列宽"
+                  onPointerDown={(event) =>
+                    beginColumnResize(
+                      event,
+                      BENCHMARK_COLUMN_WIDTH_KEY,
+                      benchmarkColumnWidth,
+                      MIN_BENCHMARK_COLUMN_WIDTH,
+                      MAX_BENCHMARK_COLUMN_WIDTH
+                    )
+                  }
+                  onClick={(event) => event.stopPropagation()}
+                />
               </th>
 
               {modelColumnMeta.map((model) => {
@@ -2479,7 +2806,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                       zIndex: 20,
                       width: model.columnWidth,
                       minWidth: model.columnWidth,
-                      maxWidth: 120,
+                      maxWidth: model.columnWidth,
                       padding: "6px 6px",
                       background: "rgba(20, 27, 45, 0.96)",
                       backdropFilter: "blur(6px)",
@@ -2496,6 +2823,23 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     >
                       {model.modelName}
                     </div>
+                    <span
+                      className={`column-resize-handle${hiddenResizeHandleKeys.has(model.columnWidthKey) ? " column-resize-handle-transparent" : ""}`}
+                      data-active={resizingColumnKey === model.columnWidthKey ? "1" : undefined}
+                      role="separator"
+                      aria-orientation="vertical"
+                      aria-label={`调整 ${model.modelName} 列宽`}
+                      onPointerDown={(event) =>
+                        beginColumnResize(
+                          event,
+                          model.columnWidthKey,
+                          model.columnWidth,
+                          MIN_MODEL_COLUMN_RESIZE_WIDTH,
+                          MAX_MODEL_COLUMN_WIDTH
+                        )
+                      }
+                      onClick={(event) => event.stopPropagation()}
+                    />
                   </th>
                 );
               })}
@@ -2561,9 +2905,9 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                 {showCategory ? (
                   <td
                     style={{
-                      width: 150,
-                      minWidth: 150,
-                      maxWidth: 150,
+                      width: categoryColumnWidth,
+                      minWidth: categoryColumnWidth,
+                      maxWidth: categoryColumnWidth,
                       padding: "6px 8px",
                       whiteSpace: "nowrap",
                       overflow: "hidden",
@@ -2577,23 +2921,28 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                 ) : null}
 
                 <td
+                  title={matrixRow.benchmark}
                   style={{
                     position: "sticky",
                     left: 0,
                     zIndex: 12,
-                    minWidth: 180,
+                    width: benchmarkColumnWidth,
+                    minWidth: benchmarkColumnWidth,
+                    maxWidth: benchmarkColumnWidth,
                     padding: "6px 8px",
                     backgroundColor: "rgba(20, 27, 45, 0.96)",
                     boxShadow: "8px 0 12px rgba(2, 6, 23, 0.28)",
                     whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
                     ...rowCellLineStyle
                   }}
                 >
-                  <span className="inline-flex items-center gap-1">
-                    <span>{matrixRow.benchmark}</span>
+                  <span className="inline-flex w-full min-w-0 items-center gap-1">
+                    <span className="truncate">{matrixRow.benchmark}</span>
                     {isLowerBetterBenchmark ? (
                       <span
-                        className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
+                        className="inline-flex h-4 w-4 shrink-0 cursor-help items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
                         title="该项目为低值更优"
                         onClick={(event) => event.stopPropagation()}
                       >
@@ -2684,6 +3033,9 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                         textDecorationColor: isSingleMaxCell ? "rgba(15, 23, 42, 0.35)" : undefined,
                         textDecorationThickness: isSingleMaxCell ? "1px" : undefined,
                         textUnderlineOffset: isSingleMaxCell ? "2px" : undefined,
+                        width: model.columnWidth,
+                        minWidth: model.columnWidth,
+                        maxWidth: model.columnWidth,
                         boxShadow: mergedCellBoxShadow || undefined,
                         ...(modelIndex === modelColumnMeta.length - 1 ? rowRightEdgeStyle ?? {} : {})
                       }}

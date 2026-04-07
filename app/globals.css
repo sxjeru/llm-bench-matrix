@@ -394,8 +394,60 @@ th {
   font-weight: 600;
 }
 
+th {
+  position: relative;
+  overflow: visible;
+}
+
 td {
   color: #e7ebf7;
+}
+
+.column-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -5px;
+  width: 10px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 120;
+  background: transparent;
+}
+
+.column-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 32%;
+  bottom: 32%;
+  left: 50%;
+  width: 2px;
+  border-radius: 999px;
+  transform: translateX(-50%);
+  background: rgba(160, 190, 248, 0.34);
+  transition: background-color 0.16s ease;
+}
+
+th:hover > .column-resize-handle::after,
+.column-resize-handle[data-active="1"]::after {
+  background: rgba(193, 218, 255, 0.68);
+}
+
+.column-resize-handle.column-resize-handle-transparent,
+.column-resize-handle.column-resize-handle-transparent:hover {
+  background: transparent;
+}
+
+.column-resize-handle.column-resize-handle-transparent::after,
+th:hover > .column-resize-handle.column-resize-handle-transparent::after,
+.column-resize-handle.column-resize-handle-transparent[data-active="1"]::after {
+  background: transparent;
+}
+
+body.column-resizing,
+body.column-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 .badge {
