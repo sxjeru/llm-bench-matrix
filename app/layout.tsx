@@ -24,6 +24,36 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <main className="page">
           <div className="container">{children}</div>
         </main>
+
+        <footer className="site-footnote">
+          <div className="container">
+            <div className="site-footnote-card">
+              <span className="site-footnote-item">
+                <span className="site-footnote-label">本页总访问量</span>
+                <span className="site-footnote-value">
+                  <span id="vercount_value_page_pv" suppressHydrationWarning>Loading</span>
+                </span> 次
+              </span>
+
+              <span className="site-footnote-divider" aria-hidden="true" />
+
+              <span className="site-footnote-item">
+                Crafted with <span className="footnote-heart">♥</span> by {" "}
+                <a
+                  className="site-footnote-link"
+                  href="https://github.com/sxjeru"
+                  target="_blank"
+                  rel="noreferrer"
+                  suppressHydrationWarning
+                >
+                  sxjeru
+                </a>
+              </span>
+            </div>
+          </div>
+        </footer>
+
+        <script defer src="https://bsz.sxjeru.top/js"></script>
         <Analytics />
       </body>
     </html>
