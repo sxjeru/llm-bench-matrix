@@ -16,6 +16,7 @@ vi.mock("@/lib/db/queries", () => ({
       modelName: "OnlyOneModelInRows",
       benchmarkName: "OnlyOneBenchmarkInRows",
       benchmarkType: "General",
+      benchmarkCanonicalKey: "only-one-benchmark-in-rows:general",
       modalities: ["Text"],
       benchTime: "2026-04-06T00:00:00.000Z",
       valueRaw: "70.1",
@@ -45,11 +46,12 @@ describe("HomePage metrics", () => {
     expect(screen.getByText("总记录").parentElement).toHaveTextContent("36");
   });
 
-  test("source 参数会透传到 rows 与 stats 查询", async () => {
+  test("source 参数透传 rows 查询，stats 固定全量查询", async () => {
     await HomePage({ searchParams: { source: "text:Qwen3.5-27B" } });
 
     expect(vi.mocked(getDashboardRows)).toHaveBeenCalledWith(null, "text:Qwen3.5-27B");
-    expect(vi.mocked(getDashboardStats)).toHaveBeenCalledWith("text:Qwen3.5-27B");
+    expect(vi.mocked(getDashboardRows)).toHaveBeenCalledWith(null, null);
+    expect(vi.mocked(getDashboardStats)).toHaveBeenCalledWith(null);
     expect(vi.mocked(getSourceOptions)).toHaveBeenCalled();
   });
 });

@@ -738,4 +738,77 @@ describe("AdminConsole text import", () => {
 
     expect(secondPayload.csvText).toContain("Bench-1-Renamed");
   });
+
+  test("重复嫌疑与快捷合并按原始文本顺序展示", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 2,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model.B",
+          benchmarkName: "Last Exam Beta",
+          benchmarkType: "Type-X",
+          rawValue: "70.1",
+          valueNum: 70.1,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        },
+        {
+          rowNumber: 2,
+          providerName: "OpenAI",
+          modelName: "Model-A",
+          benchmarkName: "Last Exam Alpha",
+          benchmarkType: "Type-X",
+          rawValue: "71.2",
+          valueNum: 71.2,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    mockFetchSequence(previewResponse);
+    render(<AdminConsole {...buildProps()} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const benchmarkHeading = await screen.findByRole("heading", { name: "重复嫌疑与快捷合并" });
+    const benchmarkSection = benchmarkHeading.parentElement;
+    if (!benchmarkSection) {
+      throw new Error("benchmark warning section not found");
+    }
+
+    const benchmarkNames = Array.from(
+      benchmarkSection.querySelectorAll("div.rounded-box.border.p-3 > div.mb-2 > span.font-semibold")
+    )
+      .map((node) => node.textContent?.trim())
+      .filter((text): text is string => Boolean(text));
+
+    expect(benchmarkNames.slice(0, 2)).toEqual(["Last Exam Beta", "Last Exam Alpha"]);
+
+    const modelHeading = await screen.findByRole("heading", { name: "模型重名嫌疑与快捷合并" });
+    const modelSection = modelHeading.parentElement;
+    if (!modelSection) {
+      throw new Error("model warning section not found");
+    }
+
+    const modelNames = Array.from(
+      modelSection.querySelectorAll("div.rounded-box.border.p-3 > div.mb-2 > span.font-semibold")
+    )
+      .map((node) => node.textContent?.trim())
+      .filter((text): text is string => Boolean(text));
+
+    expect(modelNames.slice(0, 2)).toEqual(["Model.B", "Model-A"]);
+  });
 });

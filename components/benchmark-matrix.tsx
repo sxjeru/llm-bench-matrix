@@ -85,6 +85,7 @@ function getBenchmarkComparableScore(benchmarkName: string, valueNum: number): n
 
 type Props = {
   rows: MatrixInputRow[];
+  allRows?: MatrixInputRow[];
   sourceOptions?: string[];
 };
 
@@ -318,6 +319,61 @@ function normalizeMatchToken(input: string): string {
   return input.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
+type ModelScaleToken = {
+  prefixKey: string;
+  sizeInBillions: number;
+  isEstimated: boolean;
+};
+
+const MODEL_SIZE_TOKEN_PATTERN = /\b(E?)(\d+(?:\.\d+)?)B\b/i;
+
+function extractModelScaleToken(modelName: string): ModelScaleToken | null {
+  const match = MODEL_SIZE_TOKEN_PATTERN.exec(modelName);
+  if (!match) {
+    return null;
+  }
+
+  const [, estimatePrefix, sizeText] = match;
+  const sizeInBillions = Number.parseFloat(sizeText);
+  if (!Number.isFinite(sizeInBillions)) {
+    return null;
+  }
+
+  const prefixKey = modelName
+    .slice(0, match.index)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+  return {
+    prefixKey,
+    sizeInBillions,
+    isEstimated: estimatePrefix.toLowerCase() === "e"
+  };
+}
+
+function compareModelNameByColumnOrder(left: string, right: string, collator: Intl.Collator): number {
+  const leftScaleToken = extractModelScaleToken(left);
+  const rightScaleToken = extractModelScaleToken(right);
+
+  if (
+    leftScaleToken &&
+    rightScaleToken &&
+    leftScaleToken.prefixKey.length > 0 &&
+    leftScaleToken.prefixKey === rightScaleToken.prefixKey
+  ) {
+    if (rightScaleToken.sizeInBillions !== leftScaleToken.sizeInBillions) {
+      return rightScaleToken.sizeInBillions - leftScaleToken.sizeInBillions;
+    }
+
+    if (leftScaleToken.isEstimated !== rightScaleToken.isEstimated) {
+      return leftScaleToken.isEstimated ? 1 : -1;
+    }
+  }
+
+  return collator.compare(right, left);
+}
+
 function getProviderBrandColor(providerName: string | null | undefined): string {
   const normalized = (providerName ?? "").trim().toLowerCase();
 
@@ -542,7 +598,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: 
   }) as Promise<T>;
 }
 
-export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: Props) {
+export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSourceOptions = [] }: Props) {
   const sectionRef = useRef<HTMLElement | null>(null);
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
@@ -799,29 +855,178 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
     router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
   }
 
-  const providerGroups = useMemo(() => {
-    const map = new Map<string, Set<string>>();
+  const baseSourceRows = useMemo(() => {
+    return rows.filter((row) => activeSource === SOURCE_ALL || getSourceKey(row.source) === activeSource);
+  }, [rows, activeSource]);
 
-    rows.forEach((row) => {
-      const provider = row.providerName || "Unknown";
-      if (!map.has(provider)) {
-        map.set(provider, new Set<string>());
+  const baseBenchmarkKeySet = useMemo(() => {
+    const keys = new Set<string>();
+    baseSourceRows.forEach((row) => {
+      keys.add(getMatrixGroupingKey(row, showDuplicateRows));
+    });
+    return keys;
+  }, [baseSourceRows, showDuplicateRows]);
+
+  const baseModelNameSet = useMemo(() => {
+    return new Set(baseSourceRows.map((row) => row.modelName));
+  }, [baseSourceRows]);
+
+  const sourceModelHint = useMemo(() => {
+    if (activeSource === SOURCE_ALL) return "";
+    return normalizeMatchToken(sourceTabDisplayLabel(activeSource));
+  }, [activeSource]);
+
+  const coverageMetaByModel = useMemo(() => {
+    const modelProviderMap = new Map<string, string>();
+    const modelCoveredBenchmarkKeys = new Map<string, Set<string>>();
+
+    allRows.forEach((row) => {
+      const providerName = row.providerName || "Unknown";
+      if (!modelProviderMap.has(row.modelName)) {
+        modelProviderMap.set(row.modelName, providerName);
       }
-      map.get(provider)!.add(row.modelName);
+
+      const matrixKey = getMatrixGroupingKey(row, showDuplicateRows);
+      if (!baseBenchmarkKeySet.has(matrixKey)) {
+        return;
+      }
+
+      if (!modelCoveredBenchmarkKeys.has(row.modelName)) {
+        modelCoveredBenchmarkKeys.set(row.modelName, new Set<string>());
+      }
+      modelCoveredBenchmarkKeys.get(row.modelName)!.add(matrixKey);
+    });
+
+    const totalBenchmarkCount = baseBenchmarkKeySet.size;
+    const metaMap = new Map<
+      string,
+      { providerName: string; coveredCount: number; coverageRate: number; isBaseModel: boolean }
+    >();
+
+    for (const [modelName, providerName] of modelProviderMap.entries()) {
+      const coveredCount = modelCoveredBenchmarkKeys.get(modelName)?.size ?? 0;
+      if (coveredCount <= 0) continue;
+
+      metaMap.set(modelName, {
+        providerName,
+        coveredCount,
+        coverageRate: totalBenchmarkCount > 0 ? coveredCount / totalBenchmarkCount : 0,
+        isBaseModel: baseModelNameSet.has(modelName)
+      });
+    }
+
+    return metaMap;
+  }, [allRows, baseBenchmarkKeySet, baseModelNameSet, showDuplicateRows]);
+
+  const providerGroups = useMemo(() => {
+    const map = new Map<string, string[]>();
+
+    coverageMetaByModel.forEach((meta, modelName) => {
+      if (!map.has(meta.providerName)) {
+        map.set(meta.providerName, []);
+      }
+      map.get(meta.providerName)!.push(modelName);
     });
 
     return Array.from(map.entries())
-      .map(([providerName, modelSet]) => ({
-        providerName,
-        models: Array.from(modelSet).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))
-      }))
-      .sort((a, b) => a.providerName.localeCompare(b.providerName, "zh-Hans-CN"));
-  }, [rows]);
+      .map(([providerName, modelList]) => {
+        const models = [...modelList].sort((left, right) => {
+          const leftMeta = coverageMetaByModel.get(left);
+          const rightMeta = coverageMetaByModel.get(right);
+
+          const leftIsBase = leftMeta?.isBaseModel ? 1 : 0;
+          const rightIsBase = rightMeta?.isBaseModel ? 1 : 0;
+          if (rightIsBase !== leftIsBase) {
+            return rightIsBase - leftIsBase;
+          }
+
+          const leftCoverage = leftMeta?.coverageRate ?? 0;
+          const rightCoverage = rightMeta?.coverageRate ?? 0;
+          if (rightCoverage !== leftCoverage) {
+            return rightCoverage - leftCoverage;
+          }
+
+          return left.localeCompare(right, "zh-Hans-CN", { sensitivity: "base" });
+        });
+
+        const providerCoverageAverage = models.length > 0
+          ? models.reduce((acc, modelName) => acc + (coverageMetaByModel.get(modelName)?.coverageRate ?? 0), 0) / models.length
+          : 0;
+
+        const normalizedProvider = normalizeMatchToken(providerName);
+        const isSourceRelated = sourceModelHint.length > 0 && (
+          normalizedProvider.includes(sourceModelHint) ||
+          models.some((modelName) => normalizeMatchToken(modelName).includes(sourceModelHint))
+        );
+
+        return {
+          providerName,
+          models,
+          providerCoverageAverage,
+          isSourceRelated
+        };
+      })
+      .sort((left, right) => {
+        const leftSourceRelated = left.isSourceRelated ? 1 : 0;
+        const rightSourceRelated = right.isSourceRelated ? 1 : 0;
+        if (rightSourceRelated !== leftSourceRelated) {
+          return rightSourceRelated - leftSourceRelated;
+        }
+
+        if (right.providerCoverageAverage !== left.providerCoverageAverage) {
+          return right.providerCoverageAverage - left.providerCoverageAverage;
+        }
+
+        if (right.models.length !== left.models.length) {
+          return right.models.length - left.models.length;
+        }
+
+        return left.providerName.localeCompare(right.providerName, "zh-Hans-CN", { sensitivity: "base" });
+      })
+      .map((item) => ({
+        providerName: item.providerName,
+        models: item.models
+      }));
+  }, [coverageMetaByModel, sourceModelHint]);
+
+  const modelCoveragePercentMap = useMemo(() => {
+    const map = new Map<string, number>();
+    coverageMetaByModel.forEach((meta, modelName) => {
+      map.set(modelName, Math.round(meta.coverageRate * 100));
+    });
+    return map;
+  }, [coverageMetaByModel]);
+
+  const providerAverageCoveragePercentMap = useMemo(() => {
+    const map = new Map<string, number>();
+
+    providerGroups.forEach((group) => {
+      if (group.models.length === 0) {
+        map.set(group.providerName, 0);
+        return;
+      }
+
+      const totalCoverage = group.models.reduce((acc, modelName) => {
+        return acc + (coverageMetaByModel.get(modelName)?.coverageRate ?? 0);
+      }, 0);
+
+      map.set(group.providerName, Math.round((totalCoverage / group.models.length) * 100));
+    });
+
+    return map;
+  }, [providerGroups, coverageMetaByModel]);
 
   const allModelNames = useMemo(
     () => providerGroups.flatMap((group) => group.models).sort((a, b) => a.localeCompare(b, "zh-Hans-CN")),
     [providerGroups]
   );
+
+  const defaultSelectedModels = useMemo(() => {
+    const selectableSet = new Set(allModelNames);
+    return Array.from(baseModelNameSet)
+      .filter((modelName) => selectableSet.has(modelName))
+      .sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+  }, [allModelNames, baseModelNameSet]);
 
   const [selectedModalities, setSelectedModalities] = useState<string[]>([...MODALITY_OPTIONS]);
   const [selectedModels, setSelectedModels] = useState<string[]>(allModelNames);
@@ -829,17 +1034,21 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
   useEffect(() => {
     if (!isModelSelectionLoaded) return;
 
+    if (activeSource !== SOURCE_ALL && rows.length > 0 && baseSourceRows.length === 0) {
+      return;
+    }
+
     const allModelSet = new Set(allModelNames);
     const savedForSource = modelSelectionBySourceRef.current[activeSource];
     let nextSelected: string[];
 
     if (!savedForSource) {
-      nextSelected = [...allModelNames];
+      nextSelected = [...defaultSelectedModels];
     } else if (savedForSource.length === 0) {
       nextSelected = [];
     } else {
       const kept = savedForSource.filter((modelName) => allModelSet.has(modelName));
-      nextSelected = kept.length > 0 ? kept : [...allModelNames];
+      nextSelected = kept.length > 0 ? kept : [...defaultSelectedModels];
     }
 
     const normalized = Array.from(new Set(nextSelected)).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
@@ -850,7 +1059,7 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
       }
       return normalized;
     });
-  }, [activeSource, allModelNames, isModelSelectionLoaded]);
+  }, [activeSource, allModelNames, defaultSelectedModels, isModelSelectionLoaded, rows.length, baseSourceRows.length]);
 
   useEffect(() => {
     if (!isModelSelectionLoaded) return;
@@ -889,26 +1098,27 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
 
   const modelProviderMap = useMemo(() => {
     const map = new Map<string, string>();
-    rows.forEach((row) => {
+    allRows.forEach((row) => {
       if (!map.has(row.modelName)) {
         map.set(row.modelName, row.providerName);
       }
     });
     return map;
-  }, [rows]);
+  }, [allRows]);
 
   const filteredRows = useMemo(() => {
-    return rows.filter((row) => {
-      const sourceMatched = activeSource === SOURCE_ALL || getSourceKey(row.source) === activeSource;
-      const modelMatched = selectedModelSet.has(row.modelName);
-      return sourceMatched && modelMatched;
-    });
-  }, [rows, activeSource, selectedModelSet]);
+    if (selectedModelSet.size === 0 || baseBenchmarkKeySet.size === 0) {
+      return [];
+    }
 
-  const sourceModelHint = useMemo(() => {
-    if (activeSource === SOURCE_ALL) return "";
-    return normalizeMatchToken(sourceTabDisplayLabel(activeSource));
-  }, [activeSource]);
+    return allRows.filter((row) => {
+      if (!selectedModelSet.has(row.modelName)) {
+        return false;
+      }
+      const matrixKey = getMatrixGroupingKey(row, showDuplicateRows);
+      return baseBenchmarkKeySet.has(matrixKey);
+    });
+  }, [allRows, selectedModelSet, baseBenchmarkKeySet, showDuplicateRows]);
 
   const modelColumns = useMemo(() => {
     const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
@@ -960,7 +1170,7 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
       return [...provider.models].sort((leftModel, rightModel) => {
         const leftStats = modelStats.get(leftModel);
         const rightStats = modelStats.get(rightModel);
-        if (!leftStats || !rightStats) return collator.compare(rightModel, leftModel);
+        if (!leftStats || !rightStats) return compareModelNameByColumnOrder(leftModel, rightModel, collator);
 
         if (rightStats.numericCount !== leftStats.numericCount) {
           return rightStats.numericCount - leftStats.numericCount;
@@ -968,7 +1178,7 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
         if (rightStats.totalCount !== leftStats.totalCount) {
           return rightStats.totalCount - leftStats.totalCount;
         }
-        return collator.compare(rightModel, leftModel);
+        return compareModelNameByColumnOrder(leftModel, rightModel, collator);
       });
     });
 
@@ -987,7 +1197,7 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
         }
       });
 
-      matched.sort((left, right) => collator.compare(right, left));
+      matched.sort((left, right) => compareModelNameByColumnOrder(left, right, collator));
       return [...matched, ...others];
     })();
 
@@ -1063,7 +1273,7 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
       }
     >();
 
-    filteredRows.forEach((row, rowIndex) => {
+    baseSourceRows.forEach((row, rowIndex) => {
       const category = row.benchmarkType || "General";
       const benchmark = row.benchmarkName;
       const matrixKey = getMatrixGroupingKey(row, showDuplicateRows);
@@ -1104,6 +1314,14 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
         [...matrixRow.modalities, ...normalizedModalities],
         matrixRow.categoryValues[0] ?? "General"
       );
+    });
+
+    filteredRows.forEach((row) => {
+      const matrixKey = getMatrixGroupingKey(row, showDuplicateRows);
+      const matrixRow = matrixMap.get(matrixKey);
+      if (!matrixRow) {
+        return;
+      }
 
       if (!matrixRow.cells.has(row.modelName)) {
         matrixRow.cells.set(row.modelName, {
@@ -1168,7 +1386,7 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
         };
       })
       .sort((a, b) => a.firstSeenIndex - b.firstSeenIndex);
-  }, [filteredRows, showDuplicateRows]);
+  }, [baseSourceRows, filteredRows, showDuplicateRows]);
 
   function getRowSortCycle(): RowSortMode[] {
     return activeSource === SOURCE_ALL
@@ -1265,6 +1483,21 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
     return rowsCopy;
   }, [modalityFilteredMatrixRows, rowSortState]);
 
+  const headerUniqueCounts = useMemo(() => {
+    const uniqueCategories = new Set<string>();
+    const uniqueBenchmarks = new Set<string>();
+
+    modalityFilteredMatrixRows.forEach((row) => {
+      uniqueCategories.add(row.category);
+      uniqueBenchmarks.add(row.rowKey);
+    });
+
+    return {
+      category: uniqueCategories.size,
+      benchmark: uniqueBenchmarks.size
+    };
+  }, [modalityFilteredMatrixRows]);
+
   function getSortModeLabel(column: RowSortColumn): string {
     if (rowSortState.column !== column) return "";
     const effectiveMode = getEffectiveSortMode(rowSortState.mode);
@@ -1273,15 +1506,18 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
     return "";
   }
 
+  function getSortActionText(mode: RowSortMode): string {
+    if (mode === "alpha") return "点击按首字母排序";
+    if (mode === "data") return "点击按数据量排序";
+    return "点击按 source 导入顺序（倒序）";
+  }
+
   function getSortModeTitle(column: RowSortColumn): string {
     const current = rowSortState.column === column
       ? getEffectiveSortMode(rowSortState.mode)
       : getInactiveColumnBaseMode();
     const next = nextRowSortMode(current);
-    if (next === "alpha") return "点击按首字母升序";
-    if (next === "data") return "点击按数据量降序";
-    if (next === "source") return "点击按 source 导入顺序（倒序）";
-    return "点击按首字母升序";
+    return getSortActionText(next);
   }
 
   function toggleModel(modelName: string, checked: boolean) {
@@ -1642,9 +1878,16 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
             {providerGroups.map((group) => {
               const selectedCount = group.models.filter((model) => selectedModelSet.has(model)).length;
               const providerChecked = selectedCount > 0 && selectedCount === group.models.length;
+              const providerAverageCoverage = providerAverageCoveragePercentMap.get(group.providerName) ?? 0;
+              const providerHasBaseModel = group.models.some((model) => baseModelNameSet.has(model));
 
               return (
-                <details key={group.providerName} className="rounded-lg border border-base-300/70 bg-base-100/70 px-2 py-1">
+                <details
+                  key={group.providerName}
+                  className={`rounded-lg border bg-base-100/70 px-2 py-1 ${
+                    providerHasBaseModel ? "border-base-300/70" : "border-dashed border-base-300/70"
+                  }`}
+                >
                   <summary className="flex list-none items-center justify-between gap-2 cursor-pointer py-1">
                     <label
                       className="inline-flex items-center gap-2"
@@ -1658,23 +1901,40 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
                       />
                       <span className="text-sm font-medium" style={{ color: getProviderBrandColor(group.providerName) }}>
                         {group.providerName}
+                        {providerHasBaseModel ? null : <span className="ml-1 text-[10px] opacity-70">(跨页签)</span>}
                       </span>
                     </label>
-                    <span className="text-xs opacity-70">{selectedCount}/{group.models.length}</span>
+                    <span className="text-xs opacity-70">{selectedCount}/{group.models.length} · 覆盖率 {providerAverageCoverage}%</span>
                   </summary>
 
                   <div className="grid grid-cols-1 gap-1 pb-2 pt-1">
-                    {group.models.map((model) => (
-                      <label key={`${group.providerName}-${model}`} className="inline-flex items-center gap-2 text-xs">
-                        <input
-                          type="checkbox"
-                          className="checkbox checkbox-xs"
-                          checked={selectedModelSet.has(model)}
-                          onChange={(e) => toggleModel(model, e.target.checked)}
-                        />
-                        <span className="truncate" title={model}>{model}</span>
-                      </label>
-                    ))}
+                    {group.models.map((model) => {
+                      const isBaseModel = baseModelNameSet.has(model);
+                      const coveragePercent = modelCoveragePercentMap.get(model) ?? 0;
+
+                      return (
+                        <label
+                          key={`${group.providerName}-${model}`}
+                          className={`inline-flex items-center gap-2 rounded-md px-1 py-0.5 text-xs ${
+                            isBaseModel ? "" : "border border-dashed border-base-300/70 bg-base-200/25"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="checkbox checkbox-xs"
+                            checked={selectedModelSet.has(model)}
+                            onChange={(e) => toggleModel(model, e.target.checked)}
+                          />
+                          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                            <span className="truncate" title={model}>{model}</span>
+                            {isBaseModel ? null : (
+                              <span className="rounded border border-dashed border-base-content/40 px-1 text-[10px] opacity-70">跨页签</span>
+                            )}
+                          </span>
+                          <span className="shrink-0 text-[10px] opacity-70">{coveragePercent}%</span>
+                        </label>
+                      );
+                    })}
                   </div>
                 </details>
               );
@@ -1780,7 +2040,10 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
                     onClick={() => toggleRowSort("category")}
                     title={getSortModeTitle("category")}
                   >
-                    <span>Category</span>
+                    <span className="inline-flex items-baseline gap-0.5">
+                      <span>Category</span>
+                      <span className="text-[10px] opacity-70">({headerUniqueCounts.category})</span>
+                    </span>
                     {getSortModeLabel("category") ? (
                       <span className="text-[10px] opacity-70">{getSortModeLabel("category")}</span>
                     ) : null}
@@ -1808,7 +2071,10 @@ export function BenchmarkMatrix({ rows, sourceOptions: allSourceOptions = [] }: 
                   onClick={() => toggleRowSort("benchmark")}
                   title={getSortModeTitle("benchmark")}
                 >
-                  <span>Benchmark</span>
+                  <span className="inline-flex items-baseline gap-0.5">
+                    <span>Benchmark</span>
+                    <span className="text-[10px] opacity-70">({headerUniqueCounts.benchmark})</span>
+                  </span>
                   {getSortModeLabel("benchmark") ? (
                     <span className="text-[10px] opacity-70">{getSortModeLabel("benchmark")}</span>
                   ) : null}

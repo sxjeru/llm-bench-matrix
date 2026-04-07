@@ -18,11 +18,29 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   const sourceParamRaw = resolvedSearchParams.source;
   const sourceParam = Array.isArray(sourceParamRaw) ? sourceParamRaw[0] : sourceParamRaw;
 
-  const [rows, sourceOptions, stats] = await Promise.all([
-    getDashboardRows(null, sourceParam),
+  const rowsPromise = getDashboardRows(null, sourceParam);
+  const allRowsPromise = sourceParam ? getDashboardRows(null, null) : rowsPromise;
+
+  const [rows, allRows, sourceOptions, stats] = await Promise.all([
+    rowsPromise,
+    allRowsPromise,
     getSourceOptions(),
-    getDashboardStats(sourceParam)
+    getDashboardStats(null)
   ]);
+
+  const toMatrixRow = (row: (typeof rows)[number]) => ({
+    providerName: row.providerName,
+    modelName: row.modelName,
+    benchmarkName: row.benchmarkName,
+    benchmarkType: row.benchmarkType,
+    benchmarkCanonicalKey: row.benchmarkCanonicalKey,
+    modalities: row.modalities,
+    benchTime: row.benchTime,
+    valueRaw: row.valueRaw,
+    valueNum: row.valueNum,
+    valueNote: row.valueNote,
+    source: row.source
+  });
 
   return (
     <>
@@ -51,19 +69,8 @@ export default async function HomePage({ searchParams }: HomePageProps) {
       <Suspense fallback={null}>
         <BenchmarkMatrix
           sourceOptions={sourceOptions}
-          rows={rows.map((row) => ({
-            providerName: row.providerName,
-            modelName: row.modelName,
-            benchmarkName: row.benchmarkName,
-            benchmarkType: row.benchmarkType,
-            benchmarkCanonicalKey: row.benchmarkCanonicalKey,
-            modalities: row.modalities,
-            benchTime: row.benchTime,
-            valueRaw: row.valueRaw,
-            valueNum: row.valueNum,
-            valueNote: row.valueNote,
-            source: row.source
-          }))}
+          rows={rows.map(toMatrixRow)}
+          allRows={allRows.map(toMatrixRow)}
         />
       </Suspense>
 

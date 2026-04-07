@@ -288,6 +288,10 @@ function buildModelCompareKey(input: string): string {
   return input.toLowerCase().replace(/[\-\s\.]/g, "").trim();
 }
 
+function toDomSafeId(input: string): string {
+  return input.replace(/[^a-zA-Z0-9_-]+/g, "-");
+}
+
 function isLowerBetterPreviewBenchmark(benchmarkName: string): boolean {
   return LOWER_IS_BETTER_PREVIEW_RULES.some((rule) => rule.test(benchmarkName));
 }
@@ -731,17 +735,7 @@ export function AdminConsole({
       });
     });
 
-    const levelRank: Record<BenchmarkWarningLevel, number> = {
-      danger: 0,
-      warn: 1,
-      info: 2
-    };
-
-    return warnings.sort((a, b) => {
-      const rankGap = levelRank[a.level] - levelRank[b.level];
-      if (rankGap !== 0) return rankGap;
-      return a.modelName.localeCompare(b.modelName, "zh-Hans-CN");
-    });
+    return warnings;
   }, [textImportDraftRows, existingModelByCompareKey, existingModelExactMap]);
 
   const modelsWithParentheses = useMemo(() => {
@@ -753,6 +747,11 @@ export function AdminConsole({
   const modelWarningSet = useMemo(
     () => new Set([...modelWarnings.map((item) => item.modelName), ...modelsWithParentheses]),
     [modelWarnings, modelsWithParentheses]
+  );
+
+  const modelWarningMap = useMemo(
+    () => new Map(modelWarnings.map((item) => [item.key, item])),
+    [modelWarnings]
   );
 
   const benchmarkWarnings = useMemo(() => {
@@ -852,17 +851,7 @@ export function AdminConsole({
       });
     });
 
-    const levelRank: Record<BenchmarkWarningLevel, number> = {
-      danger: 0,
-      warn: 1,
-      info: 2
-    };
-
-    return warnings.sort((a, b) => {
-      const rankGap = levelRank[a.level] - levelRank[b.level];
-      if (rankGap !== 0) return rankGap;
-      return a.benchmarkName.localeCompare(b.benchmarkName, "zh-Hans-CN");
-    });
+    return warnings;
   }, [benchmarks, textImportDraftRows, existingBenchmarkExactMap, existingBenchmarkByNameMap]);
 
   const benchmarkWarningMap = useMemo(
@@ -1030,6 +1019,8 @@ export function AdminConsole({
   );
 
   const finalizedTextImportRows = useMemo(() => {
+    const latestSourceInput = csvSource.trim();
+
     return textImportDraftRows
       .map<StructuredCsvImportRow | null>((row) => {
         const benchmarkKey = getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType);
@@ -1157,11 +1148,12 @@ export function AdminConsole({
           modalities: normalizedModalities,
           rawValue,
           valueNote,
-          source: row.source?.trim() || null
+          source: latestSourceInput.length > 0 ? latestSourceInput : (row.source?.trim() || null)
         };
       })
       .filter((item): item is StructuredCsvImportRow => item !== null);
   }, [
+    csvSource,
     textImportDraftRows,
     ignoredBenchmarkKeys,
     parenthesesModes,
@@ -1963,6 +1955,27 @@ export function AdminConsole({
     });
   }
 
+  function applyBenchmarkOverwriteByTargetId(benchmarkKey: string, targetId: number): boolean {
+    const target = benchmarkById.get(targetId);
+    if (!target) {
+      return false;
+    }
+
+    onRenameTextImportBenchmark(benchmarkKey, target.benchmarkName);
+    onRenameTextImportBenchmarkType(benchmarkKey, target.benchmarkType);
+    return true;
+  }
+
+  function applyModelOverwriteByTargetId(modelName: string, targetId: number): boolean {
+    const target = modelById.get(targetId);
+    if (!target) {
+      return false;
+    }
+
+    onRenameTextImportModel(modelName, target.modelName);
+    return true;
+  }
+
   function onMatrixBenchmarkNameInputChange(benchmarkKey: string, nextBenchmarkName: string) {
     setMatrixBenchmarkNameDrafts((prev) => ({
       ...prev,
@@ -2235,9 +2248,11 @@ export function AdminConsole({
       return;
     }
 
-    const hasAnySource = textImportDraftRows.length > 0
-      ? finalizedTextImportRows.some((row) => (row.source ?? "").trim().length > 0)
-      : csvSource.trim().length > 0;
+    const latestSourceInput = csvSource.trim();
+    const hasAnySource = latestSourceInput.length > 0
+      || (textImportDraftRows.length > 0
+        ? finalizedTextImportRows.some((row) => (row.source ?? "").trim().length > 0)
+        : false);
 
     if (!hasAnySource) {
       setConfirmImportWithoutSourceOpen(true);
@@ -3108,19 +3123,50 @@ export function AdminConsole({
                               ({matrixPreviewHeaderCounts.typeUniqueCount})
                             </span>
                           </th>
-                          {matrixPreview.modelNames.map((modelName) => (
-                            <th
-                              key={`matrix-model-${modelName}`}
-                              className={modelWarningSet.has(modelName) ? "bg-warning/20 text-warning-content" : ""}
-                            >
-                              <input
-                                className="input input-bordered input-xs w-full min-w-[120px]"
-                                value={matrixModelNameDrafts[modelName] ?? modelName}
-                                onChange={(e) => onMatrixModelNameInputChange(modelName, e.target.value)}
-                                onBlur={(e) => onMatrixModelNameInputBlur(modelName, e.target.value)}
-                              />
-                            </th>
-                          ))}
+                          {matrixPreview.modelNames.map((modelName) => {
+                            const modelWarning = modelWarningMap.get(modelName);
+                            const modelCandidateTargetIds = Array.from(new Set([
+                              ...(modelWarning?.candidateTargetIds ?? []),
+                              ...(modelWarning?.suggestedTargetId ? [modelWarning.suggestedTargetId] : [])
+                            ]));
+                            const modelInputListId = `matrix-model-override-${toDomSafeId(modelName)}`;
+
+                            return (
+                              <th
+                                key={`matrix-model-${modelName}`}
+                                className={modelWarningSet.has(modelName) ? "bg-warning/20 text-warning-content" : ""}
+                              >
+                                <input
+                                  className="input input-bordered input-xs w-full min-w-[120px]"
+                                  list={modelCandidateTargetIds.length > 0 ? modelInputListId : undefined}
+                                  value={matrixModelNameDrafts[modelName] ?? modelName}
+                                  onChange={(e) => {
+                                    const nextInput = e.target.value;
+                                    const parsedTargetId = parseMergeEntityId(nextInput, modelEntityOptions);
+                                    if (parsedTargetId !== null && applyModelOverwriteByTargetId(modelName, parsedTargetId)) {
+                                      return;
+                                    }
+                                    onMatrixModelNameInputChange(modelName, nextInput);
+                                  }}
+                                  onBlur={(e) => onMatrixModelNameInputBlur(modelName, e.target.value)}
+                                />
+                                {modelCandidateTargetIds.length > 0 ? (
+                                  <datalist id={modelInputListId}>
+                                    {modelCandidateTargetIds.map((targetId) => {
+                                      const target = modelById.get(targetId);
+                                      if (!target) return null;
+                                      return (
+                                        <option
+                                          key={`matrix-model-override-option-${modelName}-${targetId}`}
+                                          value={`${target.modelName} [${targetId}]`}
+                                        />
+                                      );
+                                    })}
+                                  </datalist>
+                                ) : null}
+                              </th>
+                            );
+                          })}
                         </tr>
                       </thead>
                       <tbody>
@@ -3181,18 +3227,52 @@ export function AdminConsole({
                                 }`}
                               >
                                 <div className="space-y-1">
-                                  <input
-                                    className="input input-bordered input-xs w-full"
-                                    value={matrixBenchmarkNameDrafts[matrixRow.key] ?? matrixRow.benchmarkName}
-                                    onChange={(e) => onMatrixBenchmarkNameInputChange(matrixRow.key, e.target.value)}
-                                    onBlur={(e) =>
-                                      onMatrixBenchmarkNameInputBlur(
-                                        matrixRow.key,
-                                        matrixRow.benchmarkName,
-                                        e.target.value
-                                      )
-                                    }
-                                  />
+                                  {(() => {
+                                    const benchmarkCandidateTargetIds = Array.from(new Set([
+                                      ...(warning?.candidateTargetIds ?? []),
+                                      ...(warning?.suggestedTargetId ? [warning.suggestedTargetId] : [])
+                                    ]));
+                                    const benchmarkInputListId = `matrix-benchmark-override-${toDomSafeId(matrixRow.key)}`;
+
+                                    return (
+                                      <>
+                                        <input
+                                          className="input input-bordered input-xs w-full"
+                                          list={benchmarkCandidateTargetIds.length > 0 ? benchmarkInputListId : undefined}
+                                          value={matrixBenchmarkNameDrafts[matrixRow.key] ?? matrixRow.benchmarkName}
+                                          onChange={(e) => {
+                                            const nextInput = e.target.value;
+                                            const parsedTargetId = parseMergeEntityId(nextInput, benchmarkEntityOptions);
+                                            if (parsedTargetId !== null && applyBenchmarkOverwriteByTargetId(matrixRow.key, parsedTargetId)) {
+                                              return;
+                                            }
+                                            onMatrixBenchmarkNameInputChange(matrixRow.key, nextInput);
+                                          }}
+                                          onBlur={(e) =>
+                                            onMatrixBenchmarkNameInputBlur(
+                                              matrixRow.key,
+                                              matrixRow.benchmarkName,
+                                              e.target.value
+                                            )
+                                          }
+                                        />
+                                        {benchmarkCandidateTargetIds.length > 0 ? (
+                                          <datalist id={benchmarkInputListId}>
+                                            {benchmarkCandidateTargetIds.map((targetId) => {
+                                              const target = benchmarkById.get(targetId);
+                                              if (!target) return null;
+                                              return (
+                                                <option
+                                                  key={`matrix-benchmark-override-option-${matrixRow.key}-${targetId}`}
+                                                  value={`${target.benchmarkName} (${target.benchmarkType}) [${targetId}]`}
+                                                />
+                                              );
+                                            })}
+                                          </datalist>
+                                        ) : null}
+                                      </>
+                                    );
+                                  })()}
                                 </div>
                               </th>
                               <td className="whitespace-nowrap text-sm">
@@ -3266,17 +3346,24 @@ export function AdminConsole({
                 <div className="mt-4 space-y-3">
                   <h4 className="font-semibold">重复嫌疑与快捷合并</h4>
                   <div className="space-y-3">
-                    {benchmarkWarnings.map((warning) => (
-                      <div
-                        key={`warning-${warning.key}`}
-                        className={`rounded-box border p-3 ${
-                          warning.level === "danger"
-                            ? "border-error/40 bg-error/5"
-                            : warning.level === "warn"
-                              ? "border-warning/40 bg-warning/5"
-                              : "border-info/40 bg-info/5"
-                        }`}
-                      >
+                    {benchmarkWarnings.map((warning) => {
+                      const benchmarkCandidateTargetIds = Array.from(new Set([
+                        ...warning.candidateTargetIds,
+                        ...(warning.suggestedTargetId ? [warning.suggestedTargetId] : [])
+                      ]));
+                      const benchmarkMergeListId = `benchmark-merge-options-${toDomSafeId(warning.key)}`;
+
+                      return (
+                        <div
+                          key={`warning-${warning.key}`}
+                          className={`rounded-box border p-3 ${
+                            warning.level === "danger"
+                              ? "border-error/40 bg-error/5"
+                              : warning.level === "warn"
+                                ? "border-warning/40 bg-warning/5"
+                                : "border-info/40 bg-info/5"
+                          }`}
+                        >
                         <div className="mb-2 flex flex-wrap items-center gap-2">
                           <span className="font-semibold">{warning.benchmarkName}</span>
                           <span className="text-xs opacity-70">({warning.benchmarkType})</span>
@@ -3287,14 +3374,18 @@ export function AdminConsole({
                             <li key={`${warning.key}-reason-${idx}`}>{reason}</li>
                           ))}
                         </ul>
-                        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(320px,1fr)_auto_auto] lg:items-center">
+                        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(320px,1fr)_auto] lg:items-center">
                           <input
                             className="input input-bordered input-sm"
                             value={benchmarkMergeFilters[warning.key] ?? ""}
-                            list={`benchmark-merge-options-${warning.key}`}
+                            list={benchmarkMergeListId}
                             onChange={(e) => {
                               const nextInput = e.target.value;
                               const parsedTargetId = parseMergeEntityId(nextInput, benchmarkEntityOptions);
+
+                              if (parsedTargetId !== null && applyBenchmarkOverwriteByTargetId(warning.key, parsedTargetId)) {
+                                return;
+                              }
 
                               setBenchmarkMergeFilters((prev) => ({
                                 ...prev,
@@ -3306,40 +3397,20 @@ export function AdminConsole({
                                 [warning.key]: parsedTargetId !== null ? String(parsedTargetId) : ""
                               }));
                             }}
-                            placeholder="输入 benchmark 名称并选择候选"
+                            placeholder="输入 benchmark 名称并选择候选（即时覆盖预览）"
                           />
-                          <datalist id={`benchmark-merge-options-${warning.key}`}>
-                            {benchmarkEntityOptions.map((option) => (
-                              <option key={`warning-target-${warning.key}-${option.id}`} value={`${option.label} [${option.id}]`} />
-                            ))}
+                          <datalist id={benchmarkMergeListId}>
+                            {benchmarkCandidateTargetIds.map((targetId) => {
+                              const target = benchmarkEntityOptions.find((item) => item.id === targetId);
+                              if (!target) return null;
+                              return (
+                                <option
+                                  key={`warning-target-${warning.key}-${target.id}`}
+                                  value={`${target.label} [${target.id}]`}
+                                />
+                              );
+                            })}
                           </datalist>
-
-                          {warning.suggestedTargetId ? (
-                            <button
-                              type="button"
-                              className="btn btn-xs btn-outline"
-                              onClick={() => {
-                                const suggested = benchmarkEntityOptions.find((item) => item.id === warning.suggestedTargetId);
-                                const suggestedInput = suggested
-                                  ? `${suggested.label} [${warning.suggestedTargetId}]`
-                                  : String(warning.suggestedTargetId);
-
-                                setBenchmarkMergeFilters((prev) => ({
-                                  ...prev,
-                                  [warning.key]: suggestedInput
-                                }));
-
-                                setBenchmarkMergeTargets((prev) => ({
-                                  ...prev,
-                                  [warning.key]: String(warning.suggestedTargetId)
-                                }));
-                              }}
-                            >
-                              采用建议
-                            </button>
-                          ) : (
-                            <span className="hidden lg:block" />
-                          )}
 
                           <label className="label cursor-pointer justify-start gap-2">
                             <input
@@ -3356,8 +3427,9 @@ export function AdminConsole({
                             <span className="label-text text-xs">忽略该 benchmark</span>
                           </label>
                         </div>
-                      </div>
-                    ))}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ) : null}
@@ -3415,17 +3487,20 @@ export function AdminConsole({
                 <div className="mt-4 space-y-3">
                   <h4 className="font-semibold">模型重名嫌疑与快捷合并</h4>
                   <div className="space-y-3">
-                    {modelWarnings.map((warning) => (
-                      <div
-                        key={`model-warning-${warning.key}`}
-                        className={`rounded-box border p-3 ${
-                          warning.level === "danger"
-                            ? "border-error/40 bg-error/5"
-                            : warning.level === "warn"
-                              ? "border-warning/40 bg-warning/5"
-                              : "border-info/40 bg-info/5"
-                        }`}
-                      >
+                    {modelWarnings.map((warning) => {
+                      const modelMergeListId = `model-merge-options-${toDomSafeId(warning.key)}`;
+
+                      return (
+                        <div
+                          key={`model-warning-${warning.key}`}
+                          className={`rounded-box border p-3 ${
+                            warning.level === "danger"
+                              ? "border-error/40 bg-error/5"
+                              : warning.level === "warn"
+                                ? "border-warning/40 bg-warning/5"
+                                : "border-info/40 bg-info/5"
+                          }`}
+                        >
                         <div className="mb-2 flex flex-wrap items-center gap-2">
                           <span className="font-semibold">{warning.modelName}</span>
                           <span className="badge badge-sm">{warning.level}</span>
@@ -3435,14 +3510,18 @@ export function AdminConsole({
                             <li key={`${warning.key}-model-reason-${idx}`}>{reason}</li>
                           ))}
                         </ul>
-                        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(320px,1fr)_auto] lg:items-center">
+                        <div className="grid grid-cols-1 gap-2 lg:grid-cols-1 lg:items-center">
                           <input
                             className="input input-bordered input-sm"
                             value={modelMergeFilters[warning.key] ?? ""}
-                            list={`model-merge-options-${warning.key}`}
+                            list={modelMergeListId}
                             onChange={(e) => {
                               const nextInput = e.target.value;
                               const parsedTargetId = parseMergeEntityId(nextInput, modelEntityOptions);
+
+                              if (parsedTargetId !== null && applyModelOverwriteByTargetId(warning.key, parsedTargetId)) {
+                                return;
+                              }
 
                               setModelMergeFilters((prev) => ({
                                 ...prev,
@@ -3454,43 +3533,18 @@ export function AdminConsole({
                                 [warning.key]: parsedTargetId !== null ? String(parsedTargetId) : ""
                               }));
                             }}
-                            placeholder="输入 model 名称并选择候选"
+                            placeholder="输入 model 名称并选择候选（即时覆盖预览）"
                           />
-                          <datalist id={`model-merge-options-${warning.key}`}>
+                          <datalist id={modelMergeListId}>
                             {modelEntityOptions.map((option) => (
                               <option key={`model-warning-target-${warning.key}-${option.id}`} value={`${option.label} [${option.id}]`} />
                             ))}
                           </datalist>
 
-                          {warning.suggestedTargetId ? (
-                            <button
-                              type="button"
-                              className="btn btn-xs btn-outline"
-                              onClick={() => {
-                                const suggested = modelEntityOptions.find((item) => item.id === warning.suggestedTargetId);
-                                const suggestedInput = suggested
-                                  ? `${suggested.label} [${warning.suggestedTargetId}]`
-                                  : String(warning.suggestedTargetId);
-
-                                setModelMergeFilters((prev) => ({
-                                  ...prev,
-                                  [warning.key]: suggestedInput
-                                }));
-
-                                setModelMergeTargets((prev) => ({
-                                  ...prev,
-                                  [warning.key]: String(warning.suggestedTargetId)
-                                }));
-                              }}
-                            >
-                              采用建议
-                            </button>
-                          ) : (
-                            <span className="hidden lg:block" />
-                          )}
                         </div>
-                      </div>
-                    ))}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ) : null}
