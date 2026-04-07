@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 
 type MatrixInputRow = {
+  recordId?: number | null;
   providerName: string;
   modelName: string;
   benchmarkName: string;
@@ -71,6 +72,7 @@ type MatrixRow = {
   modalities: string[];
   cells: Map<string, MatrixCell>;
   firstSeenIndex: number;
+  sourceOrderKey: number | null;
   rowDataCount: number;
   rowNumericCount: number;
   minComparable: number | null;
@@ -874,13 +876,17 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
   useEffect(() => {
     const sourceFromUrl = searchParams.get("source");
-    if (!sourceFromUrl) {
-      setActiveSource(SOURCE_ALL);
-      return;
-    }
+    const isKnown = sourceFromUrl
+      ? sourceOptions.some((item) => item.key === sourceFromUrl)
+      : false;
+    const nextSource = sourceFromUrl && isKnown ? sourceFromUrl : SOURCE_ALL;
 
-    const isKnown = sourceOptions.some((item) => item.key === sourceFromUrl);
-    setActiveSource(isKnown ? sourceFromUrl : SOURCE_ALL);
+    setActiveSource(nextSource);
+
+    if (activeSourceRef.current !== nextSource) {
+      const nextMode: RowSortMode = nextSource === SOURCE_ALL ? "data" : "source";
+      setRowSortState((prev) => (prev.mode === nextMode ? prev : { ...prev, mode: nextMode }));
+    }
   }, [searchParams, sourceOptions]);
 
   useEffect(() => {
@@ -1566,6 +1572,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
           modalities: normalizedModalities,
           cells: new Map<string, MatrixCell>(),
           firstSeenIndex: rowIndex,
+          sourceOrderKey: typeof row.recordId === "number" ? row.recordId : null,
           rowDataCount: 0,
           rowNumericCount: 0,
           minComparable: null,
@@ -1580,6 +1587,12 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       }
 
       const matrixRow = matrixMap.get(matrixKey)!;
+
+      if (typeof row.recordId === "number") {
+        if (matrixRow.sourceOrderKey === null || row.recordId < matrixRow.sourceOrderKey) {
+          matrixRow.sourceOrderKey = row.recordId;
+        }
+      }
 
       if (!matrixRow.categoryValues.includes(category)) {
         matrixRow.categoryValues.push(category);
@@ -1759,7 +1772,24 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     const effectiveMode = getEffectiveSortMode(rowSortState.mode);
 
     if (effectiveMode === "source") {
-      rowsCopy.sort((a, b) => b.firstSeenIndex - a.firstSeenIndex);
+      rowsCopy.sort((a, b) => {
+        const leftSourceOrder = a.sourceOrderKey;
+        const rightSourceOrder = b.sourceOrderKey;
+
+        if (leftSourceOrder !== null && rightSourceOrder !== null && leftSourceOrder !== rightSourceOrder) {
+          return leftSourceOrder - rightSourceOrder;
+        }
+
+        if (leftSourceOrder !== null && rightSourceOrder === null) {
+          return -1;
+        }
+
+        if (leftSourceOrder === null && rightSourceOrder !== null) {
+          return 1;
+        }
+
+        return a.firstSeenIndex - b.firstSeenIndex;
+      });
       return rowsCopy;
     }
 
@@ -1835,7 +1865,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   function getSortActionText(mode: RowSortMode): string {
     if (mode === "alpha") return "点击按首字母排序";
     if (mode === "data") return "点击按数据量排序";
-    return "点击按 source 导入顺序（倒序）";
+    return "点击按 source 导入顺序排序";
   }
 
   function getSortModeTitle(column: RowSortColumn): string {

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
@@ -408,6 +408,112 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     fireEvent.click(benchmarkSortButton);
 
     expect(benchmarkSortButton).toHaveAttribute("title", "点击按数据量排序");
+  });
+
+  test("刷新到非全部 source 页签时，默认进入 source 导入顺序模式", async () => {
+    mockSearchParams.set("source", "text:S1");
+
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:S1", "text:S2"]}
+        rows={[...baseRows]}
+        allRows={[...allRows]}
+      />
+    );
+
+    const benchmarkSortButton = screen.getByRole("button", { name: /Benchmark/ });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "S1" })).toHaveClass("tab-active");
+      expect(benchmarkSortButton).toHaveAttribute("title", "点击按首字母排序");
+      expect(benchmarkSortButton).not.toHaveTextContent("↓");
+    });
+  });
+
+  test("同一 source 多次导入时，行默认按导入先后顺序展示（第一次在前）", async () => {
+    mockSearchParams.set("source", "text:S1");
+
+    const multiImportRows = [
+      {
+        recordId: 101,
+        providerName: "OpenAI",
+        modelName: "Model A",
+        benchmarkName: "Bench-A",
+        benchmarkType: "General",
+        benchmarkCanonicalKey: "bench-a:general",
+        benchTime: "2026-04-06T00:00:00.000Z",
+        valueRaw: "81",
+        valueNum: 81,
+        valueNote: null,
+        source: "text:S1"
+      },
+      {
+        recordId: 102,
+        providerName: "OpenAI",
+        modelName: "Model A",
+        benchmarkName: "Bench-B",
+        benchmarkType: "General",
+        benchmarkCanonicalKey: "bench-b:general",
+        benchTime: "2026-04-06T00:00:00.000Z",
+        valueRaw: "82",
+        valueNum: 82,
+        valueNote: null,
+        source: "text:S1"
+      },
+      {
+        recordId: 201,
+        providerName: "OpenAI",
+        modelName: "Model A",
+        benchmarkName: "Bench-C",
+        benchmarkType: "General",
+        benchmarkCanonicalKey: "bench-c:general",
+        benchTime: "2025-01-01T00:00:00.000Z",
+        valueRaw: "71",
+        valueNum: 71,
+        valueNote: null,
+        source: "text:S1"
+      },
+      {
+        recordId: 202,
+        providerName: "OpenAI",
+        modelName: "Model A",
+        benchmarkName: "Bench-D",
+        benchmarkType: "General",
+        benchmarkCanonicalKey: "bench-d:general",
+        benchTime: "2025-01-01T00:00:00.000Z",
+        valueRaw: "72",
+        valueNum: 72,
+        valueNote: null,
+        source: "text:S1"
+      }
+    ] as const;
+
+    const { container } = render(
+      <BenchmarkMatrix
+        sourceOptions={["text:S1"]}
+        rows={[...multiImportRows]}
+        allRows={[...multiImportRows]}
+      />
+    );
+
+    const benchmarkSortButton = screen.getByRole("button", { name: /Benchmark/ });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "S1" })).toHaveClass("tab-active");
+      expect(benchmarkSortButton).toHaveAttribute("title", "点击按首字母排序");
+    });
+
+    const benchmarkOrder = Array.from(container.querySelectorAll("tbody tr"))
+      .map((row) => {
+        const cellText = Array.from(row.querySelectorAll("td"))
+          .map((cell) => (cell.textContent ?? "").trim())
+          .find((text) => /^Bench-[ABCD]$/.test(text));
+
+        return cellText ?? "";
+      })
+      .filter(Boolean);
+
+    expect(benchmarkOrder.slice(0, 4)).toEqual(["Bench-A", "Bench-B", "Bench-C", "Bench-D"]);
   });
 
   test("provider 按覆盖率排序，且当前页签相关 provider 始终置顶", () => {
