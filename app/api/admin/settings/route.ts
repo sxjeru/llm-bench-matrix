@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "../../../../lib/admin-auth";
-import { rebuildModelCanonicalKeysByRule } from "../../../../lib/admin-service";
+import { rebuildBenchmarkCanonicalKeysByRule, rebuildModelCanonicalKeysByRule } from "../../../../lib/admin-service";
 import { getSettings, saveSetting } from "../../../../lib/db/queries";
 
 const SENSITIVE_SETTING_KEYS = new Set([
@@ -43,7 +43,18 @@ export async function POST(request: Request) {
   await saveSetting(parsed.data);
 
   if (parsed.data.key === "model_dedupe_rule") {
-    const rebuildResult = await rebuildModelCanonicalKeysByRule(parsed.data.valueJson);
+    const [modelRebuildResult, benchmarkRebuildResult] = await Promise.all([
+      rebuildModelCanonicalKeysByRule(parsed.data.valueJson),
+      rebuildBenchmarkCanonicalKeysByRule(parsed.data.valueJson)
+    ]);
+
+    const rebuildResult = {
+      model: modelRebuildResult,
+      benchmark: benchmarkRebuildResult,
+      mergedCount: modelRebuildResult.mergedCount,
+      benchmarkMergedCount: benchmarkRebuildResult.mergedCount
+    };
+
     return NextResponse.json({ ok: true, rebuildResult });
   }
 

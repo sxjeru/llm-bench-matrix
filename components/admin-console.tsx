@@ -288,6 +288,25 @@ function buildModelCompareKey(input: string): string {
   return input.toLowerCase().replace(/[\-\s\.]/g, "").trim();
 }
 
+function normalizeModelNameByDedupeRule(input: string, rule: ModelDedupeRule): string {
+  let normalized = input.trim();
+
+  if (rule.lowercase) {
+    normalized = normalized.toLowerCase();
+  }
+  if (rule.removeHyphen) {
+    normalized = normalized.replace(/-/g, "");
+  }
+  if (rule.removeSpace) {
+    normalized = normalized.replace(/\s+/g, "");
+  }
+  if (rule.removeDot) {
+    normalized = normalized.replace(/\./g, "");
+  }
+
+  return normalized;
+}
+
 function toDomSafeId(input: string): string {
   return input.replace(/[^a-zA-Z0-9_-]+/g, "-");
 }
@@ -618,6 +637,10 @@ export function AdminConsole({
     return new Map(benchmarks.map((item) => [item.id, item]));
   }, [benchmarks]);
 
+  const providerById = useMemo(() => {
+    return new Map(providers.map((item) => [item.id, item]));
+  }, [providers]);
+
   const existingBenchmarkExactMap = useMemo(() => {
     const map = new Map<string, BenchmarkOption>();
     benchmarks.forEach((item) => {
@@ -662,6 +685,16 @@ export function AdminConsole({
     const map = new Map<string, ModelOption>();
     models.forEach((item) => {
       map.set(item.modelName.trim().toLowerCase(), item);
+    });
+    return map;
+  }, [models]);
+
+  const existingModelByCanonicalKey = useMemo(() => {
+    const map = new Map<string, ModelOption>();
+    models.forEach((item) => {
+      if (!map.has(item.canonicalKey)) {
+        map.set(item.canonicalKey, item);
+      }
     });
     return map;
   }, [models]);
@@ -1053,6 +1086,7 @@ export function AdminConsole({
         let benchmarkName = row.benchmarkName;
         let benchmarkType = row.benchmarkType;
         let modelName = row.modelName;
+        let providerName = row.providerName.trim() || "Unknown";
 
         const modelParenthesesMode = modelParenthesesModes[originalModelKey] ?? "keep";
         if (modelParenthesesMode === "remove") {
@@ -1080,10 +1114,20 @@ export function AdminConsole({
         const exactModel = existingModelExactMap.get(modelName.toLowerCase());
         if (exactModel) {
           modelName = exactModel.modelName;
+          providerName = providerById.get(exactModel.providerId)?.name ?? providerName;
         } else {
-          const sameNameModels = existingModelByNameMap.get(modelName.toLowerCase()) ?? [];
-          if (sameNameModels.length > 0) {
-            modelName = sameNameModels[0].modelName;
+          const canonicalKey = normalizeModelNameByDedupeRule(modelName, modelDedupeRule);
+          const canonicalMatchedModel = existingModelByCanonicalKey.get(canonicalKey);
+
+          if (canonicalMatchedModel) {
+            modelName = canonicalMatchedModel.modelName;
+            providerName = providerById.get(canonicalMatchedModel.providerId)?.name ?? providerName;
+          } else {
+            const sameNameModels = existingModelByNameMap.get(modelName.toLowerCase()) ?? [];
+            if (sameNameModels.length > 0) {
+              modelName = sameNameModels[0].modelName;
+              providerName = providerById.get(sameNameModels[0].providerId)?.name ?? providerName;
+            }
           }
         }
 
@@ -1141,7 +1185,7 @@ export function AdminConsole({
         );
 
         return {
-          providerName: row.providerName.trim() || "Unknown",
+          providerName,
           modelName,
           benchmarkName,
           benchmarkType,
@@ -1163,8 +1207,11 @@ export function AdminConsole({
     modelMergeTargets,
     benchmarkMergeTargets,
     modelById,
+    providerById,
     benchmarkById,
+    modelDedupeRule,
     existingModelExactMap,
+    existingModelByCanonicalKey,
     existingModelByNameMap,
     existingBenchmarkExactMap,
     existingBenchmarkByNameMap
@@ -2506,11 +2553,15 @@ export function AdminConsole({
 
       const mergedCount =
         typeof result?.rebuildResult?.mergedCount === "number" ? result.rebuildResult.mergedCount : null;
+      const benchmarkMergedCount =
+        typeof result?.rebuildResult?.benchmarkMergedCount === "number"
+          ? result.rebuildResult.benchmarkMergedCount
+          : null;
 
       notifySuccess(
-        mergedCount !== null
-          ? `模型重复识别规则已保存，并已重算 canonical_key（合并 ${mergedCount} 条重复模型）。`
-          : "模型重复识别规则已保存。新导入与新增模型会按此规则判重。"
+        mergedCount !== null || benchmarkMergedCount !== null
+          ? `模型重复识别规则已保存，并已重算 canonical_key（模型合并 ${mergedCount ?? 0} 条，benchmark 合并 ${benchmarkMergedCount ?? 0} 条）。`
+          : "模型重复识别规则已保存。新导入与新增实体会按此规则判重。"
       );
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "保存模型规则失败");

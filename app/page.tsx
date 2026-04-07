@@ -2,6 +2,8 @@ import { BenchmarkMatrix } from "@/components/benchmark-matrix";
 import { getDashboardRows, getDashboardStats, getSourceOptions } from "@/lib/db/queries";
 import { Suspense } from "react";
 
+export const dynamic = "force-dynamic";
+
 type SearchParamsShape = Record<string, string | string[] | undefined>;
 
 type HomePageProps = {

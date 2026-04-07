@@ -4,6 +4,7 @@ import { db } from "@/lib/db/client";
 import {
   buildBenchmarkCanonicalKey,
   buildModelCanonicalKey,
+  type ModelDedupeRule,
   normalizeModelDedupeRule,
   toProviderSlug
 } from "@/lib/db/normalize";
@@ -869,6 +870,85 @@ export async function rebuildModelCanonicalKeysByRule(rawRule: unknown) {
   };
 }
 
+export async function rebuildBenchmarkCanonicalKeysByRule(rawRule: unknown) {
+  const dedupeRule = normalizeModelDedupeRule(rawRule);
+  const allBenchmarks = await db
+    .select({
+      id: benchmarks.id,
+      benchmarkName: benchmarks.benchmarkName,
+      benchmarkType: benchmarks.benchmarkType,
+      mergedIntoBenchmarkId: benchmarks.mergedIntoBenchmarkId
+    })
+    .from(benchmarks)
+    .orderBy(benchmarks.id);
+
+  const groupMap = new Map<
+    string,
+    Array<{ id: number; benchmarkName: string; benchmarkType: string; mergedIntoBenchmarkId: number | null }>
+  >();
+
+  allBenchmarks.forEach((benchmark) => {
+    const canonicalKey = buildBenchmarkCanonicalKey(benchmark.benchmarkName, benchmark.benchmarkType, dedupeRule);
+    if (!groupMap.has(canonicalKey)) {
+      groupMap.set(canonicalKey, []);
+    }
+    groupMap.get(canonicalKey)?.push(benchmark);
+  });
+
+  const tempSuffix = Date.now();
+  let mergedCount = 0;
+
+  await db.transaction(async (tx: any) => {
+    for (const benchmark of allBenchmarks) {
+      await tx
+        .update(benchmarks)
+        .set({ canonicalKey: `tmp-benchmark-${benchmark.id}-${tempSuffix}` })
+        .where(eq(benchmarks.id, benchmark.id));
+    }
+
+    for (const [canonicalKey, groupedBenchmarks] of groupMap.entries()) {
+      const keeper = groupedBenchmarks.find((item) => item.mergedIntoBenchmarkId === null) ?? groupedBenchmarks[0];
+      if (!keeper) continue;
+
+      await tx
+        .update(benchmarks)
+        .set({ canonicalKey, mergedIntoBenchmarkId: null })
+        .where(eq(benchmarks.id, keeper.id));
+
+      for (const duplicate of groupedBenchmarks) {
+        if (duplicate.id === keeper.id) continue;
+
+        await tx
+          .update(benchmarkValues)
+          .set({ benchmarkId: keeper.id })
+          .where(eq(benchmarkValues.benchmarkId, duplicate.id));
+
+        await tx
+          .update(benchmarks)
+          .set({ mergedIntoBenchmarkId: keeper.id })
+          .where(eq(benchmarks.mergedIntoBenchmarkId, duplicate.id));
+
+        await tx
+          .update(benchmarks)
+          .set({
+            canonicalKey: `${canonicalKey}#merged-${duplicate.id}`,
+            mergedIntoBenchmarkId: keeper.id
+          })
+          .where(eq(benchmarks.id, duplicate.id));
+
+        mergedCount += 1;
+      }
+    }
+  });
+
+  return {
+    ok: true,
+    totalBenchmarks: allBenchmarks.length,
+    canonicalGroups: groupMap.size,
+    mergedCount
+  };
+}
+
 export async function ensureProvider(name: string, options?: { db?: DbExecutor }) {
   const cleanName = name.trim();
   if (!cleanName) {
@@ -947,7 +1027,10 @@ export async function ensureModelByProviderId(input: {
   return created;
 }
 
-export async function ensureBenchmark(input: EnsureBenchmarkInput, options?: { db?: DbExecutor }) {
+export async function ensureBenchmark(
+  input: EnsureBenchmarkInput,
+  options?: { dedupeRule?: ModelDedupeRule; db?: DbExecutor }
+) {
   const cleanName = normalizeNameParenthesisSpacing(input.benchmarkName);
   const cleanType = input.benchmarkType.trim() || "general";
 
@@ -955,7 +1038,8 @@ export async function ensureBenchmark(input: EnsureBenchmarkInput, options?: { d
     throw new Error("benchmarkName is required");
   }
 
-  const canonicalKey = buildBenchmarkCanonicalKey(cleanName, cleanType);
+  const dedupeRule = options?.dedupeRule ?? await getModelDedupeRule();
+  const canonicalKey = buildBenchmarkCanonicalKey(cleanName, cleanType, dedupeRule);
   const modalities = normalizeModalities(input.modalities);
   const forceLowerIsBetter = isLowerBetterBenchmark(cleanName) || input.higherIsBetter === false;
   const higherIsBetter = forceLowerIsBetter ? false : (input.higherIsBetter ?? true);
@@ -975,6 +1059,37 @@ export async function ensureBenchmark(input: EnsureBenchmarkInput, options?: { d
     }
 
     return existing;
+  }
+
+  const [existingByNameType] = await executor
+    .select()
+    .from(benchmarks)
+    .where(and(eq(benchmarks.benchmarkName, cleanName), eq(benchmarks.benchmarkType, cleanType)))
+    .limit(1);
+
+  if (existingByNameType) {
+    const shouldSyncCanonical = existingByNameType.canonicalKey !== canonicalKey;
+    const shouldSyncLowerIsBetter = forceLowerIsBetter && existingByNameType.higherIsBetter;
+
+    if (shouldSyncCanonical || shouldSyncLowerIsBetter) {
+      const updatedResult = await executor
+        .update(benchmarks)
+        .set({
+          canonicalKey,
+          higherIsBetter: forceLowerIsBetter ? false : existingByNameType.higherIsBetter
+        })
+        .where(eq(benchmarks.id, existingByNameType.id))
+        .returning();
+
+      const updated = firstResultRow<typeof benchmarks.$inferSelect>(updatedResult);
+      return updated ?? {
+        ...existingByNameType,
+        canonicalKey,
+        higherIsBetter: forceLowerIsBetter ? false : existingByNameType.higherIsBetter
+      };
+    }
+
+    return existingByNameType;
   }
 
   const createdResult = await executor
@@ -1196,7 +1311,7 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
         }
 
         const benchmarkType = row.benchmarkType.trim() || "general";
-        const benchmarkCanonicalKey = buildBenchmarkCanonicalKey(row.benchmarkName, benchmarkType);
+        const benchmarkCanonicalKey = buildBenchmarkCanonicalKey(row.benchmarkName, benchmarkType, dedupeRule);
         let benchmark = benchmarkCache.get(benchmarkCanonicalKey);
         if (!benchmark) {
           benchmark = await ensureBenchmark(
@@ -1208,7 +1323,7 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
               modalities: row.modalities,
               sourceBenchmarkId: row.sourceBenchmarkId
             },
-            { db: tx }
+            { dedupeRule, db: tx }
           );
           benchmarkCache.set(benchmarkCanonicalKey, benchmark);
         }
@@ -1734,6 +1849,8 @@ async function collectBenchmarkDirectionWarnings(rows: NormalizedTextImportRow[]
     return [];
   }
 
+  const dedupeRule = await getModelDedupeRule();
+
   const grouped = new Map<string, {
     benchmarkName: string;
     benchmarkType: string;
@@ -1742,7 +1859,7 @@ async function collectBenchmarkDirectionWarnings(rows: NormalizedTextImportRow[]
 
   lowerIsBetterRows.forEach((row) => {
     const benchmarkType = row.benchmarkType.trim() || "general";
-    const key = buildBenchmarkCanonicalKey(row.benchmarkName, benchmarkType);
+    const key = buildBenchmarkCanonicalKey(row.benchmarkName, benchmarkType, dedupeRule);
 
     if (!grouped.has(key)) {
       grouped.set(key, {

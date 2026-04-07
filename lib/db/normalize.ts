@@ -53,6 +53,10 @@ export function normalizeModelNameForDedupe(modelName: string, rule: ModelDedupe
   return normalized;
 }
 
+export function normalizeTextByDedupeRule(input: string, rule: ModelDedupeRule = DEFAULT_MODEL_DEDUPE_RULE): string {
+  return normalizeModelNameForDedupe(input, rule);
+}
+
 export function toProviderSlug(name: string): string {
   return normalizeToken(name);
 }
@@ -61,6 +65,10 @@ export function buildModelCanonicalKey(modelName: string, rule: ModelDedupeRule 
   return normalizeModelNameForDedupe(modelName, rule);
 }
 
-export function buildBenchmarkCanonicalKey(benchmarkName: string, benchmarkType: string): string {
-  return `${normalizeToken(benchmarkName)}:${normalizeToken(benchmarkType)}`;
+export function buildBenchmarkCanonicalKey(
+  benchmarkName: string,
+  benchmarkType: string,
+  rule: ModelDedupeRule = DEFAULT_MODEL_DEDUPE_RULE
+): string {
+  return `${normalizeTextByDedupeRule(benchmarkName, rule)}:${normalizeTextByDedupeRule(benchmarkType, rule)}`;
 }

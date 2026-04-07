@@ -49,6 +49,16 @@ type MatrixCell = {
   benchTime: string;
   allEntries: MatrixCellEntry[];
   hasMultipleValues: boolean;
+  uniqueEntries: MatrixCellEntry[];
+  noteText: string;
+  displayValue: string;
+  hasMeaningfulMultipleValues: boolean;
+  shouldShowQuestionMark: boolean;
+};
+
+type IndexedMatrixInputRow = {
+  row: MatrixInputRow;
+  matrixKey: string;
 };
 
 type MatrixRow = {
@@ -384,6 +394,7 @@ function getProviderBrandColor(providerName: string | null | undefined): string 
   if (normalized.includes("qwen") || normalized.includes("alibaba")) return "#a16dfa";
   if (normalized.includes("deepseek")) return "#14b8a6";
   if (normalized.includes("xai") || normalized.includes("grok")) return "#cecece";
+  if (normalized.includes("minimax")) return "#ff604a";
 
   const fallbackPalette = [
     "#f180b9",
@@ -467,6 +478,14 @@ function getMatrixCellDisplayValue(rawValue: string, valueNote: string | null): 
   }
 
   return raw;
+}
+
+function getMatrixCellEntryDedupKey(entry: MatrixCellEntry): string {
+  return `${entry.valueRaw}__${entry.valueNote ?? ""}__${entry.source ?? ""}__${entry.benchTime}`;
+}
+
+function getMatrixCellValueIdentity(entry: MatrixCellEntry): string {
+  return entry.valueNum !== null ? `num:${entry.valueNum}` : `raw:${entry.valueRaw}`;
 }
 
 async function loadHtml2Canvas(): Promise<Html2CanvasFn> {
@@ -612,6 +631,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showCategory, setShowCategory] = useState(true);
   const [showDuplicateRows, setShowDuplicateRows] = useState(false);
+  const [isClientReady, setIsClientReady] = useState(false);
   const [isModelSelectionLoaded, setIsModelSelectionLoaded] = useState(false);
   const [exportPreset, setExportPreset] = useState<ExportPresetKey>(DEFAULT_EXPORT_PRESET);
   const [supportsWebpExport, setSupportsWebpExport] = useState(true);
@@ -664,6 +684,10 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     const isKnown = sourceOptions.some((item) => item.key === sourceFromUrl);
     setActiveSource(isKnown ? sourceFromUrl : SOURCE_ALL);
   }, [searchParams, sourceOptions]);
+
+  useEffect(() => {
+    setIsClientReady(true);
+  }, []);
 
   useEffect(() => {
     activeSourceRef.current = activeSource;
@@ -855,9 +879,59 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
   }
 
+  const rowsBySource = useMemo(() => {
+    const map = new Map<string, MatrixInputRow[]>();
+
+    rows.forEach((row) => {
+      const sourceKey = getSourceKey(row.source);
+      if (!map.has(sourceKey)) {
+        map.set(sourceKey, []);
+      }
+      map.get(sourceKey)!.push(row);
+    });
+
+    return map;
+  }, [rows]);
+
+  const allRowsIndex = useMemo(() => {
+    const modelProviderMap = new Map<string, string>();
+    const rowsByModel = new Map<string, IndexedMatrixInputRow[]>();
+    const rowsByGroupingKey = new Map<string, IndexedMatrixInputRow[]>();
+
+    allRows.forEach((row) => {
+      if (!modelProviderMap.has(row.modelName)) {
+        modelProviderMap.set(row.modelName, row.providerName);
+      }
+
+      const indexed: IndexedMatrixInputRow = {
+        row,
+        matrixKey: getMatrixGroupingKey(row, showDuplicateRows)
+      };
+
+      if (!rowsByModel.has(row.modelName)) {
+        rowsByModel.set(row.modelName, []);
+      }
+      rowsByModel.get(row.modelName)!.push(indexed);
+
+      if (!rowsByGroupingKey.has(indexed.matrixKey)) {
+        rowsByGroupingKey.set(indexed.matrixKey, []);
+      }
+      rowsByGroupingKey.get(indexed.matrixKey)!.push(indexed);
+    });
+
+    return {
+      modelProviderMap,
+      rowsByModel,
+      rowsByGroupingKey
+    };
+  }, [allRows, showDuplicateRows]);
+
   const baseSourceRows = useMemo(() => {
-    return rows.filter((row) => activeSource === SOURCE_ALL || getSourceKey(row.source) === activeSource);
-  }, [rows, activeSource]);
+    if (activeSource === SOURCE_ALL) {
+      return rows;
+    }
+    return rowsBySource.get(activeSource) ?? [];
+  }, [rows, rowsBySource, activeSource]);
 
   const baseBenchmarkKeySet = useMemo(() => {
     const keys = new Set<string>();
@@ -877,24 +951,18 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   }, [activeSource]);
 
   const coverageMetaByModel = useMemo(() => {
-    const modelProviderMap = new Map<string, string>();
     const modelCoveredBenchmarkKeys = new Map<string, Set<string>>();
 
-    allRows.forEach((row) => {
-      const providerName = row.providerName || "Unknown";
-      if (!modelProviderMap.has(row.modelName)) {
-        modelProviderMap.set(row.modelName, providerName);
-      }
+    baseBenchmarkKeySet.forEach((matrixKey) => {
+      const groupedRows = allRowsIndex.rowsByGroupingKey.get(matrixKey);
+      if (!groupedRows || groupedRows.length === 0) return;
 
-      const matrixKey = getMatrixGroupingKey(row, showDuplicateRows);
-      if (!baseBenchmarkKeySet.has(matrixKey)) {
-        return;
-      }
-
-      if (!modelCoveredBenchmarkKeys.has(row.modelName)) {
-        modelCoveredBenchmarkKeys.set(row.modelName, new Set<string>());
-      }
-      modelCoveredBenchmarkKeys.get(row.modelName)!.add(matrixKey);
+      groupedRows.forEach(({ row }) => {
+        if (!modelCoveredBenchmarkKeys.has(row.modelName)) {
+          modelCoveredBenchmarkKeys.set(row.modelName, new Set<string>());
+        }
+        modelCoveredBenchmarkKeys.get(row.modelName)!.add(matrixKey);
+      });
     });
 
     const totalBenchmarkCount = baseBenchmarkKeySet.size;
@@ -903,9 +971,11 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       { providerName: string; coveredCount: number; coverageRate: number; isBaseModel: boolean }
     >();
 
-    for (const [modelName, providerName] of modelProviderMap.entries()) {
+    for (const [modelName, providerNameRaw] of allRowsIndex.modelProviderMap.entries()) {
       const coveredCount = modelCoveredBenchmarkKeys.get(modelName)?.size ?? 0;
       if (coveredCount <= 0) continue;
+
+      const providerName = providerNameRaw || "Unknown";
 
       metaMap.set(modelName, {
         providerName,
@@ -916,7 +986,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     }
 
     return metaMap;
-  }, [allRows, baseBenchmarkKeySet, baseModelNameSet, showDuplicateRows]);
+  }, [allRowsIndex, baseBenchmarkKeySet, baseModelNameSet]);
 
   const providerGroups = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -1040,15 +1110,18 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
     const allModelSet = new Set(allModelNames);
     const savedForSource = modelSelectionBySourceRef.current[activeSource];
+    const fallbackDefaultModels = activeSource === SOURCE_ALL
+      ? [...allModelNames]
+      : [...defaultSelectedModels];
     let nextSelected: string[];
 
     if (!savedForSource) {
-      nextSelected = [...defaultSelectedModels];
+      nextSelected = fallbackDefaultModels;
     } else if (savedForSource.length === 0) {
       nextSelected = [];
     } else {
       const kept = savedForSource.filter((modelName) => allModelSet.has(modelName));
-      nextSelected = kept.length > 0 ? kept : [...defaultSelectedModels];
+      nextSelected = kept.length > 0 ? kept : fallbackDefaultModels;
     }
 
     const normalized = Array.from(new Set(nextSelected)).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
@@ -1096,29 +1169,30 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const selectedModelSet = useMemo(() => new Set(selectedModels), [selectedModels]);
   const selectedModalitySet = useMemo(() => new Set(selectedModalities), [selectedModalities]);
 
-  const modelProviderMap = useMemo(() => {
-    const map = new Map<string, string>();
-    allRows.forEach((row) => {
-      if (!map.has(row.modelName)) {
-        map.set(row.modelName, row.providerName);
-      }
-    });
-    return map;
-  }, [allRows]);
+  const modelProviderMap = allRowsIndex.modelProviderMap;
 
   const filteredRows = useMemo(() => {
     if (selectedModelSet.size === 0 || baseBenchmarkKeySet.size === 0) {
       return [];
     }
 
-    return allRows.filter((row) => {
-      if (!selectedModelSet.has(row.modelName)) {
-        return false;
+    const result: MatrixInputRow[] = [];
+
+    selectedModels.forEach((modelName) => {
+      const indexedRows = allRowsIndex.rowsByModel.get(modelName);
+      if (!indexedRows || indexedRows.length === 0) {
+        return;
       }
-      const matrixKey = getMatrixGroupingKey(row, showDuplicateRows);
-      return baseBenchmarkKeySet.has(matrixKey);
+
+      indexedRows.forEach((indexed) => {
+        if (baseBenchmarkKeySet.has(indexed.matrixKey)) {
+          result.push(indexed.row);
+        }
+      });
     });
-  }, [allRows, selectedModelSet, baseBenchmarkKeySet, showDuplicateRows]);
+
+    return result;
+  }, [allRowsIndex, selectedModelSet, selectedModels, baseBenchmarkKeySet]);
 
   const modelColumns = useMemo(() => {
     const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
@@ -1324,22 +1398,28 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       }
 
       if (!matrixRow.cells.has(row.modelName)) {
+        const initialEntry: MatrixCellEntry = {
+          valueRaw: row.valueRaw,
+          valueNum: row.valueNum,
+          valueNote: row.valueNote,
+          source: row.source,
+          benchTime: row.benchTime
+        };
+        const noteText = (row.valueNote ?? "").trim();
+
         matrixRow.cells.set(row.modelName, {
           valueRaw: row.valueRaw,
           valueNum: row.valueNum,
           valueNote: row.valueNote,
           source: row.source,
           benchTime: row.benchTime,
-          allEntries: [
-            {
-              valueRaw: row.valueRaw,
-              valueNum: row.valueNum,
-              valueNote: row.valueNote,
-              source: row.source,
-              benchTime: row.benchTime
-            }
-          ],
-          hasMultipleValues: false
+          allEntries: [initialEntry],
+          hasMultipleValues: false,
+          uniqueEntries: [initialEntry],
+          noteText,
+          displayValue: getMatrixCellDisplayValue(row.valueRaw, row.valueNote),
+          hasMeaningfulMultipleValues: false,
+          shouldShowQuestionMark: noteText.length > 0
         });
       } else {
         const existingCell = matrixRow.cells.get(row.modelName)!;
@@ -1364,7 +1444,27 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
     return Array.from(matrixMap.values())
       .map((matrixRow) => {
-        const numericValues = Array.from(matrixRow.cells.values())
+        const finalizedCells = new Map<string, MatrixCell>();
+
+        matrixRow.cells.forEach((cell, modelName) => {
+          const uniqueEntries = Array.from(
+            new Map(cell.allEntries.map((entry) => [getMatrixCellEntryDedupKey(entry), entry])).values()
+          );
+          const valueIdentitySet = new Set(uniqueEntries.map((entry) => getMatrixCellValueIdentity(entry)));
+          const noteText = (cell.valueNote ?? "").trim();
+          const hasMeaningfulMultipleValues = uniqueEntries.length > 1 && valueIdentitySet.size > 1;
+
+          finalizedCells.set(modelName, {
+            ...cell,
+            uniqueEntries,
+            noteText,
+            displayValue: getMatrixCellDisplayValue(cell.valueRaw, cell.valueNote),
+            hasMeaningfulMultipleValues,
+            shouldShowQuestionMark: hasMeaningfulMultipleValues || noteText.length > 0
+          });
+        });
+
+        const numericValues = Array.from(finalizedCells.values())
           .map((cell) => cell.valueNum)
           .filter((value): value is number => value !== null && Number.isFinite(value));
 
@@ -1377,6 +1477,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
         return {
           ...matrixRow,
+          cells: finalizedCells,
           rowDataCount,
           rowNumericCount,
           minComparable: comparableValues.length > 0 ? Math.min(...comparableValues) : null,
@@ -1686,6 +1787,10 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     }
   }
 
+  if (!isClientReady) {
+    return null;
+  }
+
   return (
     <section className="card" ref={sectionRef} style={isFullscreen ? { paddingTop: 8 } : undefined}>
       {copyNotice ? (
@@ -1897,6 +2002,11 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                         type="checkbox"
                         className="checkbox checkbox-xs"
                         checked={providerChecked}
+                        aria-checked={providerChecked ? "true" : selectedCount > 0 ? "mixed" : "false"}
+                        ref={(element) => {
+                          if (!element) return;
+                          element.indeterminate = selectedCount > 0 && selectedCount < group.models.length;
+                        }}
                         onChange={(e) => toggleProvider(group.providerName, e.target.checked)}
                       />
                       <span className="text-sm font-medium" style={{ color: getProviderBrandColor(group.providerName) }}>
@@ -2250,24 +2360,10 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                   const comparableCellNum = cellNum !== null
                     ? getBenchmarkComparableScore(matrixRow.benchmark, cellNum)
                     : null;
-                  const rawText = cell ? getMatrixCellDisplayValue(cell.valueRaw, cell.valueNote) : "--";
-                  const noteText = (cell?.valueNote ?? "").trim();
-                  const allEntries = cell?.allEntries ?? [];
-                  const valueIdentitySet = new Set(
-                    allEntries.map((entry) =>
-                      entry.valueNum !== null ? `num:${entry.valueNum}` : `raw:${entry.valueRaw}`
-                    )
-                  );
-                  const hasMultipleValues = (cell?.hasMultipleValues ?? false) && valueIdentitySet.size > 1;
-                  const shouldShowQuestionMark = hasMultipleValues || noteText.length > 0;
-                  const uniqueEntries = Array.from(
-                    new Map(
-                      allEntries.map((entry) => [
-                        `${entry.valueRaw}__${entry.valueNote ?? ""}__${entry.source ?? ""}__${entry.benchTime}`,
-                        entry
-                      ])
-                    ).values()
-                  );
+                  const rawText = cell?.displayValue ?? "--";
+                  const noteText = cell?.noteText ?? "";
+                  const shouldShowQuestionMark = cell?.shouldShowQuestionMark ?? false;
+                  const uniqueEntries = cell?.uniqueEntries ?? [];
                   const isMaxCell =
                     comparableCellNum !== null &&
                     matrixRow.maxComparable !== null &&
