@@ -40,6 +40,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     benchTime: row.benchTime,
     valueRaw: row.valueRaw,
     valueNum: row.valueNum,
+    valueNum2: row.valueNum2,
     valueNote: row.valueNote,
     source: row.source
   });

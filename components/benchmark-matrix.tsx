@@ -29,6 +29,7 @@ type MatrixInputRow = {
   benchTime: string;
   valueRaw: string;
   valueNum: number | null;
+  valueNum2?: number | null;
   valueNote: string | null;
   source: string | null;
 };
@@ -36,6 +37,7 @@ type MatrixInputRow = {
 type MatrixCellEntry = {
   valueRaw: string;
   valueNum: number | null;
+  valueNum2: number | null;
   valueNote: string | null;
   source: string | null;
   benchTime: string;
@@ -44,6 +46,7 @@ type MatrixCellEntry = {
 type MatrixCell = {
   valueRaw: string;
   valueNum: number | null;
+  valueNum2: number | null;
   valueNote: string | null;
   source: string | null;
   benchTime: string;
@@ -72,8 +75,12 @@ type MatrixRow = {
   rowNumericCount: number;
   minComparable: number | null;
   maxComparable: number | null;
+  minComparable2: number | null;
+  maxComparable2: number | null;
   minNum: number | null;
   maxNum: number | null;
+  minNum2: number | null;
+  maxNum2: number | null;
 };
 
 type RowSortColumn = "category" | "benchmark";
@@ -121,6 +128,70 @@ const EXPORT_PRESET_MAP = {
   "3x-avif": { label: "3x AVIF", scale: 3, format: "avif", mimeType: "image/avif" }
 } as const;
 const DEFAULT_EXPORT_PRESET: ExportPresetKey = "2x-webp";
+
+type SourceFrameShadowBuildInput = {
+  isMatched: boolean;
+  isFirst?: boolean;
+  isLast?: boolean;
+  includeTop?: boolean;
+  includeBottom?: boolean;
+  exportMode?: boolean;
+};
+
+function buildSourceFrameShadows(input: SourceFrameShadowBuildInput): string[] {
+  if (!input.isMatched) {
+    return [];
+  }
+
+  const edgeSize = 2;
+  const frameColor = input.exportMode ? "rgba(93, 167, 255, 0.72)" : SOURCE_MATCH_FRAME_COLOR;
+
+  const shadows: string[] = [];
+
+  if (input.includeTop) {
+    shadows.push(`inset 0 ${edgeSize}px 0 ${frameColor}`);
+  }
+  if (input.includeBottom) {
+    shadows.push(`inset 0 -${edgeSize}px 0 ${frameColor}`);
+  }
+  if (input.isFirst) {
+    shadows.push(`inset ${edgeSize}px 0 0 ${frameColor}`);
+  }
+  if (input.isLast) {
+    shadows.push(`inset -${edgeSize}px 0 0 ${frameColor}`);
+  }
+
+  return shadows;
+}
+
+export function __buildSourceFrameShadowsForTest(input: SourceFrameShadowBuildInput): string[] {
+  return buildSourceFrameShadows(input);
+}
+
+function applyExportSourceFrameFallback(root: HTMLElement, color: string, width: number): void {
+  const sourceMatchedCells = root.querySelectorAll<HTMLElement>("[data-source-match='1']");
+
+  sourceMatchedCells.forEach((cell) => {
+    cell.style.boxShadow = "none";
+
+    if (cell.dataset.sourceMatchFirst === "1") {
+      cell.style.borderLeft = `${width}px solid ${color}`;
+    }
+    if (cell.dataset.sourceMatchLast === "1") {
+      cell.style.borderRight = `${width}px solid ${color}`;
+    }
+    if (cell.tagName === "TH") {
+      cell.style.borderTop = `${width}px solid ${color}`;
+    }
+    if (cell.dataset.sourceMatchBottom === "1") {
+      cell.style.borderBottom = `${width}px solid ${color}`;
+    }
+  });
+}
+
+export function __applyExportSourceFrameFallbackForTest(root: HTMLElement, color = "rgba(93, 167, 255, 0.65)", width = 2): void {
+  applyExportSourceFrameFallback(root, color, width);
+}
 
 type ExportPresetKey = keyof typeof EXPORT_PRESET_MAP;
 type ExportMimeType = (typeof EXPORT_PRESET_MAP)[ExportPresetKey]["mimeType"];
@@ -219,16 +290,48 @@ function normalizeBenchmarkKeyFallback(input: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+function normalizeBenchmarkDuplicateToken(input: string): string {
+  return input
+    .trim()
+    .toLowerCase()
+    .replace(/[（(][^()（）]*[)）]/g, "")
+    .replace(/[\s\-_]+/g, "")
+    .replace(/[^a-z0-9.]+/g, "");
+}
+
+function pickPreferredBenchmarkDisplayName(current: string, candidate: string): string {
+  const currentTrimmed = current.trim();
+  const candidateTrimmed = candidate.trim();
+  if (!currentTrimmed) return candidateTrimmed;
+  if (!candidateTrimmed) return currentTrimmed;
+
+  const currentHasParentheses = /[（(][^()（）]+[)）]/.test(currentTrimmed);
+  const candidateHasParentheses = /[（(][^()（）]+[)）]/.test(candidateTrimmed);
+
+  if (currentHasParentheses !== candidateHasParentheses) {
+    return currentHasParentheses ? candidateTrimmed : currentTrimmed;
+  }
+
+  return currentTrimmed.length <= candidateTrimmed.length ? currentTrimmed : candidateTrimmed;
+}
+
 function getBenchmarkDuplicateKey(canonicalKey: string | null | undefined, benchmarkName: string): string {
   const normalizedCanonical = canonicalKey?.trim().toLowerCase() ?? "";
   if (normalizedCanonical.length > 0) {
     const splitIndex = normalizedCanonical.indexOf(":");
     if (splitIndex > 0) {
-      return normalizedCanonical.slice(0, splitIndex);
+      const token = normalizeBenchmarkDuplicateToken(normalizedCanonical.slice(0, splitIndex));
+      if (token.length > 0) return token;
     }
     if (splitIndex < 0) {
-      return normalizedCanonical;
+      const token = normalizeBenchmarkDuplicateToken(normalizedCanonical);
+      if (token.length > 0) return token;
     }
+  }
+
+  const fallbackToken = normalizeBenchmarkDuplicateToken(benchmarkName);
+  if (fallbackToken.length > 0) {
+    return fallbackToken;
   }
 
   const fallback = normalizeBenchmarkKeyFallback(benchmarkName);
@@ -335,7 +438,31 @@ type ModelScaleToken = {
   isEstimated: boolean;
 };
 
+type ModelVersionToken = {
+  familyKey: string;
+  version: number;
+};
+
 const MODEL_SIZE_TOKEN_PATTERN = /\b(E?)(\d+(?:\.\d+)?)B\b/i;
+const MODEL_VERSION_TOKEN_PATTERN = /^([A-Za-z]+)[\s-_]*([0-9]+(?:\.\d+)?)/i;
+
+function extractModelVersionToken(modelName: string): ModelVersionToken | null {
+  const match = MODEL_VERSION_TOKEN_PATTERN.exec(modelName.trim());
+  if (!match) {
+    return null;
+  }
+
+  const [, family, versionText] = match;
+  const version = Number.parseFloat(versionText);
+  if (!Number.isFinite(version)) {
+    return null;
+  }
+
+  return {
+    familyKey: family.toLowerCase(),
+    version
+  };
+}
 
 function extractModelScaleToken(modelName: string): ModelScaleToken | null {
   const match = MODEL_SIZE_TOKEN_PATTERN.exec(modelName);
@@ -363,6 +490,18 @@ function extractModelScaleToken(modelName: string): ModelScaleToken | null {
 }
 
 function compareModelNameByColumnOrder(left: string, right: string, collator: Intl.Collator): number {
+  const leftVersionToken = extractModelVersionToken(left);
+  const rightVersionToken = extractModelVersionToken(right);
+
+  if (
+    leftVersionToken &&
+    rightVersionToken &&
+    leftVersionToken.familyKey === rightVersionToken.familyKey &&
+    rightVersionToken.version !== leftVersionToken.version
+  ) {
+    return rightVersionToken.version - leftVersionToken.version;
+  }
+
   const leftScaleToken = extractModelScaleToken(left);
   const rightScaleToken = extractModelScaleToken(right);
 
@@ -453,9 +592,31 @@ function formatTooltipTime(input: string): string {
   return date.toISOString().slice(0, 16).replace("T", " ");
 }
 
-function getMatrixCellDisplayValue(rawValue: string, valueNote: string | null): string {
+function formatValueNumForDisplay(valueNum: number | null): string | null {
+  if (valueNum === null || !Number.isFinite(valueNum)) return null;
+  return Number(valueNum.toFixed(6)).toString();
+}
+
+function getMatrixCellDisplayValue(
+  valueNum: number | null,
+  valueNum2: number | null,
+  rawValue: string,
+  valueNote: string | null
+): string {
   const raw = rawValue.trim();
   if (!raw) return "--";
+
+  const hasStarMarker = /[*∗﹡✱✳✻]/.test(raw);
+  const hasPairMarker = raw.includes("/");
+
+  if (hasPairMarker) {
+    const firstNumeric = formatValueNumForDisplay(valueNum);
+    const secondNumeric = formatValueNumForDisplay(valueNum2);
+
+    if (firstNumeric !== null && secondNumeric !== null) {
+      return `${firstNumeric} / ${secondNumeric}`;
+    }
+  }
 
   const pairMatch = raw.match(
     /^([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/
@@ -463,6 +624,11 @@ function getMatrixCellDisplayValue(rawValue: string, valueNote: string | null): 
   if (pairMatch) {
     const [, first, second] = pairMatch;
     return `${first} / ${second}`;
+  }
+
+  const numericDisplay = formatValueNumForDisplay(valueNum);
+  if (numericDisplay !== null) {
+    return hasStarMarker ? `${numericDisplay}*` : numericDisplay;
   }
 
   const singleMatch = raw.match(/^([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/);
@@ -485,7 +651,11 @@ function getMatrixCellEntryDedupKey(entry: MatrixCellEntry): string {
 }
 
 function getMatrixCellValueIdentity(entry: MatrixCellEntry): string {
-  return entry.valueNum !== null ? `num:${entry.valueNum}` : `raw:${entry.valueRaw}`;
+  if (entry.valueNum !== null || entry.valueNum2 !== null) {
+    return `num:${entry.valueNum ?? ""}|${entry.valueNum2 ?? ""}`;
+  }
+
+  return `raw:${entry.valueRaw}`;
 }
 
 async function loadHtml2Canvas(): Promise<Html2CanvasFn> {
@@ -513,6 +683,27 @@ async function loadHtml2Canvas(): Promise<Html2CanvasFn> {
   return html2canvasLoaderPromise;
 }
 
+function resolveCaptureDimensions(element: HTMLElement): { width: number; height: number } {
+  const table = element.querySelector("table") as HTMLElement | null;
+
+  const widthSource = table
+    ? Math.max(table.scrollWidth || 0, table.clientWidth || 0)
+    : Math.max(element.scrollWidth || 0, element.clientWidth || 0);
+
+  const heightSource = table
+    ? Math.max(table.scrollHeight || 0, table.clientHeight || 0)
+    : Math.max(element.scrollHeight || 0, element.clientHeight || 0);
+
+  return {
+    width: Math.max(1, Math.round(widthSource)),
+    height: Math.max(1, Math.round(heightSource))
+  };
+}
+
+export function __resolveCaptureDimensionsForTest(element: HTMLElement): { width: number; height: number } {
+  return resolveCaptureDimensions(element);
+}
+
 async function renderElementToImageBlob(
   element: HTMLElement,
   scale: number,
@@ -520,8 +711,9 @@ async function renderElementToImageBlob(
 ): Promise<Blob> {
   const html2canvas = await loadHtml2Canvas();
 
-  const width = Math.max(1, Math.round(element.scrollWidth));
-  const height = Math.max(1, Math.round(element.scrollHeight));
+  const { width, height } = resolveCaptureDimensions(element);
+  const captureBottomPadding = 4;
+  const captureHeight = height + captureBottomPadding;
   const captureAttr = "data-h2c-export-root";
 
   element.setAttribute(captureAttr, "1");
@@ -538,22 +730,28 @@ async function renderElementToImageBlob(
         scrollX: 0,
         scrollY: 0,
         width,
-        height,
+        height: captureHeight,
         windowWidth: width,
-        windowHeight: height,
+        windowHeight: captureHeight,
         onclone: (clonedDoc: Document) => {
           const clonedRoot = clonedDoc.querySelector(`[${captureAttr}="1"]`) as HTMLElement | null;
           if (!clonedRoot) return;
 
           clonedRoot.style.overflow = "visible";
           clonedRoot.style.maxHeight = "none";
-          clonedRoot.style.height = `${height}px`;
+          clonedRoot.style.height = `${captureHeight}px`;
           clonedRoot.style.width = `${width}px`;
 
           const clonedTable = clonedRoot.querySelector("table") as HTMLTableElement | null;
           if (clonedTable) {
             clonedTable.style.width = `${width}px`;
+            clonedTable.style.borderCollapse = "separate";
+            clonedTable.style.borderSpacing = "0";
           }
+
+          const exportSourceFrameColor = "rgba(93, 167, 255, 0.65)";
+          const exportSourceFrameWidth = 2;
+          applyExportSourceFrameFallback(clonedRoot, exportSourceFrameColor, exportSourceFrameWidth);
         }
       });
     } finally {
@@ -645,10 +843,10 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     column: "benchmark",
     mode: "data"
   });
-  const [hoveredRowKey, setHoveredRowKey] = useState<string | null>(null);
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [isDownloadingTableImage, setIsDownloadingTableImage] = useState(false);
   const [isCopyingTableImage, setIsCopyingTableImage] = useState(false);
+  const [isExportCaptureMode, setIsExportCaptureMode] = useState(false);
   const [copyNotice, setCopyNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [copyNoticeVisible, setCopyNoticeVisible] = useState(false);
   const [activeCellTooltip, setActiveCellTooltip] = useState<{
@@ -1246,13 +1444,18 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         const rightStats = modelStats.get(rightModel);
         if (!leftStats || !rightStats) return compareModelNameByColumnOrder(leftModel, rightModel, collator);
 
+        const modelNameCompare = compareModelNameByColumnOrder(leftModel, rightModel, collator);
+        if (modelNameCompare !== 0) {
+          return modelNameCompare;
+        }
+
         if (rightStats.numericCount !== leftStats.numericCount) {
           return rightStats.numericCount - leftStats.numericCount;
         }
         if (rightStats.totalCount !== leftStats.totalCount) {
           return rightStats.totalCount - leftStats.totalCount;
         }
-        return compareModelNameByColumnOrder(leftModel, rightModel, collator);
+        return 0;
       });
     });
 
@@ -1367,8 +1570,12 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
           rowNumericCount: 0,
           minComparable: null,
           maxComparable: null,
+          minComparable2: null,
+          maxComparable2: null,
           minNum: null,
-          maxNum: null
+          maxNum: null,
+          minNum2: null,
+          maxNum2: null
         });
       }
 
@@ -1381,7 +1588,9 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
       if (!matrixRow.benchmarkValues.includes(benchmark)) {
         matrixRow.benchmarkValues.push(benchmark);
-        matrixRow.benchmark = matrixRow.benchmarkValues.join(" / ");
+        matrixRow.benchmark = showDuplicateRows
+          ? matrixRow.benchmarkValues.join(" / ")
+          : pickPreferredBenchmarkDisplayName(matrixRow.benchmark, benchmark);
       }
 
       matrixRow.modalities = normalizeModalityList(
@@ -1401,6 +1610,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         const initialEntry: MatrixCellEntry = {
           valueRaw: row.valueRaw,
           valueNum: row.valueNum,
+          valueNum2: row.valueNum2 ?? null,
           valueNote: row.valueNote,
           source: row.source,
           benchTime: row.benchTime
@@ -1410,6 +1620,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         matrixRow.cells.set(row.modelName, {
           valueRaw: row.valueRaw,
           valueNum: row.valueNum,
+          valueNum2: row.valueNum2 ?? null,
           valueNote: row.valueNote,
           source: row.source,
           benchTime: row.benchTime,
@@ -1417,7 +1628,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
           hasMultipleValues: false,
           uniqueEntries: [initialEntry],
           noteText,
-          displayValue: getMatrixCellDisplayValue(row.valueRaw, row.valueNote),
+          displayValue: getMatrixCellDisplayValue(row.valueNum, row.valueNum2 ?? null, row.valueRaw, row.valueNote),
           hasMeaningfulMultipleValues: false,
           shouldShowQuestionMark: noteText.length > 0
         });
@@ -1426,6 +1637,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         existingCell.allEntries.push({
           valueRaw: row.valueRaw,
           valueNum: row.valueNum,
+          valueNum2: row.valueNum2 ?? null,
           valueNote: row.valueNote,
           source: row.source,
           benchTime: row.benchTime
@@ -1434,6 +1646,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
         if (row.valueNum !== null && (existingCell.valueNum === null || row.valueNum > existingCell.valueNum)) {
           existingCell.valueNum = row.valueNum;
+          existingCell.valueNum2 = row.valueNum2 ?? null;
           existingCell.valueRaw = row.valueRaw;
           existingCell.valueNote = row.valueNote;
           existingCell.source = row.source;
@@ -1458,7 +1671,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
             ...cell,
             uniqueEntries,
             noteText,
-            displayValue: getMatrixCellDisplayValue(cell.valueRaw, cell.valueNote),
+            displayValue: getMatrixCellDisplayValue(cell.valueNum, cell.valueNum2, cell.valueRaw, cell.valueNote),
             hasMeaningfulMultipleValues,
             shouldShowQuestionMark: hasMeaningfulMultipleValues || noteText.length > 0
           });
@@ -1468,7 +1681,15 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
           .map((cell) => cell.valueNum)
           .filter((value): value is number => value !== null && Number.isFinite(value));
 
+        const numericValues2 = Array.from(finalizedCells.values())
+          .map((cell) => cell.valueNum2)
+          .filter((value): value is number => value !== null && Number.isFinite(value));
+
         const comparableValues = numericValues.map((valueNum) =>
+          getBenchmarkComparableScore(matrixRow.benchmark, valueNum)
+        );
+
+        const comparableValues2 = numericValues2.map((valueNum) =>
           getBenchmarkComparableScore(matrixRow.benchmark, valueNum)
         );
 
@@ -1482,8 +1703,12 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
           rowNumericCount,
           minComparable: comparableValues.length > 0 ? Math.min(...comparableValues) : null,
           maxComparable: comparableValues.length > 0 ? Math.max(...comparableValues) : null,
+          minComparable2: comparableValues2.length > 0 ? Math.min(...comparableValues2) : null,
+          maxComparable2: comparableValues2.length > 0 ? Math.max(...comparableValues2) : null,
           minNum: numericValues.length > 0 ? Math.min(...numericValues) : null,
-          maxNum: numericValues.length > 0 ? Math.max(...numericValues) : null
+          maxNum: numericValues.length > 0 ? Math.max(...numericValues) : null,
+          minNum2: numericValues2.length > 0 ? Math.min(...numericValues2) : null,
+          maxNum2: numericValues2.length > 0 ? Math.max(...numericValues2) : null
         };
       })
       .sort((a, b) => a.firstSeenIndex - b.firstSeenIndex);
@@ -1698,10 +1923,15 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     setIsExportMenuOpen(false);
     setSuppressHoverMenu(true);
     setIsCopyingTableImage(true);
+    setIsExportCaptureMode(true);
     setCopyNotice(null);
     setCopyNoticeVisible(false);
 
     try {
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => resolve());
+      });
+
       const { scale } = EXPORT_PRESET_MAP[exportPreset];
       const pngBlob = await withTimeout(
         renderElementToImageBlob(tableViewportRef.current, scale, "image/png"),
@@ -1731,6 +1961,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         : rawMessage || "复制失败，请检查浏览器剪贴板权限";
       setCopyNotice({ type: "error", message });
     } finally {
+      setIsExportCaptureMode(false);
       setIsCopyingTableImage(false);
     }
   }
@@ -1741,10 +1972,15 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     setIsExportMenuOpen(false);
     setSuppressHoverMenu(true);
     setIsDownloadingTableImage(true);
+    setIsExportCaptureMode(true);
     setCopyNotice(null);
     setCopyNoticeVisible(false);
 
     try {
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => resolve());
+      });
+
       const preset = EXPORT_PRESET_MAP[exportPreset];
       const imageBlob = await withTimeout(
         renderElementToImageBlob(tableViewportRef.current, preset.scale, preset.mimeType),
@@ -1783,6 +2019,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         : rawMessage || "下载失败，请稍后重试";
       setCopyNotice({ type: "error", message });
     } finally {
+      setIsExportCaptureMode(false);
       setIsDownloadingTableImage(false);
     }
   }
@@ -1945,7 +2182,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
           onClick={() => setShowDuplicateRows((prev) => !prev)}
         >
           {showDuplicateRows ? <Eye size={14} /> : <EyeOff size={14} />}
-          显示重名列
+          显示重名行
         </button>
       </div>
 
@@ -2064,7 +2301,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
           border: "1px solid rgba(53, 73, 116, 0.35)"
         }}
       >
-        <table>
+        <table style={{ width: "max-content" }}>
           <thead>
             <tr>
               <th
@@ -2192,20 +2429,20 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
               </th>
 
               {modelColumnMeta.map((model) => {
-                const headerFrameShadows: string[] = [];
-                if (model.isSourceMatched) {
-                  headerFrameShadows.push(`inset 0 2px 0 ${SOURCE_MATCH_FRAME_COLOR}`);
-                }
-                if (model.isSourceMatchedFirst) {
-                  headerFrameShadows.push(`inset 2px 0 0 ${SOURCE_MATCH_FRAME_COLOR}`);
-                }
-                if (model.isSourceMatchedLast) {
-                  headerFrameShadows.push(`inset -2px 0 0 ${SOURCE_MATCH_FRAME_COLOR}`);
-                }
+                const headerFrameShadows = buildSourceFrameShadows({
+                  isMatched: model.isSourceMatched,
+                  isFirst: model.isSourceMatchedFirst,
+                  isLast: model.isSourceMatchedLast,
+                  includeTop: true,
+                  exportMode: isExportCaptureMode
+                });
 
                 return (
                   <th
                     key={model.modelName}
+                    data-source-match={model.isSourceMatched ? "1" : undefined}
+                    data-source-match-first={model.isSourceMatchedFirst ? "1" : undefined}
+                    data-source-match-last={model.isSourceMatchedLast ? "1" : undefined}
                     style={{
                       position: "sticky",
                       top: 0,
@@ -2239,52 +2476,34 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
               const rowKey = matrixRow.rowKey;
               const isLastMatrixRow = rowIndex === sortedMatrixRows.length - 1;
               const isLowerBetterBenchmark = LOWER_IS_BETTER_RULES.some((rule) => rule.matcher.test(matrixRow.benchmark));
-              const isHoveredRow = hoveredRowKey === rowKey;
               const isSelectedRow = selectedRowKey === rowKey;
-              const rowBorderColor = isSelectedRow
-                ? "rgba(94, 234, 212, 0.78)"
-                : isHoveredRow
-                  ? "rgba(148, 163, 184, 0.45)"
-                  : null;
+              const selectedRowColor = "rgba(94, 234, 212, 0)";
               const rowFrameStyle = isSelectedRow
                 ? {
-                    outline: "1px solid rgba(94, 234, 212, 0.78)",
-                    outlineOffset: "-2px",
-                    boxShadow: "0 0 0 1px rgba(94, 234, 212, 0.36), 0 0 12px rgba(45, 212, 191, 0.25)"
+                    boxShadow: "0 0 0 1px rgba(94, 234, 212, 0.22), 0 0 12px rgba(45, 212, 191, 0.12)"
                   }
-                : isHoveredRow
-                  ? {
-                      outline: "1px solid rgba(148, 163, 184, 0.38)",
-                      outlineOffset: "-2px",
-                      boxShadow: "0 0 8px rgba(148, 163, 184, 0.2)"
-                    }
-                  : undefined;
-              const rowCellLineStyle = rowBorderColor
+                : undefined;
+              const rowCellLineStyle = isSelectedRow
                 ? {
                     borderTopWidth: 1,
                     borderTopStyle: "solid" as const,
-                    borderTopColor: rowBorderColor,
-                    borderBottomColor: rowBorderColor,
-                    backgroundImage: isSelectedRow
-                      ? "linear-gradient(rgba(45, 212, 191, 0.10), rgba(45, 212, 191, 0.10))"
-                      : "linear-gradient(rgba(148, 163, 184, 0.05), rgba(148, 163, 184, 0.05))",
-                    boxShadow: isSelectedRow
-                      ? "inset 0 1px 0 rgba(94, 234, 212, 0.5), inset 0 -1px 0 rgba(94, 234, 212, 0.5)"
-                      : "inset 0 1px 0 rgba(148, 163, 184, 0.3), inset 0 -1px 0 rgba(148, 163, 184, 0.3)"
+                    borderTopColor: selectedRowColor,
+                    borderBottomColor: selectedRowColor,
+                    backgroundImage: "linear-gradient(rgba(45, 212, 191, 0.00), rgba(45, 212, 191, 0.05))",
+                    boxShadow: "inset 0 1px 0 rgba(94, 234, 212, 0.5), inset 0 -1px 0 rgba(94, 234, 212, 0.5)"
                   }
                 : undefined;
-              const rowLeftEdgeStyle = {
-                borderLeft: `1px solid ${rowBorderColor ?? "transparent"}`
-              };
-              const rowRightEdgeStyle = {
-                borderRight: `1px solid ${rowBorderColor ?? "transparent"}`
-              };
+              const rowLeftEdgeStyle = isSelectedRow
+                ? { borderLeft: `1px solid ${selectedRowColor}` }
+                : undefined;
+              const rowRightEdgeStyle = isSelectedRow
+                ? { borderRight: `1px solid ${selectedRowColor}` }
+                : undefined;
 
               return (
               <tr
                 key={rowKey}
-                onMouseEnter={() => setHoveredRowKey(rowKey)}
-                onMouseLeave={() => setHoveredRowKey((prev) => (prev === rowKey ? null : prev))}
+                className={isSelectedRow ? "matrix-row-selected" : "matrix-row-hover"}
                 onClick={() => {
                   setSelectedRowKey((prev) => (prev === rowKey ? null : rowKey));
                   setColumnSortBenchmarkKey((prev) => (prev === rowKey ? null : rowKey));
@@ -2357,17 +2576,32 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                 {modelColumnMeta.map((model, modelIndex) => {
                   const cell = matrixRow.cells.get(model.modelName);
                   const cellNum = cell?.valueNum ?? null;
+                  const cellNum2 = cell?.valueNum2 ?? null;
                   const comparableCellNum = cellNum !== null
                     ? getBenchmarkComparableScore(matrixRow.benchmark, cellNum)
+                    : null;
+                  const comparableCellNum2 = cellNum2 !== null
+                    ? getBenchmarkComparableScore(matrixRow.benchmark, cellNum2)
                     : null;
                   const rawText = cell?.displayValue ?? "--";
                   const noteText = cell?.noteText ?? "";
                   const shouldShowQuestionMark = cell?.shouldShowQuestionMark ?? false;
                   const uniqueEntries = cell?.uniqueEntries ?? [];
-                  const isMaxCell =
+                  const isMaxCellFirst =
                     comparableCellNum !== null &&
                     matrixRow.maxComparable !== null &&
                     comparableCellNum === matrixRow.maxComparable;
+                  const isMaxCellSecond =
+                    comparableCellNum2 !== null &&
+                    matrixRow.maxComparable2 !== null &&
+                    comparableCellNum2 === matrixRow.maxComparable2;
+                  const pairFirstDisplay = cell ? formatValueNumForDisplay(cell.valueNum) : null;
+                  const pairSecondDisplay = cell ? formatValueNumForDisplay(cell.valueNum2) : null;
+                  const isPairNumericDisplay =
+                    Boolean(cell?.valueRaw.includes("/")) &&
+                    pairFirstDisplay !== null &&
+                    pairSecondDisplay !== null;
+                  const isSingleMaxCell = !isPairNumericDisplay && isMaxCellFirst;
                   const heatStyle = getHeatCellStyle(comparableCellNum, matrixRow.minComparable, matrixRow.maxComparable);
                   const heatBackground =
                     (heatStyle as { backgroundColor?: string }).backgroundColor ?? "rgba(20, 27, 45, 0.96)";
@@ -2379,21 +2613,31 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     rowCellLineStyle && "boxShadow" in rowCellLineStyle
                       ? (rowCellLineStyle.boxShadow as string | undefined)
                       : undefined;
-                  const sourceFrameShadows: string[] = [];
-                  if (model.isSourceMatchedFirst) {
-                    sourceFrameShadows.push(`inset 2px 0 0 ${SOURCE_MATCH_FRAME_COLOR}`);
-                  }
-                  if (model.isSourceMatchedLast) {
-                    sourceFrameShadows.push(`inset -2px 0 0 ${SOURCE_MATCH_FRAME_COLOR}`);
-                  }
-                  if (model.isSourceMatched && isLastMatrixRow) {
-                    sourceFrameShadows.push(`inset 0 -2px 0 ${SOURCE_MATCH_FRAME_COLOR}`);
-                  }
+                  const sourceFrameShadows = buildSourceFrameShadows({
+                    isMatched: model.isSourceMatched,
+                    isFirst: model.isSourceMatchedFirst,
+                    isLast: model.isSourceMatchedLast,
+                    includeBottom: isLastMatrixRow,
+                    exportMode: isExportCaptureMode
+                  });
                   const mergedCellBoxShadow = [rowCellBoxShadow, ...sourceFrameShadows].filter(Boolean).join(", ");
+                  const maxSegmentStyle = {
+                    fontWeight: 800,
+                    textDecoration: "underline",
+                    textDecorationColor: "rgba(15, 23, 42, 0.35)",
+                    textDecorationThickness: "1px",
+                    textUnderlineOffset: "2px"
+                  } as const;
 
                   return (
                     <td
                       key={`${rowKey}::${model.modelName}`}
+                      data-source-match={model.isSourceMatched ? "1" : undefined}
+                      data-source-match-first={model.isSourceMatchedFirst ? "1" : undefined}
+                      data-source-match-last={model.isSourceMatchedLast ? "1" : undefined}
+                      data-source-match-bottom={
+                        model.isSourceMatched && isLastMatrixRow ? "1" : undefined
+                      }
                       style={{
                         ...rowCellLineStyle,
                         ...heatStyle,
@@ -2405,16 +2649,24 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                         lineHeight: 1.2,
                         whiteSpace: "nowrap",
                         position: "relative",
-                        fontWeight: isMaxCell ? 800 : undefined,
-                        textDecoration: isMaxCell ? "underline" : undefined,
-                        textDecorationColor: isMaxCell ? "rgba(15, 23, 42, 0.35)" : undefined,
-                        textDecorationThickness: isMaxCell ? "1px" : undefined,
-                        textUnderlineOffset: isMaxCell ? "2px" : undefined,
+                        fontWeight: isSingleMaxCell ? 800 : undefined,
+                        textDecoration: isSingleMaxCell ? "underline" : undefined,
+                        textDecorationColor: isSingleMaxCell ? "rgba(15, 23, 42, 0.35)" : undefined,
+                        textDecorationThickness: isSingleMaxCell ? "1px" : undefined,
+                        textUnderlineOffset: isSingleMaxCell ? "2px" : undefined,
                         boxShadow: mergedCellBoxShadow || undefined,
                         ...(modelIndex === modelColumnMeta.length - 1 ? rowRightEdgeStyle ?? {} : {})
                       }}
                     >
-                      <span>{rawText}</span>
+                      {isPairNumericDisplay && pairFirstDisplay && pairSecondDisplay ? (
+                        <span className="inline-flex items-center gap-1">
+                          <span style={isMaxCellFirst ? maxSegmentStyle : undefined}>{pairFirstDisplay}</span>
+                          <span>/</span>
+                          <span style={isMaxCellSecond ? maxSegmentStyle : undefined}>{pairSecondDisplay}</span>
+                        </span>
+                      ) : (
+                        <span>{rawText}</span>
+                      )}
                       {shouldShowQuestionMark ? (
                         <span
                           className="absolute right-1 top-1/2 inline-flex h-4 w-4 -translate-y-1/2 cursor-help items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
@@ -2466,7 +2718,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                 key={`${entry.valueRaw}-${entry.valueNote ?? ""}-${entry.source ?? "-"}-${entry.benchTime}`}
                 className="block rounded-md bg-white/5 px-2 py-1 leading-4"
               >
-                {getMatrixCellDisplayValue(entry.valueRaw, entry.valueNote)}
+                {getMatrixCellDisplayValue(entry.valueNum, entry.valueNum2, entry.valueRaw, entry.valueNote)}
                 {entry.valueNote ? <span className="opacity-80"> · note: {entry.valueNote}</span> : null}
                 <span className="opacity-80"> · {entry.source ?? "unknown-source"} · {formatTooltipTime(entry.benchTime)}</span>
               </span>

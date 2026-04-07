@@ -356,3 +356,37 @@ button.danger {
   color: var(--subtext);
   font-size: 12px;
 }
+
+.matrix-row-hover:hover {
+  box-shadow: 0 0 8px rgba(148, 163, 184, 0.2);
+}
+
+.matrix-row-hover:hover > td {
+  border-top: 1px solid rgba(148, 163, 184, 0.45);
+  border-bottom-color: rgba(148, 163, 184, 0.45);
+  background-image: linear-gradient(rgba(148, 163, 184, 0.05), rgba(148, 163, 184, 0.05));
+  box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.3), inset 0 -1px 0 rgba(148, 163, 184, 0.3);
+}
+
+.matrix-row-selected > td {
+  transition: border-color 120ms ease, background-image 120ms ease, box-shadow 120ms ease;
+}
+
+.matrix-row-hover:hover > td,
+.matrix-row-selected > td {
+  transition: border-color 120ms ease, background-image 120ms ease, box-shadow 120ms ease;
+}
+
+.matrix-row-hover:hover > td:first-child,
+.matrix-row-selected > td:first-child {
+  border-top-left-radius: 9px;
+  border-bottom-left-radius: 9px;
+  overflow: hidden;
+}
+
+.matrix-row-hover:hover > td:last-child,
+.matrix-row-selected > td:last-child {
+  border-top-right-radius: 9px;
+  border-bottom-right-radius: 9px;
+  overflow: hidden;
+}
