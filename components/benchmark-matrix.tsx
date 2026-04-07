@@ -114,6 +114,7 @@ const MODALITY_OPTIONS = ["Text", "Vision", "Audio", "Video", "Multimodal"] as c
 const SHOW_CATEGORY_STORAGE_KEY = "benchmark-matrix:show-category";
 const SHOW_DUPLICATE_STORAGE_KEY = "benchmark-matrix:show-duplicate";
 const MODEL_SELECTION_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:model-selection-by-source";
+const MODEL_ORDER_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:model-order-by-source";
 const COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:column-width-by-source";
 const EXPORT_PRESET_STORAGE_KEY = "benchmark-matrix:export-preset";
 const CATEGORY_COLUMN_WIDTH_KEY = "__CATEGORY__";
@@ -897,9 +898,14 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const [showDuplicateRows, setShowDuplicateRows] = useState(false);
   const [isClientReady, setIsClientReady] = useState(false);
   const [isModelSelectionLoaded, setIsModelSelectionLoaded] = useState(false);
+  const [isModelOrderLoaded, setIsModelOrderLoaded] = useState(false);
   const [isColumnWidthLoaded, setIsColumnWidthLoaded] = useState(false);
   const [activeColumnWidthMap, setActiveColumnWidthMap] = useState<Record<string, number>>({});
   const [resizingColumnKey, setResizingColumnKey] = useState<string | null>(null);
+  const [modelOrderBySource, setModelOrderBySource] = useState<Record<string, string[]>>({});
+  const [draggingModelName, setDraggingModelName] = useState<string | null>(null);
+  const [dragOverModelName, setDragOverModelName] = useState<string | null>(null);
+  const [dragInsertPosition, setDragInsertPosition] = useState<"before" | "after" | null>(null);
   const [exportPreset, setExportPreset] = useState<ExportPresetKey>(DEFAULT_EXPORT_PRESET);
   const [supportsWebpExport, setSupportsWebpExport] = useState(true);
   const [supportsAvifExport, setSupportsAvifExport] = useState(false);
@@ -991,6 +997,42 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
     setIsModelSelectionLoaded(true);
   }, []);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(MODEL_ORDER_BY_SOURCE_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as Record<string, unknown>;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          const normalizedBySource: Record<string, string[]> = {};
+
+          Object.entries(parsed).forEach(([sourceKey, value]) => {
+            if (!Array.isArray(value)) return;
+
+            normalizedBySource[sourceKey] = Array.from(
+              new Set(value.filter((item): item is string => typeof item === "string"))
+            );
+          });
+
+          setModelOrderBySource(normalizedBySource);
+        }
+      }
+    } catch {
+      // ignore storage access errors gracefully
+    }
+
+    setIsModelOrderLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isModelOrderLoaded) return;
+
+    try {
+      window.localStorage.setItem(MODEL_ORDER_BY_SOURCE_STORAGE_KEY, JSON.stringify(modelOrderBySource));
+    } catch {
+      // ignore storage access errors gracefully
+    }
+  }, [modelOrderBySource, isModelOrderLoaded]);
 
   useEffect(() => {
     try {
@@ -1206,6 +1248,41 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
     setResizingColumnKey(columnKey);
     document.body.classList.add("column-resizing");
+  }
+
+  function resetModelColumnDragState() {
+    setDraggingModelName(null);
+    setDragOverModelName(null);
+    setDragInsertPosition(null);
+  }
+
+  function commitModelColumnReorder(draggingModel: string, targetModel: string, position: "before" | "after") {
+    if (!draggingModel || draggingModel === targetModel) return;
+
+    const visibleModelOrder = [...modelColumns];
+    if (!visibleModelOrder.includes(draggingModel) || !visibleModelOrder.includes(targetModel)) return;
+
+    const withoutDragging = visibleModelOrder.filter((modelName) => modelName !== draggingModel);
+    const targetIndex = withoutDragging.indexOf(targetModel);
+    if (targetIndex < 0) return;
+
+    const insertIndex = position === "before" ? targetIndex : targetIndex + 1;
+    withoutDragging.splice(insertIndex, 0, draggingModel);
+
+    setModelOrderBySource((prev) => {
+      const previousForSource = prev[activeSource] ?? [];
+      if (
+        previousForSource.length === withoutDragging.length &&
+        previousForSource.every((item, index) => item === withoutDragging[index])
+      ) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [activeSource]: withoutDragging
+      };
+    });
   }
 
   function setSourceAndUrl(nextSource: string) {
@@ -1628,8 +1705,29 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       return [...matched, ...others];
     })();
 
+    const orderedByManual = (() => {
+      const savedOrder = modelOrderBySource[activeSource] ?? [];
+      if (savedOrder.length === 0) return baseOrderedModels;
+
+      const savedIndex = new Map(savedOrder.map((modelName, index) => [modelName, index]));
+      const baseIndex = new Map(baseOrderedModels.map((modelName, index) => [modelName, index]));
+
+      return [...baseOrderedModels].sort((left, right) => {
+        const leftSaved = savedIndex.get(left);
+        const rightSaved = savedIndex.get(right);
+
+        if (leftSaved !== undefined && rightSaved !== undefined) {
+          return leftSaved - rightSaved;
+        }
+        if (leftSaved !== undefined) return -1;
+        if (rightSaved !== undefined) return 1;
+
+        return (baseIndex.get(left) ?? 0) - (baseIndex.get(right) ?? 0);
+      });
+    })();
+
     if (!columnSortBenchmarkKey) {
-      return baseOrderedModels;
+      return orderedByManual;
     }
 
     const benchmarkScoreMap = new Map<string, number>();
@@ -1645,9 +1743,9 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       }
     });
 
-    const baseOrderIndex = new Map(baseOrderedModels.map((modelName, index) => [modelName, index]));
+    const baseOrderIndex = new Map(orderedByManual.map((modelName, index) => [modelName, index]));
 
-    return [...baseOrderedModels].sort((leftModel, rightModel) => {
+    return [...orderedByManual].sort((leftModel, rightModel) => {
       const leftScore = benchmarkScoreMap.get(leftModel);
       const rightScore = benchmarkScoreMap.get(rightModel);
 
@@ -1660,7 +1758,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
       return (baseOrderIndex.get(leftModel) ?? 0) - (baseOrderIndex.get(rightModel) ?? 0);
     });
-  }, [filteredRows, sourceModelHint, columnSortBenchmarkKey, showDuplicateRows]);
+  }, [filteredRows, sourceModelHint, columnSortBenchmarkKey, showDuplicateRows, modelOrderBySource, activeSource]);
 
   const autoModelWidthMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -2793,13 +2891,70 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                   includeTop: true,
                   exportMode: isExportCaptureMode
                 });
+                const isActiveDropTarget =
+                  !!draggingModelName &&
+                  draggingModelName !== model.modelName &&
+                  dragOverModelName === model.modelName;
+                const dragIndicatorShadow = isActiveDropTarget
+                  ? (dragInsertPosition === "before"
+                      ? "inset 3px 0 0 rgba(153, 196, 255, 0.9)"
+                      : "inset -3px 0 0 rgba(153, 196, 255, 0.9)")
+                  : "";
+                const combinedHeaderShadow = [...headerFrameShadows, dragIndicatorShadow].filter(Boolean).join(", ");
+                const isDraggingCurrentModel = draggingModelName === model.modelName;
 
                 return (
                   <th
                     key={model.modelName}
+                    draggable={!resizingColumnKey}
                     data-source-match={model.isSourceMatched ? "1" : undefined}
                     data-source-match-first={model.isSourceMatchedFirst ? "1" : undefined}
                     data-source-match-last={model.isSourceMatchedLast ? "1" : undefined}
+                    aria-grabbed={isDraggingCurrentModel ? "true" : "false"}
+                    onDragStart={(event) => {
+                      const target = event.target as HTMLElement;
+                      if (resizingColumnKey || target.closest(".column-resize-handle")) {
+                        event.preventDefault();
+                        return;
+                      }
+
+                      setDraggingModelName(model.modelName);
+                      setDragOverModelName(model.modelName);
+                      setDragInsertPosition("after");
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", model.modelName);
+                    }}
+                    onDragOver={(event) => {
+                      if (!draggingModelName || draggingModelName === model.modelName) return;
+
+                      event.preventDefault();
+
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      const nextPosition = event.clientX < rect.left + rect.width / 2 ? "before" : "after";
+                      if (event.dataTransfer) {
+                        event.dataTransfer.dropEffect = "move";
+                      }
+
+                      setDragOverModelName(model.modelName);
+                      setDragInsertPosition(nextPosition);
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+
+                      const draggingModel = draggingModelName || event.dataTransfer.getData("text/plain");
+                      if (!draggingModel) {
+                        resetModelColumnDragState();
+                        return;
+                      }
+
+                      const nextPosition = dragOverModelName === model.modelName
+                        ? (dragInsertPosition ?? "after")
+                        : "after";
+
+                      commitModelColumnReorder(draggingModel, model.modelName, nextPosition);
+                      resetModelColumnDragState();
+                    }}
+                    onDragEnd={resetModelColumnDragState}
                     style={{
                       position: "sticky",
                       top: 0,
@@ -2810,7 +2965,9 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                       padding: "6px 6px",
                       background: "rgba(20, 27, 45, 0.96)",
                       backdropFilter: "blur(6px)",
-                      boxShadow: headerFrameShadows.length > 0 ? headerFrameShadows.join(", ") : undefined
+                      cursor: resizingColumnKey ? "col-resize" : "grab",
+                      opacity: isDraggingCurrentModel ? 0.58 : 1,
+                      boxShadow: combinedHeaderShadow || undefined
                     }}
                   >
                     <div
