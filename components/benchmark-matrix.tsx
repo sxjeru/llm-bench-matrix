@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Check,
@@ -784,16 +784,16 @@ function getMatrixCellDisplayValue(
   return raw;
 }
 
-function getMatrixCellEntryDedupKey(entry: MatrixCellEntry): string {
-  return `${entry.valueRaw}__${entry.valueNote ?? ""}__${entry.source ?? ""}__${entry.benchTime}`;
-}
-
 function getMatrixCellValueIdentity(entry: MatrixCellEntry): string {
   if (entry.valueNum !== null || entry.valueNum2 !== null) {
     return `num:${entry.valueNum ?? ""}|${entry.valueNum2 ?? ""}`;
   }
 
   return `raw:${entry.valueRaw}`;
+}
+
+function getMatrixCellSourceValueDedupKey(entry: MatrixCellEntry): string {
+  return `${entry.source ?? ""}__${getMatrixCellValueIdentity(entry)}`;
 }
 
 async function loadHtml2Canvas(): Promise<Html2CanvasFn> {
@@ -1002,6 +1002,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     mode: "data"
   });
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
+  const [rowPresenceFilterModel, setRowPresenceFilterModel] = useState<string | null>(null);
   const [isDownloadingTableImage, setIsDownloadingTableImage] = useState(false);
   const [isCopyingTableImage, setIsCopyingTableImage] = useState(false);
   const [isExportCaptureMode, setIsExportCaptureMode] = useState(false);
@@ -1037,7 +1038,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       : false;
     const nextSource = sourceFromUrl && isKnown ? sourceFromUrl : SOURCE_ALL;
 
-    setActiveSource(nextSource);
+    setActiveSource((prev) => (prev === nextSource ? prev : nextSource));
 
     if (activeSourceRef.current !== nextSource) {
       const nextMode: RowSortMode = nextSource === SOURCE_ALL ? "data" : "source";
@@ -1461,13 +1462,6 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   }
 
   function setSourceAndUrl(nextSource: string) {
-    setActiveSource(nextSource);
-    if (nextSource === SOURCE_ALL) {
-      setRowSortState({ column: "benchmark", mode: "data" });
-    } else {
-      setRowSortState((prev) => ({ ...prev, mode: "source" }));
-    }
-
     const params = new URLSearchParams(searchParams.toString());
     if (nextSource === SOURCE_ALL) {
       params.delete("source");
@@ -1482,7 +1476,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const rowsBySource = useMemo(() => {
     const map = new Map<string, MatrixInputRow[]>();
 
-    rows.forEach((row) => {
+    allRows.forEach((row) => {
       const sourceKey = getSourceKey(row.source);
       if (!map.has(sourceKey)) {
         map.set(sourceKey, []);
@@ -1491,7 +1485,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     });
 
     return map;
-  }, [rows]);
+  }, [allRows]);
 
   const allRowsIndex = useMemo(() => {
     const modelProviderMap = new Map<string, string>();
@@ -1528,10 +1522,10 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
   const baseSourceRows = useMemo(() => {
     if (activeSource === SOURCE_ALL) {
-      return rows;
+      return allRows;
     }
     return rowsBySource.get(activeSource) ?? [];
-  }, [rows, rowsBySource, activeSource]);
+  }, [allRows, rowsBySource, activeSource]);
 
   const baseBenchmarkKeySet = useMemo(() => {
     const keys = new Set<string>();
@@ -1701,7 +1695,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const [selectedModalities, setSelectedModalities] = useState<string[]>([...MODALITY_OPTIONS]);
   const [selectedModels, setSelectedModels] = useState<string[]>(allModelNames);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!isModelSelectionLoaded) return;
 
     if (activeSource !== SOURCE_ALL && rows.length > 0 && baseSourceRows.length === 0) {
@@ -1934,6 +1928,12 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       return (baseOrderIndex.get(leftModel) ?? 0) - (baseOrderIndex.get(rightModel) ?? 0);
     });
   }, [filteredRows, sourceModelHint, columnSortBenchmarkKey, showDuplicateRows, modelOrderBySource, activeSource]);
+
+  useEffect(() => {
+    if (!rowPresenceFilterModel) return;
+    if (modelColumns.includes(rowPresenceFilterModel)) return;
+    setRowPresenceFilterModel(null);
+  }, [modelColumns, rowPresenceFilterModel]);
 
   const autoModelWidthMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -2237,9 +2237,15 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         const finalizedCells = new Map<string, MatrixCell>();
 
         matrixRow.cells.forEach((cell, modelName) => {
-          const uniqueEntries = Array.from(
-            new Map(cell.allEntries.map((entry) => [getMatrixCellEntryDedupKey(entry), entry])).values()
-          );
+          const uniqueEntriesMap = new Map<string, MatrixCellEntry>();
+          cell.allEntries.forEach((entry) => {
+            const dedupKey = getMatrixCellSourceValueDedupKey(entry);
+            if (!uniqueEntriesMap.has(dedupKey)) {
+              uniqueEntriesMap.set(dedupKey, entry);
+            }
+          });
+
+          const uniqueEntries = Array.from(uniqueEntriesMap.values());
           const valueIdentitySet = new Set(uniqueEntries.map((entry) => getMatrixCellValueIdentity(entry)));
           const noteText = (cell.valueNote ?? "").trim();
           const hasMeaningfulMultipleValues = uniqueEntries.length > 1 && valueIdentitySet.size > 1;
@@ -2331,8 +2337,18 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     return matrixRows.filter((row) => row.modalities.some((modality) => selectedModalitySet.has(modality)));
   }, [matrixRows, selectedModalitySet]);
 
+  const presenceFilteredMatrixRows = useMemo(() => {
+    if (!rowPresenceFilterModel) return modalityFilteredMatrixRows;
+
+    return modalityFilteredMatrixRows.filter((row) => {
+      const cell = row.cells.get(rowPresenceFilterModel);
+      if (!cell) return false;
+      return cell.displayValue.trim() !== "--";
+    });
+  }, [modalityFilteredMatrixRows, rowPresenceFilterModel]);
+
   const sortedMatrixRows = useMemo(() => {
-    const rowsCopy = [...modalityFilteredMatrixRows];
+    const rowsCopy = [...presenceFilteredMatrixRows];
     const effectiveMode = getEffectiveSortMode(rowSortState.mode);
 
     if (effectiveMode === "source") {
@@ -2401,13 +2417,13 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       return a.firstSeenIndex - b.firstSeenIndex;
     });
     return rowsCopy;
-  }, [modalityFilteredMatrixRows, rowSortState]);
+  }, [presenceFilteredMatrixRows, rowSortState]);
 
   const headerUniqueCounts = useMemo(() => {
     const uniqueCategories = new Set<string>();
     const uniqueBenchmarks = new Set<string>();
 
-    modalityFilteredMatrixRows.forEach((row) => {
+    presenceFilteredMatrixRows.forEach((row) => {
       uniqueCategories.add(row.category);
       uniqueBenchmarks.add(row.rowKey);
     });
@@ -2416,7 +2432,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       category: uniqueCategories.size,
       benchmark: uniqueBenchmarks.size
     };
-  }, [modalityFilteredMatrixRows]);
+  }, [presenceFilteredMatrixRows]);
 
   function getSortModeLabel(column: RowSortColumn): string {
     if (rowSortState.column !== column) return "";
@@ -3075,8 +3091,14 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                       ? "inset 3px 0 0 rgba(153, 196, 255, 0.9)"
                       : "inset -3px 0 0 rgba(153, 196, 255, 0.9)")
                   : "";
-                const combinedHeaderShadow = [...headerFrameShadows, dragIndicatorShadow].filter(Boolean).join(", ");
                 const isDraggingCurrentModel = draggingModelName === model.modelName;
+                const isPresenceFilterActive = rowPresenceFilterModel === model.modelName;
+                const activeUnderlineShadow = isPresenceFilterActive
+                  ? "inset 0 -2px 0 rgba(166, 203, 255, 0.96), inset 0 -6px 12px rgba(124, 177, 255, 0.28)"
+                  : "";
+                const combinedHeaderShadow = [...headerFrameShadows, dragIndicatorShadow, activeUnderlineShadow]
+                  .filter(Boolean)
+                  .join(", ");
 
                 return (
                   <th
@@ -3086,6 +3108,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     data-source-match-first={model.isSourceMatchedFirst ? "1" : undefined}
                     data-source-match-last={model.isSourceMatchedLast ? "1" : undefined}
                     aria-grabbed={isDraggingCurrentModel ? "true" : "false"}
+                    title={isPresenceFilterActive ? "再次点击显示全部行" : "点击仅保留该模型有值的行"}
                     onDragStart={(event) => {
                       const target = event.target as HTMLElement;
                       if (resizingColumnKey || target.closest(".column-resize-handle")) {
@@ -3130,6 +3153,10 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                       resetModelColumnDragState();
                     }}
                     onDragEnd={resetModelColumnDragState}
+                    onClick={() => {
+                      if (draggingModelName) return;
+                      setRowPresenceFilterModel((prev) => (prev === model.modelName ? null : model.modelName));
+                    }}
                     style={{
                       position: "sticky",
                       top: 0,

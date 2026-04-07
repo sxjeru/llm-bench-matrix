@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
@@ -51,5 +51,58 @@ describe("BenchmarkMatrix source tabs", () => {
 
     const tablist = screen.getByRole("tablist");
     expect(tablist.className).toContain("overflow-x-auto");
+  });
+
+  test("从 Gemma 4 切回全部时，模型选择会恢复到全量 allRows", async () => {
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:Gemma 4", "text:Seed2.0"]}
+        rows={[
+          {
+            providerName: "Google",
+            modelName: "Gemma 4 31B",
+            benchmarkName: "Bench-G",
+            benchmarkType: "General",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Gemma 4"
+          }
+        ]}
+        allRows={[
+          {
+            providerName: "Google",
+            modelName: "Gemma 4 31B",
+            benchmarkName: "Bench-G",
+            benchmarkType: "General",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Gemma 4"
+          },
+          {
+            providerName: "Seed",
+            modelName: "Seed2.0 Pro",
+            benchmarkName: "Bench-S",
+            benchmarkType: "General",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "77",
+            valueNum: 77,
+            valueNote: null,
+            source: "text:Seed2.0"
+          }
+        ]}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Gemma 4" }));
+    fireEvent.click(screen.getByRole("tab", { name: "全部" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("已选模型 2/2")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Bench-S")).toBeInTheDocument();
   });
 });
