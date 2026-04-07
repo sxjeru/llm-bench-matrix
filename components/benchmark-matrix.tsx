@@ -116,6 +116,7 @@ const SHOW_DUPLICATE_STORAGE_KEY = "benchmark-matrix:show-duplicate";
 const MODEL_SELECTION_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:model-selection-by-source";
 const MODEL_ORDER_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:model-order-by-source";
 const COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:column-width-by-source";
+const HEATMAP_PALETTE_STORAGE_KEY = "benchmark-matrix:heatmap-palette";
 const EXPORT_PRESET_STORAGE_KEY = "benchmark-matrix:export-preset";
 const CATEGORY_COLUMN_WIDTH_KEY = "__CATEGORY__";
 const BENCHMARK_COLUMN_WIDTH_KEY = "__BENCHMARK__";
@@ -131,6 +132,36 @@ const MAX_MODEL_COLUMN_WIDTH = 320;
 const SOURCE_MATCH_FRAME_COLOR = "rgba(93, 167, 255, 0.42)";
 const WEBP_EXPORT_QUALITY = 0.94;
 const AVIF_EXPORT_QUALITY = 0.9;
+const HEATMAP_PRESETS = {
+  classic: {
+    label: "经典红黄绿",
+    low: "#ff9b80",
+    mid: "#ffee6f",
+    high: "#a1d48c"
+  },
+  coolwarm: {
+    label: "冷暖蓝橙",
+    low: "#7aa8ff",
+    mid: "#f0f5ff",
+    high: "#ffb07f"
+  },
+  mintsun: {
+    label: "薄荷暖阳",
+    low: "#8bc5ff",
+    mid: "#f9f2b1",
+    high: "#74d8b4"
+  },
+  colorblind: {
+    label: "色盲友好",
+    low: "#8ea4ff",
+    mid: "#d8d8d8",
+    high: "#ffb55e"
+  }
+} as const;
+const DEFAULT_HEATMAP_PRESET_KEY: HeatmapPresetKey = "classic";
+const DEFAULT_HEATMAP_ALPHA = 0.55;
+const MIN_HEATMAP_ALPHA = 0.24;
+const MAX_HEATMAP_ALPHA = 0.92;
 const EXPORT_PRESET_MAP = {
   "1x-png": { label: "1x PNG", scale: 1, format: "png", mimeType: "image/png" },
   "2x-png": { label: "2x PNG", scale: 2, format: "png", mimeType: "image/png" },
@@ -143,6 +174,25 @@ const EXPORT_PRESET_MAP = {
   "3x-avif": { label: "3x AVIF", scale: 3, format: "avif", mimeType: "image/avif" }
 } as const;
 const DEFAULT_EXPORT_PRESET: ExportPresetKey = "2x-webp";
+
+type HeatmapPresetKey = keyof typeof HEATMAP_PRESETS;
+type HeatmapPresetSelection = HeatmapPresetKey | "custom";
+type HeatmapPaletteHex = {
+  low: string;
+  mid: string;
+  high: string;
+};
+type HeatmapPaletteRgb = {
+  low: [number, number, number];
+  mid: [number, number, number];
+  high: [number, number, number];
+};
+
+const DEFAULT_HEATMAP_PALETTE_HEX: HeatmapPaletteHex = {
+  low: HEATMAP_PRESETS[DEFAULT_HEATMAP_PRESET_KEY].low,
+  mid: HEATMAP_PRESETS[DEFAULT_HEATMAP_PRESET_KEY].mid,
+  high: HEATMAP_PRESETS[DEFAULT_HEATMAP_PRESET_KEY].high
+};
 
 function getModelColumnWidthKey(modelName: string): string {
   return `model:${modelName}`;
@@ -611,14 +661,47 @@ function blendColor(from: [number, number, number], to: [number, number, number]
   return [lerp(from[0], to[0], t), lerp(from[1], to[1], t), lerp(from[2], to[2], t)] as const;
 }
 
-function getHeatCellStyle(valueNum: number | null, minNum: number | null, maxNum: number | null) {
+function isValidHexColor(value: string): boolean {
+  return /^#[0-9a-f]{6}$/i.test(value.trim());
+}
+
+function normalizeHexColor(value: string, fallback: string): string {
+  return isValidHexColor(value) ? value.trim().toLowerCase() : fallback;
+}
+
+function clampHeatmapAlpha(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_HEATMAP_ALPHA;
+  return Math.min(MAX_HEATMAP_ALPHA, Math.max(MIN_HEATMAP_ALPHA, Number(value.toFixed(2))));
+}
+
+function hexToRgbTuple(value: string): [number, number, number] {
+  const normalized = value.replace("#", "");
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+  return [red, green, blue];
+}
+
+function rgbaFromHex(value: string, alpha: number): string {
+  const [red, green, blue] = hexToRgbTuple(value);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
+function getHeatCellStyle(
+  valueNum: number | null,
+  minNum: number | null,
+  maxNum: number | null,
+  palette: HeatmapPaletteRgb,
+  alpha: number
+) {
   if (valueNum === null || minNum === null || maxNum === null) {
     return {} as const;
   }
 
   if (minNum === maxNum) {
+    const mid = palette.mid;
     return {
-      backgroundColor: "rgba(255, 238, 111, 0.52)",
+      backgroundColor: `rgba(${mid[0]}, ${mid[1]}, ${mid[2]}, ${alpha})`,
       color: "#0f172a",
       textShadow: "0 0 1px rgba(0, 0, 0, 0.28)",
       WebkitTextStroke: "0.25px rgba(0, 0, 0, 0.25)"
@@ -627,16 +710,12 @@ function getHeatCellStyle(valueNum: number | null, minNum: number | null, maxNum
 
   const ratio = Math.min(1, Math.max(0, (valueNum - minNum) / (maxNum - minNum)));
 
-  const red: [number, number, number] = [255, 155, 128];
-  const yellow: [number, number, number] = [255, 238, 111];
-  const green: [number, number, number] = [161, 212, 140];
-
   const color = ratio <= 0.5
-    ? blendColor(red, yellow, ratio / 0.5)
-    : blendColor(yellow, green, (ratio - 0.5) / 0.5);
+    ? blendColor(palette.low, palette.mid, ratio / 0.5)
+    : blendColor(palette.mid, palette.high, (ratio - 0.5) / 0.5);
 
   return {
-    backgroundColor: `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0.52)`,
+    backgroundColor: `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${alpha})`,
     color: "#0f172a",
     textShadow: "0 0 1px rgba(0, 0, 0, 0.28)",
     WebkitTextStroke: "0.25px rgba(0, 0, 0, 0.25)"
@@ -882,6 +961,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const showDuplicateLoadedRef = useRef(false);
   const modelSelectionBySourceRef = useRef<Record<string, string[]>>({});
   const columnWidthBySourceRef = useRef<Record<string, Record<string, number>>>({});
+  const heatmapPaletteLoadedRef = useRef(false);
   const columnResizeStateRef = useRef<{
     columnKey: string;
     startX: number;
@@ -906,6 +986,9 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const [draggingModelName, setDraggingModelName] = useState<string | null>(null);
   const [dragOverModelName, setDragOverModelName] = useState<string | null>(null);
   const [dragInsertPosition, setDragInsertPosition] = useState<"before" | "after" | null>(null);
+  const [heatmapPalette, setHeatmapPalette] = useState<HeatmapPaletteHex>(DEFAULT_HEATMAP_PALETTE_HEX);
+  const [heatmapAlpha, setHeatmapAlpha] = useState(DEFAULT_HEATMAP_ALPHA);
+  const [heatmapPresetSelection, setHeatmapPresetSelection] = useState<HeatmapPresetSelection>(DEFAULT_HEATMAP_PRESET_KEY);
   const [exportPreset, setExportPreset] = useState<ExportPresetKey>(DEFAULT_EXPORT_PRESET);
   const [supportsWebpExport, setSupportsWebpExport] = useState(true);
   const [supportsAvifExport, setSupportsAvifExport] = useState(false);
@@ -1151,6 +1234,59 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   }, [exportPreset]);
 
   useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(HEATMAP_PALETTE_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as {
+          low?: unknown;
+          mid?: unknown;
+          high?: unknown;
+          alpha?: unknown;
+          preset?: unknown;
+        };
+
+        const nextPalette: HeatmapPaletteHex = {
+          low: normalizeHexColor(typeof parsed.low === "string" ? parsed.low : "", DEFAULT_HEATMAP_PALETTE_HEX.low),
+          mid: normalizeHexColor(typeof parsed.mid === "string" ? parsed.mid : "", DEFAULT_HEATMAP_PALETTE_HEX.mid),
+          high: normalizeHexColor(typeof parsed.high === "string" ? parsed.high : "", DEFAULT_HEATMAP_PALETTE_HEX.high)
+        };
+
+        const presetRaw = typeof parsed.preset === "string" ? parsed.preset : "";
+        const isKnownPreset = presetRaw in HEATMAP_PRESETS;
+        const nextPresetSelection: HeatmapPresetSelection = isKnownPreset
+          ? (presetRaw as HeatmapPresetKey)
+          : "custom";
+        const parsedAlpha = typeof parsed.alpha === "number" ? parsed.alpha : DEFAULT_HEATMAP_ALPHA;
+
+        setHeatmapPalette(nextPalette);
+        setHeatmapAlpha(clampHeatmapAlpha(parsedAlpha));
+        setHeatmapPresetSelection(nextPresetSelection);
+      }
+    } catch {
+      // ignore storage access errors gracefully
+    }
+
+    heatmapPaletteLoadedRef.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!heatmapPaletteLoadedRef.current) return;
+
+    try {
+      window.localStorage.setItem(
+        HEATMAP_PALETTE_STORAGE_KEY,
+        JSON.stringify({
+          ...heatmapPalette,
+          alpha: heatmapAlpha,
+          preset: heatmapPresetSelection
+        })
+      );
+    } catch {
+      // ignore storage access errors gracefully
+    }
+  }, [heatmapPalette, heatmapAlpha, heatmapPresetSelection]);
+
+  useEffect(() => {
     if (!copyNotice) return;
 
     setCopyNoticeVisible(true);
@@ -1227,6 +1363,45 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
   const isImageActionBusy = isDownloadingTableImage || isCopyingTableImage;
   const showExportMenu = isExportMenuOpen || (!suppressHoverMenu && isExportMenuHovered);
+  const heatmapPaletteRgb = useMemo<HeatmapPaletteRgb>(() => {
+    return {
+      low: hexToRgbTuple(heatmapPalette.low),
+      mid: hexToRgbTuple(heatmapPalette.mid),
+      high: hexToRgbTuple(heatmapPalette.high)
+    };
+  }, [heatmapPalette]);
+  const heatmapGradientPreview = useMemo(
+    () => `linear-gradient(90deg, ${rgbaFromHex(heatmapPalette.low, heatmapAlpha)} 0%, ${rgbaFromHex(heatmapPalette.mid, heatmapAlpha)} 50%, ${rgbaFromHex(heatmapPalette.high, heatmapAlpha)} 100%)`,
+    [heatmapPalette, heatmapAlpha]
+  );
+
+  function updateHeatmapPaletteColor(key: keyof HeatmapPaletteHex, nextColor: string) {
+    setHeatmapPalette((prev) => {
+      const fallback = prev[key];
+      const normalized = normalizeHexColor(nextColor, fallback);
+      if (normalized === prev[key]) return prev;
+      return {
+        ...prev,
+        [key]: normalized
+      };
+    });
+    setHeatmapPresetSelection("custom");
+  }
+
+  function applyHeatmapPreset(nextPreset: HeatmapPresetKey) {
+    const preset = HEATMAP_PRESETS[nextPreset];
+    setHeatmapPalette({
+      low: preset.low,
+      mid: preset.mid,
+      high: preset.high
+    });
+    setHeatmapPresetSelection(nextPreset);
+  }
+
+  function resetHeatmapPaletteToDefault() {
+    applyHeatmapPreset(DEFAULT_HEATMAP_PRESET_KEY);
+    setHeatmapAlpha(DEFAULT_HEATMAP_ALPHA);
+  }
 
   function beginColumnResize(
     event: ReactPointerEvent<HTMLElement>,
@@ -3138,7 +3313,13 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     pairFirstDisplay !== null &&
                     pairSecondDisplay !== null;
                   const isSingleMaxCell = !isPairNumericDisplay && isMaxCellFirst;
-                  const heatStyle = getHeatCellStyle(comparableCellNum, matrixRow.minComparable, matrixRow.maxComparable);
+                  const heatStyle = getHeatCellStyle(
+                    comparableCellNum,
+                    matrixRow.minComparable,
+                    matrixRow.maxComparable,
+                    heatmapPaletteRgb,
+                    heatmapAlpha
+                  );
                   const heatBackground =
                     (heatStyle as { backgroundColor?: string }).backgroundColor ?? "rgba(20, 27, 45, 0.96)";
                   const hasHeatColor =
@@ -3230,6 +3411,103 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
             );})}
           </tbody>
         </table>
+      </div>
+
+      <div className="heatmap-panel">
+        <div className="heatmap-panel-top">
+          <div className="heatmap-panel-title-wrap">
+            <span className="heatmap-panel-title">热力图渐变设置</span>
+          </div>
+
+          <div className="heatmap-panel-actions">
+            <label className="heatmap-preset-group">
+              <span>预设</span>
+              <select
+                className="select select-sm heatmap-preset-select"
+                value={heatmapPresetSelection}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  if (next === "custom") {
+                    setHeatmapPresetSelection("custom");
+                    return;
+                  }
+
+                  if (next in HEATMAP_PRESETS) {
+                    applyHeatmapPreset(next as HeatmapPresetKey);
+                  }
+                }}
+              >
+                {(Object.entries(HEATMAP_PRESETS) as [HeatmapPresetKey, (typeof HEATMAP_PRESETS)[HeatmapPresetKey]][]).map(
+                  ([presetKey, preset]) => (
+                    <option key={presetKey} value={presetKey}>{preset.label}</option>
+                  )
+                )}
+                <option value="custom">自定义</option>
+              </select>
+            </label>
+
+            <button type="button" className="btn btn-sm heatmap-reset-btn" onClick={resetHeatmapPaletteToDefault}>
+              恢复默认
+            </button>
+          </div>
+        </div>
+
+        <div className="heatmap-gradient-track" style={{ background: heatmapGradientPreview }} />
+
+        <div className="heatmap-panel-bottom">
+          <span className="heatmap-hex-readout">
+            {heatmapPalette.low.toUpperCase()} · {heatmapPalette.mid.toUpperCase()} · {heatmapPalette.high.toUpperCase()}
+          </span>
+
+          <div className="heatmap-stop-controls">
+            <label className="heatmap-alpha-inline">
+              <span>透明度</span>
+              <input
+                type="range"
+                className="heatmap-alpha-range"
+                min={Math.round(MIN_HEATMAP_ALPHA * 100)}
+                max={Math.round(MAX_HEATMAP_ALPHA * 100)}
+                step={1}
+                value={Math.round(heatmapAlpha * 100)}
+                onChange={(event) => {
+                  const next = Number(event.target.value) / 100;
+                  setHeatmapAlpha(clampHeatmapAlpha(next));
+                }}
+              />
+              <span>{Math.round(heatmapAlpha * 100)}%</span>
+            </label>
+
+            <label className="heatmap-stop-pill">
+              <span>较差</span>
+              <input
+                type="color"
+                className="input heatmap-color-input"
+                value={heatmapPalette.low}
+                onChange={(event) => updateHeatmapPaletteColor("low", event.target.value)}
+              />
+            </label>
+
+            <label className="heatmap-stop-pill">
+              <span>中等</span>
+              <input
+                type="color"
+                className="input heatmap-color-input"
+                value={heatmapPalette.mid}
+                onChange={(event) => updateHeatmapPaletteColor("mid", event.target.value)}
+              />
+            </label>
+
+            <label className="heatmap-stop-pill">
+              <span>优秀</span>
+              <input
+                type="color"
+                className="input heatmap-color-input"
+                value={heatmapPalette.high}
+                onChange={(event) => updateHeatmapPaletteColor("high", event.target.value)}
+              />
+            </label>
+          </div>
+        </div>
       </div>
 
       {activeCellTooltip ? (

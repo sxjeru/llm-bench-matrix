@@ -581,3 +581,213 @@ button.danger {
   border-bottom-right-radius: 9px;
   overflow: hidden;
 }
+
+.heatmap-panel {
+  margin-top: 24px;
+  border: 1px solid rgba(91, 112, 155, 0.42);
+  border-radius: 14px;
+  background:
+    linear-gradient(155deg, rgba(22, 32, 56, 0.86), rgba(17, 26, 44, 0.76)),
+    radial-gradient(120% 120% at 12% 0%, rgba(111, 162, 255, 0.14), transparent 58%);
+  box-shadow: inset 0 1px 0 rgba(188, 212, 255, 0.12), 0 10px 24px rgba(5, 12, 29, 0.28);
+  padding: 12px 14px;
+}
+
+.heatmap-panel-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.heatmap-panel-title-wrap {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.heatmap-panel-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #d8e6ff;
+  letter-spacing: 0.01em;
+}
+
+.heatmap-panel-subtitle {
+  font-size: 12px;
+  color: #95a8cd;
+}
+
+.heatmap-panel-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.heatmap-preset-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #b3c1de;
+}
+
+.heatmap-preset-select {
+  min-height: 34px;
+  height: 34px;
+  border-color: rgba(150, 175, 220, 0.34);
+  background: rgba(20, 30, 52, 0.82);
+}
+
+.heatmap-reset-btn {
+  min-height: 34px;
+  height: 34px;
+  border: 1px solid rgba(150, 175, 220, 0.34);
+  background: rgba(20, 30, 52, 0.62);
+  color: #c9d9f4;
+}
+
+.heatmap-reset-btn:hover {
+  background: rgba(27, 40, 67, 0.82);
+}
+
+.heatmap-gradient-track {
+  margin-top: 10px;
+  height: 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(179, 203, 244, 0.3);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.18), 0 0 0 1px rgba(12, 18, 35, 0.28);
+}
+
+.heatmap-alpha-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #a9bbdf;
+  margin-right: 8px;
+}
+
+input.heatmap-alpha-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 130px;
+  height: 6px;
+  min-height: 6px;
+  border: 1px solid rgba(158, 184, 229, 0.36);
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.32));
+  padding: 0;
+}
+
+input.heatmap-alpha-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(203, 224, 255, 0.86);
+  background: #cfe1ff;
+  box-shadow: 0 0 0 2px rgba(35, 50, 84, 0.7);
+  cursor: pointer;
+}
+
+input.heatmap-alpha-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(203, 224, 255, 0.86);
+  background: #cfe1ff;
+  box-shadow: 0 0 0 2px rgba(35, 50, 84, 0.7);
+  cursor: pointer;
+}
+
+input.heatmap-alpha-range::-moz-range-track {
+  height: 6px;
+  border: 1px solid rgba(158, 184, 229, 0.36);
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.32));
+}
+
+.heatmap-panel-bottom {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.heatmap-hex-readout {
+  font-size: 11px;
+  color: #90a7d4;
+  letter-spacing: 0.02em;
+}
+
+.heatmap-stop-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.heatmap-stop-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(151, 177, 223, 0.34);
+  border-radius: 999px;
+  background: rgba(23, 34, 57, 0.66);
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #c7d7f5;
+}
+
+.heatmap-color-input {
+  height: 22px;
+  min-height: 22px;
+  width: 26px;
+  min-width: 26px;
+  padding: 0;
+  border: 1px solid rgba(179, 203, 244, 0.4);
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.heatmap-color-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.heatmap-color-input::-webkit-color-swatch {
+  border: 0;
+  border-radius: 6px;
+}
+
+.heatmap-color-input::-moz-color-swatch {
+  border: 0;
+  border-radius: 6px;
+}
+
+@media (max-width: 760px) {
+  .heatmap-panel {
+    padding: 10px 11px;
+  }
+
+  .heatmap-panel-title-wrap {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .heatmap-panel-actions,
+  .heatmap-alpha-inline,
+  .heatmap-panel-bottom,
+  .heatmap-stop-controls {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+  .heatmap-alpha-inline > span:first-child {
+    white-space: nowrap;
+  }
