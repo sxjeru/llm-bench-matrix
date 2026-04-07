@@ -403,9 +403,10 @@ function normalizeBenchmarkDuplicateToken(input: string): string {
   return input
     .trim()
     .toLowerCase()
-    .replace(/[（(][^()（）]*[)）]/g, "")
+    .replace(/（/g, "(")
+    .replace(/）/g, ")")
     .replace(/[\s\-_]+/g, "")
-    .replace(/[^a-z0-9.]+/g, "");
+    .replace(/[^a-z0-9().]+/g, "");
 }
 
 function pickPreferredBenchmarkDisplayName(current: string, candidate: string): string {
