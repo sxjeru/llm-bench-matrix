@@ -212,6 +212,22 @@ function parseMergeEntityId(
   return exact?.id ?? null;
 }
 
+function parseExplicitMergeEntityId(rawInput: string): number | null {
+  const normalized = rawInput.trim();
+  if (!normalized) return null;
+
+  if (/^\d+$/.test(normalized)) {
+    return Number(normalized);
+  }
+
+  const matchedId = normalized.match(/\[(\d+)\]\s*$/);
+  if (matchedId) {
+    return Number(matchedId[1]);
+  }
+
+  return null;
+}
+
 async function postJson(
   url: string,
   payload: unknown,
@@ -325,6 +341,34 @@ function getOmniDocBenchNormalizeHint(benchmarkName: string, rawValue: string): 
   return String(normalized);
 }
 
+function formatPreviewNumericValue(
+  rawValue: string,
+  numericValue: number | null,
+  position: "first" | "second" = "first"
+): string {
+  if (numericValue === null) {
+    return "-";
+  }
+
+  const normalizedRaw = rawValue.trim();
+  const targetPart = position === "second"
+    ? (normalizedRaw.split("/")[1] ?? "").trim()
+    : (normalizedRaw.split("/")[0] ?? "").trim();
+
+  const currencyMatch = targetPart.match(/^([$¥€£])/);
+  if (!currencyMatch) {
+    return String(numericValue);
+  }
+
+  const fractionDigits = targetPart.match(/\.(\d+)/)?.[1]?.length ?? 0;
+  const formatted = numericValue.toLocaleString("en-US", {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: Math.max(fractionDigits, 6)
+  });
+
+  return `${currencyMatch[1]}${formatted}`;
+}
+
 function normalizeModalityName(input: string): string {
   const normalized = input.trim().toLowerCase();
   if (!normalized) return "Text";
@@ -356,6 +400,23 @@ function normalizeModalityList(input: string[] | undefined): string[] {
   }
 
   return withoutVision;
+}
+
+function inferProviderNameFromModelName(modelName: string): string {
+  const trimmed = modelName.trim();
+  if (!trimmed) return "Unknown";
+
+  const alphaPrefix = trimmed.match(/^[A-Za-z]+/);
+  if (alphaPrefix?.[0]) {
+    return alphaPrefix[0];
+  }
+
+  const tokenized = trimmed.split(/[\s\-_:]/).map((item) => item.trim()).filter(Boolean);
+  if (tokenized.length > 0) {
+    return tokenized[0];
+  }
+
+  return "Unknown";
 }
 
 function resolveHardcodedBenchmarkAliasTarget(input: string): string | null {
@@ -563,6 +624,7 @@ export function AdminConsole({
   const [matrixBenchmarkNameDrafts, setMatrixBenchmarkNameDrafts] = useState<Record<string, string>>({});
   const [matrixBenchmarkTypeDrafts, setMatrixBenchmarkTypeDrafts] = useState<Record<string, string>>({});
   const [matrixModelNameDrafts, setMatrixModelNameDrafts] = useState<Record<string, string>>({});
+  const [openMatrixBenchmarkCandidateFor, setOpenMatrixBenchmarkCandidateFor] = useState<string | null>(null);
   const [globalStarSupplement, setGlobalStarSupplement] = useState("");
   const [benchmarkMergeTargets, setBenchmarkMergeTargets] = useState<Record<string, string>>({});
   const [benchmarkMergeFilters, setBenchmarkMergeFilters] = useState<Record<string, string>>({});
@@ -842,7 +904,7 @@ export function AdminConsole({
       if (aliasTargetName) {
         const aliasTarget = benchmarks.find((item) => item.benchmarkName.toLowerCase() === aliasTargetName.toLowerCase());
         if (aliasTarget) {
-          reasons.push(`命中硬编码别名，建议合并到 ${aliasTarget.benchmarkName} (${aliasTarget.benchmarkType})`);
+          reasons.push(`命中硬编码别名，建议合并到 ${aliasTarget.benchmarkName} [${aliasTarget.benchmarkType}]`);
           suggestedTargetId = aliasTarget.id;
           level = "danger";
         } else {
@@ -856,7 +918,7 @@ export function AdminConsole({
       if (candidates.length > 0) {
         const candidateLabels = candidates
           .slice(0, 3)
-          .map((item) => `${item.benchmarkName} (${item.benchmarkType})`)
+          .map((item) => `${item.benchmarkName} [${item.benchmarkType}]`)
           .join("、");
 
         reasons.push(`与库内 benchmark 相似：${candidateLabels}`);
@@ -1261,7 +1323,7 @@ export function AdminConsole({
     () =>
       benchmarks.map((item) => ({
         id: item.id,
-        label: `${item.benchmarkName} (${item.benchmarkType})`
+        label: `${item.benchmarkName} [${item.benchmarkType}]`
       })),
     [benchmarks]
   );
@@ -1400,6 +1462,11 @@ export function AdminConsole({
           dropdown.removeAttribute("open");
         }
       });
+
+      const targetElement = target instanceof Element ? target : null;
+      if (!targetElement || !targetElement.closest('[data-matrix-benchmark-candidate-container="true"]')) {
+        setOpenMatrixBenchmarkCandidateFor(null);
+      }
     };
 
     document.addEventListener("pointerdown", handlePointerDown);
@@ -1445,18 +1512,83 @@ export function AdminConsole({
     const payload = buildWorkbookFormData(sheetName || selectedSheet || undefined);
     const result = await postFormData("/api/admin/import-xlsm/preview", payload);
 
+    const workbookPreviewRows = (result.previewRows ?? []) as PreviewRow[];
+    const warningRows = (result.warnings ?? []) as ImportWarning[];
+    const normalizedSelectedSheet =
+      typeof result.selectedSheet === "string" && result.selectedSheet.trim().length > 0
+        ? result.selectedSheet.trim()
+        : (sheetName || selectedSheet || "Sheet1");
+
+    let currentBenchmarkType = "General";
+    const unifiedPreviewRows: TextImportPreviewRow[] = workbookPreviewRows.map((row) => {
+      const rowCategory = typeof row.category === "string" ? row.category.trim() : "";
+      if (rowCategory) {
+        currentBenchmarkType = rowCategory;
+      }
+
+      const benchmarkType = currentBenchmarkType || "General";
+      const normalizedModelName = row.modelName.trim();
+      const existingModel = existingModelExactMap.get(normalizedModelName.toLowerCase());
+      const providerName = existingModel
+        ? (providerById.get(existingModel.providerId)?.name ?? inferProviderNameFromModelName(normalizedModelName))
+        : inferProviderNameFromModelName(normalizedModelName);
+
+      return {
+        rowNumber: row.rowNumber,
+        providerName,
+        modelName: normalizedModelName,
+        benchmarkName: row.benchmarkName,
+        benchmarkType,
+        modalities: normalizeModalityList([benchmarkType]),
+        rawValue: row.rawValue,
+        valueNum: row.valueNum,
+        valueNum2: row.valueNum2,
+        valueNote: row.valueNote,
+        source: `xlsm:${normalizedSelectedSheet}`,
+        valid: row.valid
+      };
+    });
+
+    const parsedCount = Number(result.parsedCount ?? unifiedPreviewRows.length);
+    const warningCount = Number(result.warningCount ?? warningRows.length);
+    const skippedCount = Math.max(0, parsedCount - unifiedPreviewRows.length);
+
     setSheetNames(result.sheetNames ?? []);
-    setSelectedSheet(result.selectedSheet ?? "");
-    setPreviewRows((result.previewRows ?? []) as PreviewRow[]);
-    setPreviewWarnings((result.warnings ?? []) as ImportWarning[]);
+    setSelectedSheet(normalizedSelectedSheet);
+    setPreviewRows(workbookPreviewRows);
+    setPreviewWarnings(warningRows);
     setPreviewMeta({
       benchmarkColumn: result.benchmarkColumn ?? "Benchmark",
       categoryColumn: result.categoryColumn ?? null,
-      parsedCount: result.parsedCount ?? 0,
-      warningCount: result.warningCount ?? 0
+      parsedCount,
+      warningCount
     });
 
-    notifySuccess(`预览完成：解析 ${result.parsedCount ?? 0} 条，警告 ${result.warningCount ?? 0} 条`);
+    setTextImportPreviewRows(unifiedPreviewRows);
+    setTextImportDraftRows(unifiedPreviewRows.map((row) => ({ ...row })));
+    setGlobalStarSupplement("");
+    setBenchmarkMergeTargets({});
+    setBenchmarkMergeFilters({});
+    setIgnoredBenchmarkKeys({});
+    setParenthesesModes({});
+    setParenthesesCustomNames({});
+    setModelMergeTargets({});
+    setModelMergeFilters({});
+    setModelParenthesesModes({});
+    setModelParenthesesCustomNames({});
+    setPairNoteAutoFillAppliedByBenchmark({});
+    setMatrixBenchmarkNameDrafts({});
+    setMatrixBenchmarkTypeDrafts({});
+    setMatrixModelNameDrafts({});
+    setOpenMatrixBenchmarkCandidateFor(null);
+    setTextImportPreviewMeta({
+      format: "workbook-table",
+      total: unifiedPreviewRows.length,
+      skipped: skippedCount
+    });
+    setTextImportPreviewVisibleCount(200);
+
+    notifySuccess(`预览完成：解析 ${parsedCount} 条，警告 ${warningCount} 条；已同步到下方统一预览表`);
 
     return result;
   }
@@ -1511,16 +1643,41 @@ export function AdminConsole({
     }, 280);
 
     try {
-      const payload = buildWorkbookFormData(selectedSheet || undefined, allowWarningsImport);
-      const result = await postFormData("/api/admin/import-xlsm/commit", payload);
-      notifySuccess(`导入完成：${result.inserted ?? 0}/${result.total ?? 0}，工作表 ${result.selectedSheet ?? selectedSheet}`);
+      if (textImportDraftRows.length === 0) {
+        throw new Error("请先解析并预览工作表，再执行导入");
+      }
+
+      if (previewWarnings.length > 0 && !allowWarningsImport) {
+        throw new Error("存在不合规值，请先处理或勾选“忽略警告继续导入”");
+      }
+
+      if (finalizedTextImportRows.length === 0) {
+        throw new Error("处理后无可导入数据，请检查忽略项或编辑值");
+      }
+
+      const generatedCsvText = buildStructuredCsvText(finalizedTextImportRows);
+      const result = await postJson("/api/admin/import-csv", {
+        csvText: generatedCsvText,
+        source: csvSource || undefined
+      });
+
+      const directionWarningCount = Number(result.warningCount ?? 0);
+      const warningDetails = extractTextImportWarningDetails(result.warnings);
+
+      if (directionWarningCount > 0) {
+        notifyError(
+          `工作簿导入完成：${result.inserted ?? 0}/${result.total ?? 0}（忽略 ${ignoredTextImportCount}，格式 ${result.format ?? "structured-csv"}）；已自动处理 ${directionWarningCount} 条解析警告`,
+          warningDetails
+        );
+      } else {
+        notifySuccess(
+          `工作簿导入完成：${result.inserted ?? 0}/${result.total ?? 0}（忽略 ${ignoredTextImportCount}，格式 ${result.format ?? "structured-csv"}）`
+        );
+      }
+
       finalStatus = "success";
       finalProgress = 100;
       finalStatusText = `导入成功：${result.inserted ?? 0}/${result.total ?? 0}`;
-
-      if (Array.isArray(result.warnings)) {
-        setPreviewWarnings(result.warnings as ImportWarning[]);
-      }
     } catch (error) {
       const payload = (error as Error & { payload?: unknown }).payload as { warnings?: ImportWarning[] } | undefined;
       if (payload?.warnings) {
@@ -2003,7 +2160,8 @@ export function AdminConsole({
   }
 
   function applyBenchmarkOverwriteByTargetId(benchmarkKey: string, targetId: number): boolean {
-    const target = benchmarkById.get(targetId);
+    const target = benchmarkById.get(targetId)
+      ?? benchmarks.find((item) => String(item.id) === String(targetId));
     if (!target) {
       return false;
     }
@@ -2014,7 +2172,8 @@ export function AdminConsole({
   }
 
   function applyModelOverwriteByTargetId(modelName: string, targetId: number): boolean {
-    const target = modelById.get(targetId);
+    const target = modelById.get(targetId)
+      ?? models.find((item) => String(item.id) === String(targetId));
     if (!target) {
       return false;
     }
@@ -2170,6 +2329,7 @@ export function AdminConsole({
       setMatrixBenchmarkNameDrafts({});
       setMatrixBenchmarkTypeDrafts({});
       setMatrixModelNameDrafts({});
+      setOpenMatrixBenchmarkCandidateFor(null);
       setTextImportPreviewMeta({
         format: result.format ?? "matrix-table",
         total: result.total ?? 0,
@@ -2957,7 +3117,7 @@ export function AdminConsole({
                 <div className="mt-4">
                   <h4 className="mb-2 flex items-center gap-2 font-semibold">
                     <Table2 size={16} />
-                    预览数据（最多 40 条）
+                    预览数据
                   </h4>
                   <div className="overflow-x-auto rounded-box border border-base-300">
                     <table className="table table-zebra table-sm">
@@ -2982,8 +3142,8 @@ export function AdminConsole({
                             <td>{row.benchmarkName}</td>
                             <td>{row.modelName}</td>
                             <td>{row.rawValue}</td>
-                            <td>{row.valueNum ?? "-"}</td>
-                            <td>{row.valueNum2 ?? "-"}</td>
+                            <td>{formatPreviewNumericValue(row.rawValue, row.valueNum, "first")}</td>
+                            <td>{formatPreviewNumericValue(row.rawValue, row.valueNum2, "second")}</td>
                             <td>{row.valueNote ?? "-"}</td>
                             <td>{row.valid ? "✅" : "⚠️"}</td>
                           </tr>
@@ -3193,7 +3353,7 @@ export function AdminConsole({
                                   value={matrixModelNameDrafts[modelName] ?? modelName}
                                   onChange={(e) => {
                                     const nextInput = e.target.value;
-                                    const parsedTargetId = parseMergeEntityId(nextInput, modelEntityOptions);
+                                    const parsedTargetId = parseExplicitMergeEntityId(nextInput);
                                     if (parsedTargetId !== null && applyModelOverwriteByTargetId(modelName, parsedTargetId)) {
                                       return;
                                     }
@@ -3204,12 +3364,20 @@ export function AdminConsole({
                                 {modelCandidateTargetIds.length > 0 ? (
                                   <datalist id={modelInputListId}>
                                     {modelCandidateTargetIds.map((targetId) => {
-                                      const target = modelById.get(targetId);
-                                      if (!target) return null;
+                                      const target = modelEntityOptions.find((item) => String(item.id) === String(targetId));
+                                      if (!target) {
+                                        return (
+                                          <option
+                                            key={`matrix-model-override-option-${modelName}-${targetId}`}
+                                            value={`#${targetId} [${targetId}]`}
+                                          />
+                                        );
+                                      }
+
                                       return (
                                         <option
                                           key={`matrix-model-override-option-${modelName}-${targetId}`}
-                                          value={`${target.modelName} [${targetId}]`}
+                                          value={`${target.label} [${targetId}]`}
                                         />
                                       );
                                     })}
@@ -3283,44 +3451,76 @@ export function AdminConsole({
                                       ...(warning?.candidateTargetIds ?? []),
                                       ...(warning?.suggestedTargetId ? [warning.suggestedTargetId] : [])
                                     ]));
-                                    const benchmarkInputListId = `matrix-benchmark-override-${toDomSafeId(matrixRow.key)}`;
+                                    const benchmarkCandidateOptions = benchmarkCandidateTargetIds.map((targetId) => {
+                                      const target = benchmarkEntityOptions.find((item) => String(item.id) === String(targetId));
+                                      return {
+                                        targetId,
+                                        label: target?.label ?? `#${targetId}`
+                                      };
+                                    });
 
                                     return (
                                       <>
-                                        <input
-                                          className="input input-bordered input-xs w-full"
-                                          list={benchmarkCandidateTargetIds.length > 0 ? benchmarkInputListId : undefined}
-                                          value={matrixBenchmarkNameDrafts[matrixRow.key] ?? matrixRow.benchmarkName}
-                                          onChange={(e) => {
-                                            const nextInput = e.target.value;
-                                            const parsedTargetId = parseMergeEntityId(nextInput, benchmarkEntityOptions);
-                                            if (parsedTargetId !== null && applyBenchmarkOverwriteByTargetId(matrixRow.key, parsedTargetId)) {
-                                              return;
-                                            }
-                                            onMatrixBenchmarkNameInputChange(matrixRow.key, nextInput);
-                                          }}
-                                          onBlur={(e) =>
-                                            onMatrixBenchmarkNameInputBlur(
-                                              matrixRow.key,
-                                              matrixRow.benchmarkName,
-                                              e.target.value
-                                            )
-                                          }
-                                        />
-                                        {benchmarkCandidateTargetIds.length > 0 ? (
-                                          <datalist id={benchmarkInputListId}>
-                                            {benchmarkCandidateTargetIds.map((targetId) => {
-                                              const target = benchmarkById.get(targetId);
-                                              if (!target) return null;
-                                              return (
-                                                <option
-                                                  key={`matrix-benchmark-override-option-${matrixRow.key}-${targetId}`}
-                                                  value={`${target.benchmarkName} (${target.benchmarkType}) [${targetId}]`}
-                                                />
+                                        <div className="relative" data-matrix-benchmark-candidate-container="true">
+                                          <input
+                                            className="input input-bordered input-xs w-full"
+                                            value={matrixBenchmarkNameDrafts[matrixRow.key] ?? matrixRow.benchmarkName}
+                                            onFocus={() => {
+                                              if (benchmarkCandidateOptions.length > 0) {
+                                                setOpenMatrixBenchmarkCandidateFor(matrixRow.key);
+                                              }
+                                            }}
+                                            onChange={(e) => {
+                                              const nextInput = e.target.value;
+                                              const parsedTargetId = parseExplicitMergeEntityId(nextInput);
+                                              if (parsedTargetId !== null && applyBenchmarkOverwriteByTargetId(matrixRow.key, parsedTargetId)) {
+                                                setOpenMatrixBenchmarkCandidateFor(null);
+                                                return;
+                                              }
+                                              onMatrixBenchmarkNameInputChange(matrixRow.key, nextInput);
+                                            }}
+                                            onBlur={(e) => {
+                                              onMatrixBenchmarkNameInputBlur(
+                                                matrixRow.key,
+                                                matrixRow.benchmarkName,
+                                                e.target.value
                                               );
-                                            })}
-                                          </datalist>
-                                        ) : null}
+                                              setOpenMatrixBenchmarkCandidateFor((current) =>
+                                                current === matrixRow.key ? null : current
+                                              );
+                                            }}
+                                          />
+                                          {benchmarkCandidateOptions.length > 0 && openMatrixBenchmarkCandidateFor === matrixRow.key ? (
+                                            <div
+                                              role="listbox"
+                                              className="absolute left-0 right-0 top-full z-[95] mt-1 max-h-60 overflow-auto rounded-md border border-base-300 bg-base-100/95 p-1 shadow-xl backdrop-blur"
+                                            >
+                                              {benchmarkCandidateOptions.map((option) => (
+                                                <div
+                                                  key={`matrix-benchmark-override-option-${matrixRow.key}-${option.targetId}`}
+                                                  role="option"
+                                                  tabIndex={0}
+                                                  className="cursor-pointer rounded-sm px-2 py-1 text-left text-xs leading-5 text-base-content hover:bg-base-200/90"
+                                                  onMouseDown={(event) => {
+                                                    event.preventDefault();
+                                                    applyBenchmarkOverwriteByTargetId(matrixRow.key, option.targetId);
+                                                    setOpenMatrixBenchmarkCandidateFor(null);
+                                                  }}
+                                                  onKeyDown={(event) => {
+                                                    if (event.key !== "Enter" && event.key !== " ") {
+                                                      return;
+                                                    }
+                                                    event.preventDefault();
+                                                    applyBenchmarkOverwriteByTargetId(matrixRow.key, option.targetId);
+                                                    setOpenMatrixBenchmarkCandidateFor(null);
+                                                  }}
+                                                >
+                                                  {`${option.label} [${option.targetId}]`}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          ) : null}
+                                        </div>
                                       </>
                                     );
                                   })()}
@@ -3417,7 +3617,7 @@ export function AdminConsole({
                         >
                         <div className="mb-2 flex flex-wrap items-center gap-2">
                           <span className="font-semibold">{warning.benchmarkName}</span>
-                          <span className="text-xs opacity-70">({warning.benchmarkType})</span>
+                          <span className="text-xs opacity-70">[{warning.benchmarkType}]</span>
                           <span className="badge badge-sm">{warning.level}</span>
                         </div>
                         <ul className="mb-2 list-disc pl-5 text-sm opacity-85">
@@ -3432,7 +3632,7 @@ export function AdminConsole({
                             list={benchmarkMergeListId}
                             onChange={(e) => {
                               const nextInput = e.target.value;
-                              const parsedTargetId = parseMergeEntityId(nextInput, benchmarkEntityOptions);
+                              const parsedTargetId = parseExplicitMergeEntityId(nextInput);
 
                               if (parsedTargetId !== null && applyBenchmarkOverwriteByTargetId(warning.key, parsedTargetId)) {
                                 return;
@@ -3568,7 +3768,7 @@ export function AdminConsole({
                             list={modelMergeListId}
                             onChange={(e) => {
                               const nextInput = e.target.value;
-                              const parsedTargetId = parseMergeEntityId(nextInput, modelEntityOptions);
+                              const parsedTargetId = parseExplicitMergeEntityId(nextInput);
 
                               if (parsedTargetId !== null && applyModelOverwriteByTargetId(warning.key, parsedTargetId)) {
                                 return;
@@ -3696,8 +3896,8 @@ export function AdminConsole({
                                   ) : null}
                                 </span>
                               </td>
-                              <td>{row.valueNum ?? "-"}</td>
-                              <td>{row.valueNum2 ?? "-"}</td>
+                              <td>{formatPreviewNumericValue(row.rawValue, row.valueNum, "first")}</td>
+                              <td>{formatPreviewNumericValue(row.rawValue, row.valueNum2, "second")}</td>
                               <td>{omniHint ? `入库校对 → ${omniHint}` : noteText || "-"}</td>
                               <td>{row.source ?? "-"}</td>
                               <td>{row.valid ? "✅" : "⚠️"}</td>

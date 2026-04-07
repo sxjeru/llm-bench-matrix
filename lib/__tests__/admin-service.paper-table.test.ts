@@ -136,4 +136,36 @@ describe("paper-table 文本解析", () => {
     expect(new Set(covostRows.map((row) => row.benchmarkType))).toEqual(new Set(["Audio"]));
     expect(covostRows.every((row) => row.modalities.includes("Audio"))).toBe(true);
   });
+
+  test("Category + Benchmark 双列表头可正确解析并继承分类", () => {
+    const inputText = [
+      "Category\tBenchmark\tGPT‑5.4\tGPT‑5.4 Pro\tGPT‑5.4 mini\tGPT‑5.4 nano\tGPT‑5.3-Codex\tGPT‑5.2\tGPT‑5.2 Pro\tGPT-5 mini",
+      "Knowledge & STEM\tGPQA Diamond\t92.8\t94.4\t88\t82.8\t92.6\t92.4\t93.2\t81.6",
+      "Professional\tGDPval\t83\t82\t—\t—\t70.9\t70.9\t74.1\t—",
+      "\tFinanceAgent v1.1\t56\t61.5\t—\t—\t54\t59.5\t—\t—",
+      "\tInvestment Banking\t87.3\t83.6\t—\t—\t79.3\t68.4\t71.7\t—",
+      "\tOfficeQA\t68.1\t—\t—\t—\t65.1\t63.1\t—\t—"
+    ].join("\n");
+
+    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+
+    expect(parsed.format).toBe("matrix-table");
+    expect(parsed.rows.length).toBe(25);
+
+    const modelNames = new Set(parsed.rows.map((row) => row.modelName));
+    expect(modelNames.has("Benchmark")).toBe(false);
+    expect(modelNames.has("Category")).toBe(false);
+    expect(modelNames.has("GPT‑5.3-Codex")).toBe(true);
+
+    const gpqaRows = parsed.rows.filter((row) => row.benchmarkName === "GPQA Diamond");
+    expect(gpqaRows.length).toBe(8);
+    expect(new Set(gpqaRows.map((row) => row.benchmarkType))).toEqual(new Set(["Knowledge & STEM"]));
+
+    const professionalBenchmarks = ["GDPval", "FinanceAgent v1.1", "Investment Banking", "OfficeQA"];
+    for (const benchmarkName of professionalBenchmarks) {
+      const benchmarkRows = parsed.rows.filter((row) => row.benchmarkName === benchmarkName);
+      expect(benchmarkRows.length).toBeGreaterThan(0);
+      expect(new Set(benchmarkRows.map((row) => row.benchmarkType))).toEqual(new Set(["Professional"]));
+    }
+  });
 });

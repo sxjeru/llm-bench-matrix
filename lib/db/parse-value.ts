@@ -6,7 +6,7 @@ export type ParsedBenchmarkValue = {
 };
 
 function toNumber(input: string): number | null {
-  const parsed = Number.parseFloat(input.replace(/,/g, ""));
+  const parsed = Number.parseFloat(input.replace(/[$¥€£,\s]/g, ""));
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -44,7 +44,7 @@ export function parseBenchmarkValue(rawInput: string): ParsedBenchmarkValue {
   }
 
   const pairMatch = raw.match(
-    /^([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/
+    /^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/
   );
   if (pairMatch) {
     const [, first, second, tail] = pairMatch;
@@ -58,7 +58,7 @@ export function parseBenchmarkValue(rawInput: string): ParsedBenchmarkValue {
     };
   }
 
-  const singleMatch = raw.match(/^([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/);
+  const singleMatch = raw.match(/^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/);
   if (singleMatch) {
     const [, value, tail] = singleMatch;
     const note = normalizeSingleTailToNote(tail);

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 
@@ -739,6 +739,53 @@ describe("AdminConsole text import", () => {
     expect(secondPayload.csvText).toContain("Bench-1-Renamed");
   });
 
+  test("矩阵预览中的重复嫌疑 benchmark 下拉候选不应为空", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "Bench 1",
+          benchmarkType: "Type-C",
+          rawValue: "70.1",
+          valueNum: 70.1,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    mockFetchSequence(previewResponse);
+    render(<AdminConsole {...buildProps()} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const matrixTable = await findMatrixPreviewTable();
+    const benchmarkInput = within(matrixTable).getByDisplayValue("Bench 1") as HTMLInputElement;
+    const benchmarkRow = benchmarkInput.closest("tr");
+    if (!benchmarkRow) {
+      throw new Error("Benchmark row not found");
+    }
+
+    await user.click(benchmarkInput);
+
+    const optionButton = within(benchmarkRow).getByRole("option", {
+      name: /Bench-1 \[Type-A\] \[11\]/
+    });
+
+    expect(optionButton).toBeInTheDocument();
+  });
+
   test("重复嫌疑与快捷合并按原始文本顺序展示", async () => {
     const user = userEvent.setup();
 
@@ -810,5 +857,105 @@ describe("AdminConsole text import", () => {
       .filter((text): text is string => Boolean(text));
 
     expect(modelNames.slice(0, 2)).toEqual(["Model.B", "Model-A"]);
+  });
+
+  test("XLSX 预览会同步到统一矩阵预览，且导入走结构化文本通道", async () => {
+    const user = userEvent.setup();
+
+    const workbookPreviewResponse = {
+      sheetNames: ["Sheet1"],
+      selectedSheet: "Sheet1",
+      benchmarkColumn: "Benchmark",
+      categoryColumn: "Category",
+      modelColumns: ["Model A", "Model B"],
+      parsedCount: 2,
+      warningCount: 0,
+      warnings: [],
+      previewRows: [
+        {
+          rowNumber: 2,
+          category: "Professional",
+          benchmarkName: "GDPval",
+          modelName: "Model A",
+          rawValue: "83",
+          valueNum: 83,
+          valueNum2: null,
+          valueNote: null,
+          valid: true
+        },
+        {
+          rowNumber: 3,
+          category: null,
+          benchmarkName: "FinanceAgent v1.1",
+          modelName: "Model B",
+          rawValue: "61.5",
+          valueNum: 61.5,
+          valueNum2: null,
+          valueNote: null,
+          valid: true
+        }
+      ]
+    };
+
+    const importResponse = {
+      format: "structured-csv",
+      total: 2,
+      skipped: 0,
+      inserted: 2,
+      warningCount: 0,
+      warnings: []
+    };
+
+    const fetchMock = mockFetchSequence(workbookPreviewResponse, importResponse);
+    render(<AdminConsole {...buildProps()} />);
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement | null;
+    if (!fileInput) {
+      throw new Error("Workbook file input not found");
+    }
+
+    const workbookFile = new File(["dummy"], "bench.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    fireEvent.change(fileInput, { target: { files: [workbookFile] } });
+    expect(fileInput.files).toHaveLength(1);
+
+    const previewButton = screen.getByRole("button", { name: "解析并预览" });
+    const workbookForm = previewButton.closest("form") as HTMLFormElement | null;
+    if (!workbookForm) {
+      throw new Error("Workbook preview form not found");
+    }
+
+    fireEvent.submit(workbookForm);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const matrixTable = await findMatrixPreviewTable();
+    const financeBenchmarkInput = within(matrixTable).getByDisplayValue("FinanceAgent v1.1");
+    const financeRow = financeBenchmarkInput.closest("tr");
+    if (!financeRow) {
+      throw new Error("Finance benchmark row not found");
+    }
+
+    expect(within(financeRow).getByDisplayValue("Professional")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "导入当前工作表" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const secondCall = fetchMock.mock.calls[1];
+    expect(secondCall[0]).toBe("/api/admin/import-csv");
+
+    const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
+      csvText?: string;
+    };
+
+    expect(secondPayload.csvText).toContain("GDPval");
+    expect(secondPayload.csvText).toContain("FinanceAgent v1.1");
+    expect(secondPayload.csvText).toContain("xlsm:Sheet1");
   });
 });

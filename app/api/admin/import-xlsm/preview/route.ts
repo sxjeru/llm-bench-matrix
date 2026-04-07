@@ -28,7 +28,7 @@ export async function POST(request: Request) {
       benchmarkColumn: parsed.benchmarkColumn,
       categoryColumn: parsed.categoryColumn,
       modelColumns: parsed.modelColumns,
-      previewRows: parsed.records.slice(0, 40),
+      previewRows: parsed.records,
       warnings: parsed.warnings.slice(0, 200),
       warningCount: parsed.warnings.length,
       parsedCount: parsed.records.length

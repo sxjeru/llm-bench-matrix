@@ -4,9 +4,9 @@ import { parseBenchmarkValue } from "@/lib/db/parse-value";
 const EMPTY_MARKERS = new Set(["", "-", "--", "—", "–", "n/a", "na", "null"]);
 const CATEGORY_HEADERS = new Set(["category", "类别", "分类", "type", "group"]);
 
-const numberPattern = "[+-]?(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d+)?";
-const pairRegex = new RegExp(`^${numberPattern}\\s*\\/\\s*${numberPattern}(?:\\s*[\\*\\^][0-9A-Za-z]+)?$`);
-const singleRegex = new RegExp(`^${numberPattern}(?:\\s*[\\*\\^][0-9A-Za-z]+)?$`);
+const numberPattern = "(?:[$¥€£]\\s*)?[+-]?(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d+)?";
+const pairRegex = new RegExp(`^${numberPattern}\\s*\\/\\s*${numberPattern}(?:\\s*[\\*\\^][0-9A-Za-z]*)?$`);
+const singleRegex = new RegExp(`^${numberPattern}(?:\\s*[\\*\\^][0-9A-Za-z]*)?$`);
 
 export type ImportWarning = {
   rowNumber: number;
@@ -125,16 +125,21 @@ export function parseWorkbookBuffer(buffer: Buffer, sheetName?: string): Workboo
 
   const warnings: ImportWarning[] = [];
   const records: ParsedImportRecord[] = [];
+  let currentCategory: string | null = null;
 
   for (let rowIndex = 1; rowIndex < rawRows.length; rowIndex += 1) {
     const row = rawRows[rowIndex] ?? [];
+    const nextCategoryValue = categoryIndex !== null ? normalizeCell(row[categoryIndex]) : "";
+    if (categoryIndex !== null && nextCategoryValue) {
+      currentCategory = nextCategoryValue;
+    }
+
+    const category = categoryIndex !== null ? currentCategory : null;
     const benchmarkName = normalizeNameParenthesisSpacing(normalizeCell(row[benchmarkIndex]));
 
     if (!benchmarkName) {
       continue;
     }
-
-    const category = categoryIndex !== null ? normalizeCell(row[categoryIndex]) || null : null;
 
     for (const modelIndex of modelIndices) {
       const modelName = normalizeNameParenthesisSpacing(normalizeCell(headerRow[modelIndex]));

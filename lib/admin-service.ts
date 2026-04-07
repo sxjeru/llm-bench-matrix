@@ -66,7 +66,7 @@ const EMPTY_VALUE_MARKERS = new Set(["", "-", "--", "—", "na", "n/a", "null", 
 const LOWER_IS_BETTER_BENCHMARK_RULES = [/fleurs/i, /omnidocbench\s*1\.5/i];
 const OMNIDOCBENCH_15_MATCHER = /omnidocbench\s*1\.5/i;
 const MULTIMODAL_HINT_PATTERN = /(\bmultimodal(?:ity)?\b|\bmulti[\s-_]?modal(?:ity)?\b|多模态)/i;
-const PAPER_TABLE_VALUE_TOKEN_REGEX = /^[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[%％])?(?:[*^][0-9A-Za-z]*)?$/;
+const PAPER_TABLE_VALUE_TOKEN_REGEX = /^(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[%％])?(?:[*^][0-9A-Za-z]*)?$/;
 const PAPER_HEADER_CONTINUATION_TOKENS = new Set([
   "high",
   "low",
@@ -1476,14 +1476,32 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
   }
 
   const headerCells = splitTableLine(rawLines[headerLineIndex]);
+  const normalizedHeaderCells = headerCells.map((cell) => cell.trim().toLowerCase());
+  const benchmarkLabelIndex = normalizedHeaderCells.findIndex((cell) =>
+    /^(benchmark|benchmarks|指标|基准|评测|任务|项目)$/.test(cell)
+  );
+  const categoryLabelIndex = normalizedHeaderCells.findIndex((cell) =>
+    /^(category|categories|type|types|domain|domains|类别|分类|领域|赛道)$/.test(cell)
+  );
   const firstHeaderCell = (headerCells[0] || "").trim();
   const startsWithBenchmarkLabel =
     !firstHeaderCell
     || /benchmark|type|category|指标|类别|分类/i.test(firstHeaderCell);
 
-  const modelStartIndex = startsWithBenchmarkLabel ? 1 : 0;
+  const hasExplicitBenchmarkColumn = benchmarkLabelIndex >= 0;
+  const benchmarkColumnIndex = hasExplicitBenchmarkColumn ? benchmarkLabelIndex : 0;
+  const categoryColumnIndex = hasExplicitBenchmarkColumn
+    && categoryLabelIndex >= 0
+    && categoryLabelIndex !== benchmarkColumnIndex
+    ? categoryLabelIndex
+    : -1;
+  const modelHeaderStartIndex = hasExplicitBenchmarkColumn
+    ? benchmarkColumnIndex + 1
+    : (startsWithBenchmarkLabel ? 1 : 0);
+  const modelValueStartIndex = benchmarkColumnIndex + 1;
+
   const modelNames = headerCells
-    .slice(modelStartIndex)
+    .slice(modelHeaderStartIndex)
     .map((cell) => normalizeNameParenthesisSpacing(cell))
     .filter(Boolean);
 
@@ -1503,19 +1521,33 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
 
   for (let lineIndex = headerLineIndex + 1; lineIndex < rawLines.length; lineIndex += 1) {
     const cells = splitTableLine(rawLines[lineIndex]);
-    const benchmarkInput = normalizeNameParenthesisSpacing(cells[0] || "");
+    const categoryInput = categoryColumnIndex >= 0
+      ? normalizeNameParenthesisSpacing(cells[categoryColumnIndex] || "")
+      : "";
+
+    if (categoryInput) {
+      currentBenchmarkType = categoryInput;
+      const sectionTypeHint = inferTypeFromPreambleLine(categoryInput);
+      currentModalities = sectionTypeHint ? inferModalitiesFromCategory(sectionTypeHint) : defaultModalities;
+    }
+
+    const benchmarkInput = normalizeNameParenthesisSpacing(cells[benchmarkColumnIndex] || "");
     const normalizedBenchmarkInput = normalizeBenchmarkImportName(benchmarkInput);
     const benchmarkDirection = parseBenchmarkNameAndDirection(normalizedBenchmarkInput);
     const benchmarkName = benchmarkDirection.benchmarkName;
 
+    const allModelValuesEmpty = modelNames.every((_, modelIndex) =>
+      isEmptyImportValue((cells[modelValueStartIndex + modelIndex] || "").trim())
+    );
+
     if (!benchmarkName) {
+      if (categoryInput && allModelValuesEmpty) {
+        continue;
+      }
+
       skipped += 1;
       continue;
     }
-
-    const allModelValuesEmpty = modelNames.every((_, modelIndex) =>
-      isEmptyImportValue((cells[modelIndex + 1] || "").trim())
-    );
 
     if (allModelValuesEmpty && isMatrixTypeMarker(benchmarkName)) {
       currentBenchmarkType = benchmarkName;
@@ -1532,7 +1564,7 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
 
     for (let modelIndex = 0; modelIndex < modelNames.length; modelIndex += 1) {
       const modelName = modelNames[modelIndex];
-      const rawInput = (cells[modelIndex + 1] || "").trim();
+      const rawInput = (cells[modelValueStartIndex + modelIndex] || "").trim();
 
       if (!modelName || isEmptyImportValue(rawInput)) {
         continue;
