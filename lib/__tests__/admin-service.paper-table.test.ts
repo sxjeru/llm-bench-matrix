@@ -7,6 +7,7 @@ type ParsedTextImportResult = {
     benchmarkType: string;
     modelName: string;
     valueRaw: string;
+    valueNote?: string | null;
     modalities: string[];
   }>;
   warnings?: Array<{
@@ -167,5 +168,28 @@ describe("paper-table 文本解析", () => {
       expect(benchmarkRows.length).toBeGreaterThan(0);
       expect(new Set(benchmarkRows.map((row) => row.benchmarkType))).toEqual(new Set(["Professional"]));
     }
+  });
+
+  test("矩阵值中的括号说明会拆分为数值与备注", () => {
+    const inputText = [
+      "Benchmark\tClaude Sonnet 4\tGPT-5",
+      "Terminal-Bench 2.0 (Best self-reported)\t66.5 (Claude Code)\t56.2 (Claude Code)"
+    ].join("\n");
+
+    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    expect(parsed.format).toBe("matrix-table");
+
+    const terminalRows = parsed.rows.filter(
+      (row) => row.benchmarkName === "Terminal-Bench 2.0 (Best self-reported)"
+    );
+    expect(terminalRows.length).toBe(2);
+
+    const byModel = new Map(terminalRows.map((row) => [row.modelName, row]));
+
+    expect(byModel.get("Claude Sonnet 4")?.valueRaw).toBe("66.5");
+    expect(byModel.get("Claude Sonnet 4")?.valueNote).toBe("(Claude Code)");
+
+    expect(byModel.get("GPT-5")?.valueRaw).toBe("56.2");
+    expect(byModel.get("GPT-5")?.valueNote).toBe("(Claude Code)");
   });
 });

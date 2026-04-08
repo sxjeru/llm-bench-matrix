@@ -438,7 +438,16 @@ function escapeCsvCell(input: string): string {
 }
 
 function buildStructuredCsvText(rows: StructuredCsvImportRow[]): string {
-  const header = ["provider", "model", "benchmark", "benchmark_type", "value_raw", "modalities", "source"];
+  const header = [
+    "provider",
+    "model",
+    "benchmark",
+    "benchmark_type",
+    "value_raw",
+    "value_note",
+    "modalities",
+    "source"
+  ];
   const lines = [header.join(",")];
 
   rows.forEach((row) => {
@@ -448,6 +457,7 @@ function buildStructuredCsvText(rows: StructuredCsvImportRow[]): string {
       row.benchmarkName,
       row.benchmarkType,
       row.rawValue,
+      row.valueNote ?? "",
       row.modalities.join(","),
       row.source ?? ""
     ]
@@ -463,7 +473,7 @@ function buildStructuredCsvText(rows: StructuredCsvImportRow[]): string {
 function parsePairRawValue(rawValue: string): { first: string; second: string; note: string | null } | null {
   const normalized = rawValue.trim();
   const pairMatch = normalized.match(
-    /^([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/
+    /^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/
   );
 
   if (!pairMatch) return null;
@@ -487,7 +497,7 @@ function parseSingleRawValue(rawValue: string): { value: string; tail: string } 
   if (parsePairRawValue(rawValue)) return null;
 
   const normalized = rawValue.trim();
-  const singleMatch = normalized.match(/^([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/);
+  const singleMatch = normalized.match(/^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/);
   if (!singleMatch) return null;
 
   return {
@@ -1143,6 +1153,15 @@ export function AdminConsole({
           const starNote = row.valueNote?.trim() || starSingleValue.note || null;
           rawValue = composeStarRawValue(starSingleValue.value, starNote);
           valueNote = starNote;
+        } else {
+          const singleValue = parseSingleRawValue(rawValueInput);
+          if (singleValue) {
+            const singleTail = singleValue.tail.trim();
+            if (singleTail.length > 0 && !singleTail.startsWith("*")) {
+              rawValue = singleValue.value;
+              valueNote = row.valueNote?.trim() || singleTail || null;
+            }
+          }
         }
 
         let benchmarkName = row.benchmarkName;

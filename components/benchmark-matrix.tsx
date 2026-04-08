@@ -85,6 +85,17 @@ type MatrixRow = {
   maxNum2: number | null;
 };
 
+type OverallModelSummary = {
+  rawScore: number | null;
+  rawRank: number | null;
+  correctedScore: number | null;
+  correctedRank: number | null;
+  coverage: number;
+  coveredRows: number;
+  totalRows: number;
+  correctionFactor: number;
+};
+
 type RowSortColumn = "category" | "benchmark";
 type RowSortMode = "source" | "alpha" | "data";
 
@@ -736,6 +747,53 @@ function formatValueNumForDisplay(valueNum: number | null): string | null {
   return Number(valueNum.toFixed(6)).toString();
 }
 
+function getSortedQuantile(sortedValues: number[], q: number): number {
+  if (sortedValues.length === 0) return 0;
+  if (sortedValues.length === 1) return sortedValues[0] ?? 0;
+
+  const clampedQ = Math.min(1, Math.max(0, q));
+  const position = (sortedValues.length - 1) * clampedQ;
+  const lowerIndex = Math.floor(position);
+  const upperIndex = Math.ceil(position);
+
+  const lower = sortedValues[lowerIndex] ?? 0;
+  const upper = sortedValues[upperIndex] ?? lower;
+  if (lowerIndex === upperIndex) return lower;
+
+  const weight = position - lowerIndex;
+  return lower + (upper - lower) * weight;
+}
+
+function buildDenseRankMap(
+  items: Array<{ modelName: string; score: number | null }>,
+  precision = 2
+): Map<string, number> {
+  const factor = 10 ** precision;
+
+  const validItems = items
+    .filter((item): item is { modelName: string; score: number } => item.score !== null && Number.isFinite(item.score))
+    .map((item) => ({
+      modelName: item.modelName,
+      normalizedScore: Math.round(item.score * factor) / factor
+    }))
+    .sort((a, b) => b.normalizedScore - a.normalizedScore);
+
+  const rankMap = new Map<string, number>();
+  let rank = 0;
+  let previousScore: number | null = null;
+
+  validItems.forEach((item) => {
+    if (previousScore === null || item.normalizedScore !== previousScore) {
+      rank += 1;
+      previousScore = item.normalizedScore;
+    }
+
+    rankMap.set(item.modelName, rank);
+  });
+
+  return rankMap;
+}
+
 function getMatrixCellDisplayValue(
   valueNum: number | null,
   valueNum2: number | null,
@@ -746,23 +804,38 @@ function getMatrixCellDisplayValue(
   if (!raw) return "--";
 
   const hasStarMarker = /[*∗﹡✱✳✻]/.test(raw);
-  const hasPairMarker = raw.includes("/");
+  const pairMatch = raw.match(
+    /^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/
+  );
 
-  if (hasPairMarker) {
+  if (pairMatch) {
+    const [, first, second] = pairMatch;
+    const hasCurrencySymbol = /[$¥€£]/.test(first) || /[$¥€£]/.test(second);
+
+    if (hasCurrencySymbol) {
+      return `${first.trim()} / ${second.trim()}`;
+    }
+
     const firstNumeric = formatValueNumForDisplay(valueNum);
     const secondNumeric = formatValueNumForDisplay(valueNum2);
 
     if (firstNumeric !== null && secondNumeric !== null) {
       return `${firstNumeric} / ${secondNumeric}`;
     }
+
+    return `${first.trim()} / ${second.trim()}`;
   }
 
-  const pairMatch = raw.match(
-    /^([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/
-  );
-  if (pairMatch) {
-    const [, first, second] = pairMatch;
-    return `${first} / ${second}`;
+  const currencySingleMatch = raw.match(/^((?:[$¥€£]\s*)[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/);
+  if (currencySingleMatch) {
+    const [, value, tail] = currencySingleMatch;
+    const tailText = tail.trim();
+
+    if (!tailText) return value.trim();
+    if (tailText === "*" || tailText.startsWith("*")) return `${value.trim()}*`;
+    if (valueNote && valueNote.trim().length > 0) return value.trim();
+
+    return `${value.trim()}${tailText}`;
   }
 
   const numericDisplay = formatValueNumForDisplay(valueNum);
@@ -970,6 +1043,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     minWidth: number;
     maxWidth: number;
   } | null>(null);
+  const headerInteractionSuppressUntilRef = useRef(0);
   const exportPresetLoadedRef = useRef(false);
   const pathname = usePathname();
   const router = useRouter();
@@ -1014,6 +1088,12 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     y: number;
     entries: MatrixCellEntry[];
     note: string | null;
+  } | null>(null);
+  const [activeOverallTooltip, setActiveOverallTooltip] = useState<{
+    x: number;
+    y: number;
+    modelName: string;
+    summary: OverallModelSummary;
   } | null>(null);
 
   const sourceOptions = useMemo(() => {
@@ -1346,6 +1426,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
     const stopResize = () => {
       if (!columnResizeStateRef.current) return;
+      suppressHeaderInteractionsFor();
       columnResizeStateRef.current = null;
       setResizingColumnKey(null);
       document.body.classList.remove("column-resizing");
@@ -1425,6 +1506,19 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
     setResizingColumnKey(columnKey);
     document.body.classList.add("column-resizing");
+    suppressHeaderInteractionsFor();
+  }
+
+  function suppressHeaderInteractionsFor(durationMs = 180) {
+    headerInteractionSuppressUntilRef.current = Math.max(
+      headerInteractionSuppressUntilRef.current,
+      Date.now() + durationMs
+    );
+  }
+
+  function shouldSuppressHeaderInteractions(): boolean {
+    if (resizingColumnKey !== null) return true;
+    return Date.now() < headerInteractionSuppressUntilRef.current;
   }
 
   function resetModelColumnDragState() {
@@ -2435,6 +2529,155 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     };
   }, [presenceFilteredMatrixRows]);
 
+  const overallSummaryByModel = useMemo(() => {
+    const aggregateByModel = new Map<string, { sum: number; count: number }>();
+    modelColumns.forEach((modelName) => {
+      aggregateByModel.set(modelName, { sum: 0, count: 0 });
+    });
+
+    let totalComparableRows = 0;
+
+    presenceFilteredMatrixRows.forEach((row) => {
+      const rowEntries: Array<{ modelName: string; original: number; comparable: number }> = [];
+
+      modelColumns.forEach((modelName) => {
+        const cell = row.cells.get(modelName);
+        const valueNum = cell?.valueNum;
+
+        if (valueNum === null || valueNum === undefined || !Number.isFinite(valueNum)) {
+          return;
+        }
+
+        rowEntries.push({
+          modelName,
+          original: valueNum,
+          comparable: getBenchmarkComparableScore(row.benchmark, valueNum)
+        });
+      });
+
+      if (rowEntries.length === 0) {
+        return;
+      }
+
+      totalComparableRows += 1;
+
+      const originalValues = rowEntries.map((entry) => entry.original);
+      const minOriginal = Math.min(...originalValues);
+      const maxOriginal = Math.max(...originalValues);
+
+      const isRatioRow = minOriginal >= 0 && maxOriginal <= 1.2;
+      const isPercentRow = !isRatioRow && minOriginal >= 0 && maxOriginal <= 100.000001;
+
+      const transformedByEntry = (() => {
+        if (isRatioRow) {
+          return rowEntries.map((entry) => ({
+            modelName: entry.modelName,
+            transformed: entry.comparable * 100
+          }));
+        }
+
+        if (isPercentRow) {
+          return rowEntries.map((entry) => ({
+            modelName: entry.modelName,
+            transformed: entry.comparable
+          }));
+        }
+
+        const comparableValues = rowEntries.map((entry) => entry.comparable);
+        const sortedComparable = [...comparableValues].sort((a, b) => a - b);
+        const percentile05 = getSortedQuantile(sortedComparable, 0.05);
+        const percentile95 = getSortedQuantile(sortedComparable, 0.95);
+        const clippedComparable = comparableValues.map((value) => Math.min(percentile95, Math.max(percentile05, value)));
+        const clippedMin = Math.min(...clippedComparable);
+        const loggedComparable = clippedComparable.map((value) => Math.log1p(Math.max(0, value - clippedMin)));
+
+        return rowEntries.map((entry, index) => ({
+          modelName: entry.modelName,
+          transformed: loggedComparable[index] ?? 0
+        }));
+      })();
+
+      const transformedValues = transformedByEntry.map((entry) => entry.transformed);
+      const minTransformed = Math.min(...transformedValues);
+      const maxTransformed = Math.max(...transformedValues);
+
+      transformedByEntry.forEach((entry) => {
+        const aggregate = aggregateByModel.get(entry.modelName);
+        if (!aggregate) return;
+
+        const rowScore = maxTransformed === minTransformed
+          ? 50
+          : Math.min(100, Math.max(0, ((entry.transformed - minTransformed) / (maxTransformed - minTransformed)) * 100));
+
+        aggregate.sum += rowScore;
+        aggregate.count += 1;
+      });
+    });
+
+    const rawScoreItems = modelColumns.map((modelName) => {
+      const aggregate = aggregateByModel.get(modelName) ?? { sum: 0, count: 0 };
+      const rawScore = aggregate.count > 0 ? aggregate.sum / aggregate.count : null;
+      const coverage = totalComparableRows > 0 ? aggregate.count / totalComparableRows : 0;
+      const correctionFactor = 0.9 + 0.1 * coverage;
+      const correctedScore = rawScore !== null ? rawScore * correctionFactor : null;
+
+      return {
+        modelName,
+        rawScore,
+        correctedScore,
+        coveredRows: aggregate.count,
+        totalRows: totalComparableRows,
+        coverage,
+        correctionFactor
+      };
+    });
+
+    const rawRankMap = buildDenseRankMap(
+      rawScoreItems.map((item) => ({ modelName: item.modelName, score: item.rawScore }))
+    );
+    const correctedRankMap = buildDenseRankMap(
+      rawScoreItems.map((item) => ({ modelName: item.modelName, score: item.correctedScore }))
+    );
+
+    const summaryMap = new Map<string, OverallModelSummary>();
+    rawScoreItems.forEach((item) => {
+      summaryMap.set(item.modelName, {
+        rawScore: item.rawScore,
+        rawRank: item.rawScore !== null ? (rawRankMap.get(item.modelName) ?? null) : null,
+        correctedScore: item.correctedScore,
+        correctedRank: item.correctedScore !== null ? (correctedRankMap.get(item.modelName) ?? null) : null,
+        coverage: item.coverage,
+        coveredRows: item.coveredRows,
+        totalRows: item.totalRows,
+        correctionFactor: item.correctionFactor
+      });
+    });
+
+    return summaryMap;
+  }, [presenceFilteredMatrixRows, modelColumns]);
+
+  const hasOverallSummary = useMemo(() => {
+    return modelColumns.some((modelName) => overallSummaryByModel.get(modelName)?.rawScore !== null);
+  }, [modelColumns, overallSummaryByModel]);
+
+  const overallHeatRange = useMemo(() => {
+    const rawScores = modelColumns
+      .map((modelName) => overallSummaryByModel.get(modelName)?.rawScore)
+      .filter((value): value is number => value !== null && value !== undefined && Number.isFinite(value));
+
+    if (rawScores.length === 0) {
+      return {
+        minRawScore: null,
+        maxRawScore: null
+      };
+    }
+
+    return {
+      minRawScore: Math.min(...rawScores),
+      maxRawScore: Math.max(...rawScores)
+    };
+  }, [modelColumns, overallSummaryByModel]);
+
   function getSortModeLabel(column: RowSortColumn): string {
     if (rowSortState.column !== column) return "";
     const effectiveMode = getEffectiveSortMode(rowSortState.mode);
@@ -2930,7 +3173,16 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                 }}
               >
                 <details className="dropdown dropdown-bottom" data-modality-filter="true">
-                  <summary className="btn btn-ghost btn-xs h-auto min-h-0 px-1 normal-case text-inherit">Modality</summary>
+                  <summary
+                    className="btn btn-ghost btn-xs h-auto min-h-0 px-1 normal-case text-inherit"
+                    onClick={(event) => {
+                      if (!shouldSuppressHeaderInteractions()) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                  >
+                    Modality
+                  </summary>
                   <div className="dropdown-content z-[90] mt-1 w-44 rounded-box border border-base-300 bg-base-100 p-2 shadow-xl">
                     <div className="mb-1 text-[11px] opacity-75">勾选筛选模态</div>
                     <div className="space-y-1">
@@ -2995,7 +3247,10 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                   <button
                     type="button"
                     className="btn btn-ghost btn-xs h-auto min-h-0 rounded-none p-0 normal-case text-inherit hover:bg-transparent"
-                    onClick={() => toggleRowSort("category")}
+                    onClick={() => {
+                      if (shouldSuppressHeaderInteractions()) return;
+                      toggleRowSort("category");
+                    }}
                     title={getSortModeTitle("category")}
                   >
                     <span className="inline-flex items-baseline gap-0.5">
@@ -3045,7 +3300,10 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                 <button
                   type="button"
                   className="btn btn-ghost btn-xs h-auto min-h-0 rounded-none p-0 normal-case text-inherit hover:bg-transparent"
-                  onClick={() => toggleRowSort("benchmark")}
+                  onClick={() => {
+                    if (shouldSuppressHeaderInteractions()) return;
+                    toggleRowSort("benchmark");
+                  }}
                   title={getSortModeTitle("benchmark")}
                 >
                   <span className="inline-flex items-baseline gap-0.5">
@@ -3155,7 +3413,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     }}
                     onDragEnd={resetModelColumnDragState}
                     onClick={() => {
-                      if (draggingModelName) return;
+                      if (draggingModelName || shouldSuppressHeaderInteractions()) return;
                       setRowPresenceFilterModel((prev) => (prev === model.modelName ? null : model.modelName));
                     }}
                     style={{
@@ -3339,7 +3597,8 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                   const isPairNumericDisplay =
                     Boolean(cell?.valueRaw.includes("/")) &&
                     pairFirstDisplay !== null &&
-                    pairSecondDisplay !== null;
+                    pairSecondDisplay !== null &&
+                    !/[$¥€£]/.test(cell?.valueRaw ?? "");
                   const isSingleMaxCell = !isPairNumericDisplay && isMaxCellFirst;
                   const heatStyle = getHeatCellStyle(
                     comparableCellNum,
@@ -3437,6 +3696,130 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                 })}
               </tr>
             );})}
+
+            {hasOverallSummary ? (
+              <tr data-overall-row="1" className="matrix-row-overall">
+                <td
+                  style={{
+                    width: 72,
+                    minWidth: 72,
+                    maxWidth: 72,
+                    padding: "4px 6px",
+                    textAlign: "center",
+                    borderTop: "1px solid rgba(147, 197, 253, 0.35)",
+                    backgroundColor: "rgba(18, 31, 52, 0.92)",
+                    fontWeight: 700,
+                    fontSize: "13px",
+                    lineHeight: 1
+                  }}
+                >
+                  ∑
+                </td>
+
+                {showCategory ? (
+                  <td
+                    style={{
+                      width: categoryColumnWidth,
+                      minWidth: categoryColumnWidth,
+                      maxWidth: categoryColumnWidth,
+                      padding: "6px 8px",
+                      borderTop: "1px solid rgba(147, 197, 253, 0.35)",
+                      backgroundColor: "rgba(18, 31, 52, 0.92)",
+                      fontWeight: 700
+                    }}
+                  >
+                    Overall
+                  </td>
+                ) : null}
+
+                <td
+                  style={{
+                    position: "sticky",
+                    left: 0,
+                    zIndex: 13,
+                    width: benchmarkColumnWidth,
+                    minWidth: benchmarkColumnWidth,
+                    maxWidth: benchmarkColumnWidth,
+                    padding: "6px 8px",
+                    borderTop: "1px solid rgba(147, 197, 253, 0.4)",
+                    backgroundColor: "rgba(18, 31, 52, 0.98)",
+                    boxShadow: "8px 0 12px rgba(2, 6, 23, 0.28)",
+                    fontWeight: 800,
+                    letterSpacing: "0.02em"
+                  }}
+                >
+                  总评 / Ranking
+                </td>
+
+                {modelColumnMeta.map((model) => {
+                  const summary = overallSummaryByModel.get(model.modelName);
+                  const hasRawScore = summary?.rawScore !== null && summary?.rawRank !== null;
+                  const showSummaryTip = hasRawScore && summary?.correctedScore !== null && summary?.correctedRank !== null;
+                  const heatStyle = getHeatCellStyle(
+                    summary?.rawScore ?? null,
+                    overallHeatRange.minRawScore,
+                    overallHeatRange.maxRawScore,
+                    heatmapPaletteRgb,
+                    heatmapAlpha
+                  );
+                  const heatBackground =
+                    (heatStyle as { backgroundColor?: string }).backgroundColor ?? "rgba(18, 31, 52, 0.92)";
+
+                  const scoreText = hasRawScore ? summary!.rawScore!.toFixed(1) : "--";
+                  const rankText = hasRawScore ? `(${summary!.rawRank})` : "";
+
+                  return (
+                    <td
+                      key={`overall::${model.modelName}`}
+                      data-overall-model={model.modelName}
+                      style={{
+                        ...heatStyle,
+                        padding: "4px 6px",
+                        paddingRight: showSummaryTip ? "22px" : "6px",
+                        fontSize: "14px",
+                        lineHeight: 1.2,
+                        whiteSpace: "nowrap",
+                        position: "relative",
+                        backgroundColor: heatBackground,
+                        borderTop: "1px solid rgba(147, 197, 253, 0.35)",
+                        fontWeight: 750,
+                        width: model.columnWidth,
+                        minWidth: model.columnWidth,
+                        maxWidth: model.columnWidth
+                      }}
+                    >
+                      {hasRawScore ? (
+                        <span className="inline-flex items-end gap-1">
+                          <span>{scoreText}</span>
+                          <span className="text-[11px] opacity-75">{rankText}</span>
+                        </span>
+                      ) : (
+                        <span>{scoreText}</span>
+                      )}
+                      {showSummaryTip ? (
+                        <span
+                          data-overall-tooltip-trigger={model.modelName}
+                          className="absolute right-1 top-1/2 inline-flex h-4 w-4 -translate-y-1/2 cursor-help items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
+                          onMouseEnter={(event) => {
+                            if (!summary) return;
+                            const rect = event.currentTarget.getBoundingClientRect();
+                            setActiveOverallTooltip({
+                              x: rect.left + rect.width / 2,
+                              y: rect.top - 6,
+                              modelName: model.modelName,
+                              summary
+                            });
+                          }}
+                          onMouseLeave={() => setActiveOverallTooltip(null)}
+                        >
+                          ?
+                        </span>
+                      ) : null}
+                    </td>
+                  );
+                })}
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </div>
@@ -3569,6 +3952,39 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
               </span>
             ))}
           </span>
+        </div>
+      ) : null}
+
+      {activeOverallTooltip ? (
+        <div
+          className="pointer-events-none fixed z-[2600] w-[320px] max-w-[320px] rounded-xl border border-white/20 bg-slate-900/96 p-2 text-left text-[11px] font-medium text-slate-100 shadow-2xl backdrop-blur-lg"
+          style={{
+            left: activeOverallTooltip.x,
+            top: activeOverallTooltip.y,
+            transform: "translate(-50%, -100%)"
+          }}
+        >
+          <span className="mb-1 block text-[10px] text-slate-300">{activeOverallTooltip.modelName} · 总评细节</span>
+
+          <span className="block rounded-md bg-white/5 px-2 py-1 leading-4">
+            原始总评分：{activeOverallTooltip.summary.rawScore !== null ? `${activeOverallTooltip.summary.rawScore.toFixed(1)}%` : "--"}
+          </span>
+          <span className="mt-1 block rounded-md bg-white/5 px-2 py-1 leading-4">
+            原始名次：{activeOverallTooltip.summary.rawRank !== null ? `No.${activeOverallTooltip.summary.rawRank}` : "--"}
+          </span>
+          <span className="mt-1 block rounded-md bg-white/5 px-2 py-1 leading-4">
+            覆盖率：{(activeOverallTooltip.summary.coverage * 100).toFixed(1)}%
+            （{activeOverallTooltip.summary.coveredRows}/{activeOverallTooltip.summary.totalRows}）
+          </span>
+          <span className="mt-1 block rounded-md bg-white/5 px-2 py-1 leading-4">
+            修正后总评：{activeOverallTooltip.summary.correctedScore !== null ? `${activeOverallTooltip.summary.correctedScore.toFixed(1)}%` : "--"}
+            （系数 {activeOverallTooltip.summary.correctionFactor.toFixed(3)}）
+          </span>
+          <span className="mt-1 block rounded-md bg-white/5 px-2 py-1 leading-4">
+            修正后名次：{activeOverallTooltip.summary.correctedRank !== null ? `No.${activeOverallTooltip.summary.correctedRank}` : "--"}
+          </span>
+
+          <span className="mt-1 block text-[10px] text-slate-300">注：表格主展示名次按原始总评分计算</span>
         </div>
       ) : null}
 

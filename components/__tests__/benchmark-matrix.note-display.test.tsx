@@ -12,8 +12,31 @@ vi.mock("next/navigation", () => ({
 }));
 
 describe("BenchmarkMatrix 星号值显示", () => {
-  test("单元格只显示净值，备注通过问号展示", async () => {
+  test("货币值展示保留美元符号与千分位", () => {
     render(
+      <BenchmarkMatrix
+        rows={[
+          {
+            providerName: "OpenAI",
+            modelName: "GPT-5-mini",
+            benchmarkName: "Vending Bench 2",
+            benchmarkType: "Business",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "$5,634.00",
+            valueNum: 5634,
+            valueNote: null,
+            source: "text:demo"
+          }
+        ]}
+      />
+    );
+
+    expect(screen.getByText("$5,634.00")).toBeInTheDocument();
+    expect(screen.queryByText(/^5634(?:\.0+)?$/)).not.toBeInTheDocument();
+  });
+
+  test("单元格只显示净值，备注通过问号展示", async () => {
+    const { container } = render(
       <BenchmarkMatrix
         rows={[
           {
@@ -38,19 +61,22 @@ describe("BenchmarkMatrix 星号值显示", () => {
     expect(valueCell).not.toBeNull();
     expect(valueCell).toHaveStyle({ paddingRight: "22px" });
 
-    const questionMark = screen.getByText("?");
-    fireEvent.mouseEnter(questionMark);
+    const questionMark = Array.from(container.querySelectorAll("span")).find(
+      (node) => node.textContent === "?" && !node.hasAttribute("data-overall-tooltip-trigger")
+    );
+    expect(questionMark).toBeTruthy();
+    fireEvent.mouseEnter(questionMark as HTMLElement);
 
     expect(await screen.findByText("注释：data from the technical report")).toBeInTheDocument();
   });
 
   test("tooltip 会隐藏数值和 source 都相同的重复记录", async () => {
-    render(
+    const { container } = render(
       <BenchmarkMatrix
         rows={[
           {
             providerName: "Alibaba",
-            modelName: "Qwen3.6",
+            modelName: "Seed2.0",
             benchmarkName: "LiveCodeBench",
             benchmarkType: "Coding Agent",
             benchTime: "2026-04-07T01:01:00.000Z",
@@ -85,14 +111,18 @@ describe("BenchmarkMatrix 星号值显示", () => {
       />
     );
 
-    const questionMark = screen.getByText("?");
-    fireEvent.mouseEnter(questionMark);
+    const questionMark = Array.from(container.querySelectorAll("span")).find(
+      (node) => node.textContent === "?" && !node.hasAttribute("data-overall-tooltip-trigger")
+    );
+    expect(questionMark).toBeTruthy();
+    fireEvent.mouseEnter(questionMark as HTMLElement);
 
     const duplicateHint = await screen.findByText("该单元格存在多条记录");
     const tooltip = duplicateHint.closest("div");
     expect(tooltip).not.toBeNull();
 
-    const tooltipTextList = Array.from(tooltip!.querySelectorAll("span")).map((node) => node.textContent ?? "");
+    const tooltipEntryRows = Array.from(tooltip!.querySelectorAll("span.block.rounded-md"));
+    const tooltipTextList = tooltipEntryRows.map((node) => node.textContent ?? "");
     const seedEntries = tooltipTextList.filter((text) => text.includes("55.4") && text.includes("text:Seed2.0"));
     const qwenEntries = tooltipTextList.filter((text) => text.includes("57.1") && text.includes("text:Qwen3.6"));
 

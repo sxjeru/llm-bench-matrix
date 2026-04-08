@@ -28,6 +28,7 @@ type NormalizedTextImportRow = {
   benchmarkName: string;
   benchmarkType: string;
   valueRaw: string;
+  valueNote: string | null;
   benchTime: Date;
   unit: string;
   higherIsBetter: boolean;
@@ -107,6 +108,10 @@ const PAPER_MODALITY_HINT_TOKENS = new Set([
 const PAPER_HEADER_LABEL_REGEX = /\b(capability|benchmark|benchmarks|category|categories|type|types|model|models)\b/gi;
 const UNSUPPORTED_SPECIAL_VALUE_SYMBOL_REGEX = /[‡†§¶※¤]/g;
 const UNSUPPORTED_SPECIAL_VALUE_SYMBOL_TEST_REGEX = /[‡†§¶※¤]/;
+const IMPORT_VALUE_PAIR_REGEX =
+  /^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/;
+const IMPORT_VALUE_SINGLE_REGEX =
+  /^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/;
 
 function isLowerBetterBenchmark(benchmarkName: string): boolean {
   return LOWER_IS_BETTER_BENCHMARK_RULES.some((rule) => rule.test(benchmarkName));
@@ -147,6 +152,63 @@ function isMultimodalHint(input: string): boolean {
 
 function normalizeImportedValueRaw(rawInput: string): string {
   return rawInput.replace(/[％%]/g, "").replace(/[∗﹡✱✳✻]/g, "*").trim();
+}
+
+function mergeImportValueNotes(primaryNote: string | null | undefined, secondaryNote: string | null | undefined): string | null {
+  const primary = primaryNote?.trim() ?? "";
+  const secondary = secondaryNote?.trim() ?? "";
+
+  if (primary && secondary) {
+    return primary === secondary ? primary : `${primary}; ${secondary}`;
+  }
+
+  if (primary) return primary;
+  if (secondary) return secondary;
+
+  return null;
+}
+
+function normalizeImportedValueAndExtractNote(rawInput: string, explicitNoteInput?: string | null): {
+  valueRaw: string;
+  valueNote: string | null;
+} {
+  const normalizedRaw = normalizeImportedValueRaw(rawInput);
+  const explicitNote = explicitNoteInput?.trim() || null;
+  const parsed = parseBenchmarkValue(normalizedRaw);
+  const parsedNote = parsed.valueNote === "non-numeric" ? null : parsed.valueNote;
+
+  let valueRaw = normalizedRaw;
+  const valueNote = mergeImportValueNotes(explicitNote, parsedNote);
+
+  const pairMatch = normalizedRaw.match(IMPORT_VALUE_PAIR_REGEX);
+  if (pairMatch) {
+    const [, first, second, tail] = pairMatch;
+    const tailText = tail.trim();
+
+    if (tailText.length > 0 && !tailText.startsWith("*")) {
+      valueRaw = `${first.trim()} / ${second.trim()}`;
+    }
+
+    return {
+      valueRaw,
+      valueNote
+    };
+  }
+
+  const singleMatch = normalizedRaw.match(IMPORT_VALUE_SINGLE_REGEX);
+  if (singleMatch) {
+    const [, value, tail] = singleMatch;
+    const tailText = tail.trim();
+
+    if (tailText.length > 0 && !tailText.startsWith("*")) {
+      valueRaw = value.trim();
+    }
+  }
+
+  return {
+    valueRaw,
+    valueNote
+  };
 }
 
 function normalizeNameParenthesisSpacing(rawName: string): string {
@@ -1254,6 +1316,7 @@ export async function importParsedRecords(
       benchmarkName: normalizeNameParenthesisSpacing(record.benchmarkName),
       benchmarkType: (record.category || "general").trim() || "general",
       valueRaw: record.rawValue,
+      valueNote: null,
       benchTime: options?.benchTime ?? new Date(),
       unit: "score",
       higherIsBetter: true,
@@ -1330,6 +1393,7 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
 
         const parsedValue = parseBenchmarkValue(row.valueRaw);
         const normalizedValue = normalizeStoredBenchmarkValue(benchmark.benchmarkName, parsedValue);
+        const mergedValueNote = mergeImportValueNotes(row.valueNote, normalizedValue.valueNote);
         valueRows.push({
           modelId: model.id,
           benchmarkId: benchmark.id,
@@ -1337,7 +1401,7 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
           valueRaw: normalizedValue.valueRaw,
           valueNum: normalizedValue.valueNum !== null ? String(normalizedValue.valueNum) : null,
           valueNum2: normalizedValue.valueNum2 !== null ? String(normalizedValue.valueNum2) : null,
-          valueNote: normalizedValue.valueNote,
+          valueNote: mergedValueNote,
           source: row.source ?? null
         });
       } catch (error) {
@@ -1383,7 +1447,10 @@ function parseStructuredCsvRows(inputText: string, defaultSource: string | null)
       return;
     }
 
-    const valueRaw = normalizeImportedValueRaw(valueRawInput);
+    const { valueRaw, valueNote } = normalizeImportedValueAndExtractNote(
+      valueRawInput,
+      toNullableText(row.value_note || row.valueNote || row.note)
+    );
     const providerName = (row.provider || row.provider_name || "").trim() || inferProviderNameFromModel(modelName);
     const benchmarkType = (row.benchmark_type || row.type || "general").trim() || "general";
     const modalitiesInput = (row.modalities || "").trim();
@@ -1402,6 +1469,7 @@ function parseStructuredCsvRows(inputText: string, defaultSource: string | null)
       benchmarkName,
       benchmarkType,
       valueRaw,
+      valueNote,
       benchTime,
       unit: (row.unit || "score").trim() || "score",
       higherIsBetter: benchmarkDirection.hadDirectionMarker
@@ -1570,13 +1638,16 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
         continue;
       }
 
+      const normalizedValue = normalizeImportedValueAndExtractNote(rawInput);
+
       rows.push({
         rowNumber: lineIndex + 1,
         providerName: inferProviderNameFromModel(modelName),
         modelName,
         benchmarkName,
         benchmarkType: currentBenchmarkType,
-        valueRaw: normalizeImportedValueRaw(rawInput),
+        valueRaw: normalizedValue.valueRaw,
+        valueNote: normalizedValue.valueNote,
         benchTime: new Date(),
         unit: "score",
         higherIsBetter: benchmarkDirection.higherIsBetter,
@@ -1779,13 +1850,16 @@ function parsePaperCopiedTableRows(inputText: string, defaultSource: string | nu
         continue;
       }
 
+      const normalizedValue = normalizeImportedValueAndExtractNote(rawInput);
+
       rows.push({
         rowNumber: lineIndex + 1,
         providerName: inferProviderNameFromModel(modelName),
         modelName,
         benchmarkName,
         benchmarkType: currentBenchmarkType,
-        valueRaw: normalizeImportedValueRaw(rawInput),
+        valueRaw: normalizedValue.valueRaw,
+        valueNote: normalizedValue.valueNote,
         benchTime: new Date(),
         unit: "score",
         higherIsBetter: benchmarkDirection.higherIsBetter,
@@ -1948,6 +2022,7 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
 
   const previewRows = parsed.rows.map((row) => {
     const parsedValue = parseBenchmarkValue(row.valueRaw);
+    const mergedNote = mergeImportValueNotes(row.valueNote, parsedValue.valueNote);
 
     return {
       rowNumber: row.rowNumber,
@@ -1956,10 +2031,10 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
       benchmarkName: row.benchmarkName,
       benchmarkType: row.benchmarkType,
       modalities: normalizeModalities(row.modalities),
-      rawValue: parsedValue.valueRaw,
+      rawValue: row.valueRaw,
       valueNum: parsedValue.valueNum,
       valueNum2: parsedValue.valueNum2,
-      valueNote: parsedValue.valueNote,
+      valueNote: mergedNote,
       source: row.source,
       valid: parsedValue.valueRaw.length > 0
     };
