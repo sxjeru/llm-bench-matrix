@@ -2060,14 +2060,67 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       };
     })();
 
+    const entriesByGroup = new Map<string, MatrixCellEntry[]>();
+    const preferredEntryByGroup = new Map<string, MatrixCellEntry>();
+    const modelNameByGroup = new Map<string, string>();
+
     filteredRows.forEach((row) => {
-      const displayValue = getMatrixCellDisplayValue(row.valueNum, row.valueNum2 ?? null, row.valueRaw, row.valueNote);
-      const notePadding = row.valueNote && row.valueNote.trim().length > 0 ? 18 : 0;
-      const measured = measureTextWidth(displayValue, "600 14px Inter, ui-sans-serif, system-ui") + 18 + notePadding;
-      const previous = valueWidthByModel.get(row.modelName) ?? 0;
+      const groupKey = `${getMatrixGroupingKey(row, showDuplicateRows)}::${row.modelName}`;
+
+      const entry: MatrixCellEntry = {
+        valueRaw: row.valueRaw,
+        valueNum: row.valueNum,
+        valueNum2: row.valueNum2 ?? null,
+        valueNote: row.valueNote,
+        source: row.source,
+        benchTime: row.benchTime
+      };
+
+      if (!entriesByGroup.has(groupKey)) {
+        entriesByGroup.set(groupKey, []);
+      }
+      entriesByGroup.get(groupKey)!.push(entry);
+
+      const preferred = preferredEntryByGroup.get(groupKey);
+      if (!preferred || (entry.valueNum !== null && (preferred.valueNum === null || entry.valueNum > preferred.valueNum))) {
+        preferredEntryByGroup.set(groupKey, entry);
+      }
+
+      modelNameByGroup.set(groupKey, row.modelName);
+    });
+
+    entriesByGroup.forEach((entries, groupKey) => {
+      const modelName = modelNameByGroup.get(groupKey);
+      if (!modelName || entries.length === 0) return;
+
+      const preferredEntry = preferredEntryByGroup.get(groupKey) ?? entries[0]!;
+      const displayValue = getMatrixCellDisplayValue(
+        preferredEntry.valueNum,
+        preferredEntry.valueNum2,
+        preferredEntry.valueRaw,
+        preferredEntry.valueNote
+      );
+
+      const uniqueEntriesMap = new Map<string, MatrixCellEntry>();
+      entries.forEach((entry) => {
+        const dedupKey = getMatrixCellSourceValueDedupKey(entry);
+        if (!uniqueEntriesMap.has(dedupKey)) {
+          uniqueEntriesMap.set(dedupKey, entry);
+        }
+      });
+
+      const uniqueEntries = Array.from(uniqueEntriesMap.values());
+      const valueIdentitySet = new Set(uniqueEntries.map((entry) => getMatrixCellValueIdentity(entry)));
+      const noteText = (preferredEntry.valueNote ?? "").trim();
+      const hasMeaningfulMultipleValues = uniqueEntries.length > 1 && valueIdentitySet.size > 1;
+      const questionMarkPadding = hasMeaningfulMultipleValues || noteText.length > 0 ? 16 : 0;
+
+      const compactDisplayValue = displayValue.replace(/\s*\/\s*/g, "/");
+      const measured = measureTextWidth(compactDisplayValue, "600 14px Inter, ui-sans-serif, system-ui") + 18 + questionMarkPadding;
+      const previous = valueWidthByModel.get(modelName) ?? 0;
 
       if (measured > previous) {
-        valueWidthByModel.set(row.modelName, measured);
+        valueWidthByModel.set(modelName, measured);
       }
     });
 
@@ -2083,7 +2136,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     });
 
     return map;
-  }, [modelColumns, filteredRows]);
+  }, [modelColumns, filteredRows, showDuplicateRows]);
 
   useEffect(() => {
     if (!isColumnWidthLoaded) return;
@@ -2943,109 +2996,111 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
           {isFullscreen ? "退出全屏" : "全屏显示表格"}
         </button>
 
-        <div
-          className="relative"
-          ref={exportMenuRef}
-          onMouseEnter={() => setIsExportMenuHovered(true)}
-          onMouseLeave={() => {
-            setIsExportMenuHovered(false);
-            setSuppressHoverMenu(false);
-          }}
-        >
-          <div className="inline-flex h-8 items-center overflow-hidden rounded-lg border border-base-300/80 bg-base-100/55 shadow-sm">
-            <button
-              type="button"
-              className="btn btn-sm btn-ghost h-8 gap-1 rounded-none border-0 px-1.5"
-              aria-label="导出图片"
-              onClick={downloadTableImage}
-              disabled={isImageActionBusy}
-            >
-              <ImageDown size={15} />
-              {isDownloadingTableImage ? "下载中..." : "导出图片"}
-            </button>
+        <div className="flex w-full flex-wrap items-center justify-end gap-2">
+          <div
+            className="relative"
+            ref={exportMenuRef}
+            onMouseEnter={() => setIsExportMenuHovered(true)}
+            onMouseLeave={() => {
+              setIsExportMenuHovered(false);
+              setSuppressHoverMenu(false);
+            }}
+          >
+            <div className="inline-flex h-8 items-center overflow-hidden rounded-lg border border-base-300/80 bg-base-100/55 shadow-sm">
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost h-8 gap-1 rounded-none border-0 px-1.5"
+                aria-label="导出图片"
+                onClick={downloadTableImage}
+                disabled={isImageActionBusy}
+              >
+                <ImageDown size={15} />
+                {isDownloadingTableImage ? "下载中..." : "导出图片"}
+              </button>
 
-            <span className="h-4 w-px bg-base-300/70" />
+              <span className="h-4 w-px bg-base-300/70" />
 
-            <label className="inline-flex h-full items-center px-0">
-              <select
-                className="select select-ghost select-xs h-6 min-h-6 w-[82px] border-0 bg-base-200/45 px-0.5 pr-4 text-[11px] font-medium text-base-content shadow-none focus:bg-base-200/60 focus:outline-none"
-                aria-label="导出规格"
-                value={exportPreset}
-                onChange={(event) => {
-                  const next = event.target.value;
-                  if (isExportPresetKey(next)) {
-                    setExportPreset(next);
-                  }
+              <label className="inline-flex h-full items-center px-0">
+                <select
+                  className="select select-ghost select-xs h-6 min-h-6 w-[82px] border-0 bg-base-200/45 px-0.5 pr-4 text-[11px] font-medium text-base-content shadow-none focus:bg-base-200/60 focus:outline-none"
+                  aria-label="导出规格"
+                  value={exportPreset}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    if (isExportPresetKey(next)) {
+                      setExportPreset(next);
+                    }
+                  }}
+                  disabled={isImageActionBusy}
+                >
+                  {availableExportPresetKeys.map((key) => (
+                    <option
+                      key={key}
+                      value={key}
+                      style={{ backgroundColor: "#0f172a", color: "#e2e8f0" }}
+                    >
+                      {EXPORT_PRESET_MAP[key].label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <span className="h-4 w-px bg-base-300/70" />
+
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost h-8 rounded-none border-0 px-1.5"
+                aria-label="导出图片菜单"
+                aria-haspopup="menu"
+                aria-expanded={isExportMenuOpen}
+                onClick={() => {
+                  setSuppressHoverMenu(false);
+                  setIsExportMenuOpen((prev) => !prev);
                 }}
                 disabled={isImageActionBusy}
               >
-                {availableExportPresetKeys.map((key) => (
-                  <option
-                    key={key}
-                    value={key}
-                    style={{ backgroundColor: "#0f172a", color: "#e2e8f0" }}
-                  >
-                    {EXPORT_PRESET_MAP[key].label}
-                  </option>
-                ))}
-              </select>
-            </label>
+                <ChevronDown size={14} />
+              </button>
+            </div>
 
-            <span className="h-4 w-px bg-base-300/70" />
-
-            <button
-              type="button"
-              className="btn btn-sm btn-ghost h-8 rounded-none border-0 px-1.5"
-              aria-label="导出图片菜单"
-              aria-haspopup="menu"
-              aria-expanded={isExportMenuOpen}
-              onClick={() => {
-                setSuppressHoverMenu(false);
-                setIsExportMenuOpen((prev) => !prev);
-              }}
-              disabled={isImageActionBusy}
+            <div
+              role="menu"
+              onMouseEnter={() => setIsExportMenuHovered(true)}
+              className={`absolute right-0 top-full z-40 min-w-[170px] rounded-lg border border-base-300/80 bg-base-100/95 p-1 shadow-xl backdrop-blur transition-all duration-150 ${
+                showExportMenu ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+              }`}
             >
-              <ChevronDown size={14} />
-            </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="btn btn-sm btn-ghost w-full justify-start"
+                onClick={copyTableImageToClipboard}
+                disabled={isImageActionBusy}
+              >
+                <Copy size={14} />
+                {isCopyingTableImage ? "复制中..." : "复制到剪贴板"}
+              </button>
+            </div>
           </div>
 
-          <div
-            role="menu"
-            onMouseEnter={() => setIsExportMenuHovered(true)}
-            className={`absolute right-0 top-full z-40 min-w-[170px] rounded-lg border border-base-300/80 bg-base-100/95 p-1 shadow-xl backdrop-blur transition-all duration-150 ${
-              showExportMenu ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
-            }`}
+          <button
+            type="button"
+            className="btn btn-xs btn-ghost"
+            onClick={() => setShowCategory((prev) => !prev)}
           >
-            <button
-              type="button"
-              role="menuitem"
-              className="btn btn-sm btn-ghost w-full justify-start"
-              onClick={copyTableImageToClipboard}
-              disabled={isImageActionBusy}
-            >
-              <Copy size={14} />
-              {isCopyingTableImage ? "复制中..." : "复制到剪贴板"}
-            </button>
-          </div>
+            {showCategory ? <Eye size={14} /> : <EyeOff size={14} />}
+            显示类别列
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-xs btn-ghost"
+            onClick={() => setShowDuplicateRows((prev) => !prev)}
+          >
+            {showDuplicateRows ? <Eye size={14} /> : <EyeOff size={14} />}
+            显示重名行
+          </button>
         </div>
-
-        <button
-          type="button"
-          className="btn btn-xs btn-ghost"
-          onClick={() => setShowCategory((prev) => !prev)}
-        >
-          {showCategory ? <Eye size={14} /> : <EyeOff size={14} />}
-          显示类别列
-        </button>
-
-        <button
-          type="button"
-          className="btn btn-xs btn-ghost"
-          onClick={() => setShowDuplicateRows((prev) => !prev)}
-        >
-          {showDuplicateRows ? <Eye size={14} /> : <EyeOff size={14} />}
-          显示重名行
-        </button>
       </div>
 
       <div className={`${isFullscreen ? "mt-2" : ""} rounded-box border border-base-300/70 bg-base-200/35 p-3`}>
@@ -3603,6 +3658,9 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     pairFirstDisplay !== null &&
                     pairSecondDisplay !== null &&
                     !/[$¥€£]/.test(cell?.valueRaw ?? "");
+                  const cellPaddingRight = shouldShowQuestionMark
+                    ? (isPairNumericDisplay ? "18px" : "22px")
+                    : "6px";
                   const isSingleMaxCell = !isPairNumericDisplay && isMaxCellFirst;
                   const heatStyle = getHeatCellStyle(
                     comparableCellNum,
@@ -3652,7 +3710,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                         backgroundColor: heatBackground,
                         borderBottomColor: hasHeatColor ? "rgba(255, 255, 255, 0.08)" : undefined,
                         padding: "4px 6px",
-                        paddingRight: shouldShowQuestionMark ? "22px" : "6px",
+                        paddingRight: cellPaddingRight,
                         fontSize: "14px",
                         lineHeight: 1.2,
                         whiteSpace: "nowrap",
@@ -3670,9 +3728,9 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                       }}
                     >
                       {isPairNumericDisplay && pairFirstDisplay && pairSecondDisplay ? (
-                        <span className="inline-flex items-center gap-1">
+                        <span className="inline-flex items-center gap-0 leading-none">
                           <span style={isMaxCellFirst ? maxSegmentStyle : undefined}>{pairFirstDisplay}</span>
-                          <span>/</span>
+                          <span className="mx-[1px] opacity-85">/</span>
                           <span style={isMaxCellSecond ? maxSegmentStyle : undefined}>{pairSecondDisplay}</span>
                         </span>
                       ) : (
