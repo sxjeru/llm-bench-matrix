@@ -956,10 +956,18 @@ async function renderElementToImageBlob(
 
           const clonedTable = clonedRoot.querySelector("table") as HTMLTableElement | null;
           if (clonedTable) {
-            clonedTable.style.width = `${width}px`;
+            clonedTable.style.minWidth = `${width}px`;
             clonedTable.style.borderCollapse = "separate";
             clonedTable.style.borderSpacing = "0";
           }
+
+          const clonedModalityFilters = clonedRoot.querySelectorAll<HTMLElement>("[data-modality-filter='true']");
+          clonedModalityFilters.forEach((filter) => {
+            filter.removeAttribute("open");
+            filter.querySelectorAll<HTMLElement>(".dropdown-content").forEach((panel) => {
+              panel.style.display = "none";
+            });
+          });
 
           const exportSourceFrameColor = "rgba(93, 167, 255, 0.65)";
           const exportSourceFrameWidth = 2;
@@ -3183,47 +3191,24 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                   >
                     Modality
                   </summary>
-                  <div className="dropdown-content z-[90] mt-1 w-44 rounded-box border border-base-300 bg-base-100 p-2 shadow-xl">
-                    <div className="mb-1 text-[11px] opacity-75">勾选筛选模态</div>
-                    <div className="space-y-1">
+                  <div className="dropdown-content z-[90] mt-1 w-60 overflow-hidden rounded-xl border border-base-300/80 bg-base-100/95 p-1.5 shadow-xl backdrop-blur">
+                    <div className="mb-1 px-1 text-[11px] font-medium opacity-75">勾选筛选模态</div>
+
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-1">
                       {MODALITY_OPTIONS.map((modality) => (
                         <label
                           key={`matrix-modality-filter-${modality}`}
-                          className="label cursor-pointer justify-start gap-2 py-0.5"
+                          className="flex w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-medium leading-none transition hover:bg-base-200/55"
                         >
                           <input
                             type="checkbox"
-                            className="checkbox checkbox-xs"
+                            className="checkbox checkbox-xs shrink-0"
                             checked={selectedModalitySet.has(modality)}
                             onChange={(e) => toggleModality(modality, e.target.checked)}
                           />
-                          <span className="label-text text-xs">{modality}</span>
+                          <span className="min-w-0 truncate">{modality}</span>
                         </label>
                       ))}
-                    </div>
-                    <div className="mt-2 flex gap-1">
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-xs"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          selectAllModalities();
-                        }}
-                      >
-                        全选
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-xs"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          clearAllModalities();
-                        }}
-                      >
-                        清空
-                      </button>
                     </div>
                   </div>
                 </details>
@@ -3556,8 +3541,27 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     ...rowCellLineStyle
                   }}
                 >
-                  <span className="inline-flex w-full min-w-0 items-center gap-1">
-                    <span className="truncate">{matrixRow.benchmark}</span>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      width: "100%",
+                      minWidth: 0
+                    }}
+                  >
+                    <span
+                      style={{
+                        display: "block",
+                        flex: "1 1 auto",
+                        minWidth: 0,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap"
+                      }}
+                    >
+                      {matrixRow.benchmark}
+                    </span>
                     {isLowerBetterBenchmark ? (
                       <span
                         className="inline-flex h-4 w-4 shrink-0 cursor-help items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
