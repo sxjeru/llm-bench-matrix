@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 
-import { BenchmarkMatrix } from "@/components/benchmark-matrix";
+import { BenchmarkMatrix, __buildOverallScoreDisplayDecimalsMapForTest } from "@/components/benchmark-matrix";
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/",
@@ -103,6 +103,24 @@ const rows = [
 ] as const;
 
 describe("BenchmarkMatrix 总评行", () => {
+  test("同一位小数但名次不同时显示两位小数", () => {
+    const decimalsMap = __buildOverallScoreDisplayDecimalsMapForTest([
+      { modelName: "Model A", rawScore: 68.24, rawRank: 4 },
+      { modelName: "Model B", rawScore: 68.21, rawRank: 5 },
+      { modelName: "Model C", rawScore: 67.95, rawRank: 6 },
+      { modelName: "Model D", rawScore: null, rawRank: null },
+      { modelName: "Model E", rawScore: 59.31, rawRank: 8 },
+      { modelName: "Model F", rawScore: 59.31, rawRank: 8 }
+    ]);
+
+    expect(decimalsMap.get("Model A")).toBe(2);
+    expect(decimalsMap.get("Model B")).toBe(2);
+    expect(decimalsMap.get("Model C")).toBe(1);
+    expect(decimalsMap.get("Model D")).toBe(1);
+    expect(decimalsMap.get("Model E")).toBe(1);
+    expect(decimalsMap.get("Model F")).toBe(1);
+  });
+
   test("表格末尾展示原始总评与原始名次", () => {
     const { container } = render(<BenchmarkMatrix rows={[...rows]} />);
 

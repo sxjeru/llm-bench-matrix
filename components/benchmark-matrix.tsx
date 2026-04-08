@@ -309,6 +309,27 @@ function applyExportSourceFrameFallback(root: HTMLElement, color: string, width:
   });
 }
 
+function applyExportOverallRowNudgeFallback(root: HTMLElement): void {
+  const overallRow = root.querySelector<HTMLTableRowElement>("tr[data-overall-row='1']");
+  if (!overallRow) return;
+
+  const overallBenchmarkLabel = overallRow.querySelector<HTMLElement>("[data-overall-benchmark-label='1']");
+  if (overallBenchmarkLabel) {
+    overallBenchmarkLabel.style.paddingTop = "8px";
+    overallBenchmarkLabel.style.paddingBottom = "4px";
+  }
+
+  const overallBenchmarkCnText = overallRow.querySelector<HTMLElement>("[data-overall-benchmark-cn-text='1']");
+  if (overallBenchmarkCnText) {
+    overallBenchmarkCnText.style.display = "inline-block";
+    overallBenchmarkCnText.style.transform = "translateY(2px)";
+  }
+
+  overallRow.querySelectorAll<HTMLElement>("[data-overall-tooltip-trigger]").forEach((trigger) => {
+    trigger.style.top = "56%";
+  });
+}
+
 export function __applyExportSourceFrameFallbackForTest(root: HTMLElement, color = "rgba(93, 167, 255, 0.65)", width = 2): void {
   applyExportSourceFrameFallback(root, color, width);
 }
@@ -794,6 +815,46 @@ function buildDenseRankMap(
   return rankMap;
 }
 
+type OverallScoreDisplayItem = {
+  modelName: string;
+  rawScore: number | null;
+  rawRank: number | null;
+};
+
+function buildOverallScoreDisplayDecimalsMap(items: OverallScoreDisplayItem[]): Map<string, 1 | 2> {
+  const decimalsMap = new Map<string, 1 | 2>();
+  const groupedByOneDecimal = new Map<string, OverallScoreDisplayItem[]>();
+
+  items.forEach((item) => {
+    decimalsMap.set(item.modelName, 1);
+
+    if (item.rawScore === null || item.rawRank === null || !Number.isFinite(item.rawScore)) return;
+
+    const oneDecimalKey = item.rawScore.toFixed(1);
+    if (!groupedByOneDecimal.has(oneDecimalKey)) {
+      groupedByOneDecimal.set(oneDecimalKey, []);
+    }
+    groupedByOneDecimal.get(oneDecimalKey)!.push(item);
+  });
+
+  groupedByOneDecimal.forEach((groupItems) => {
+    if (groupItems.length < 2) return;
+
+    const distinctRanks = new Set(groupItems.map((item) => item.rawRank));
+    if (distinctRanks.size > 1) {
+      groupItems.forEach((item) => {
+        decimalsMap.set(item.modelName, 2);
+      });
+    }
+  });
+
+  return decimalsMap;
+}
+
+export function __buildOverallScoreDisplayDecimalsMapForTest(items: OverallScoreDisplayItem[]): Map<string, 1 | 2> {
+  return buildOverallScoreDisplayDecimalsMap(items);
+}
+
 function getMatrixCellDisplayValue(
   valueNum: number | null,
   valueNum2: number | null,
@@ -971,6 +1032,7 @@ async function renderElementToImageBlob(
 
           const exportSourceFrameColor = "rgba(93, 167, 255, 0.65)";
           const exportSourceFrameWidth = 2;
+          applyExportOverallRowNudgeFallback(clonedRoot);
           applyExportSourceFrameFallback(clonedRoot, exportSourceFrameColor, exportSourceFrameWidth);
         }
       });
@@ -2739,6 +2801,19 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     };
   }, [modelColumns, overallSummaryByModel]);
 
+  const overallScoreDisplayDecimalsByModel = useMemo(() => {
+    const items: OverallScoreDisplayItem[] = modelColumns.map((modelName) => {
+      const summary = overallSummaryByModel.get(modelName);
+      return {
+        modelName,
+        rawScore: summary?.rawScore ?? null,
+        rawRank: summary?.rawRank ?? null
+      };
+    });
+
+    return buildOverallScoreDisplayDecimalsMap(items);
+  }, [modelColumns, overallSummaryByModel]);
+
   function getSortModeLabel(column: RowSortColumn): string {
     if (rowSortState.column !== column) return "";
     const effectiveMode = getEffectiveSortMode(rowSortState.mode);
@@ -3221,20 +3296,20 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         <table style={{ width: "max-content" }}>
           <thead>
             <tr>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  zIndex: 22,
-                  width: 72,
-                  minWidth: 72,
-                  maxWidth: 72,
-                  padding: "6px 6px",
-                  background: "rgba(20, 27, 45, 0.96)",
-                  backdropFilter: "blur(6px)",
-                  whiteSpace: "nowrap"
-                }}
-              >
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    zIndex: 22,
+                    width: 72,
+                    minWidth: 72,
+                    maxWidth: 72,
+                    padding: "6px 6px",
+                    background: "rgba(20, 27, 45, 0.96)",
+                    backdropFilter: "blur(6px)",
+                    whiteSpace: "nowrap"
+                  }}
+                >
                 <details className="dropdown dropdown-bottom" data-modality-filter="true">
                   <summary
                     className="btn btn-ghost btn-xs h-auto min-h-0 px-1 normal-case text-inherit"
@@ -3533,231 +3608,235 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                 : undefined;
 
               return (
-              <tr
-                key={rowKey}
-                className={isSelectedRow ? "matrix-row-selected" : "matrix-row-hover"}
-                onClick={() => {
-                  setSelectedRowKey((prev) => (prev === rowKey ? null : rowKey));
-                  setColumnSortBenchmarkKey((prev) => (prev === rowKey ? null : rowKey));
-                }}
-                style={{ cursor: "pointer", ...rowFrameStyle }}
-              >
-                <td
-                  style={{
-                    width: 72,
-                    minWidth: 72,
-                    maxWidth: 72,
-                    padding: "4px 6px",
-                    textAlign: "center",
-                    ...rowCellLineStyle,
-                    ...rowLeftEdgeStyle
+                <tr
+                  key={rowKey}
+                  className={isSelectedRow ? "matrix-row-selected" : "matrix-row-hover"}
+                  onClick={() => {
+                    setSelectedRowKey((prev) => (prev === rowKey ? null : rowKey));
+                    setColumnSortBenchmarkKey((prev) => (prev === rowKey ? null : rowKey));
                   }}
+                  style={{ cursor: "pointer", ...rowFrameStyle }}
                 >
-                  <div className="flex flex-wrap items-center justify-center gap-1">
-                    {matrixRow.modalities.map((modality, idx) =>
-                      renderModalityBadge(modality, `${rowKey}-modality-${modality}-${idx}`)
-                    )}
-                  </div>
-                </td>
-
-                {showCategory ? (
                   <td
                     style={{
-                      width: categoryColumnWidth,
-                      minWidth: categoryColumnWidth,
-                      maxWidth: categoryColumnWidth,
+                      width: 72,
+                      minWidth: 72,
+                      maxWidth: 72,
+                      padding: "4px 6px",
+                      textAlign: "center",
+                      ...rowCellLineStyle,
+                      ...rowLeftEdgeStyle
+                    }}
+                  >
+                    <div className="flex flex-wrap items-center justify-center gap-1">
+                      {matrixRow.modalities.map((modality, idx) =>
+                        renderModalityBadge(modality, `${rowKey}-modality-${modality}-${idx}`)
+                      )}
+                    </div>
+                  </td>
+
+                  {showCategory ? (
+                    <td
+                      style={{
+                        width: categoryColumnWidth,
+                        minWidth: categoryColumnWidth,
+                        maxWidth: categoryColumnWidth,
+                        padding: "6px 8px",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        ...rowCellLineStyle
+                      }}
+                      title={matrixRow.category}
+                    >
+                      {matrixRow.category}
+                    </td>
+                  ) : null}
+
+                  <td
+                    title={matrixRow.benchmark}
+                    style={{
+                      position: "sticky",
+                      left: 0,
+                      zIndex: 12,
+                      width: benchmarkColumnWidth,
+                      minWidth: benchmarkColumnWidth,
+                      maxWidth: benchmarkColumnWidth,
                       padding: "6px 8px",
+                      backgroundColor: "rgba(20, 27, 45, 0.96)",
+                      boxShadow: "8px 0 12px rgba(2, 6, 23, 0.28)",
                       whiteSpace: "nowrap",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       ...rowCellLineStyle
                     }}
-                    title={matrixRow.category}
-                  >
-                    {matrixRow.category}
-                  </td>
-                ) : null}
-
-                <td
-                  title={matrixRow.benchmark}
-                  style={{
-                    position: "sticky",
-                    left: 0,
-                    zIndex: 12,
-                    width: benchmarkColumnWidth,
-                    minWidth: benchmarkColumnWidth,
-                    maxWidth: benchmarkColumnWidth,
-                    padding: "6px 8px",
-                    backgroundColor: "rgba(20, 27, 45, 0.96)",
-                    boxShadow: "8px 0 12px rgba(2, 6, 23, 0.28)",
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    ...rowCellLineStyle
-                  }}
-                >
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
-                      width: "100%",
-                      minWidth: 0
-                    }}
                   >
                     <span
                       style={{
-                        display: "block",
-                        flex: "1 1 auto",
-                        minWidth: 0,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap"
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                        width: "100%",
+                        minWidth: 0
                       }}
                     >
-                      {matrixRow.benchmark}
-                    </span>
-                    {isLowerBetterBenchmark ? (
                       <span
-                        className="inline-flex h-4 w-4 shrink-0 cursor-help items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
-                        title="该项目为低值更优"
-                        onClick={(event) => event.stopPropagation()}
+                        style={{
+                          display: "block",
+                          flex: "1 1 auto",
+                          minWidth: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap"
+                        }}
                       >
-                        ↓
+                        {matrixRow.benchmark}
                       </span>
-                    ) : null}
-                  </span>
-                </td>
-
-                {modelColumnMeta.map((model, modelIndex) => {
-                  const cell = matrixRow.cells.get(model.modelName);
-                  const cellNum = cell?.valueNum ?? null;
-                  const cellNum2 = cell?.valueNum2 ?? null;
-                  const comparableCellNum = cellNum !== null
-                    ? getBenchmarkComparableScore(matrixRow.benchmark, cellNum)
-                    : null;
-                  const comparableCellNum2 = cellNum2 !== null
-                    ? getBenchmarkComparableScore(matrixRow.benchmark, cellNum2)
-                    : null;
-                  const rawText = cell?.displayValue ?? "--";
-                  const noteText = cell?.noteText ?? "";
-                  const shouldShowQuestionMark = cell?.shouldShowQuestionMark ?? false;
-                  const uniqueEntries = cell?.uniqueEntries ?? [];
-                  const isMaxCellFirst =
-                    comparableCellNum !== null &&
-                    matrixRow.maxComparable !== null &&
-                    comparableCellNum === matrixRow.maxComparable;
-                  const isMaxCellSecond =
-                    comparableCellNum2 !== null &&
-                    matrixRow.maxComparable2 !== null &&
-                    comparableCellNum2 === matrixRow.maxComparable2;
-                  const pairFirstDisplay = cell ? formatValueNumForDisplay(cell.valueNum) : null;
-                  const pairSecondDisplay = cell ? formatValueNumForDisplay(cell.valueNum2) : null;
-                  const isPairNumericDisplay =
-                    Boolean(cell?.valueRaw.includes("/")) &&
-                    pairFirstDisplay !== null &&
-                    pairSecondDisplay !== null &&
-                    !/[$¥€£]/.test(cell?.valueRaw ?? "");
-                  const cellPaddingRight = shouldShowQuestionMark
-                    ? (isPairNumericDisplay ? "18px" : "22px")
-                    : "6px";
-                  const isSingleMaxCell = !isPairNumericDisplay && isMaxCellFirst;
-                  const heatStyle = getHeatCellStyle(
-                    comparableCellNum,
-                    matrixRow.minComparable,
-                    matrixRow.maxComparable,
-                    heatmapPaletteRgb,
-                    heatmapAlpha
-                  );
-                  const heatBackground =
-                    (heatStyle as { backgroundColor?: string }).backgroundColor ?? "rgba(20, 27, 45, 0.96)";
-                  const hasHeatColor =
-                    comparableCellNum !== null &&
-                    matrixRow.minComparable !== null &&
-                    matrixRow.maxComparable !== null;
-                  const rowCellBoxShadow =
-                    rowCellLineStyle && "boxShadow" in rowCellLineStyle
-                      ? (rowCellLineStyle.boxShadow as string | undefined)
-                      : undefined;
-                  const sourceFrameShadows = buildSourceFrameShadows({
-                    isMatched: model.isSourceMatched,
-                    isFirst: model.isSourceMatchedFirst,
-                    isLast: model.isSourceMatchedLast,
-                    includeBottom: isLastMatrixRow,
-                    exportMode: isExportCaptureMode
-                  });
-                  const mergedCellBoxShadow = [rowCellBoxShadow, ...sourceFrameShadows].filter(Boolean).join(", ");
-                  const maxSegmentStyle = {
-                    fontWeight: 800,
-                    textDecoration: "underline",
-                    textDecorationColor: "rgba(15, 23, 42, 0.35)",
-                    textDecorationThickness: "1px",
-                    textUnderlineOffset: "2px"
-                  } as const;
-
-                  return (
-                    <td
-                      key={`${rowKey}::${model.modelName}`}
-                      data-source-match={model.isSourceMatched ? "1" : undefined}
-                      data-source-match-first={model.isSourceMatchedFirst ? "1" : undefined}
-                      data-source-match-last={model.isSourceMatchedLast ? "1" : undefined}
-                      data-source-match-bottom={
-                        model.isSourceMatched && isLastMatrixRow ? "1" : undefined
-                      }
-                      style={{
-                        ...rowCellLineStyle,
-                        ...heatStyle,
-                        backgroundColor: heatBackground,
-                        borderBottomColor: hasHeatColor ? "rgba(255, 255, 255, 0.08)" : undefined,
-                        padding: "4px 6px",
-                        paddingRight: cellPaddingRight,
-                        fontSize: "14px",
-                        lineHeight: 1.2,
-                        whiteSpace: "nowrap",
-                        position: "relative",
-                        fontWeight: isSingleMaxCell ? 800 : undefined,
-                        textDecoration: isSingleMaxCell ? "underline" : undefined,
-                        textDecorationColor: isSingleMaxCell ? "rgba(15, 23, 42, 0.35)" : undefined,
-                        textDecorationThickness: isSingleMaxCell ? "1px" : undefined,
-                        textUnderlineOffset: isSingleMaxCell ? "2px" : undefined,
-                        width: model.columnWidth,
-                        minWidth: model.columnWidth,
-                        maxWidth: model.columnWidth,
-                        boxShadow: mergedCellBoxShadow || undefined,
-                        ...(modelIndex === modelColumnMeta.length - 1 ? rowRightEdgeStyle ?? {} : {})
-                      }}
-                    >
-                      {isPairNumericDisplay && pairFirstDisplay && pairSecondDisplay ? (
-                        <span className="inline-flex items-center gap-0 leading-none">
-                          <span style={isMaxCellFirst ? maxSegmentStyle : undefined}>{pairFirstDisplay}</span>
-                          <span className="mx-[1px] opacity-85">/</span>
-                          <span style={isMaxCellSecond ? maxSegmentStyle : undefined}>{pairSecondDisplay}</span>
-                        </span>
-                      ) : (
-                        <span>{rawText}</span>
-                      )}
-                      {shouldShowQuestionMark ? (
+                      {isLowerBetterBenchmark ? (
                         <span
-                          className="absolute right-1 top-1/2 inline-flex h-4 w-4 -translate-y-1/2 cursor-help items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
-                          onMouseEnter={(event) => {
-                            const rect = event.currentTarget.getBoundingClientRect();
-                            setActiveCellTooltip({
-                              x: rect.left + rect.width / 2,
-                              y: rect.top - 6,
-                              entries: uniqueEntries,
-                              note: noteText.length > 0 ? noteText : null
-                            });
-                          }}
-                          onMouseLeave={() => setActiveCellTooltip(null)}
+                          className="inline-flex h-4 w-4 shrink-0 cursor-help items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
+                          title="该项目为低值更优"
+                          onClick={(event) => event.stopPropagation()}
                         >
-                          ?
+                          ↓
                         </span>
                       ) : null}
-                    </td>
-                  );
-                })}
-              </tr>
-            );})}
+                    </span>
+                  </td>
+
+                  {modelColumnMeta.map((model, modelIndex) => {
+                    const cell = matrixRow.cells.get(model.modelName);
+                    const cellNum = cell?.valueNum ?? null;
+                    const cellNum2 = cell?.valueNum2 ?? null;
+                    const comparableCellNum = cellNum !== null
+                      ? getBenchmarkComparableScore(matrixRow.benchmark, cellNum)
+                      : null;
+                    const comparableCellNum2 = cellNum2 !== null
+                      ? getBenchmarkComparableScore(matrixRow.benchmark, cellNum2)
+                      : null;
+                    const rawText = cell?.displayValue ?? "--";
+                    const noteText = cell?.noteText ?? "";
+                    const shouldShowQuestionMark = cell?.shouldShowQuestionMark ?? false;
+                    const uniqueEntries = cell?.uniqueEntries ?? [];
+                    const isMaxCellFirst =
+                      comparableCellNum !== null &&
+                      matrixRow.maxComparable !== null &&
+                      comparableCellNum === matrixRow.maxComparable;
+                    const isMaxCellSecond =
+                      comparableCellNum2 !== null &&
+                      matrixRow.maxComparable2 !== null &&
+                      comparableCellNum2 === matrixRow.maxComparable2;
+                    const pairFirstDisplay = cell ? formatValueNumForDisplay(cell.valueNum) : null;
+                    const pairSecondDisplay = cell ? formatValueNumForDisplay(cell.valueNum2) : null;
+                    const isPairNumericDisplay =
+                      Boolean(cell?.valueRaw.includes("/")) &&
+                      pairFirstDisplay !== null &&
+                      pairSecondDisplay !== null &&
+                      !/[$¥€£]/.test(cell?.valueRaw ?? "");
+                    const cellPaddingRight = shouldShowQuestionMark
+                      ? (isPairNumericDisplay ? "18px" : "22px")
+                      : "6px";
+                    const isSingleMaxCell = !isPairNumericDisplay && isMaxCellFirst;
+                    const heatStyle = getHeatCellStyle(
+                      comparableCellNum,
+                      matrixRow.minComparable,
+                      matrixRow.maxComparable,
+                      heatmapPaletteRgb,
+                      heatmapAlpha
+                    );
+                    const heatBackground =
+                      (heatStyle as { backgroundColor?: string }).backgroundColor ?? "rgba(20, 27, 45, 0.96)";
+                    const hasHeatColor =
+                      comparableCellNum !== null &&
+                      matrixRow.minComparable !== null &&
+                      matrixRow.maxComparable !== null;
+                    const rowCellBoxShadow =
+                      rowCellLineStyle && "boxShadow" in rowCellLineStyle
+                        ? (rowCellLineStyle.boxShadow as string | undefined)
+                        : undefined;
+                    const sourceFrameShadows = buildSourceFrameShadows({
+                      isMatched: model.isSourceMatched,
+                      isFirst: model.isSourceMatchedFirst,
+                      isLast: model.isSourceMatchedLast,
+                      includeBottom: isLastMatrixRow,
+                      exportMode: isExportCaptureMode
+                    });
+                    const mergedCellBoxShadow = [rowCellBoxShadow, ...sourceFrameShadows].filter(Boolean).join(", ");
+                    const maxSegmentStyle = isExportCaptureMode
+                      ? {
+                          fontWeight: 800,
+                          display: "inline-block",
+                          borderBottom: "1.5px solid rgba(15, 23, 42, 0.45)",
+                          paddingBottom: "0.5px",
+                          lineHeight: 1
+                        }
+                      : {
+                          fontWeight: 800,
+                          textDecoration: "underline",
+                          textDecorationColor: "rgba(15, 23, 42, 0.35)",
+                          textDecorationThickness: "1px",
+                          textUnderlineOffset: "2px"
+                        };
+
+                    return (
+                      <td
+                        key={`${rowKey}::${model.modelName}`}
+                        data-source-match={model.isSourceMatched ? "1" : undefined}
+                        data-source-match-first={model.isSourceMatchedFirst ? "1" : undefined}
+                        data-source-match-last={model.isSourceMatchedLast ? "1" : undefined}
+                        data-source-match-bottom={
+                          model.isSourceMatched && isLastMatrixRow ? "1" : undefined
+                        }
+                        style={{
+                          ...rowCellLineStyle,
+                          ...heatStyle,
+                          backgroundColor: heatBackground,
+                          borderBottomColor: hasHeatColor ? "rgba(255, 255, 255, 0.08)" : undefined,
+                          padding: "4px 6px",
+                          paddingRight: cellPaddingRight,
+                          fontSize: "14px",
+                          lineHeight: 1.2,
+                          whiteSpace: "nowrap",
+                          position: "relative",
+                          width: model.columnWidth,
+                          minWidth: model.columnWidth,
+                          maxWidth: model.columnWidth,
+                          boxShadow: mergedCellBoxShadow || undefined,
+                          ...(modelIndex === modelColumnMeta.length - 1 ? rowRightEdgeStyle ?? {} : {})
+                        }}
+                      >
+                        {isPairNumericDisplay && pairFirstDisplay && pairSecondDisplay ? (
+                          <span className="inline-flex items-center gap-0 leading-none">
+                            <span style={isMaxCellFirst ? maxSegmentStyle : undefined}>{pairFirstDisplay}</span>
+                            <span className="mx-[1px] opacity-85">/</span>
+                            <span style={isMaxCellSecond ? maxSegmentStyle : undefined}>{pairSecondDisplay}</span>
+                          </span>
+                        ) : (
+                          <span style={isSingleMaxCell ? maxSegmentStyle : undefined}>{rawText}</span>
+                        )}
+                        {shouldShowQuestionMark ? (
+                          <span
+                            className="absolute right-1 top-1/2 inline-flex h-4 w-4 -translate-y-1/2 cursor-help items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
+                            onMouseEnter={(event) => {
+                              const rect = event.currentTarget.getBoundingClientRect();
+                              setActiveCellTooltip({
+                                x: rect.left + rect.width / 2,
+                                y: rect.top - 6,
+                                entries: uniqueEntries,
+                                note: noteText.length > 0 ? noteText : null
+                              });
+                            }}
+                            onMouseLeave={() => setActiveCellTooltip(null)}
+                          >
+                            ?
+                          </span>
+                        ) : null}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
 
             {hasOverallSummary ? (
               <tr data-overall-row="1" className="matrix-row-overall">
@@ -3795,6 +3874,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                 ) : null}
 
                 <td
+                  data-overall-benchmark-label="1"
                   style={{
                     position: "sticky",
                     left: 0,
@@ -3810,7 +3890,8 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     letterSpacing: "0.02em"
                   }}
                 >
-                  总评 / Ranking
+                  <span data-overall-benchmark-cn-text="1">总评</span>
+                  <span> / Ranking</span>
                 </td>
 
                 {modelColumnMeta.map((model) => {
@@ -3827,7 +3908,8 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                   const heatBackground =
                     (heatStyle as { backgroundColor?: string }).backgroundColor ?? "rgba(18, 31, 52, 0.92)";
 
-                  const scoreText = hasRawScore ? summary!.rawScore!.toFixed(1) : "--";
+                  const scoreDecimals = overallScoreDisplayDecimalsByModel.get(model.modelName) ?? 1;
+                  const scoreText = hasRawScore ? summary!.rawScore!.toFixed(scoreDecimals) : "--";
                   const rankText = hasRawScore ? `(${summary!.rawRank})` : "";
 
                   return (
