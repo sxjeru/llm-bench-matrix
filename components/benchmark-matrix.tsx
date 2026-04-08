@@ -606,6 +606,28 @@ function extractModelVersionToken(modelName: string): ModelVersionToken | null {
   };
 }
 
+function compareSourceTabKeysByVersion(leftKey: string, rightKey: string): number {
+  const leftLabel = sourceTabDisplayLabel(leftKey);
+  const rightLabel = sourceTabDisplayLabel(rightKey);
+
+  const leftVersionToken = extractModelVersionToken(leftLabel);
+  const rightVersionToken = extractModelVersionToken(rightLabel);
+
+  if (
+    leftVersionToken &&
+    rightVersionToken &&
+    leftVersionToken.familyKey === rightVersionToken.familyKey &&
+    rightVersionToken.version !== leftVersionToken.version
+  ) {
+    return rightVersionToken.version - leftVersionToken.version;
+  }
+
+  const labelCompare = leftLabel.localeCompare(rightLabel, "zh-Hans-CN", { numeric: true, sensitivity: "base" });
+  if (labelCompare !== 0) return labelCompare;
+
+  return leftKey.localeCompare(rightKey, "zh-Hans-CN", { numeric: true, sensitivity: "base" });
+}
+
 function extractModelScaleToken(modelName: string): ModelScaleToken | null {
   const match = MODEL_SIZE_TOKEN_PATTERN.exec(modelName);
   if (!match) {
@@ -1169,9 +1191,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const sourceOptions = useMemo(() => {
     const rowSourceKeys = rows.map((row) => getSourceKey(row.source));
     const externalSourceKeys = allSourceOptions.map((source) => getSourceKey(source));
-    const keys = Array.from(new Set([...rowSourceKeys, ...externalSourceKeys])).sort((a, b) =>
-      getSourceLabel(a).localeCompare(getSourceLabel(b), "zh-Hans-CN")
-    );
+    const keys = Array.from(new Set([...rowSourceKeys, ...externalSourceKeys])).sort(compareSourceTabKeysByVersion);
 
     return [
       { key: SOURCE_ALL, label: "全部" },

@@ -12,6 +12,34 @@ vi.mock("next/navigation", () => ({
 }));
 
 describe("BenchmarkMatrix source tabs", () => {
+  test("同系列 source 页签按新版本优先排序（如 Qwen3.6 在 Qwen3.5 前）", () => {
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:Qwen3.5", "text:Qwen3.6", "text:Qwen3.4", "text:Gemini-2.5-Pro"]}
+        rows={[
+          {
+            providerName: "Qwen",
+            modelName: "Qwen Model",
+            benchmarkName: "Bench-Q",
+            benchmarkType: "General",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Qwen3.5"
+          }
+        ]}
+      />
+    );
+
+    const qwenTabs = screen
+      .getAllByRole("tab")
+      .map((tab) => tab.textContent?.trim() ?? "")
+      .filter((label) => label.startsWith("Qwen3."));
+
+    expect(qwenTabs).toEqual(["Qwen3.6", "Qwen3.5", "Qwen3.4"]);
+  });
+
   test("当 rows 仅有单一 source 时，也会按 sourceOptions 展示全部页签", () => {
     render(
       <BenchmarkMatrix
