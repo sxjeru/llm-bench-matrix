@@ -1,38 +1,31 @@
 #!/usr/bin/env node
+/**
+ * Standalone migration script – runs as plain Node ESM.
+ *
+ * SSL and driver-detection logic is intentionally duplicated here (mirroring
+ * lib/db/ssl.ts and lib/db/driver.ts) because this script must run without
+ * the TypeScript compiler or Next.js build pipeline.
+ */
 import "dotenv/config";
 import { existsSync, readdirSync } from "node:fs";
 
+// ---------------------------------------------------------------------------
+// Connection helpers (mirrors lib/db/driver.ts)
+// ---------------------------------------------------------------------------
+
 const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL || "";
-
-function printMissingDatabaseEnvError() {
-  console.error(
-    [
-      "[migrate] Missing database connection string.",
-      "[migrate] Set DATABASE_URL (preferred) or POSTGRES_URL in Vercel > Project > Settings > Environment Variables.",
-      "[migrate] For Neon, use the Neon connection string; DATABASE_DRIVER=neon is optional because .neon.tech URLs are auto-detected.",
-      "[migrate] The build script runs database migrations before Next.js builds, so deployment cannot continue until this is configured."
-    ].join("\n")
-  );
-}
-
-if (!connectionString) {
-  printMissingDatabaseEnvError();
-  process.exit(1);
-}
 
 const useNeon =
   process.env.DATABASE_DRIVER === "neon" ||
   (process.env.DATABASE_DRIVER !== "pg" && /\.neon\.tech/.test(connectionString));
 
+// ---------------------------------------------------------------------------
+// SSL helpers (mirrors lib/db/ssl.ts)
+// ---------------------------------------------------------------------------
+
 const PG_SSL_QUERY_KEYS = [
-  "ssl",
-  "sslmode",
-  "sslcert",
-  "sslkey",
-  "sslrootcert",
-  "sslpassword",
-  "sslaccept",
-  "uselibpqcompat"
+  "ssl", "sslmode", "sslcert", "sslkey",
+  "sslrootcert", "sslpassword", "sslaccept", "uselibpqcompat"
 ];
 
 function normalizeEnvMultiline(value) {
@@ -72,6 +65,34 @@ function getSSLOptions() {
   return { ca: pem, rejectUnauthorized: true };
 }
 
+// ---------------------------------------------------------------------------
+// Env helpers
+// ---------------------------------------------------------------------------
+
+function parseIntEnv(name, fallback) {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const value = Number.parseInt(raw, 10);
+  if (Number.isNaN(value) || value < 0) return fallback;
+  return value;
+}
+
+// ---------------------------------------------------------------------------
+// Migration runner
+// ---------------------------------------------------------------------------
+
+if (!connectionString) {
+  console.error(
+    [
+      "[migrate] Missing database connection string.",
+      "[migrate] Set DATABASE_URL (preferred) or POSTGRES_URL in Vercel > Project > Settings > Environment Variables.",
+      "[migrate] For Neon, use the Neon connection string; DATABASE_DRIVER=neon is optional because .neon.tech URLs are auto-detected.",
+      "[migrate] The build script runs database migrations before Next.js builds, so deployment cannot continue until this is configured."
+    ].join("\n")
+  );
+  process.exit(1);
+}
+
 async function createMigrateContext() {
   if (useNeon) {
     const { Pool, neonConfig } = await import("@neondatabase/serverless");
@@ -97,10 +118,10 @@ async function createMigrateContext() {
   const pool = new pg.default.Pool({
     connectionString: pgConnectionString,
     ssl: sslOptions,
-    max: Number.parseInt(process.env.DATABASE_POOL_MAX || "5", 10),
-    idleTimeoutMillis: Number.parseInt(process.env.DATABASE_POOL_IDLE_TIMEOUT_MS || "10000", 10),
-    connectionTimeoutMillis: Number.parseInt(process.env.DATABASE_POOL_CONNECTION_TIMEOUT_MS || "5000", 10),
-    maxUses: Number.parseInt(process.env.DATABASE_POOL_MAX_USES || "7500", 10)
+    max: parseIntEnv("DATABASE_POOL_MAX", 5),
+    idleTimeoutMillis: parseIntEnv("DATABASE_POOL_IDLE_TIMEOUT_MS", 10000),
+    connectionTimeoutMillis: parseIntEnv("DATABASE_POOL_CONNECTION_TIMEOUT_MS", 5000),
+    maxUses: parseIntEnv("DATABASE_POOL_MAX_USES", 7500)
   });
 
   const db = drizzle(pool);

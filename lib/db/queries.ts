@@ -44,6 +44,20 @@ const dashboardStatsInFlight = new Map<string, Promise<DashboardStats>>();
 const sourceOptionsCache = new Map<string, TimedCacheEntry<string[]>>();
 const sourceOptionsInFlight = new Map<string, Promise<string[]>>();
 
+/**
+ * Clear all in-memory query caches. Call after admin write operations
+ * (import, merge, delete, etc.) so subsequent reads reflect updated data.
+ */
+export function invalidateAllCaches() {
+  dashboardRowsCache.clear();
+  dashboardStatsCache.clear();
+  sourceOptionsCache.clear();
+
+  dashboardRowsInFlight.clear();
+  dashboardStatsInFlight.clear();
+  sourceOptionsInFlight.clear();
+}
+
 function normalizeSourceFilterKey(sourceFilter?: string | null): string {
   const normalized = sourceFilter?.trim();
   return normalized && normalized.length > 0 ? normalized : "__ALL__";

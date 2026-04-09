@@ -1,12 +1,4 @@
-function normalizeToken(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-  const HYPHEN_VARIANT_REGEX = /[\-\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g;
+const HYPHEN_VARIANT_REGEX = /[\-\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g;
 
 export type ModelDedupeRule = {
   lowercase: boolean;
@@ -62,7 +54,11 @@ export function normalizeTextByDedupeRule(input: string, rule: ModelDedupeRule =
 }
 
 export function toProviderSlug(name: string): string {
-  return normalizeToken(name);
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 export function buildModelCanonicalKey(modelName: string, rule: ModelDedupeRule = DEFAULT_MODEL_DEDUPE_RULE): string {

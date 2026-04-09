@@ -11,6 +11,7 @@ import {
 import { parseBenchmarkValue, type ParsedBenchmarkValue } from "@/lib/db/parse-value";
 import type { ParsedImportRecord } from "@/lib/import/xlsm";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
+import { invalidateAllCaches } from "@/lib/db/queries";
 
 type EnsureBenchmarkInput = {
   benchmarkName: string;
@@ -62,7 +63,8 @@ type TextParseWarning = {
   reason: string;
 };
 
-type DbExecutor = any;
+/** Structural type covering the Drizzle methods used by entity-ensure helpers. */
+type DbExecutor = Pick<typeof db, "select" | "insert" | "update" | "delete" | "execute">;
 
 const EMPTY_VALUE_MARKERS = new Set(["", "-", "--", "—", "na", "n/a", "null", "none"]);
 const LOWER_IS_BETTER_BENCHMARK_RULES = [/fleurs/i, /omnidocbench\s*1\.5/i];
@@ -1009,6 +1011,8 @@ export async function rebuildModelCanonicalKeysByRule(rawRule: unknown) {
     }
   });
 
+  invalidateAllCaches();
+
   return {
     ok: true,
     totalModels: allModels.length,
@@ -1095,6 +1099,8 @@ export async function rebuildBenchmarkCanonicalKeysByRule(rawRule: unknown) {
       }
     }
   });
+
+  invalidateAllCaches();
 
   return {
     ok: true,
@@ -1309,6 +1315,8 @@ export async function createBenchmarkValue(input: {
     throw new Error("failed to create benchmark value");
   }
 
+  invalidateAllCaches();
+
   return created;
 }
 
@@ -1455,6 +1463,8 @@ export async function mergeEntity(input: {
       .set({ mergedIntoBenchmarkId: input.targetId })
       .where(and(eq(benchmarks.id, input.sourceId), isNull(benchmarks.mergedIntoBenchmarkId)));
   });
+
+  invalidateAllCaches();
 }
 
 export async function updateMergedEntityRecord(input: {
@@ -1471,13 +1481,14 @@ export async function updateMergedEntityRecord(input: {
       .update(models)
       .set({ mergedIntoModelId: input.targetId })
       .where(eq(models.id, input.sourceId));
-    return { ok: true };
+  } else {
+    await db
+      .update(benchmarks)
+      .set({ mergedIntoBenchmarkId: input.targetId })
+      .where(eq(benchmarks.id, input.sourceId));
   }
 
-  await db
-    .update(benchmarks)
-    .set({ mergedIntoBenchmarkId: input.targetId })
-    .where(eq(benchmarks.id, input.sourceId));
+  invalidateAllCaches();
 
   return { ok: true };
 }
@@ -1491,13 +1502,14 @@ export async function deleteMergedEntityRecord(input: {
       .update(models)
       .set({ mergedIntoModelId: null })
       .where(eq(models.id, input.sourceId));
-    return { ok: true };
+  } else {
+    await db
+      .update(benchmarks)
+      .set({ mergedIntoBenchmarkId: null })
+      .where(eq(benchmarks.id, input.sourceId));
   }
 
-  await db
-    .update(benchmarks)
-    .set({ mergedIntoBenchmarkId: null })
-    .where(eq(benchmarks.id, input.sourceId));
+  invalidateAllCaches();
 
   return { ok: true };
 }
@@ -1545,7 +1557,7 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
 
   const dedupeRule = await getModelDedupeRule();
 
-  return db.transaction(async (tx: any) => {
+  const result = await db.transaction(async (tx: any) => {
     const providerCache = new Map<string, Awaited<ReturnType<typeof ensureProvider>>>();
     const modelCache = new Map<string, Awaited<ReturnType<typeof ensureModelByProviderId>>>();
     const benchmarkByNameCache = new Map<string, Array<typeof benchmarks.$inferSelect>>();
@@ -1733,6 +1745,10 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
 
     return { inserted: valueRows.length };
   });
+
+  invalidateAllCaches();
+
+  return result;
 }
 
 function parseStructuredCsvRows(inputText: string, defaultSource: string | null): ParsedTextImportResult {
@@ -2417,6 +2433,8 @@ export async function deleteModelAndAllValues(modelId: number) {
     await tx.delete(models).where(eq(models.id, modelId));
   });
 
+  invalidateAllCaches();
+
   return {
     ok: true,
     modelId: existing.id,
@@ -2431,6 +2449,8 @@ export async function deleteBenchmarkValuesBySource(sourceInput: string) {
       .delete(benchmarkValues)
       .where(or(isNull(benchmarkValues.source), eq(benchmarkValues.source, "")))
       .returning({ id: benchmarkValues.id });
+
+    invalidateAllCaches();
 
     return {
       ok: true,
@@ -2463,6 +2483,8 @@ export async function deleteBenchmarkValuesBySource(sourceInput: string) {
     .delete(benchmarkSourceMeta)
     .where(inArray(benchmarkSourceMeta.source, matchedSources))
     .returning({ id: benchmarkSourceMeta.id });
+
+  invalidateAllCaches();
 
   return {
     ok: true,
@@ -2956,10 +2978,13 @@ export function __getDuplicateNameSimilarityForTest(left: string, right: string)
 export async function clearNonSettingsData() {
   await db.transaction(async (tx: any) => {
     await tx.delete(benchmarkValues);
+    await tx.delete(benchmarkSourceMeta);
     await tx.delete(models);
     await tx.delete(benchmarks);
     await tx.delete(providers);
   });
+
+  invalidateAllCaches();
 
   return {
     ok: true
