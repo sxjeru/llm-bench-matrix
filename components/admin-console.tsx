@@ -741,6 +741,7 @@ export function AdminConsole({
   const [mergeType, setMergeType] = useState<"model" | "benchmark">("model");
   const [mergeSourceInput, setMergeSourceInput] = useState("");
   const [mergeTargetInput, setMergeTargetInput] = useState("");
+  const [mergeTargetBenchmarkNameInput, setMergeTargetBenchmarkNameInput] = useState("");
   const [mergeSubmitState, setMergeSubmitState] = useState<MergeSubmitState>("idle");
   const mergeSubmitResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mergeSubmitButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -2667,6 +2668,7 @@ export function AdminConsole({
     setMergeType("model");
     setMergeSourceInput(`${candidate.sourceName} [${candidate.sourceId}]`);
     setMergeTargetInput(`${candidate.targetName} [${candidate.targetId}]`);
+    setMergeTargetBenchmarkNameInput("");
     window.requestAnimationFrame(() => {
       mergeSubmitButtonRef.current?.scrollIntoView({
         behavior: "smooth",
@@ -2680,6 +2682,7 @@ export function AdminConsole({
     setMergeType("benchmark");
     setMergeSourceInput(`${candidate.sourceName} [${candidate.sourceType}] [${candidate.sourceId}]`);
     setMergeTargetInput(`${candidate.targetName} [${candidate.targetType}] [${candidate.targetId}]`);
+    setMergeTargetBenchmarkNameInput(candidate.targetName);
     window.requestAnimationFrame(() => {
       mergeSubmitButtonRef.current?.scrollIntoView({
         behavior: "smooth",
@@ -2689,12 +2692,22 @@ export function AdminConsole({
     });
   }
 
-  function resolveMergeEntityLabel(entityType: "model" | "benchmark", entityId: number): string {
+  function resolveMergeEntityLabel(
+    entityType: "model" | "benchmark",
+    entityId: number,
+    targetBenchmarkNameOverride?: string
+  ): string {
     if (entityType === "model") {
       return modelById.get(entityId)?.modelName ?? `#${entityId}`;
     }
 
     const benchmark = benchmarkById.get(entityId);
+    if (targetBenchmarkNameOverride && targetBenchmarkNameOverride.trim().length > 0) {
+      return benchmark
+        ? `${targetBenchmarkNameOverride.trim()} [${benchmark.benchmarkType}]`
+        : targetBenchmarkNameOverride.trim();
+    }
+
     return benchmark ? `${benchmark.benchmarkName} [${benchmark.benchmarkType}]` : `#${entityId}`;
   }
 
@@ -2722,9 +2735,14 @@ export function AdminConsole({
     });
   }
 
-  function upsertMergedRecordAfterMerge(entityType: "model" | "benchmark", sourceId: number, targetId: number) {
+  function upsertMergedRecordAfterMerge(
+    entityType: "model" | "benchmark",
+    sourceId: number,
+    targetId: number,
+    targetBenchmarkNameOverride?: string
+  ) {
     const sourceName = resolveMergeEntityLabel(entityType, sourceId);
-    const targetName = resolveMergeEntityLabel(entityType, targetId);
+    const targetName = resolveMergeEntityLabel(entityType, targetId, targetBenchmarkNameOverride);
 
     setMergedRecordList((prev) => {
       const nextRecord: MergedRecord = {
@@ -2798,16 +2816,30 @@ export function AdminConsole({
       mergeSubmitResetTimerRef.current = null;
     }
 
+    const normalizedTargetBenchmarkName =
+      mergeType === "benchmark"
+        ? mergeTargetBenchmarkNameInput.trim()
+        : "";
+
     setMergeSubmitState("submitting");
 
     try {
       await postJson("/api/admin/merge", {
         entityType: mergeType,
         sourceId: resolvedMergeSourceId,
-        targetId: resolvedMergeTargetId
+        targetId: resolvedMergeTargetId,
+        targetBenchmarkName:
+          mergeType === "benchmark" && normalizedTargetBenchmarkName.length > 0
+            ? normalizedTargetBenchmarkName
+            : undefined
       });
 
-      upsertMergedRecordAfterMerge(mergeType, resolvedMergeSourceId, resolvedMergeTargetId);
+      upsertMergedRecordAfterMerge(
+        mergeType,
+        resolvedMergeSourceId,
+        resolvedMergeTargetId,
+        mergeType === "benchmark" ? normalizedTargetBenchmarkName : undefined
+      );
       removeDuplicateCandidateByMerge(mergeType, resolvedMergeSourceId, resolvedMergeTargetId);
 
       setMergeSubmitState("success");
@@ -4567,6 +4599,7 @@ export function AdminConsole({
                     setMergeType(e.target.value as "model" | "benchmark");
                     setMergeSourceInput("");
                     setMergeTargetInput("");
+                    setMergeTargetBenchmarkNameInput("");
                   }}
                 >
                   <option value="model">model</option>
@@ -4601,7 +4634,17 @@ export function AdminConsole({
               <div className="md:col-span-12 text-xs opacity-75">
                 解析结果：source = {resolvedMergeSourceId ?? "-"}，target = {resolvedMergeTargetId ?? "-"}
               </div>
-              <div className="md:col-span-12">
+              {mergeType === "benchmark" ? (
+                <div className="md:col-span-8">
+                  <input
+                    className="input input-bordered w-full"
+                    value={mergeTargetBenchmarkNameInput}
+                    onChange={(e) => setMergeTargetBenchmarkNameInput(e.target.value)}
+                    placeholder="可选：合并时同时修改 target benchmark 显示名称"
+                  />
+                </div>
+              ) : null}
+              <div className={mergeType === "benchmark" ? "md:col-span-4" : "md:col-span-12"}>
                 <button
                   ref={mergeSubmitButtonRef}
                   type="submit"

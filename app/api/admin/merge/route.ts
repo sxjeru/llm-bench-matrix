@@ -6,7 +6,8 @@ import { mergeEntity } from "../../../../lib/admin-service";
 const schema = z.object({
   entityType: z.enum(["model", "benchmark"]),
   sourceId: z.number().int().positive(),
-  targetId: z.number().int().positive()
+  targetId: z.number().int().positive(),
+  targetBenchmarkName: z.string().trim().min(1).optional()
 });
 
 export async function POST(request: Request) {

@@ -1236,4 +1236,46 @@ describe("AdminConsole merge interactions", () => {
     const errorNotices = screen.getAllByText(/重复检测失败-[12]/);
     expect(errorNotices).toHaveLength(2);
   });
+
+  test("benchmark 合并时可同步修改 target benchmark 显示名", async () => {
+    const user = userEvent.setup();
+
+    const duplicateResult = buildDuplicateDetectionResponse();
+    const fetchMock = mockFetchSequence(duplicateResult, { ok: true });
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await openMergeTab(user);
+    await user.click(screen.getByRole("button", { name: "检测重复候选" }));
+
+    await user.click(screen.getByRole("button", { name: "Benchmark 候选（1）" }));
+    await user.click(screen.getAllByRole("button", { name: "填充到合并表单" })[0]!);
+
+    const renameInput = screen.getByPlaceholderText("可选：合并时同时修改 target benchmark 显示名称");
+    await user.clear(renameInput);
+    await user.type(renameInput, "Bench-2-Renamed");
+
+    await user.click(screen.getByRole("button", { name: "合并实体" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const secondCall = fetchMock.mock.calls[1];
+    const secondPayload = JSON.parse(((secondCall?.[1] as RequestInit).body ?? "{}") as string) as {
+      entityType?: string;
+      targetBenchmarkName?: string;
+    };
+
+    expect(secondPayload.entityType).toBe("benchmark");
+    expect(secondPayload.targetBenchmarkName).toBe("Bench-2-Renamed");
+
+    const mergedRowSource = await screen.findByText(/Bench-1 \[Type-A\] \[11\]/);
+    const mergedRow = mergedRowSource.closest("tr");
+    if (!mergedRow) {
+      throw new Error("Merged benchmark row not found");
+    }
+
+    expect(within(mergedRow).getByDisplayValue("Bench-2-Renamed [Type-B] [12]")).toBeInTheDocument();
+  });
 });

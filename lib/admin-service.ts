@@ -1300,6 +1300,7 @@ export async function mergeEntity(input: {
   entityType: "model" | "benchmark";
   sourceId: number;
   targetId: number;
+  targetBenchmarkName?: string;
 }) {
   if (input.sourceId === input.targetId) {
     throw new Error("sourceId and targetId cannot be the same");
@@ -1318,6 +1319,39 @@ export async function mergeEntity(input: {
         .where(and(eq(models.id, input.sourceId), isNull(models.mergedIntoModelId)));
 
       return;
+    }
+
+    const normalizedTargetBenchmarkName = input.targetBenchmarkName
+      ? normalizeNameParenthesisSpacing(input.targetBenchmarkName)
+      : "";
+
+    if (normalizedTargetBenchmarkName.length > 0) {
+      const [targetBenchmark] = await tx
+        .select({
+          benchmarkType: benchmarks.benchmarkType
+        })
+        .from(benchmarks)
+        .where(eq(benchmarks.id, input.targetId))
+        .limit(1);
+
+      if (!targetBenchmark) {
+        throw new Error(`target benchmark not found: ${input.targetId}`);
+      }
+
+      const dedupeRule = await getModelDedupeRule();
+      const nextCanonicalKey = buildBenchmarkCanonicalKey(
+        normalizedTargetBenchmarkName,
+        targetBenchmark.benchmarkType,
+        dedupeRule
+      );
+
+      await tx
+        .update(benchmarks)
+        .set({
+          benchmarkName: normalizedTargetBenchmarkName,
+          canonicalKey: nextCanonicalKey
+        })
+        .where(eq(benchmarks.id, input.targetId));
     }
 
     const [sourceBenchmark] = await tx
