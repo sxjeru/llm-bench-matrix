@@ -170,6 +170,41 @@ describe("paper-table 文本解析", () => {
     }
   });
 
+  test("逗号分隔矩阵文本可正确识别 Category + Benchmark 列", () => {
+    const inputText = [
+      "Category,Benchmark,Muse Spark Thinking,Opus 4.6 Max,Gemini 3.1 Pro High,GPT 5.4 Xhigh,Grok 4.2 Reasoning",
+      "Multimodal,CharXiv Reasoning,86.4,65.3 (Self-Reported: 61.5),80.2,82.8,60.9"
+    ].join("\n");
+
+    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+
+    expect(parsed.format).toBe("matrix-table");
+
+    const charxivRows = parsed.rows.filter((row) => row.benchmarkName === "CharXiv Reasoning");
+    expect(charxivRows).toHaveLength(5);
+    expect(new Set(charxivRows.map((row) => row.benchmarkType))).toEqual(new Set(["Multimodal"]));
+    expect(charxivRows.every((row) => row.modalities.includes("Multimodal"))).toBe(true);
+
+    const opusRow = charxivRows.find((row) => row.modelName === "Opus 4.6 Max");
+    expect(opusRow?.valueRaw).toBe("65.3");
+    expect(opusRow?.valueNote).toBe("(Self-Reported: 61.5)");
+  });
+
+  test("结构化 CSV 识别不受逗号矩阵支持影响", () => {
+    const inputText = [
+      "provider,model,benchmark,benchmark_type,value_raw,source",
+      "OpenAI,GPT-5.4,GPQA Diamond,Knowledge,92.8,text:unit-test"
+    ].join("\n");
+
+    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+
+    expect(parsed.format).toBe("structured-csv");
+    expect(parsed.rows).toHaveLength(1);
+    expect(parsed.rows[0]?.modelName).toBe("GPT-5.4");
+    expect(parsed.rows[0]?.benchmarkName).toBe("GPQA Diamond");
+    expect(parsed.rows[0]?.valueRaw).toBe("92.8");
+  });
+
   test("矩阵值中的括号说明会拆分为数值与备注", () => {
     const inputText = [
       "Benchmark\tClaude Sonnet 4\tGPT-5",

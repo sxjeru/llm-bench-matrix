@@ -278,9 +278,37 @@ function isEmptyImportValue(rawInput: string | undefined): boolean {
   return EMPTY_VALUE_MARKERS.has(normalized);
 }
 
+function splitCommaSeparatedLine(line: string): string[] | null {
+  if (!line.includes(",")) {
+    return null;
+  }
+
+  try {
+    const parsedRows = parse(line, {
+      columns: false,
+      trim: true,
+      skipEmptyLines: false
+    }) as string[][];
+
+    const firstRow = parsedRows[0];
+    if (!firstRow || firstRow.length <= 1) {
+      return null;
+    }
+
+    return firstRow.map((item) => item.trim());
+  } catch {
+    return null;
+  }
+}
+
 function splitTableLine(line: string): string[] {
   if (line.includes("\t")) {
     return line.split("\t").map((item) => item.trim());
+  }
+
+  const commaSeparatedCells = splitCommaSeparatedLine(line);
+  if (commaSeparatedCells) {
+    return commaSeparatedCells;
   }
 
   return line
@@ -733,12 +761,20 @@ function sanitizeUnsupportedValueSymbols(rows: NormalizedTextImportRow[]): {
 }
 
 function looksLikeStructuredCsv(firstLine: string): boolean {
-  if (!firstLine.includes(",")) return false;
+  const headerCells = splitCommaSeparatedLine(firstLine)
+    ?.map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
 
-  const lowered = firstLine.toLowerCase();
-  return ["provider", "model", "benchmark", "value", "bench_time", "source"].some((token) =>
-    lowered.includes(token)
-  );
+  if (!headerCells || headerCells.length === 0) {
+    return false;
+  }
+
+  const headerSet = new Set(headerCells);
+  const hasModelColumn = headerSet.has("model") || headerSet.has("model_name");
+  const hasBenchmarkColumn = headerSet.has("benchmark") || headerSet.has("benchmark_name");
+  const hasValueColumn = headerSet.has("value") || headerSet.has("value_raw") || headerSet.has("raw_value");
+
+  return hasModelColumn && hasBenchmarkColumn && hasValueColumn;
 }
 
 function normalizeModalities(modalities?: string[]): string[] {
