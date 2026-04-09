@@ -140,6 +140,7 @@ const MAX_BENCHMARK_COLUMN_WIDTH = 560;
 const DEFAULT_MODEL_COLUMN_BASELINE_WIDTH = 88;
 const MIN_MODEL_COLUMN_RESIZE_WIDTH = 24;
 const MAX_MODEL_COLUMN_WIDTH = 320;
+const COLUMN_WIDTH_STORAGE_DEBOUNCE_MS = 250;
 const SOURCE_MATCH_FRAME_COLOR = "rgba(93, 167, 255, 0.42)";
 const WEBP_EXPORT_QUALITY = 0.94;
 const AVIF_EXPORT_QUALITY = 0.9;
@@ -1127,6 +1128,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const showDuplicateLoadedRef = useRef(false);
   const modelSelectionBySourceRef = useRef<Record<string, string[]>>({});
   const columnWidthBySourceRef = useRef<Record<string, Record<string, number>>>({});
+  const columnWidthPersistTimeoutRef = useRef<number | null>(null);
   const heatmapPaletteLoadedRef = useRef(false);
   const columnResizeStateRef = useRef<{
     columnKey: string;
@@ -2270,12 +2272,29 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       [sourceKey]: activeColumnWidthMap
     };
 
-    try {
-      window.localStorage.setItem(COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY, JSON.stringify(columnWidthBySourceRef.current));
-    } catch {
-      // ignore storage access errors gracefully
+    if (columnWidthPersistTimeoutRef.current !== null) {
+      window.clearTimeout(columnWidthPersistTimeoutRef.current);
     }
+
+    columnWidthPersistTimeoutRef.current = window.setTimeout(() => {
+      columnWidthPersistTimeoutRef.current = null;
+
+      try {
+        window.localStorage.setItem(COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY, JSON.stringify(columnWidthBySourceRef.current));
+      } catch {
+        // ignore storage access errors gracefully
+      }
+    }, COLUMN_WIDTH_STORAGE_DEBOUNCE_MS);
   }, [activeColumnWidthMap, isColumnWidthLoaded]);
+
+  useEffect(() => {
+    return () => {
+      if (columnWidthPersistTimeoutRef.current !== null) {
+        window.clearTimeout(columnWidthPersistTimeoutRef.current);
+        columnWidthPersistTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   const categoryColumnWidth = useMemo(
     () => clampColumnWidth(
