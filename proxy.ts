@@ -1,8 +1,8 @@
 /**
- * Next.js Middleware – Admin route protection
+ * Next.js Proxy – Admin route protection
  *
  * Security model (layered):
- *   1. **Middleware (this file)** – Fast cookie-format check. Rejects requests
+ *   1. **Proxy (this file)** – Fast cookie-format check. Rejects requests
  *      without a valid-format session cookie and redirects to login. This is a
  *      UX convenience layer; it does NOT perform database validation.
  *   2. **Server Component** (`app/admin/page.tsx`) – Calls `isAdminAuthorized`

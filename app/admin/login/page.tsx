@@ -15,10 +15,27 @@ export default function AdminLoginPage() {
 
   const router = useRouter();
 
+  function sanitizeRedirectTarget(rawTarget: string | null): string {
+    if (!rawTarget) return "/admin";
+
+    const target = rawTarget.trim();
+    if (!target.startsWith("/")) return "/admin";
+    if (target.startsWith("//")) return "/admin";
+
+    try {
+      const resolved = new URL(target, window.location.origin);
+      if (resolved.origin !== window.location.origin) return "/admin";
+      if (!resolved.pathname.startsWith("/admin")) return "/admin";
+      return `${resolved.pathname}${resolved.search}${resolved.hash}`;
+    } catch {
+      return "/admin";
+    }
+  }
+
   function getRedirectTarget() {
     if (typeof window === "undefined") return "/admin";
 
-    return new URLSearchParams(window.location.search).get("from") || "/admin";
+    return sanitizeRedirectTarget(new URLSearchParams(window.location.search).get("from"));
   }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {

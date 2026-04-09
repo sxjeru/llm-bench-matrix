@@ -1,4 +1,4 @@
-import { and, count, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, count, countDistinct, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 
@@ -30,6 +30,7 @@ export type DashboardRow = {
 
 const SOURCE_EMPTY_KEY = "__EMPTY__";
 const DASHBOARD_CACHE_TTL_MS = 60_000;
+const DEFAULT_MAX_DASHBOARD_ROWS = 50_000;
 
 type TimedCacheEntry<T> = {
   value: T;
@@ -102,10 +103,11 @@ function resolveDashboardWhereClause(sourceFilter?: string | null) {
 }
 
 export async function getDashboardRows(limit: number | null = null, sourceFilter?: string | null): Promise<DashboardRow[]> {
-  const normalizedLimit =
+  const rawLimit =
     typeof limit === "number" && Number.isFinite(limit) && limit > 0
       ? Math.trunc(limit)
-      : null;
+      : DEFAULT_MAX_DASHBOARD_ROWS;
+  const normalizedLimit = Math.min(rawLimit, DEFAULT_MAX_DASHBOARD_ROWS);
   const normalizedSourceFilter = sourceFilter?.trim() || null;
   const cacheKey = `${normalizedLimit ?? "all"}::${normalizeSourceFilterKey(normalizedSourceFilter)}`;
 
@@ -147,9 +149,10 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
           )
         )
         .where(whereClause)
-        .orderBy(desc(benchmarkValues.benchTime), desc(benchmarkValues.id));
+        .orderBy(desc(benchmarkValues.benchTime), desc(benchmarkValues.id))
+        .limit(normalizedLimit);
 
-      const rows = normalizedLimit !== null ? await baseQuery.limit(normalizedLimit) : await baseQuery;
+      const rows = await baseQuery;
 
       const shouldUseSourceMeta = Boolean(
         normalizedSourceFilter && normalizedSourceFilter !== SOURCE_EMPTY_KEY
@@ -197,42 +200,24 @@ export async function getDashboardStats(sourceFilter?: string | null): Promise<D
     async () => {
       const whereClause = resolveDashboardWhereClause(normalizedSourceFilter);
 
-      const [providerResult, modelResult, benchmarkResult, totalResult] = await Promise.all([
-        db
-          .select({ count: sql<number>`count(distinct ${providers.id})` })
-          .from(benchmarkValues)
-          .innerJoin(models, eq(benchmarkValues.modelId, models.id))
-          .innerJoin(providers, eq(models.providerId, providers.id))
-          .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-          .where(whereClause),
-        db
-          .select({ count: sql<number>`count(distinct ${models.id})` })
-          .from(benchmarkValues)
-          .innerJoin(models, eq(benchmarkValues.modelId, models.id))
-          .innerJoin(providers, eq(models.providerId, providers.id))
-          .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-          .where(whereClause),
-        db
-          .select({ count: sql<number>`count(distinct ${benchmarks.id})` })
-          .from(benchmarkValues)
-          .innerJoin(models, eq(benchmarkValues.modelId, models.id))
-          .innerJoin(providers, eq(models.providerId, providers.id))
-          .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-          .where(whereClause),
-        db
-          .select({ count: count() })
-          .from(benchmarkValues)
-          .innerJoin(models, eq(benchmarkValues.modelId, models.id))
-          .innerJoin(providers, eq(models.providerId, providers.id))
-          .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-          .where(whereClause)
-      ]);
+      const [result] = await db
+        .select({
+          providerCount: countDistinct(providers.id),
+          modelCount: countDistinct(models.id),
+          benchmarkCount: countDistinct(benchmarks.id),
+          totalRecords: count()
+        })
+        .from(benchmarkValues)
+        .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+        .innerJoin(providers, eq(models.providerId, providers.id))
+        .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+        .where(whereClause);
 
       return {
-        providerCount: Number(providerResult[0]?.count ?? 0),
-        modelCount: Number(modelResult[0]?.count ?? 0),
-        benchmarkCount: Number(benchmarkResult[0]?.count ?? 0),
-        totalRecords: Number(totalResult[0]?.count ?? 0)
+        providerCount: Number(result?.providerCount ?? 0),
+        modelCount: Number(result?.modelCount ?? 0),
+        benchmarkCount: Number(result?.benchmarkCount ?? 0),
+        totalRecords: Number(result?.totalRecords ?? 0)
       };
     }
   );
@@ -268,18 +253,18 @@ export async function getSourceOptions(): Promise<string[]> {
     DASHBOARD_CACHE_TTL_MS,
     async () => {
       const rows = await db
-        .select({ source: benchmarkValues.source })
+        .selectDistinct({ source: benchmarkValues.source })
         .from(benchmarkValues)
         .where(isNotNull(benchmarkValues.source))
         .orderBy(benchmarkValues.source);
 
-      return Array.from(
-        new Set(
-          rows
-            .map((item) => item.source?.trim() ?? "")
-            .filter((item): item is string => item.length > 0)
-        )
-      );
+      const normalized = rows
+        .map((item) => item.source?.trim() ?? "")
+        .filter((item): item is string => item.length > 0);
+
+      // Keep post-trim uniqueness semantics stable even if DB distinct values differ
+      // only by surrounding whitespace.
+      return Array.from(new Set(normalized));
     }
   );
 }

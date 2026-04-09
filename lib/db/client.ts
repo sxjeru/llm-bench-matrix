@@ -34,7 +34,13 @@ function createDb() {
 
   if (useNeon) {
     neonConfig.webSocketConstructor = WebSocket;
-    const pool = new NeonPool({ connectionString });
+    const pool = new NeonPool({
+      connectionString,
+      max: parseIntEnv("DATABASE_POOL_MAX", 5, 1),
+      idleTimeoutMillis: parseIntEnv("DATABASE_POOL_IDLE_TIMEOUT_MS", 10_000, 0),
+      connectionTimeoutMillis: parseIntEnv("DATABASE_POOL_CONNECTION_TIMEOUT_MS", 5_000, 0),
+      maxUses: parseIntEnv("DATABASE_POOL_MAX_USES", 7_500, 0)
+    });
     return neonDrizzle(pool, { schema });
   }
 

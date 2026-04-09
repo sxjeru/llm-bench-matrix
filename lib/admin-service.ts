@@ -959,13 +959,12 @@ export async function rebuildModelCanonicalKeysByRule(rawRule: unknown) {
   let mergedCount = 0;
 
   await db.transaction(async (tx: any) => {
-    for (const model of allModels) {
-      await tx
-        .update(models)
-        .set({ canonicalKey: `tmp-model-${model.id}-${tempSuffix}` })
-        .where(eq(models.id, model.id));
-    }
+    // Phase 1: Batch assign temporary keys to all models in a single UPDATE
+    await tx.execute(
+      sql`UPDATE models SET canonical_key = 'tmp-model-' || id::text || '-' || ${String(tempSuffix)}`
+    );
 
+    // Phase 2: Process each canonical group
     for (const [canonicalKey, groupedModels] of groupMap.entries()) {
       const keeper = groupedModels.find((item) => item.mergedIntoModelId === null) ?? groupedModels[0];
       if (!keeper) continue;
@@ -975,18 +974,27 @@ export async function rebuildModelCanonicalKeysByRule(rawRule: unknown) {
         .set({ canonicalKey, mergedIntoModelId: null })
         .where(eq(models.id, keeper.id));
 
+      const duplicateIds = groupedModels
+        .filter((item) => item.id !== keeper.id)
+        .map((item) => item.id);
+
+      if (duplicateIds.length === 0) continue;
+
+      // Batch reassign benchmark values from all duplicates to keeper
+      await tx
+        .update(benchmarkValues)
+        .set({ modelId: keeper.id })
+        .where(inArray(benchmarkValues.modelId, duplicateIds));
+
+      // Batch update merged_into pointers that referenced any duplicate
+      await tx
+        .update(models)
+        .set({ mergedIntoModelId: keeper.id })
+        .where(inArray(models.mergedIntoModelId, duplicateIds));
+
+      // Mark each duplicate with its unique merged key
       for (const duplicate of groupedModels) {
         if (duplicate.id === keeper.id) continue;
-
-        await tx
-          .update(benchmarkValues)
-          .set({ modelId: keeper.id })
-          .where(eq(benchmarkValues.modelId, duplicate.id));
-
-        await tx
-          .update(models)
-          .set({ mergedIntoModelId: keeper.id })
-          .where(eq(models.mergedIntoModelId, duplicate.id));
 
         await tx
           .update(models)
@@ -1038,13 +1046,12 @@ export async function rebuildBenchmarkCanonicalKeysByRule(rawRule: unknown) {
   let mergedCount = 0;
 
   await db.transaction(async (tx: any) => {
-    for (const benchmark of allBenchmarks) {
-      await tx
-        .update(benchmarks)
-        .set({ canonicalKey: `tmp-benchmark-${benchmark.id}-${tempSuffix}` })
-        .where(eq(benchmarks.id, benchmark.id));
-    }
+    // Phase 1: Batch assign temporary keys to all benchmarks in a single UPDATE
+    await tx.execute(
+      sql`UPDATE benchmarks SET canonical_key = 'tmp-benchmark-' || id::text || '-' || ${String(tempSuffix)}`
+    );
 
+    // Phase 2: Process each canonical group
     for (const [canonicalKey, groupedBenchmarks] of groupMap.entries()) {
       const keeper = groupedBenchmarks.find((item) => item.mergedIntoBenchmarkId === null) ?? groupedBenchmarks[0];
       if (!keeper) continue;
@@ -1054,18 +1061,27 @@ export async function rebuildBenchmarkCanonicalKeysByRule(rawRule: unknown) {
         .set({ canonicalKey, mergedIntoBenchmarkId: null })
         .where(eq(benchmarks.id, keeper.id));
 
+      const duplicateIds = groupedBenchmarks
+        .filter((item) => item.id !== keeper.id)
+        .map((item) => item.id);
+
+      if (duplicateIds.length === 0) continue;
+
+      // Batch reassign benchmark values from all duplicates to keeper
+      await tx
+        .update(benchmarkValues)
+        .set({ benchmarkId: keeper.id })
+        .where(inArray(benchmarkValues.benchmarkId, duplicateIds));
+
+      // Batch update merged_into pointers that referenced any duplicate
+      await tx
+        .update(benchmarks)
+        .set({ mergedIntoBenchmarkId: keeper.id })
+        .where(inArray(benchmarks.mergedIntoBenchmarkId, duplicateIds));
+
+      // Mark each duplicate with its unique merged key
       for (const duplicate of groupedBenchmarks) {
         if (duplicate.id === keeper.id) continue;
-
-        await tx
-          .update(benchmarkValues)
-          .set({ benchmarkId: keeper.id })
-          .where(eq(benchmarkValues.benchmarkId, duplicate.id));
-
-        await tx
-          .update(benchmarks)
-          .set({ mergedIntoBenchmarkId: keeper.id })
-          .where(eq(benchmarks.mergedIntoBenchmarkId, duplicate.id));
 
         await tx
           .update(benchmarks)
