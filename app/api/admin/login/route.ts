@@ -77,6 +77,10 @@ export async function POST(request: Request) {
     await persistAdminPassword(parsed.data.password, "admin-auto-bootstrap");
   }
 
+  if (result.needsHashUpgrade) {
+    await persistAdminPassword(parsed.data.password, "hash-upgrade-sha256-to-pbkdf2");
+  }
+
   const sessionToken = await createAdminSessionToken();
 
   const response = NextResponse.json({
