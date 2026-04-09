@@ -10,7 +10,9 @@ import {
   Layers,
   Merge as MergeIcon,
   PlusCircle,
+  Search,
   Settings2,
+  Sparkles,
   ShieldAlert,
   Table2,
   TriangleAlert,
@@ -149,6 +151,53 @@ type NoticeState = {
   details?: string[];
 };
 
+type NoticeItem = NoticeState & {
+  id: number;
+  visible: boolean;
+};
+
+type MergeSubmitState = "idle" | "submitting" | "success";
+
+type DuplicateConfidence = "high" | "medium" | "low";
+
+type DuplicateModelCandidate = {
+  sourceId: number;
+  sourceName: string;
+  sourceProviderName: string;
+  sourceValueCount: number;
+  targetId: number;
+  targetName: string;
+  targetProviderName: string;
+  targetValueCount: number;
+  confidence: DuplicateConfidence;
+  similarity: number;
+  characterRepeatScore: number;
+  reasons: string[];
+};
+
+type DuplicateBenchmarkCandidate = {
+  sourceId: number;
+  sourceName: string;
+  sourceType: string;
+  sourceSourceSummary?: string;
+  sourceValueCount: number;
+  targetId: number;
+  targetName: string;
+  targetType: string;
+  targetSourceSummary?: string;
+  targetValueCount: number;
+  confidence: DuplicateConfidence;
+  similarity: number;
+  characterRepeatScore: number;
+  reasons: string[];
+};
+
+type DuplicateDetectionResult = {
+  generatedAt: string;
+  modelCandidates: DuplicateModelCandidate[];
+  benchmarkCandidates: DuplicateBenchmarkCandidate[];
+};
+
 const DEFAULT_MODEL_DEDUPE_RULE: ModelDedupeRule = {
   lowercase: true,
   removeHyphen: true,
@@ -164,6 +213,7 @@ const HARDCODED_BENCHMARK_ALIAS_RULES: Array<{ pattern: RegExp; targetName: stri
 const LOWER_IS_BETTER_PREVIEW_RULES = [/fleurs/i, /omnidocbench\s*1\.5/i];
 const OMNIDOCBENCH_15_MATCHER = /omnidocbench\s*1\.5/i;
 const MULTIMODAL_HINT_PATTERN = /(\bmultimodal(?:ity)?\b|\bmulti[\s-_]?modal(?:ity)?\b|多模态)/i;
+const MODEL_HYPHEN_VARIANT_REGEX = /[\-\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g;
 const PAIR_NOTE_HISTORY_STORAGE_KEY = "admin-console:pair-note-history";
 const STAR_NOTE_HISTORY_STORAGE_KEY = "admin-console:star-note-history";
 const MODALITY_OPTIONS = ["Text", "Vision", "Audio", "Video", "Multimodal"] as const;
@@ -303,11 +353,15 @@ function buildBenchmarkCompareKey(input: string): string {
 }
 
 function buildModelCompareKey(input: string): string {
-  return input.toLowerCase().replace(/[\-\s\.]/g, "").trim();
+  return input
+    .toLowerCase()
+    .replace(MODEL_HYPHEN_VARIANT_REGEX, "")
+    .replace(/[\s\.]/g, "")
+    .trim();
 }
 
 function normalizeModelNameByDedupeRule(input: string, rule: ModelDedupeRule): string {
-  let normalized = input.trim();
+  let normalized = input.trim().replace(MODEL_HYPHEN_VARIANT_REGEX, "-");
 
   if (rule.lowercase) {
     normalized = normalized.toLowerCase();
@@ -601,8 +655,7 @@ export function AdminConsole({
   initialSettings
 }: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>("import");
-  const [notice, setNotice] = useState<NoticeState | null>(null);
-  const [noticeVisible, setNoticeVisible] = useState(false);
+  const [noticeList, setNoticeList] = useState<NoticeItem[]>([]);
 
   const [providerName, setProviderName] = useState("");
   const [providerId, setProviderId] = useState<number | "">(providers[0]?.id ?? "");
@@ -680,12 +733,17 @@ export function AdminConsole({
   const [textImportStatusText, setTextImportStatusText] = useState("等待导入");
   const importProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const textImportProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const noticeHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const noticeClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noticeTimersRef = useRef<
+    Map<number, { hideTimer: ReturnType<typeof setTimeout>; clearTimer: ReturnType<typeof setTimeout> }>
+  >(new Map());
+  const nextNoticeIdRef = useRef(1);
 
   const [mergeType, setMergeType] = useState<"model" | "benchmark">("model");
   const [mergeSourceInput, setMergeSourceInput] = useState("");
   const [mergeTargetInput, setMergeTargetInput] = useState("");
+  const [mergeSubmitState, setMergeSubmitState] = useState<MergeSubmitState>("idle");
+  const mergeSubmitResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mergeSubmitButtonRef = useRef<HTMLButtonElement | null>(null);
   const [mergedRecordList, setMergedRecordList] = useState<MergedRecord[]>(mergedRecords);
   const [mergedRecordTargetInputs, setMergedRecordTargetInputs] = useState<Record<string, string>>(() =>
     mergedRecords.reduce<Record<string, string>>((acc, record) => {
@@ -693,6 +751,10 @@ export function AdminConsole({
       return acc;
     }, {})
   );
+  const [isDetectingDuplicates, setIsDetectingDuplicates] = useState(false);
+  const [duplicateDetectionResult, setDuplicateDetectionResult] = useState<DuplicateDetectionResult | null>(null);
+  const [duplicateDetectionEntityType, setDuplicateDetectionEntityType] = useState<"model" | "benchmark">("model");
+  const [duplicateConfidenceFilter, setDuplicateConfidenceFilter] = useState<"high-medium" | "all">("high-medium");
 
   const [settingKey, setSettingKey] = useState("");
   const [settingValue, setSettingValue] = useState("{}");
@@ -1360,6 +1422,20 @@ export function AdminConsole({
     [mergeTargetInput, mergeEntityOptions]
   );
 
+  const visibleModelDuplicateCandidates = useMemo(() => {
+    if (!duplicateDetectionResult) return [];
+    return duplicateDetectionResult.modelCandidates.filter((candidate) =>
+      shouldDisplayDuplicateCandidate(candidate.confidence)
+    );
+  }, [duplicateDetectionResult, duplicateConfidenceFilter]);
+
+  const visibleBenchmarkDuplicateCandidates = useMemo(() => {
+    if (!duplicateDetectionResult) return [];
+    return duplicateDetectionResult.benchmarkCandidates.filter((candidate) =>
+      shouldDisplayDuplicateCandidate(candidate.confidence)
+    );
+  }, [duplicateDetectionResult, duplicateConfidenceFilter]);
+
   useEffect(() => {
     return () => {
       if (importProgressTimerRef.current) {
@@ -1372,15 +1448,16 @@ export function AdminConsole({
         textImportProgressTimerRef.current = null;
       }
 
-      if (noticeHideTimerRef.current) {
-        clearTimeout(noticeHideTimerRef.current);
-        noticeHideTimerRef.current = null;
+      if (mergeSubmitResetTimerRef.current) {
+        clearTimeout(mergeSubmitResetTimerRef.current);
+        mergeSubmitResetTimerRef.current = null;
       }
 
-      if (noticeClearTimerRef.current) {
-        clearTimeout(noticeClearTimerRef.current);
-        noticeClearTimerRef.current = null;
-      }
+      noticeTimersRef.current.forEach(({ hideTimer, clearTimer }) => {
+        clearTimeout(hideTimer);
+        clearTimeout(clearTimer);
+      });
+      noticeTimersRef.current.clear();
     };
   }, []);
 
@@ -1393,34 +1470,6 @@ export function AdminConsole({
       }, {})
     );
   }, [mergedRecords]);
-
-  useEffect(() => {
-    if (!notice) return;
-
-    if (noticeHideTimerRef.current) {
-      clearTimeout(noticeHideTimerRef.current);
-      noticeHideTimerRef.current = null;
-    }
-
-    if (noticeClearTimerRef.current) {
-      clearTimeout(noticeClearTimerRef.current);
-      noticeClearTimerRef.current = null;
-    }
-
-    setNoticeVisible(true);
-
-    const hideDelay = notice.type === "error" ? 30000 : 15000;
-    const clearDelay = notice.type === "error" ? 30500 : 15000;
-
-    noticeHideTimerRef.current = setTimeout(() => {
-      setNoticeVisible(false);
-    }, hideDelay);
-
-    noticeClearTimerRef.current = setTimeout(() => {
-      setNotice(null);
-      setNoticeVisible(false);
-    }, clearDelay);
-  }, [notice]);
 
   useEffect(() => {
     try {
@@ -1487,20 +1536,75 @@ export function AdminConsole({
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, []);
 
-  function notifySuccess(message: string, details?: string[]) {
-    setNotice({
-      type: "success",
-      message,
-      details: details && details.length > 0 ? details : undefined
+  function clearNoticeTimers(noticeId: number) {
+    const timers = noticeTimersRef.current.get(noticeId);
+    if (!timers) return;
+
+    clearTimeout(timers.hideTimer);
+    clearTimeout(timers.clearTimer);
+    noticeTimersRef.current.delete(noticeId);
+  }
+
+  function enqueueNotice(type: NoticeState["type"], message: string, details?: string[]) {
+    const noticeId = nextNoticeIdRef.current;
+    nextNoticeIdRef.current += 1;
+
+    const normalizedDetails = details && details.length > 0 ? details : undefined;
+
+    setNoticeList((prev) => [
+      ...prev,
+      {
+        id: noticeId,
+        type,
+        message,
+        details: normalizedDetails,
+        visible: false
+      }
+    ]);
+
+    window.requestAnimationFrame(() => {
+      setNoticeList((prev) =>
+        prev.map((item) =>
+          item.id === noticeId
+            ? {
+                ...item,
+                visible: true
+              }
+            : item
+        )
+      );
     });
+
+    const hideDelay = type === "error" ? 30000 : 15000;
+    const clearDelay = hideDelay + 500;
+
+    const hideTimer = setTimeout(() => {
+      setNoticeList((prev) =>
+        prev.map((item) =>
+          item.id === noticeId
+            ? {
+                ...item,
+                visible: false
+              }
+            : item
+        )
+      );
+    }, hideDelay);
+
+    const clearTimer = setTimeout(() => {
+      setNoticeList((prev) => prev.filter((item) => item.id !== noticeId));
+      clearNoticeTimers(noticeId);
+    }, clearDelay);
+
+    noticeTimersRef.current.set(noticeId, { hideTimer, clearTimer });
+  }
+
+  function notifySuccess(message: string, details?: string[]) {
+    enqueueNotice("success", message, details);
   }
 
   function notifyError(message: string, details?: string[]) {
-    setNotice({
-      type: "error",
-      message,
-      details: details && details.length > 0 ? details : undefined
-    });
+    enqueueNotice("error", message, details);
   }
 
   function buildWorkbookFormData(sheetName?: string, allowWarnings?: boolean) {
@@ -2509,12 +2613,192 @@ export function AdminConsole({
     await executeImportCsv();
   }
 
+  function duplicateConfidenceBadgeClass(confidence: DuplicateConfidence): string {
+    if (confidence === "high") {
+      return "border border-emerald-300/70 bg-emerald-500/25 text-emerald-100";
+    }
+    if (confidence === "medium") {
+      return "border border-amber-300/70 bg-amber-500/25 text-amber-100";
+    }
+    return "border border-slate-300/50 bg-slate-500/20 text-slate-100";
+  }
+
+  function duplicateConfidenceLabel(confidence: DuplicateConfidence): string {
+    if (confidence === "high") return "高置信";
+    if (confidence === "medium") return "中置信";
+    return "低置信";
+  }
+
+  function duplicateCandidateCardClass(confidence: DuplicateConfidence): string {
+    if (confidence === "high") {
+      return "border-success/45 bg-success/5";
+    }
+    if (confidence === "medium") {
+      return "border-warning/45 bg-warning/5";
+    }
+    return "border-base-300/70 bg-base-100/70";
+  }
+
+  function duplicateReasonLabel(reason: string): string {
+    if (reason === "strict-normalized-equal") return "严格归一化一致";
+    if (reason === "ignore-high-reasoning-tokens-equal") return "去噪词后名称一致";
+    if (reason === "normalized-name-equal") return "名称归一化一致";
+    if (reason === "same-type") return "类型一致";
+    if (reason === "general-type-gap") return "General 可覆盖";
+    if (reason === "type-mismatch") return "类型不一致";
+    if (reason === "variant-conflict-hint") return "疑似变体冲突";
+    if (reason === "version-gap-hint") return "版本差异（已降级）";
+    if (reason.startsWith("char-similarity-")) {
+      const value = Number.parseFloat(reason.replace("char-similarity-", ""));
+      if (Number.isFinite(value)) {
+        return `字符相似 ${(value * 100).toFixed(1)}%`;
+      }
+      return "字符相似";
+    }
+    return reason;
+  }
+
+  function shouldDisplayDuplicateCandidate(confidence: DuplicateConfidence): boolean {
+    if (duplicateConfidenceFilter === "all") return true;
+    return confidence !== "low";
+  }
+
+  function applyModelDuplicateCandidate(candidate: DuplicateModelCandidate) {
+    setMergeType("model");
+    setMergeSourceInput(`${candidate.sourceName} [${candidate.sourceId}]`);
+    setMergeTargetInput(`${candidate.targetName} [${candidate.targetId}]`);
+    window.requestAnimationFrame(() => {
+      mergeSubmitButtonRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "end",
+        inline: "nearest"
+      });
+    });
+  }
+
+  function applyBenchmarkDuplicateCandidate(candidate: DuplicateBenchmarkCandidate) {
+    setMergeType("benchmark");
+    setMergeSourceInput(`${candidate.sourceName} [${candidate.sourceType}] [${candidate.sourceId}]`);
+    setMergeTargetInput(`${candidate.targetName} [${candidate.targetType}] [${candidate.targetId}]`);
+    window.requestAnimationFrame(() => {
+      mergeSubmitButtonRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "end",
+        inline: "nearest"
+      });
+    });
+  }
+
+  function resolveMergeEntityLabel(entityType: "model" | "benchmark", entityId: number): string {
+    if (entityType === "model") {
+      return modelById.get(entityId)?.modelName ?? `#${entityId}`;
+    }
+
+    const benchmark = benchmarkById.get(entityId);
+    return benchmark ? `${benchmark.benchmarkName} [${benchmark.benchmarkType}]` : `#${entityId}`;
+  }
+
+  function removeDuplicateCandidateByMerge(entityType: "model" | "benchmark", sourceId: number, targetId: number) {
+    setDuplicateDetectionResult((prev) => {
+      if (!prev) return prev;
+
+      const shouldKeepCandidate = (candidate: { sourceId: number; targetId: number }) => {
+        const isExactPair = candidate.sourceId === sourceId && candidate.targetId === targetId;
+        const isReversePair = candidate.sourceId === targetId && candidate.targetId === sourceId;
+        return !isExactPair && !isReversePair;
+      };
+
+      if (entityType === "model") {
+        return {
+          ...prev,
+          modelCandidates: prev.modelCandidates.filter(shouldKeepCandidate)
+        };
+      }
+
+      return {
+        ...prev,
+        benchmarkCandidates: prev.benchmarkCandidates.filter(shouldKeepCandidate)
+      };
+    });
+  }
+
+  function upsertMergedRecordAfterMerge(entityType: "model" | "benchmark", sourceId: number, targetId: number) {
+    const sourceName = resolveMergeEntityLabel(entityType, sourceId);
+    const targetName = resolveMergeEntityLabel(entityType, targetId);
+
+    setMergedRecordList((prev) => {
+      const nextRecord: MergedRecord = {
+        entityType,
+        sourceId,
+        sourceName,
+        targetId,
+        targetName
+      };
+
+      const existingIndex = prev.findIndex(
+        (item) => item.entityType === entityType && item.sourceId === sourceId
+      );
+
+      if (existingIndex >= 0) {
+        const next = [...prev];
+        next[existingIndex] = nextRecord;
+        return next;
+      }
+
+      return [nextRecord, ...prev];
+    });
+
+    setMergedRecordTargetInputs((prev) => ({
+      ...prev,
+      [`${entityType}:${sourceId}`]: `${targetName} [${targetId}]`
+    }));
+  }
+
+  async function onDetectDuplicateCandidates() {
+    if (isDetectingDuplicates) return;
+
+    setIsDetectingDuplicates(true);
+    try {
+      const result = await postJson("/api/admin/detect-duplicates", {});
+      const typedResult = result as DuplicateDetectionResult;
+      setDuplicateDetectionResult(typedResult);
+
+      if ((typedResult.modelCandidates?.length ?? 0) > 0) {
+        setDuplicateDetectionEntityType("model");
+      } else {
+        setDuplicateDetectionEntityType("benchmark");
+      }
+
+      notifySuccess(
+        `重复检测完成：model 候选 ${typedResult.modelCandidates?.length ?? 0} 条，benchmark 候选 ${typedResult.benchmarkCandidates?.length ?? 0} 条`
+      );
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "重复检测失败");
+    } finally {
+      setIsDetectingDuplicates(false);
+    }
+  }
+
   async function onMerge(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (mergeSubmitState === "submitting") return;
+
     if (resolvedMergeSourceId === null || resolvedMergeTargetId === null) {
       notifyError("请从下拉候选中选择 source/target，或直接输入合法 ID");
       return;
     }
+
+    if (resolvedMergeSourceId === resolvedMergeTargetId) {
+      notifyError("source 和 target 不能相同");
+      return;
+    }
+
+    if (mergeSubmitResetTimerRef.current) {
+      clearTimeout(mergeSubmitResetTimerRef.current);
+      mergeSubmitResetTimerRef.current = null;
+    }
+
+    setMergeSubmitState("submitting");
 
     try {
       await postJson("/api/admin/merge", {
@@ -2522,8 +2806,20 @@ export function AdminConsole({
         sourceId: resolvedMergeSourceId,
         targetId: resolvedMergeTargetId
       });
+
+      upsertMergedRecordAfterMerge(mergeType, resolvedMergeSourceId, resolvedMergeTargetId);
+      removeDuplicateCandidateByMerge(mergeType, resolvedMergeSourceId, resolvedMergeTargetId);
+
+      setMergeSubmitState("success");
+
+      mergeSubmitResetTimerRef.current = setTimeout(() => {
+        setMergeSubmitState("idle");
+        mergeSubmitResetTimerRef.current = null;
+      }, 1200);
+
       notifySuccess("合并完成。");
     } catch (error) {
+      setMergeSubmitState("idle");
       notifyError(error instanceof Error ? error.message : "合并失败");
     }
   }
@@ -2745,6 +3041,12 @@ export function AdminConsole({
     }
   }
 
+  const canSubmitMerge =
+    mergeSubmitState !== "submitting"
+    && resolvedMergeSourceId !== null
+    && resolvedMergeTargetId !== null
+    && resolvedMergeSourceId !== resolvedMergeTargetId;
+
   const tabClass = (key: TabKey) =>
     `btn rounded-xl border-0 text-base md:text-base transition-all duration-200 ease-out ${
       activeTab === key
@@ -2754,43 +3056,48 @@ export function AdminConsole({
 
   return (
     <>
-      {notice ? (
-        <div className="pointer-events-none fixed right-6 top-20 z-[120]">
-          <div
-            className={`pointer-events-auto flex min-w-[260px] max-w-[640px] items-start gap-3 rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-md transition-all duration-300 ease-out ${
-              noticeVisible ? "translate-y-0 opacity-100" : "-translate-y-2 opacity-0"
-            } ${
-              notice.type === "success"
-                ? "border-emerald-500/45 bg-emerald-900/80 text-emerald-100"
-                : "border-rose-500/45 bg-rose-900/80 text-rose-100"
-            }`}
-          >
-            <span
-              className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                notice.type === "success" ? "bg-emerald-500/25 text-emerald-200" : "bg-rose-500/25 text-rose-200"
+      {noticeList.length > 0 ? (
+        <div className="pointer-events-none fixed right-6 top-20 z-[120] flex max-w-[min(92vw,720px)] flex-col items-end gap-2">
+          {noticeList.map((notice) => (
+            <div
+              key={notice.id}
+              className={`pointer-events-auto flex min-w-[260px] max-w-[640px] gap-3 rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-md transition-all duration-300 ease-out ${
+                notice.details && notice.details.length > 0 ? "items-start" : "items-center"
+              } ${
+                notice.visible ? "translate-y-0 opacity-100" : "-translate-y-2 opacity-0"
+              } ${
+                notice.type === "success"
+                  ? "border-emerald-500/45 bg-emerald-900/80 text-emerald-100"
+                  : "border-rose-500/45 bg-rose-900/80 text-rose-100"
               }`}
             >
-              {notice.type === "success" ? <Check size={18} /> : <TriangleAlert size={18} />}
-            </span>
-            <div className="min-w-0">
-              <div className="break-words text-sm font-semibold tracking-wide">{notice.message}</div>
-              {notice.details && notice.details.length > 0 ? (
-                <ul
-                  className={`mt-2 max-h-56 list-disc space-y-1 overflow-auto rounded-lg border px-3 py-2 text-xs leading-5 ${
-                    notice.type === "success"
-                      ? "border-emerald-300/35 bg-emerald-950/25"
-                      : "border-rose-300/35 bg-rose-950/25"
-                  }`}
-                >
-                  {notice.details.map((detail, index) => (
-                    <li key={`notice-detail-${index}`} className="break-words">
-                      {detail}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
+              <span
+                className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                  notice.type === "success" ? "bg-emerald-500/25 text-emerald-200" : "bg-rose-500/25 text-rose-200"
+                }`}
+              >
+                {notice.type === "success" ? <Check size={18} /> : <TriangleAlert size={18} />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="break-words text-sm font-semibold tracking-wide">{notice.message}</div>
+                {notice.details && notice.details.length > 0 ? (
+                  <ul
+                    className={`mt-2 max-h-56 list-disc space-y-1 overflow-auto rounded-lg border px-3 py-2 text-xs leading-5 ${
+                      notice.type === "success"
+                        ? "border-emerald-300/35 bg-emerald-950/25"
+                        : "border-rose-300/35 bg-rose-950/25"
+                    }`}
+                  >
+                    {notice.details.map((detail, index) => (
+                      <li key={`notice-detail-${notice.id}-${index}`} className="break-words">
+                        {detail}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
             </div>
-          </div>
+          ))}
         </div>
       ) : null}
 
@@ -4081,6 +4388,176 @@ export function AdminConsole({
               <MergeIcon size={18} />
               实体合并（去重）
             </h3>
+            <div className="mb-5 rounded-2xl border border-primary/25 bg-gradient-to-br from-base-200/45 via-base-100/30 to-base-100/70 p-4 shadow-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <h4 className="flex items-center gap-2 text-base font-semibold">
+                  <Sparkles size={16} className="text-primary" />
+                  重复候选检测
+                </h4>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary ml-auto"
+                  onClick={onDetectDuplicateCandidates}
+                  disabled={isDetectingDuplicates}
+                >
+                  <Search size={14} />
+                  {isDetectingDuplicates ? "检测中..." : "检测重复候选"}
+                </button>
+              </div>
+
+              <p className="mt-2 text-xs opacity-75">
+                模型：去噪词（如 high/reasoning）+ 字符重复匹配度；Benchmark：名称归一化 + 字符重复匹配度（不依赖模型重合度）。
+              </p>
+
+              {duplicateDetectionResult ? (
+                <div className="mt-3 space-y-3">
+                  <div className="flex flex-wrap items-center gap-2 text-xs opacity-80">
+                    <span className="opacity-70">生成时间：{new Date(duplicateDetectionResult.generatedAt).toLocaleString()}</span>
+                  </div>
+
+                  <div className="tabs tabs-boxed inline-flex bg-base-200/70 p-1">
+                    <button
+                      type="button"
+                      className={`tab ${duplicateDetectionEntityType === "model" ? "tab-active" : ""}`}
+                      onClick={() => setDuplicateDetectionEntityType("model")}
+                    >
+                      {`Model 候选（${duplicateDetectionResult.modelCandidates.length}）`}
+                    </button>
+                    <button
+                      type="button"
+                      className={`tab ${duplicateDetectionEntityType === "benchmark" ? "tab-active" : ""}`}
+                      onClick={() => setDuplicateDetectionEntityType("benchmark")}
+                    >
+                      {`Benchmark 候选（${duplicateDetectionResult.benchmarkCandidates.length}）`}
+                    </button>
+                  </div>
+
+                  <div className="inline-flex items-center gap-1 rounded-lg border border-base-300/70 bg-base-100/60 p-1 text-xs">
+                    <button
+                      type="button"
+                      className={`btn btn-xs ${duplicateConfidenceFilter === "high-medium" ? "btn-primary" : "btn-ghost"}`}
+                      onClick={() => setDuplicateConfidenceFilter("high-medium")}
+                    >
+                      仅高/中置信
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn-xs ${duplicateConfidenceFilter === "all" ? "btn-primary" : "btn-ghost"}`}
+                      onClick={() => setDuplicateConfidenceFilter("all")}
+                    >
+                      显示全部
+                    </button>
+                  </div>
+
+                  {duplicateDetectionEntityType === "model" ? (
+                    visibleModelDuplicateCandidates.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-base-300 p-3 text-sm opacity-70">
+                        当前筛选条件下未检测到 model 重复候选。
+                      </div>
+                    ) : (
+                      <div className="max-h-[420px] space-y-2 overflow-auto pr-1">
+                        {visibleModelDuplicateCandidates.map((candidate) => (
+                          <div
+                            key={`dup-model-${candidate.sourceId}-${candidate.targetId}`}
+                            className={`rounded-xl border p-3 shadow-sm ${duplicateCandidateCardClass(candidate.confidence)}`}
+                          >
+                            <div className="flex flex-wrap items-start gap-2">
+                              <span className="font-semibold">
+                                {candidate.sourceName} [{candidate.sourceId}] → {candidate.targetName} [{candidate.targetId}]
+                              </span>
+                              <span className={`badge badge-sm font-semibold ${duplicateConfidenceBadgeClass(candidate.confidence)}`}>
+                                {duplicateConfidenceLabel(candidate.confidence)}
+                              </span>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline ml-auto"
+                                onClick={() => applyModelDuplicateCandidate(candidate)}
+                              >
+                                填充到合并表单
+                              </button>
+                            </div>
+
+                            <div className="mt-1 text-xs opacity-80">
+                              {/* 提供方：{candidate.sourceProviderName} → {candidate.targetProviderName} */}
+                              记录数：{candidate.sourceValueCount} → {candidate.targetValueCount}
+                              ・相似度 {(candidate.similarity * 100).toFixed(1)}%
+                              ・字符重复 {(candidate.characterRepeatScore * 100).toFixed(1)}%
+                            </div>
+
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {candidate.reasons.map((reason) => (
+                                <span
+                                  key={`dup-model-reason-${candidate.sourceId}-${candidate.targetId}-${reason}`}
+                                  className="badge badge-outline badge-xs"
+                                >
+                                  {duplicateReasonLabel(reason)}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  ) : (
+                    visibleBenchmarkDuplicateCandidates.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-base-300 p-3 text-sm opacity-70">
+                        当前筛选条件下未检测到 benchmark 重复候选。
+                      </div>
+                    ) : (
+                      <div className="max-h-[420px] space-y-2 overflow-auto pr-1">
+                        {visibleBenchmarkDuplicateCandidates.map((candidate) => (
+                          <div
+                            key={`dup-benchmark-${candidate.sourceId}-${candidate.targetId}`}
+                            className={`rounded-xl border p-3 shadow-sm ${duplicateCandidateCardClass(candidate.confidence)}`}
+                          >
+                            <div className="flex flex-wrap items-start gap-2">
+                              <span className="font-semibold">
+                                {candidate.sourceName} [{candidate.sourceType}] → {candidate.targetName} [{candidate.targetType}]
+                              </span>
+                              <span className={`badge badge-sm font-semibold ${duplicateConfidenceBadgeClass(candidate.confidence)}`}>
+                                {duplicateConfidenceLabel(candidate.confidence)}
+                              </span>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline ml-auto"
+                                onClick={() => applyBenchmarkDuplicateCandidate(candidate)}
+                              >
+                                填充到合并表单
+                              </button>
+                            </div>
+
+                            <div className="mt-1 text-xs opacity-80">
+                              记录数：{candidate.sourceValueCount} → {candidate.targetValueCount}
+                              ・相似度 {(candidate.similarity * 100).toFixed(1)}%
+                              ・字符重复 {(candidate.characterRepeatScore * 100).toFixed(1)}%
+                              {candidate.sourceSourceSummary || candidate.targetSourceSummary
+                                ? `・Source ${candidate.sourceSourceSummary ?? "空 source"} → ${candidate.targetSourceSummary ?? "空 source"}`
+                                : ""}
+                            </div>
+
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {candidate.reasons.map((reason) => (
+                                <span
+                                  key={`dup-benchmark-reason-${candidate.sourceId}-${candidate.targetId}-${reason}`}
+                                  className="badge badge-outline badge-xs"
+                                >
+                                  {duplicateReasonLabel(reason)}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  )}
+                </div>
+              ) : (
+                <div className="mt-3 rounded-xl border border-dashed border-base-300 p-3 text-sm opacity-75">
+                  点击“检测重复候选”后，会列出可疑的 model / benchmark，并支持一键填充到下方合并表单。
+                </div>
+              )}
+            </div>
+
             <form onSubmit={onMerge} className="grid grid-cols-1 gap-3 md:grid-cols-12">
               <div className="md:col-span-4">
                 <select
@@ -4125,7 +4602,19 @@ export function AdminConsole({
                 解析结果：source = {resolvedMergeSourceId ?? "-"}，target = {resolvedMergeTargetId ?? "-"}
               </div>
               <div className="md:col-span-12">
-                <button type="submit" className="btn btn-error">合并实体</button>
+                <button
+                  ref={mergeSubmitButtonRef}
+                  type="submit"
+                  className={`btn ${mergeSubmitState === "success" ? "btn-success" : "btn-error"}`}
+                  disabled={!canSubmitMerge}
+                  style={{ scrollMarginBottom: "72px" }}
+                >
+                  {mergeSubmitState === "submitting"
+                    ? "合并中..."
+                    : mergeSubmitState === "success"
+                      ? "已合并"
+                      : "合并实体"}
+                </button>
               </div>
             </form>
 

@@ -95,6 +95,63 @@ async function findMatrixPreviewTable() {
   return matrixTable;
 }
 
+async function openMergeTab(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("tab", { name: "实体去重" }));
+}
+
+function buildDuplicateDetectionResponse() {
+  return {
+    generatedAt: "2026-04-09T12:34:56.000Z",
+    modelCandidates: [
+      {
+        sourceId: 1,
+        sourceName: "Model A",
+        sourceProviderName: "OpenAI",
+        sourceValueCount: 10,
+        targetId: 2,
+        targetName: "Model B",
+        targetProviderName: "OpenAI",
+        targetValueCount: 12,
+        confidence: "high",
+        similarity: 0.98,
+        characterRepeatScore: 0.97,
+        reasons: ["normalized-name-equal"]
+      }
+    ],
+    benchmarkCandidates: [
+      {
+        sourceId: 11,
+        sourceName: "Bench-1",
+        sourceType: "Type-A",
+        sourceSourceSummary: "text:old-source",
+        sourceValueCount: 8,
+        targetId: 12,
+        targetName: "Bench-2",
+        targetType: "Type-B",
+        targetSourceSummary: "text:new-source",
+        targetValueCount: 13,
+        confidence: "medium",
+        similarity: 0.93,
+        characterRepeatScore: 0.92,
+        reasons: ["char-similarity-0.930"]
+      }
+    ]
+  };
+}
+
+if (typeof Element !== "undefined") {
+  const elementPrototype = Element.prototype as unknown as Record<string, unknown>;
+  const hasScrollIntoView = typeof Reflect.get(elementPrototype, "scrollIntoView") === "function";
+
+  if (!hasScrollIntoView) {
+    Object.defineProperty(elementPrototype, "scrollIntoView", {
+      configurable: true,
+      writable: true,
+      value: () => {}
+    });
+  }
+}
+
 describe("AdminConsole text import", () => {
   test("矩阵预览表头显示 Benchmark/Type 计数", async () => {
     const user = userEvent.setup();
@@ -1069,5 +1126,114 @@ describe("AdminConsole text import", () => {
     expect(secondPayload.csvText).toContain("GDPval");
     expect(secondPayload.csvText).toContain("FinanceAgent v1.1");
     expect(secondPayload.csvText).toContain("xlsm:Sheet1");
+  });
+});
+
+describe("AdminConsole merge interactions", () => {
+  test("重复候选页签显示计数，点击填充可正确写入合并输入", async () => {
+    const user = userEvent.setup();
+
+    const duplicateResult = buildDuplicateDetectionResponse();
+    mockFetchSequence(duplicateResult);
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await openMergeTab(user);
+    await user.click(screen.getByRole("button", { name: "检测重复候选" }));
+
+    expect(await screen.findByRole("button", { name: "Model 候选（1）" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Benchmark 候选（1）" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Benchmark 候选（1）" }));
+    expect(await screen.findByText(/source text:old-source → text:new-source/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Model 候选（1）" }));
+
+    const scrollSpy = vi.spyOn(
+      HTMLElement.prototype as unknown as { scrollIntoView: () => void },
+      "scrollIntoView"
+    );
+
+    await user.click(screen.getByRole("button", { name: "填充到合并表单" }));
+
+    expect(screen.getByPlaceholderText("source：输入名称或ID")).toHaveValue("Model A [1]");
+    expect(screen.getByPlaceholderText("target：输入名称或ID")).toHaveValue("Model B [2]");
+    await waitFor(() => {
+      expect(scrollSpy).toHaveBeenCalled();
+    });
+
+    scrollSpy.mockRestore();
+  });
+
+  test("合并按钮状态变化，且成功后即时移除候选并更新合并记录", async () => {
+    const user = userEvent.setup();
+
+    const duplicateResult = buildDuplicateDetectionResponse();
+    let resolveMergeResponse: (value: Response) => void = () => {
+      throw new Error("merge response resolver not initialized");
+    };
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(createJsonResponse(duplicateResult))
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveMergeResponse = resolve;
+          })
+      );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await openMergeTab(user);
+    await user.click(screen.getByRole("button", { name: "检测重复候选" }));
+    await screen.findByRole("button", { name: "Model 候选（1）" });
+
+    await user.click(screen.getByRole("button", { name: "填充到合并表单" }));
+
+    await user.click(screen.getByRole("button", { name: "合并实体" }));
+    expect(screen.getByRole("button", { name: "合并中..." })).toBeDisabled();
+
+    resolveMergeResponse(createJsonResponse({ ok: true }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "已合并" })).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Model A \[1\]\s*→\s*Model B \[2\]/)).not.toBeInTheDocument();
+    });
+
+    const mergedRowSource = await screen.findByText("Model A [1]");
+    const mergedRow = mergedRowSource.closest("tr");
+    if (!mergedRow) {
+      throw new Error("Merged record row not found");
+    }
+
+    expect(within(mergedRow).getByDisplayValue("Model B [2]")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("右上通知支持并列显示多条消息", async () => {
+    const user = userEvent.setup();
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(createJsonResponse({ error: "重复检测失败-1" }, false, 500))
+      .mockResolvedValueOnce(createJsonResponse({ error: "重复检测失败-2" }, false, 500));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await openMergeTab(user);
+
+    await user.click(screen.getByRole("button", { name: "检测重复候选" }));
+    expect(await screen.findByText("重复检测失败-1")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "检测重复候选" }));
+    expect(await screen.findByText("重复检测失败-2")).toBeInTheDocument();
+
+    const errorNotices = screen.getAllByText(/重复检测失败-[12]/);
+    expect(errorNotices).toHaveLength(2);
   });
 });

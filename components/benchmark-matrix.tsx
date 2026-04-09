@@ -1709,8 +1709,13 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     if (activeSource === SOURCE_ALL) {
       return allRows;
     }
+
+    if (rows.length > 0) {
+      return rows;
+    }
+
     return rowsBySource.get(activeSource) ?? [];
-  }, [allRows, rowsBySource, activeSource]);
+  }, [allRows, rows, rowsBySource, activeSource]);
 
   const baseBenchmarkKeySet = useMemo(() => {
     const keys = new Set<string>();

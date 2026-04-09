@@ -113,6 +113,46 @@ const IMPORT_VALUE_PAIR_REGEX =
   /^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/;
 const IMPORT_VALUE_SINGLE_REGEX =
   /^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/;
+const MODEL_DUPLICATE_NOISE_TOKENS = new Set([
+  "high",
+  "reasoning",
+  "reason",
+  "thinking",
+  "think",
+  "preview",
+  "exp",
+  "experimental",
+  "default"
+]);
+const BENCHMARK_VARIANT_CONFLICT_HINTS: Array<[RegExp, RegExp]> = [
+  [/with\s*tools?/i, /no\s*tools?/i],
+  [/open\s*book/i, /closed\s*book/i],
+  [/\b0\s*shot\b/i, /\b[1-9]\d*\s*shot\b/i]
+];
+const DUPLICATE_RESULT_LIMIT = 200;
+const SUPERSCRIPT_SUBSCRIPT_DIGIT_MAP: Record<string, string> = {
+  "⁰": "0",
+  "¹": "1",
+  "²": "2",
+  "³": "3",
+  "⁴": "4",
+  "⁵": "5",
+  "⁶": "6",
+  "⁷": "7",
+  "⁸": "8",
+  "⁹": "9",
+  "₀": "0",
+  "₁": "1",
+  "₂": "2",
+  "₃": "3",
+  "₄": "4",
+  "₅": "5",
+  "₆": "6",
+  "₇": "7",
+  "₈": "8",
+  "₉": "9"
+};
+const SUPERSCRIPT_SUBSCRIPT_DIGIT_REGEX = /[⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉]/g;
 
 function isLowerBetterBenchmark(benchmarkName: string): boolean {
   return LOWER_IS_BETTER_BENCHMARK_RULES.some((rule) => rule.test(benchmarkName));
@@ -1280,10 +1320,85 @@ export async function mergeEntity(input: {
       return;
     }
 
+    const [sourceBenchmark] = await tx
+      .select({
+        benchmarkType: benchmarks.benchmarkType,
+        modalities: benchmarks.modalities
+      })
+      .from(benchmarks)
+      .where(eq(benchmarks.id, input.sourceId))
+      .limit(1);
+
+    const sourceValueSourceRows = await tx
+      .select({ source: benchmarkValues.source })
+      .from(benchmarkValues)
+      .where(eq(benchmarkValues.benchmarkId, input.sourceId));
+
+    const sourceMetaRows = await tx
+      .select({
+        source: benchmarkSourceMeta.source,
+        benchmarkType: benchmarkSourceMeta.benchmarkType,
+        modalities: benchmarkSourceMeta.modalities
+      })
+      .from(benchmarkSourceMeta)
+      .where(eq(benchmarkSourceMeta.benchmarkId, input.sourceId));
+
     await tx
       .update(benchmarkValues)
       .set({ benchmarkId: input.targetId })
       .where(eq(benchmarkValues.benchmarkId, input.sourceId));
+
+    const sourceSet = new Set<string>();
+    sourceValueSourceRows.forEach((row: { source: string | null }) => {
+      const normalizedSource = row.source?.trim() ?? "";
+      if (normalizedSource.length > 0) {
+        sourceSet.add(normalizedSource);
+      }
+    });
+
+    const sourceMetaBySource = new Map<string, { benchmarkType: string; modalities: string[] | null }>();
+    sourceMetaRows.forEach((row: { source: string; benchmarkType: string; modalities: string[] | null }) => {
+      const normalizedSource = row.source.trim();
+      if (!normalizedSource) return;
+
+      if (!sourceMetaBySource.has(normalizedSource)) {
+        sourceMetaBySource.set(normalizedSource, {
+          benchmarkType: row.benchmarkType,
+          modalities: row.modalities
+        });
+      }
+
+      sourceSet.add(normalizedSource);
+    });
+
+    const fallbackBenchmarkType = sourceBenchmark?.benchmarkType ?? "general";
+    const fallbackModalities = sourceBenchmark?.modalities?.length ? sourceBenchmark.modalities : ["Text"];
+
+    const sourceMetaRowsToMigrate = Array.from(sourceSet).map((source) => {
+      const sourceMeta = sourceMetaBySource.get(source);
+
+      return {
+        benchmarkId: input.targetId,
+        source,
+        benchmarkType: sourceMeta?.benchmarkType ?? fallbackBenchmarkType,
+        modalities: sourceMeta?.modalities ?? fallbackModalities
+      };
+    });
+
+    if (sourceMetaRowsToMigrate.length > 0) {
+      await tx
+        .insert(benchmarkSourceMeta)
+        .values(sourceMetaRowsToMigrate)
+        .onConflictDoNothing({
+          target: [benchmarkSourceMeta.benchmarkId, benchmarkSourceMeta.source]
+        });
+    }
+
+    if (sourceMetaRows.length > 0) {
+      await tx
+        .delete(benchmarkSourceMeta)
+        .where(eq(benchmarkSourceMeta.benchmarkId, input.sourceId));
+    }
 
     await tx
       .update(benchmarks)
@@ -2308,6 +2423,484 @@ export async function deleteBenchmarkValuesBySource(sourceInput: string) {
     deletedSourceMeta: deletedSourceMetaRows.length,
     deletedEmptySource: false
   };
+}
+
+type DuplicateConfidence = "high" | "medium" | "low";
+
+export type ModelDuplicateCandidate = {
+  sourceId: number;
+  sourceName: string;
+  sourceProviderName: string;
+  sourceValueCount: number;
+  targetId: number;
+  targetName: string;
+  targetProviderName: string;
+  targetValueCount: number;
+  confidence: DuplicateConfidence;
+  similarity: number;
+  characterRepeatScore: number;
+  reasons: string[];
+};
+
+export type BenchmarkDuplicateCandidate = {
+  sourceId: number;
+  sourceName: string;
+  sourceType: string;
+  sourceSourceSummary: string;
+  sourceValueCount: number;
+  targetId: number;
+  targetName: string;
+  targetType: string;
+  targetSourceSummary: string;
+  targetValueCount: number;
+  confidence: DuplicateConfidence;
+  similarity: number;
+  characterRepeatScore: number;
+  reasons: string[];
+};
+
+export type DuplicateEntityDetectionResult = {
+  generatedAt: string;
+  modelCandidates: ModelDuplicateCandidate[];
+  benchmarkCandidates: BenchmarkDuplicateCandidate[];
+};
+
+function normalizeLooseText(input: string): string {
+  return input
+    .replace(SUPERSCRIPT_SUBSCRIPT_DIGIT_REGEX, (value) => SUPERSCRIPT_SUBSCRIPT_DIGIT_MAP[value] ?? value)
+    .toLowerCase()
+    .replace(/[\u2012-\u2015\u2212]/g, "-")
+    .replace(/[^a-z0-9\u0370-\u03ff\u1f00-\u1fff\u4e00-\u9fa5]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compactAlphaNum(input: string): string {
+  return normalizeLooseText(input).replace(/\s+/g, "");
+}
+
+function buildModelDuplicateKey(input: string): string {
+  const normalized = normalizeLooseText(input);
+  if (!normalized) return "";
+
+  const tokens = normalized
+    .split(" ")
+    .filter(Boolean)
+    .filter((token) => !MODEL_DUPLICATE_NOISE_TOKENS.has(token));
+
+  return tokens.join(" ");
+}
+
+function buildBenchmarkDuplicateKey(input: string): string {
+  return normalizeLooseText(stripBenchmarkCitationRefs(input));
+}
+
+function buildBigramCounts(input: string): Map<string, number> {
+  const compact = compactAlphaNum(input);
+  const map = new Map<string, number>();
+  if (!compact) return map;
+
+  if (compact.length === 1) {
+    map.set(compact, 1);
+    return map;
+  }
+
+  for (let index = 0; index < compact.length - 1; index += 1) {
+    const token = compact.slice(index, index + 2);
+    map.set(token, (map.get(token) ?? 0) + 1);
+  }
+
+  return map;
+}
+
+function getDiceSimilarity(left: string, right: string): number {
+  const leftMap = buildBigramCounts(left);
+  const rightMap = buildBigramCounts(right);
+  if (leftMap.size === 0 || rightMap.size === 0) return 0;
+
+  let shared = 0;
+  let leftTotal = 0;
+  let rightTotal = 0;
+
+  leftMap.forEach((count, token) => {
+    leftTotal += count;
+    shared += Math.min(count, rightMap.get(token) ?? 0);
+  });
+  rightMap.forEach((count) => {
+    rightTotal += count;
+  });
+
+  if (leftTotal + rightTotal === 0) return 0;
+  return (2 * shared) / (leftTotal + rightTotal);
+}
+
+function getCharacterRepeatScore(left: string, right: string): number {
+  const leftCompact = compactAlphaNum(left);
+  const rightCompact = compactAlphaNum(right);
+  if (!leftCompact || !rightCompact) return 0;
+
+  const leftCounts = new Map<string, number>();
+  const rightCounts = new Map<string, number>();
+
+  for (const ch of leftCompact) {
+    leftCounts.set(ch, (leftCounts.get(ch) ?? 0) + 1);
+  }
+  for (const ch of rightCompact) {
+    rightCounts.set(ch, (rightCounts.get(ch) ?? 0) + 1);
+  }
+
+  let shared = 0;
+  leftCounts.forEach((count, ch) => {
+    shared += Math.min(count, rightCounts.get(ch) ?? 0);
+  });
+
+  return shared / Math.max(leftCompact.length, rightCompact.length);
+}
+
+function determineDuplicateConfidence(similarity: number): DuplicateConfidence {
+  if (similarity >= 0.96) return "high";
+  if (similarity >= 0.92) return "medium";
+  return "low";
+}
+
+function duplicateConfidenceWeight(confidence: DuplicateConfidence): number {
+  if (confidence === "high") return 3;
+  if (confidence === "medium") return 2;
+  return 1;
+}
+
+function downgradeDuplicateConfidence(confidence: DuplicateConfidence): DuplicateConfidence {
+  if (confidence === "high") return "medium";
+  if (confidence === "medium") return "low";
+  return "low";
+}
+
+function extractPrimaryVersionNumber(input: string): number | null {
+  const normalizedInput = input.replace(
+    SUPERSCRIPT_SUBSCRIPT_DIGIT_REGEX,
+    (value) => SUPERSCRIPT_SUBSCRIPT_DIGIT_MAP[value] ?? value
+  );
+
+  const match = normalizedInput.match(/\b\d+(?:\.\d+)?\b/);
+  if (!match) return null;
+  const parsed = Number.parseFloat(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function buildVersionFamilyKey(input: string): string {
+  return normalizeLooseText(input)
+    .replace(/\b\d+(?:\.\d+)?\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasModelVersionGapHint(leftName: string, rightName: string): boolean {
+  const leftVersion = extractPrimaryVersionNumber(leftName);
+  const rightVersion = extractPrimaryVersionNumber(rightName);
+  if (leftVersion === null || rightVersion === null) return false;
+  if (leftVersion === rightVersion) return false;
+
+  const leftFamily = buildVersionFamilyKey(leftName);
+  const rightFamily = buildVersionFamilyKey(rightName);
+
+  return leftFamily.length > 0 && leftFamily === rightFamily;
+}
+
+function chooseMergeDirection<T extends { id: number }>(
+  left: T,
+  right: T,
+  countById: Map<number, number>
+): { source: T; target: T; sourceCount: number; targetCount: number } {
+  const leftCount = countById.get(left.id) ?? 0;
+  const rightCount = countById.get(right.id) ?? 0;
+
+  if (leftCount !== rightCount) {
+    return leftCount > rightCount
+      ? { source: right, target: left, sourceCount: rightCount, targetCount: leftCount }
+      : { source: left, target: right, sourceCount: leftCount, targetCount: rightCount };
+  }
+
+  if (left.id < right.id) {
+    return { source: right, target: left, sourceCount: rightCount, targetCount: leftCount };
+  }
+
+  return { source: left, target: right, sourceCount: leftCount, targetCount: rightCount };
+}
+
+function hasBenchmarkVariantConflict(leftName: string, rightName: string): boolean {
+  return BENCHMARK_VARIANT_CONFLICT_HINTS.some(([leftPattern, rightPattern]) => {
+    const leftMatchLeft = leftPattern.test(leftName);
+    const leftMatchRight = leftPattern.test(rightName);
+    const rightMatchLeft = rightPattern.test(leftName);
+    const rightMatchRight = rightPattern.test(rightName);
+
+    return (leftMatchLeft && rightMatchRight) || (leftMatchRight && rightMatchLeft);
+  });
+}
+
+function formatBenchmarkSourceSummary(source: string | null): string {
+  const normalized = source?.trim() ?? "";
+  return normalized.length > 0 ? normalized : "空 source";
+}
+
+export async function detectDuplicateEntityCandidates(): Promise<DuplicateEntityDetectionResult> {
+  const [activeModels, activeBenchmarks, modelValueStats, benchmarkValueStats, benchmarkSourceStats] = await Promise.all([
+    db
+      .select({
+        id: models.id,
+        modelName: models.modelName,
+        providerName: providers.name
+      })
+      .from(models)
+      .innerJoin(providers, eq(models.providerId, providers.id))
+      .where(isNull(models.mergedIntoModelId)),
+    db
+      .select({
+        id: benchmarks.id,
+        benchmarkName: benchmarks.benchmarkName,
+        benchmarkType: benchmarks.benchmarkType,
+        modalities: benchmarks.modalities
+      })
+      .from(benchmarks)
+      .where(isNull(benchmarks.mergedIntoBenchmarkId)),
+    db
+      .select({
+        modelId: benchmarkValues.modelId,
+        count: sql<number>`count(*)`
+      })
+      .from(benchmarkValues)
+      .groupBy(benchmarkValues.modelId),
+    db
+      .select({
+        benchmarkId: benchmarkValues.benchmarkId,
+        count: sql<number>`count(*)`
+      })
+      .from(benchmarkValues)
+      .groupBy(benchmarkValues.benchmarkId),
+    db
+      .select({
+        benchmarkId: benchmarkValues.benchmarkId,
+        source: benchmarkValues.source,
+        count: sql<number>`count(*)`
+      })
+      .from(benchmarkValues)
+      .groupBy(benchmarkValues.benchmarkId, benchmarkValues.source)
+  ]);
+
+  const modelValueCountById = new Map(
+    modelValueStats.map((item) => [item.modelId, Number(item.count ?? 0)])
+  );
+  const benchmarkValueCountById = new Map(
+    benchmarkValueStats.map((item) => [item.benchmarkId, Number(item.count ?? 0)])
+  );
+  const benchmarkSourceSummaryById = new Map<number, string>();
+  const benchmarkTopSourceById = new Map<number, { source: string | null; count: number }>();
+
+  benchmarkSourceStats.forEach((item) => {
+    const benchmarkId = item.benchmarkId;
+    const current = benchmarkTopSourceById.get(benchmarkId);
+    const nextCount = Number(item.count ?? 0);
+
+    if (!current || nextCount > current.count) {
+      benchmarkTopSourceById.set(benchmarkId, {
+        source: item.source,
+        count: nextCount
+      });
+      return;
+    }
+
+    if (nextCount === current.count) {
+      const currentLabel = formatBenchmarkSourceSummary(current.source);
+      const nextLabel = formatBenchmarkSourceSummary(item.source);
+      if (nextLabel.localeCompare(currentLabel, "zh-Hans-CN", { sensitivity: "base" }) < 0) {
+        benchmarkTopSourceById.set(benchmarkId, {
+          source: item.source,
+          count: nextCount
+        });
+      }
+    }
+  });
+
+  benchmarkTopSourceById.forEach((item, benchmarkId) => {
+    benchmarkSourceSummaryById.set(benchmarkId, formatBenchmarkSourceSummary(item.source));
+  });
+
+  const modelCandidates: ModelDuplicateCandidate[] = [];
+
+  for (let leftIndex = 0; leftIndex < activeModels.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < activeModels.length; rightIndex += 1) {
+      const left = activeModels[leftIndex]!;
+      const right = activeModels[rightIndex]!;
+
+      const strictLeft = compactAlphaNum(left.modelName);
+      const strictRight = compactAlphaNum(right.modelName);
+      const noiseLeft = buildModelDuplicateKey(left.modelName);
+      const noiseRight = buildModelDuplicateKey(right.modelName);
+      const charRepeatScore = getCharacterRepeatScore(left.modelName, right.modelName);
+      const diceScore = getDiceSimilarity(left.modelName, right.modelName);
+      const similarity = Math.max(charRepeatScore, diceScore);
+
+      const reasons: string[] = [];
+      let confidence: DuplicateConfidence | null = null;
+
+      if (strictLeft && strictLeft === strictRight) {
+        confidence = "high";
+        reasons.push("strict-normalized-equal");
+      }
+
+      if (noiseLeft && noiseRight && noiseLeft === noiseRight) {
+        confidence = "high";
+        reasons.push("ignore-high-reasoning-tokens-equal");
+      }
+
+      if (similarity >= 0.9) {
+        const similarityConfidence = determineDuplicateConfidence(similarity);
+        if (!confidence || duplicateConfidenceWeight(similarityConfidence) > duplicateConfidenceWeight(confidence)) {
+          confidence = similarityConfidence;
+        }
+        reasons.push(`char-similarity-${similarity.toFixed(3)}`);
+      }
+
+      if (
+        confidence
+        && !reasons.includes("strict-normalized-equal")
+        && !reasons.includes("ignore-high-reasoning-tokens-equal")
+        && hasModelVersionGapHint(left.modelName, right.modelName)
+      ) {
+        confidence = downgradeDuplicateConfidence(confidence);
+        reasons.push("version-gap-hint");
+      }
+
+      if (!confidence) {
+        continue;
+      }
+
+      const direction = chooseMergeDirection(left, right, modelValueCountById);
+
+      modelCandidates.push({
+        sourceId: direction.source.id,
+        sourceName: direction.source.modelName,
+        sourceProviderName: direction.source.providerName,
+        sourceValueCount: direction.sourceCount,
+        targetId: direction.target.id,
+        targetName: direction.target.modelName,
+        targetProviderName: direction.target.providerName,
+        targetValueCount: direction.targetCount,
+        confidence,
+        similarity: Number(similarity.toFixed(4)),
+        characterRepeatScore: Number(charRepeatScore.toFixed(4)),
+        reasons: Array.from(new Set(reasons))
+      });
+    }
+  }
+
+  const benchmarkCandidates: BenchmarkDuplicateCandidate[] = [];
+
+  for (let leftIndex = 0; leftIndex < activeBenchmarks.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < activeBenchmarks.length; rightIndex += 1) {
+      const left = activeBenchmarks[leftIndex]!;
+      const right = activeBenchmarks[rightIndex]!;
+
+      const normalizedLeftName = buildBenchmarkDuplicateKey(left.benchmarkName);
+      const normalizedRightName = buildBenchmarkDuplicateKey(right.benchmarkName);
+      const sameNormalizedName = normalizedLeftName.length > 0 && normalizedLeftName === normalizedRightName;
+
+      const charRepeatScore = getCharacterRepeatScore(left.benchmarkName, right.benchmarkName);
+      const diceScore = getDiceSimilarity(left.benchmarkName, right.benchmarkName);
+      const similarity = Math.max(charRepeatScore, diceScore);
+
+      if (!sameNormalizedName && similarity < 0.9) {
+        continue;
+      }
+
+      const leftType = normalizeLooseText(left.benchmarkType || "general") || "general";
+      const rightType = normalizeLooseText(right.benchmarkType || "general") || "general";
+      const sameType = leftType === rightType;
+      const hasGeneralTypeGap = leftType === "general" || rightType === "general";
+      const hasVariantConflict = hasBenchmarkVariantConflict(left.benchmarkName, right.benchmarkName);
+
+      const reasons: string[] = [];
+      let confidence: DuplicateConfidence = "low";
+
+      if (sameNormalizedName) {
+        reasons.push("normalized-name-equal");
+        confidence = sameType || hasGeneralTypeGap ? "high" : "medium";
+      }
+
+      if (similarity >= 0.95) {
+        reasons.push(`char-similarity-${similarity.toFixed(3)}`);
+        if (confidence === "low") {
+          confidence = sameType ? "high" : "medium";
+        }
+      } else if (similarity >= 0.9) {
+        reasons.push(`char-similarity-${similarity.toFixed(3)}`);
+        if (confidence === "low") {
+          confidence = "low";
+        }
+      }
+
+      if (sameType) {
+        reasons.push("same-type");
+      } else if (hasGeneralTypeGap) {
+        reasons.push("general-type-gap");
+      } else {
+        reasons.push("type-mismatch");
+      }
+
+      if (hasVariantConflict) {
+        reasons.push("variant-conflict-hint");
+        if (confidence === "high") confidence = "medium";
+      }
+
+      const direction = chooseMergeDirection(left, right, benchmarkValueCountById);
+
+      benchmarkCandidates.push({
+        sourceId: direction.source.id,
+        sourceName: direction.source.benchmarkName,
+        sourceType: direction.source.benchmarkType,
+        sourceSourceSummary: benchmarkSourceSummaryById.get(direction.source.id) ?? "空 source",
+        sourceValueCount: direction.sourceCount,
+        targetId: direction.target.id,
+        targetName: direction.target.benchmarkName,
+        targetType: direction.target.benchmarkType,
+        targetSourceSummary: benchmarkSourceSummaryById.get(direction.target.id) ?? "空 source",
+        targetValueCount: direction.targetCount,
+        confidence,
+        similarity: Number(similarity.toFixed(4)),
+        characterRepeatScore: Number(charRepeatScore.toFixed(4)),
+        reasons: Array.from(new Set(reasons))
+      });
+    }
+  }
+
+  const sortByConfidence = <T extends { confidence: DuplicateConfidence; similarity: number; targetValueCount: number }>(
+    left: T,
+    right: T
+  ) => {
+    const confidenceDiff = duplicateConfidenceWeight(right.confidence) - duplicateConfidenceWeight(left.confidence);
+    if (confidenceDiff !== 0) return confidenceDiff;
+
+    if (right.similarity !== left.similarity) {
+      return right.similarity - left.similarity;
+    }
+
+    return right.targetValueCount - left.targetValueCount;
+  };
+
+  return {
+    generatedAt: new Date().toISOString(),
+    modelCandidates: modelCandidates.sort(sortByConfidence).slice(0, DUPLICATE_RESULT_LIMIT),
+    benchmarkCandidates: benchmarkCandidates.sort(sortByConfidence).slice(0, DUPLICATE_RESULT_LIMIT)
+  };
+}
+
+export function __normalizeDuplicateCompareTextForTest(input: string): string {
+  return normalizeLooseText(input);
+}
+
+export function __getDuplicateNameSimilarityForTest(left: string, right: string): number {
+  const similarity = Math.max(getCharacterRepeatScore(left, right), getDiceSimilarity(left, right));
+  return Number(similarity.toFixed(4));
 }
 
 export async function clearNonSettingsData() {

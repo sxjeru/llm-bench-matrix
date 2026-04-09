@@ -6,6 +6,8 @@ function normalizeToken(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+  const HYPHEN_VARIANT_REGEX = /[\-\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g;
+
 export type ModelDedupeRule = {
   lowercase: boolean;
   removeHyphen: boolean;
@@ -36,6 +38,8 @@ export function normalizeModelDedupeRule(raw: unknown): ModelDedupeRule {
 
 export function normalizeModelNameForDedupe(modelName: string, rule: ModelDedupeRule = DEFAULT_MODEL_DEDUPE_RULE): string {
   let normalized = modelName.trim();
+
+  normalized = normalized.replace(HYPHEN_VARIANT_REGEX, "-");
 
   if (rule.lowercase) {
     normalized = normalized.toLowerCase();

@@ -22,11 +22,17 @@ let parseBenchmarkTextRowsForTest: (
   inputText: string,
   sourceInput?: string | null
 ) => ParsedTextImportResult;
+let normalizeDuplicateCompareTextForTest: (input: string) => string;
+let getDuplicateNameSimilarityForTest: (left: string, right: string) => number;
 
 beforeAll(async () => {
   process.env.DATABASE_URL ??= "postgres://test:test@127.0.0.1:5432/test";
   const module = await import("@/lib/admin-service");
   parseBenchmarkTextRowsForTest = module.__parseBenchmarkTextRowsForTest as typeof parseBenchmarkTextRowsForTest;
+  normalizeDuplicateCompareTextForTest =
+    module.__normalizeDuplicateCompareTextForTest as typeof normalizeDuplicateCompareTextForTest;
+  getDuplicateNameSimilarityForTest =
+    module.__getDuplicateNameSimilarityForTest as typeof getDuplicateNameSimilarityForTest;
 });
 
 describe("paper-table 文本解析", () => {
@@ -99,6 +105,25 @@ describe("paper-table 文本解析", () => {
     expect(benchmarkNames.has("τ2-Bench (retail)")).toBe(true);
     expect(benchmarkNames.has("τ2-Bench (telecom)")).toBe(true);
     expect(Array.from(benchmarkNames).some((name) => name.includes("τ 2 -Bench"))).toBe(false);
+  });
+
+  test("判重归一化中 τ2 与 τ² 一致，且 τ² 与 τ³ 可区分", () => {
+    expect(normalizeDuplicateCompareTextForTest("τ2-Bench [General]")).toBe("τ2 bench general");
+    expect(normalizeDuplicateCompareTextForTest("τ²-Bench [General]")).toBe("τ2 bench general");
+    expect(normalizeDuplicateCompareTextForTest("τ³-Bench [General]")).toBe("τ3 bench general");
+
+    expect(normalizeDuplicateCompareTextForTest("τ²-Bench [General]")).not.toBe(
+      normalizeDuplicateCompareTextForTest("τ³-Bench [General]")
+    );
+  });
+
+  test("重复相似度计算保留希腊字母并区分上标数字", () => {
+    const exactEquivalent = getDuplicateNameSimilarityForTest("τ2-Bench", "τ²-Bench");
+    const superscriptGap = getDuplicateNameSimilarityForTest("τ²-Bench", "τ³-Bench");
+
+    expect(exactEquivalent).toBe(1);
+    expect(superscriptGap).toBeLessThan(1);
+    expect(normalizeDuplicateCompareTextForTest("Λ-τ Bench")).toBe("λ τ bench");
   });
 
   test("VLM 关键词可识别为 Vision 模态", () => {
