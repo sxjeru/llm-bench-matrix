@@ -72,6 +72,7 @@ type TextImportPreviewRow = {
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
+  benchmarkTypeProvided?: boolean;
   modalities?: string[];
   rawValue: string;
   valueNum: number | null;
@@ -135,6 +136,7 @@ type StructuredCsvImportRow = {
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
+  benchmarkTypeProvided: boolean;
   modalities: string[];
   rawValue: string;
   valueNote: string | null;
@@ -443,6 +445,7 @@ function buildStructuredCsvText(rows: StructuredCsvImportRow[]): string {
     "model",
     "benchmark",
     "benchmark_type",
+    "benchmark_type_provided",
     "value_raw",
     "value_note",
     "modalities",
@@ -456,6 +459,7 @@ function buildStructuredCsvText(rows: StructuredCsvImportRow[]): string {
       row.modelName,
       row.benchmarkName,
       row.benchmarkType,
+      row.benchmarkTypeProvided ? "1" : "0",
       row.rawValue,
       row.valueNote ?? "",
       row.modalities.join(","),
@@ -1240,16 +1244,6 @@ export function AdminConsole({
         if (exactExisting) {
           benchmarkName = exactExisting.benchmarkName;
           benchmarkType = exactExisting.benchmarkType;
-        } else {
-          const sameNameExisting = existingBenchmarkByNameMap.get(benchmarkName.trim().toLowerCase()) ?? [];
-          if (sameNameExisting.length > 0) {
-            const exactTypeMatch = sameNameExisting.find(
-              (item) => item.benchmarkType.trim().toLowerCase() === benchmarkType.trim().toLowerCase()
-            );
-            const autoTarget = exactTypeMatch ?? sameNameExisting[0];
-            benchmarkName = autoTarget.benchmarkName;
-            benchmarkType = autoTarget.benchmarkType;
-          }
         }
 
         const mergeTargetId = Number(benchmarkMergeTargets[benchmarkKey]);
@@ -1270,6 +1264,7 @@ export function AdminConsole({
           modelName,
           benchmarkName,
           benchmarkType,
+          benchmarkTypeProvided: row.benchmarkTypeProvided ?? true,
           modalities: normalizedModalities,
           rawValue,
           valueNote,
@@ -1294,8 +1289,7 @@ export function AdminConsole({
     existingModelExactMap,
     existingModelByCanonicalKey,
     existingModelByNameMap,
-    existingBenchmarkExactMap,
-    existingBenchmarkByNameMap
+    existingBenchmarkExactMap
   ]);
 
   const ignoredTextImportCount = useMemo(() => {
@@ -1314,6 +1308,7 @@ export function AdminConsole({
       modelName: row.modelName,
       benchmarkName: row.benchmarkName,
       benchmarkType: row.benchmarkType,
+      benchmarkTypeProvided: row.benchmarkTypeProvided,
       modalities: row.modalities,
       rawValue: row.rawValue,
       valueNum: null,
@@ -1539,10 +1534,12 @@ export function AdminConsole({
         : (sheetName || selectedSheet || "Sheet1");
 
     let currentBenchmarkType = "General";
+    let currentBenchmarkTypeProvided = false;
     const unifiedPreviewRows: TextImportPreviewRow[] = workbookPreviewRows.map((row) => {
       const rowCategory = typeof row.category === "string" ? row.category.trim() : "";
       if (rowCategory) {
         currentBenchmarkType = rowCategory;
+        currentBenchmarkTypeProvided = true;
       }
 
       const benchmarkType = currentBenchmarkType || "General";
@@ -1558,6 +1555,7 @@ export function AdminConsole({
         modelName: normalizedModelName,
         benchmarkName: row.benchmarkName,
         benchmarkType,
+        benchmarkTypeProvided: currentBenchmarkTypeProvided,
         modalities: normalizeModalityList([benchmarkType]),
         rawValue: row.rawValue,
         valueNum: row.valueNum,

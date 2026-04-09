@@ -1,6 +1,6 @@
 import { and, count, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
+import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 
 function toNullableNumber(value: unknown): number | null {
   if (value === null || value === undefined) return null;
@@ -124,8 +124,10 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
           modelName: models.modelName,
           benchmarkName: benchmarks.benchmarkName,
           benchmarkType: benchmarks.benchmarkType,
+          benchmarkTypeOverride: benchmarkSourceMeta.benchmarkType,
           benchmarkCanonicalKey: benchmarks.canonicalKey,
           modalities: benchmarks.modalities,
+          modalitiesOverride: benchmarkSourceMeta.modalities,
           benchTime: benchmarkValues.benchTime,
           valueRaw: benchmarkValues.valueRaw,
           valueNum: benchmarkValues.valueNum,
@@ -137,19 +139,34 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
         .innerJoin(models, eq(benchmarkValues.modelId, models.id))
         .innerJoin(providers, eq(models.providerId, providers.id))
         .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+        .leftJoin(
+          benchmarkSourceMeta,
+          and(
+            eq(benchmarkSourceMeta.benchmarkId, benchmarks.id),
+            eq(benchmarkSourceMeta.source, benchmarkValues.source)
+          )
+        )
         .where(whereClause)
         .orderBy(desc(benchmarkValues.benchTime), desc(benchmarkValues.id));
 
       const rows = normalizedLimit !== null ? await baseQuery.limit(normalizedLimit) : await baseQuery;
+
+      const shouldUseSourceMeta = Boolean(
+        normalizedSourceFilter && normalizedSourceFilter !== SOURCE_EMPTY_KEY
+      );
 
       return rows.map((row) => ({
         id: row.id,
         providerName: row.providerName,
         modelName: row.modelName,
         benchmarkName: row.benchmarkName,
-        benchmarkType: row.benchmarkType,
+        benchmarkType: shouldUseSourceMeta
+          ? (row.benchmarkTypeOverride ?? row.benchmarkType)
+          : row.benchmarkType,
         benchmarkCanonicalKey: row.benchmarkCanonicalKey,
-        modalities: row.modalities ?? [],
+        modalities: shouldUseSourceMeta
+          ? (row.modalitiesOverride ?? row.modalities ?? [])
+          : (row.modalities ?? []),
         benchTime: row.benchTime.toISOString(),
         valueRaw: row.valueRaw,
         valueNum: toNullableNumber(row.valueNum),

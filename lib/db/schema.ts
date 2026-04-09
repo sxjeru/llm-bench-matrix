@@ -59,6 +59,32 @@ export const benchmarks = pgTable(
   })
 );
 
+export const benchmarkSourceMeta = pgTable(
+  "benchmark_source_meta",
+  {
+    id: serial("id").primaryKey(),
+    benchmarkId: integer("benchmark_id")
+      .notNull()
+      .references(() => benchmarks.id, { onDelete: "cascade" }),
+    source: text("source").notNull(),
+    benchmarkType: text("benchmark_type").notNull(),
+    modalities: text("modalities")
+      .array()
+      .notNull()
+      .default(sql`ARRAY['Text']::text[]`),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
+  },
+  (table) => ({
+    benchmarkSourceUnique: uniqueIndex("benchmark_source_meta_benchmark_source_unique").on(
+      table.benchmarkId,
+      table.source
+    ),
+    benchmarkIdx: index("benchmark_source_meta_benchmark_idx").on(table.benchmarkId),
+    sourceIdx: index("benchmark_source_meta_source_idx").on(table.source)
+  })
+);
+
 export const benchmarkValues = pgTable(
   "benchmark_values",
   {

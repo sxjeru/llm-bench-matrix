@@ -5,6 +5,7 @@ type ParsedTextImportResult = {
   rows: Array<{
     benchmarkName: string;
     benchmarkType: string;
+    benchmarkTypeProvided?: boolean;
     modelName: string;
     valueRaw: string;
     valueNote?: string | null;
@@ -203,6 +204,25 @@ describe("paper-table 文本解析", () => {
     expect(parsed.rows[0]?.modelName).toBe("GPT-5.4");
     expect(parsed.rows[0]?.benchmarkName).toBe("GPQA Diamond");
     expect(parsed.rows[0]?.valueRaw).toBe("92.8");
+  });
+
+  test("结构化 CSV 支持 benchmark_type_provided 标记", () => {
+    const inputText = [
+      "provider,model,benchmark,benchmark_type,benchmark_type_provided,value_raw,source",
+      "OpenAI,GPT-5.4,GPQA Diamond,General,0,92.8,text:unit-test",
+      "OpenAI,GPT-5.4,AIME 2025,Math,1,91.2,text:unit-test"
+    ].join("\n");
+
+    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+
+    expect(parsed.format).toBe("structured-csv");
+    expect(parsed.rows).toHaveLength(2);
+
+    const gpqa = parsed.rows.find((row) => row.benchmarkName === "GPQA Diamond");
+    const aime = parsed.rows.find((row) => row.benchmarkName === "AIME 2025");
+
+    expect(gpqa?.benchmarkTypeProvided).toBe(false);
+    expect(aime?.benchmarkTypeProvided).toBe(true);
   });
 
   test("矩阵值中的括号说明会拆分为数值与备注", () => {

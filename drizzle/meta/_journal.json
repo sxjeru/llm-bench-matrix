@@ -15,6 +15,13 @@
       "when": 1775433600000,
       "tag": "0001_source_index",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1775692800000,
+      "tag": "0002_benchmark_source_meta",
+      "breakpoints": true
     }
   ]
 }

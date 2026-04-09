@@ -17,6 +17,7 @@ type PreviewResponse = {
     modelName: string;
     benchmarkName: string;
     benchmarkType: string;
+      benchmarkTypeProvided?: boolean;
     modalities?: string[];
     rawValue: string;
     valueNum: number | null;
@@ -357,6 +358,117 @@ describe("AdminConsole text import", () => {
     });
 
     expect(await screen.findByText(/已自动处理 1 条解析警告/)).toBeInTheDocument();
+  });
+
+  test("同名 benchmark 导入时保留导入 type 与 modality", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "structured-csv",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "Bench-1",
+          benchmarkType: "Type-New",
+          modalities: ["Vision"],
+          rawValue: "70.1",
+          valueNum: 70.1,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    const importResponse = {
+      format: "structured-csv",
+      total: 1,
+      skipped: 0,
+      inserted: 1,
+      warningCount: 0,
+      warnings: []
+    };
+
+    const fetchMock = mockFetchSequence(previewResponse, importResponse);
+    render(<AdminConsole {...buildProps()} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const secondCall = fetchMock.mock.calls[1];
+    const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
+      csvText?: string;
+    };
+
+    expect(secondPayload.csvText).toContain("Bench-1,Type-New");
+    expect(secondPayload.csvText).toContain("Vision");
+    expect(secondPayload.csvText).not.toContain("Bench-1,Type-A");
+  });
+
+  test("未提供 type 的行会写入 benchmark_type_provided=0", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "matrix-table",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "Bench-1",
+          benchmarkType: "General",
+          benchmarkTypeProvided: false,
+          modalities: ["Text"],
+          rawValue: "70.1",
+          valueNum: 70.1,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    const importResponse = {
+      format: "structured-csv",
+      total: 1,
+      skipped: 0,
+      inserted: 1,
+      warningCount: 0,
+      warnings: []
+    };
+
+    const fetchMock = mockFetchSequence(previewResponse, importResponse);
+    render(<AdminConsole {...buildProps()} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const secondCall = fetchMock.mock.calls[1];
+    const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
+      csvText?: string;
+    };
+
+    expect(secondPayload.csvText).toContain("Bench-1,General,0");
   });
 
   test("星号值支持 *:// 语法并自动回填注释输入", async () => {

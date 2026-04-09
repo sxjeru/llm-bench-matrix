@@ -1,5 +1,5 @@
 import { parse } from "csv-parse/sync";
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
   buildBenchmarkCanonicalKey,
@@ -10,7 +10,7 @@ import {
 } from "@/lib/db/normalize";
 import { parseBenchmarkValue, type ParsedBenchmarkValue } from "@/lib/db/parse-value";
 import type { ParsedImportRecord } from "@/lib/import/xlsm";
-import { benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
+import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 
 type EnsureBenchmarkInput = {
   benchmarkName: string;
@@ -27,6 +27,7 @@ type NormalizedTextImportRow = {
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
+  benchmarkTypeProvided: boolean;
   valueRaw: string;
   valueNote: string | null;
   benchTime: Date;
@@ -1351,6 +1352,7 @@ export async function importParsedRecords(
       modelName: normalizeNameParenthesisSpacing(record.modelName),
       benchmarkName: normalizeNameParenthesisSpacing(record.benchmarkName),
       benchmarkType: (record.category || "general").trim() || "general",
+      benchmarkTypeProvided: Boolean(record.category && record.category.trim().length > 0),
       valueRaw: record.rawValue,
       valueNote: null,
       benchTime: options?.benchTime ?? new Date(),
@@ -1381,8 +1383,55 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
   return db.transaction(async (tx: any) => {
     const providerCache = new Map<string, Awaited<ReturnType<typeof ensureProvider>>>();
     const modelCache = new Map<string, Awaited<ReturnType<typeof ensureModelByProviderId>>>();
-    const benchmarkCache = new Map<string, Awaited<ReturnType<typeof ensureBenchmark>>>();
+    const benchmarkByNameCache = new Map<string, Array<typeof benchmarks.$inferSelect>>();
+    const sourceMetaUpsertMap = new Map<
+      string,
+      {
+        benchmarkId: number;
+        source: string;
+        benchmarkType: string;
+        modalities: string[];
+      }
+    >();
     const valueRows: Array<typeof benchmarkValues.$inferInsert> = [];
+
+    const existingActiveBenchmarks = await tx
+      .select()
+      .from(benchmarks)
+      .where(isNull(benchmarks.mergedIntoBenchmarkId)) as Array<typeof benchmarks.$inferSelect>;
+
+    existingActiveBenchmarks
+      .sort((left, right) => left.id - right.id)
+      .forEach((benchmark) => {
+        const benchmarkNameKey = benchmark.benchmarkName.trim().toLowerCase();
+        if (!benchmarkNameKey) return;
+        if (!benchmarkByNameCache.has(benchmarkNameKey)) {
+          benchmarkByNameCache.set(benchmarkNameKey, []);
+        }
+        benchmarkByNameCache.get(benchmarkNameKey)?.push(benchmark);
+      });
+
+    const upsertBenchmarkByNameCache = (benchmark: typeof benchmarks.$inferSelect) => {
+      const benchmarkNameKey = benchmark.benchmarkName.trim().toLowerCase();
+      if (!benchmarkNameKey) return;
+
+      const existing = benchmarkByNameCache.get(benchmarkNameKey) ?? [];
+      const next = [...existing.filter((item) => item.id !== benchmark.id), benchmark]
+        .sort((left, right) => left.id - right.id);
+
+      benchmarkByNameCache.set(benchmarkNameKey, next);
+    };
+
+    const pickSharedBenchmark = (benchmarkName: string, benchmarkType: string) => {
+      const benchmarkNameKey = benchmarkName.trim().toLowerCase();
+      if (!benchmarkNameKey) return null;
+
+      const candidates = benchmarkByNameCache.get(benchmarkNameKey) ?? [];
+      if (candidates.length === 0) return null;
+
+      const normalizedType = benchmarkType.trim().toLowerCase();
+      return candidates.find((item) => item.benchmarkType.trim().toLowerCase() === normalizedType) ?? candidates[0] ?? null;
+    };
 
     for (const row of rows) {
       try {
@@ -1410,10 +1459,12 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
         }
 
         const benchmarkType = row.benchmarkType.trim() || "general";
-        const benchmarkCanonicalKey = buildBenchmarkCanonicalKey(row.benchmarkName, benchmarkType, dedupeRule);
-        let benchmark = benchmarkCache.get(benchmarkCanonicalKey);
+        const hasImportedBenchmarkType = row.benchmarkTypeProvided;
+        const benchmarkTypeForSelection = hasImportedBenchmarkType ? benchmarkType : "general";
+        let benchmark = pickSharedBenchmark(row.benchmarkName, benchmarkTypeForSelection);
+
         if (!benchmark) {
-          benchmark = await ensureBenchmark(
+          const createdBenchmark = await ensureBenchmark(
             {
               benchmarkName: row.benchmarkName,
               benchmarkType,
@@ -1424,7 +1475,49 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
             },
             { dedupeRule, db: tx }
           );
-          benchmarkCache.set(benchmarkCanonicalKey, benchmark);
+          benchmark = createdBenchmark;
+
+          upsertBenchmarkByNameCache(createdBenchmark);
+        }
+
+        if (!benchmark) {
+          throw new Error(`未能解析 benchmark：${row.benchmarkName}`);
+        }
+
+        const shouldForceLowerIsBetter = isLowerBetterBenchmark(benchmark.benchmarkName) || row.higherIsBetter === false;
+        if (shouldForceLowerIsBetter && benchmark.higherIsBetter) {
+          const updatedBenchmarkResult = await tx
+            .update(benchmarks)
+            .set({ higherIsBetter: false })
+            .where(eq(benchmarks.id, benchmark.id))
+            .returning();
+
+          benchmark = firstResultRow<typeof benchmarks.$inferSelect>(updatedBenchmarkResult)
+            ?? { ...benchmark, higherIsBetter: false };
+
+          upsertBenchmarkByNameCache(benchmark);
+        }
+
+        const normalizedSource = row.source?.trim() ?? "";
+        const normalizedSourceOrNull = normalizedSource.length > 0 ? normalizedSource : null;
+
+        if (normalizedSourceOrNull) {
+          const sourceBenchmarkType = hasImportedBenchmarkType
+            ? benchmarkType
+            : benchmark.benchmarkType;
+          const sourceModalities = hasImportedBenchmarkType
+            ? normalizeModalities(
+              row.modalities?.length ? row.modalities : [sourceBenchmarkType]
+            )
+            : normalizeModalities(benchmark.modalities);
+
+          const sourceMetaKey = `${benchmark.id}::${normalizedSourceOrNull}`;
+          sourceMetaUpsertMap.set(sourceMetaKey, {
+            benchmarkId: benchmark.id,
+            source: normalizedSourceOrNull,
+            benchmarkType: sourceBenchmarkType,
+            modalities: sourceModalities
+          });
         }
 
         const parsedValue = parseBenchmarkValue(row.valueRaw);
@@ -1438,7 +1531,7 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
           valueNum: normalizedValue.valueNum !== null ? String(normalizedValue.valueNum) : null,
           valueNum2: normalizedValue.valueNum2 !== null ? String(normalizedValue.valueNum2) : null,
           valueNote: mergedValueNote,
-          source: row.source ?? null
+          source: normalizedSourceOrNull
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "unknown import error";
@@ -1453,6 +1546,24 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
       const chunk = valueRows.slice(index, index + batchSize);
       if (chunk.length === 0) continue;
       await tx.insert(benchmarkValues).values(chunk);
+    }
+
+    const sourceMetaRows = Array.from(sourceMetaUpsertMap.values());
+    for (let index = 0; index < sourceMetaRows.length; index += batchSize) {
+      const chunk = sourceMetaRows.slice(index, index + batchSize);
+      if (chunk.length === 0) continue;
+
+      await tx
+        .insert(benchmarkSourceMeta)
+        .values(chunk)
+        .onConflictDoUpdate({
+          target: [benchmarkSourceMeta.benchmarkId, benchmarkSourceMeta.source],
+          set: {
+            benchmarkType: sql`excluded.benchmark_type`,
+            modalities: sql`excluded.modalities`,
+            updatedAt: sql`now()`
+          }
+        });
     }
 
     return { inserted: valueRows.length };
@@ -1488,7 +1599,14 @@ function parseStructuredCsvRows(inputText: string, defaultSource: string | null)
       toNullableText(row.value_note || row.valueNote || row.note)
     );
     const providerName = (row.provider || row.provider_name || "").trim() || inferProviderNameFromModel(modelName);
-    const benchmarkType = (row.benchmark_type || row.type || "general").trim() || "general";
+    const benchmarkTypeInput = (row.benchmark_type || row.type || "").trim();
+    const benchmarkTypeProvidedFlagRaw = (row.benchmark_type_provided || row.type_provided || "")
+      .trim()
+      .toLowerCase();
+    const benchmarkTypeProvided = benchmarkTypeProvidedFlagRaw
+      ? ["1", "true", "yes", "y"].includes(benchmarkTypeProvidedFlagRaw)
+      : benchmarkTypeInput.length > 0;
+    const benchmarkType = benchmarkTypeInput || "general";
     const modalitiesInput = (row.modalities || "").trim();
     const benchTimeRaw = row.bench_time || row.time || row.date || new Date().toISOString();
     const benchTime = new Date(benchTimeRaw);
@@ -1504,6 +1622,7 @@ function parseStructuredCsvRows(inputText: string, defaultSource: string | null)
       modelName,
       benchmarkName,
       benchmarkType,
+      benchmarkTypeProvided,
       valueRaw,
       valueNote,
       benchTime,
@@ -1621,6 +1740,7 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
   let skipped = 0;
   const defaultModalities = preambleTypeHint ? inferModalitiesFromCategory(preambleTypeHint) : ["Text"];
   let currentBenchmarkType = preambleTypeHint ?? "General";
+  let currentBenchmarkTypeProvided = Boolean(preambleTypeHint && preambleTypeHint.trim().length > 0);
   let currentModalities = defaultModalities;
 
   for (let lineIndex = headerLineIndex + 1; lineIndex < rawLines.length; lineIndex += 1) {
@@ -1631,6 +1751,7 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
 
     if (categoryInput) {
       currentBenchmarkType = categoryInput;
+      currentBenchmarkTypeProvided = true;
       const sectionTypeHint = inferTypeFromPreambleLine(categoryInput);
       currentModalities = sectionTypeHint ? inferModalitiesFromCategory(sectionTypeHint) : defaultModalities;
     }
@@ -1655,6 +1776,7 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
 
     if (allModelValuesEmpty && isMatrixTypeMarker(benchmarkName)) {
       currentBenchmarkType = benchmarkName;
+      currentBenchmarkTypeProvided = true;
 
       const sectionTypeHint = inferTypeFromPreambleLine(benchmarkName);
       if (sectionTypeHint) {
@@ -1682,6 +1804,7 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
         modelName,
         benchmarkName,
         benchmarkType: currentBenchmarkType,
+        benchmarkTypeProvided: currentBenchmarkTypeProvided,
         valueRaw: normalizedValue.valueRaw,
         valueNote: normalizedValue.valueNote,
         benchTime: new Date(),
@@ -1788,6 +1911,7 @@ function parsePaperCopiedTableRows(inputText: string, defaultSource: string | nu
 
   const defaultModalities = preambleTypeHint ? inferModalitiesFromCategory(preambleTypeHint) : ["Text"];
   let currentBenchmarkType = initialCategoryFromHeader ?? preambleTypeHint ?? "General";
+  let currentBenchmarkTypeProvided = Boolean((initialCategoryFromHeader ?? preambleTypeHint ?? "").trim());
   let currentModalities = defaultModalities;
 
   const rows: NormalizedTextImportRow[] = [];
@@ -1837,6 +1961,7 @@ function parsePaperCopiedTableRows(inputText: string, defaultSource: string | nu
       if (!normalizedBenchmarkInput) {
         if (pendingBenchmarkPrefix) {
           currentBenchmarkType = pendingCategoryParts.join(" ");
+          currentBenchmarkTypeProvided = true;
           const sectionTypeHint = inferTypeFromPreambleLine(currentBenchmarkType);
           currentModalities = sectionTypeHint ? inferModalitiesFromCategory(sectionTypeHint) : defaultModalities;
         } else {
@@ -1847,6 +1972,7 @@ function parsePaperCopiedTableRows(inputText: string, defaultSource: string | nu
         }
       } else {
         currentBenchmarkType = pendingCategoryParts.join(" ");
+        currentBenchmarkTypeProvided = true;
         const sectionTypeHint = inferTypeFromPreambleLine(currentBenchmarkType);
         currentModalities = sectionTypeHint ? inferModalitiesFromCategory(sectionTypeHint) : defaultModalities;
       }
@@ -1871,6 +1997,7 @@ function parsePaperCopiedTableRows(inputText: string, defaultSource: string | nu
 
     if (isMatrixTypeMarker(benchmarkName) && extractedValues.every((value) => isEmptyImportValue(value))) {
       currentBenchmarkType = benchmarkName;
+      currentBenchmarkTypeProvided = true;
       const sectionTypeHint = inferTypeFromPreambleLine(benchmarkName);
       currentModalities = sectionTypeHint ? inferModalitiesFromCategory(sectionTypeHint) : defaultModalities;
       continue;
@@ -1894,6 +2021,7 @@ function parsePaperCopiedTableRows(inputText: string, defaultSource: string | nu
         modelName,
         benchmarkName,
         benchmarkType: currentBenchmarkType,
+        benchmarkTypeProvided: currentBenchmarkTypeProvided,
         valueRaw: normalizedValue.valueRaw,
         valueNote: normalizedValue.valueNote,
         benchTime: new Date(),
@@ -2066,6 +2194,7 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
       modelName: row.modelName,
       benchmarkName: row.benchmarkName,
       benchmarkType: row.benchmarkType,
+      benchmarkTypeProvided: row.benchmarkTypeProvided,
       modalities: normalizeModalities(row.modalities),
       rawValue: row.valueRaw,
       valueNum: parsedValue.valueNum,
@@ -2165,12 +2294,18 @@ export async function deleteBenchmarkValuesBySource(sourceInput: string) {
     .where(inArray(benchmarkValues.source, matchedSources))
     .returning({ id: benchmarkValues.id });
 
+  const deletedSourceMetaRows = await db
+    .delete(benchmarkSourceMeta)
+    .where(inArray(benchmarkSourceMeta.source, matchedSources))
+    .returning({ id: benchmarkSourceMeta.id });
+
   return {
     ok: true,
     source: rawSource,
     normalizedSource,
     matchedSources,
     deleted: deletedRows.length,
+    deletedSourceMeta: deletedSourceMetaRows.length,
     deletedEmptySource: false
   };
 }
