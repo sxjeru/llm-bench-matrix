@@ -598,6 +598,25 @@ function normalizeMatchToken(input: string): string {
   return input.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
+const MATCH_HYPHEN_VARIANT_REGEX = /[\-\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g;
+
+function normalizeHeaderPrefixMatchToken(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(MATCH_HYPHEN_VARIANT_REGEX, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function isSourceHeaderPrefixMatch(modelName: string, sourceLabel: string): boolean {
+  const normalizedSourceLabel = normalizeHeaderPrefixMatchToken(sourceLabel);
+  if (!normalizedSourceLabel) return false;
+
+  const normalizedModelName = normalizeHeaderPrefixMatchToken(modelName);
+  if (!normalizedModelName) return false;
+
+  return normalizedModelName.startsWith(normalizedSourceLabel);
+}
+
 type ModelScaleToken = {
   prefixKey: string;
   sizeInBillions: number;
@@ -609,8 +628,14 @@ type ModelVersionToken = {
   version: number;
 };
 
+type ModelVariantToken = {
+  familyKey: string;
+  variant: "pro" | "base" | "flash" | "flash-lite" | "mini" | "nano";
+};
+
 const MODEL_SIZE_TOKEN_PATTERN = /\b(E?)(\d+(?:\.\d+)?)B\b/i;
 const MODEL_VERSION_TOKEN_PATTERN = /^([A-Za-z]+)[\s-_]*([0-9]+(?:\.\d+)?)/i;
+const MODEL_FLASH_LITE_PATTERN = /\bflash[\s-_]*lite\b/i;
 
 function extractModelVersionToken(modelName: string): ModelVersionToken | null {
   const match = MODEL_VERSION_TOKEN_PATTERN.exec(modelName.trim());
@@ -677,6 +702,55 @@ function extractModelScaleToken(modelName: string): ModelScaleToken | null {
   };
 }
 
+function extractModelVariantToken(modelName: string): ModelVariantToken | null {
+  const normalized = modelName
+    .toLowerCase()
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g, "-")
+    .replace(/[\-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) return null;
+
+  const variant: ModelVariantToken["variant"] = (() => {
+    if (/\bpro\b/.test(normalized)) return "pro";
+    if (MODEL_FLASH_LITE_PATTERN.test(normalized)) return "flash-lite";
+    if (/\bflash\b/.test(normalized)) return "flash";
+    if (/\bmini\b/.test(normalized)) return "mini";
+    if (/\bnano\b/.test(normalized)) return "nano";
+    return "base";
+  })();
+
+  const familyKey = normalized
+    .replace(MODEL_FLASH_LITE_PATTERN, " ")
+    .replace(/\b(?:pro|flash|lite|mini|nano)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!familyKey) return null;
+
+  return {
+    familyKey,
+    variant
+  };
+}
+
+function compareModelVariantPriority(
+  leftVariant: ModelVariantToken["variant"],
+  rightVariant: ModelVariantToken["variant"]
+): number {
+  const priority: Record<ModelVariantToken["variant"], number> = {
+    pro: 6,
+    base: 5,
+    flash: 4,
+    mini: 3,
+    nano: 2,
+    "flash-lite": 1
+  };
+
+  return priority[rightVariant] - priority[leftVariant];
+}
+
 function compareModelNameByColumnOrder(left: string, right: string, collator: Intl.Collator): number {
   const leftVersionToken = extractModelVersionToken(left);
   const rightVersionToken = extractModelVersionToken(right);
@@ -688,6 +762,21 @@ function compareModelNameByColumnOrder(left: string, right: string, collator: In
     rightVersionToken.version !== leftVersionToken.version
   ) {
     return rightVersionToken.version - leftVersionToken.version;
+  }
+
+  const leftVariantToken = extractModelVariantToken(left);
+  const rightVariantToken = extractModelVariantToken(right);
+
+  if (
+    leftVariantToken &&
+    rightVariantToken &&
+    leftVariantToken.familyKey.length > 0 &&
+    leftVariantToken.familyKey === rightVariantToken.familyKey
+  ) {
+    const variantCompare = compareModelVariantPriority(leftVariantToken.variant, rightVariantToken.variant);
+    if (variantCompare !== 0) {
+      return variantCompare;
+    }
   }
 
   const leftScaleToken = extractModelScaleToken(left);
@@ -1754,10 +1843,15 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     return new Set(baseSourceRows.map((row) => row.modelName));
   }, [baseSourceRows]);
 
-  const sourceModelHint = useMemo(() => {
+  const sourceTabMatchLabel = useMemo(() => {
     if (activeSource === SOURCE_ALL) return "";
-    return normalizeMatchToken(sourceTabDisplayLabel(activeSource));
+    return sourceTabDisplayLabel(activeSource).trim();
   }, [activeSource]);
+
+  const sourceModelHint = useMemo(() => {
+    if (!sourceTabMatchLabel) return "";
+    return normalizeMatchToken(sourceTabMatchLabel);
+  }, [sourceTabMatchLabel]);
 
   const coverageMetaByModel = useMemo(() => {
     const modelCoveredBenchmarkKeys = new Map<string, Set<string>>();
@@ -1948,23 +2042,41 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
     const sourceKey = activeSourceRef.current;
     const normalized = Array.from(new Set(selectedModels)).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+    const fallbackDefaultModels = sourceKey === SOURCE_ALL
+      ? [...allModelNames]
+      : [...defaultSelectedModels];
+    const normalizedDefault = Array.from(new Set(fallbackDefaultModels)).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+    const isDefaultSelection =
+      normalized.length === normalizedDefault.length
+      && normalized.every((item, index) => item === normalizedDefault[index]);
+
     const previous = modelSelectionBySourceRef.current[sourceKey] ?? [];
 
-    if (previous.length === normalized.length && previous.every((item, index) => item === normalized[index])) {
-      return;
-    }
+    if (!isDefaultSelection) {
+      if (previous.length === normalized.length && previous.every((item, index) => item === normalized[index])) {
+        return;
+      }
 
-    modelSelectionBySourceRef.current = {
-      ...modelSelectionBySourceRef.current,
-      [sourceKey]: normalized
-    };
+      modelSelectionBySourceRef.current = {
+        ...modelSelectionBySourceRef.current,
+        [sourceKey]: normalized
+      };
+    } else {
+      if (!(sourceKey in modelSelectionBySourceRef.current)) {
+        return;
+      }
+
+      const nextSelectionBySource = { ...modelSelectionBySourceRef.current };
+      delete nextSelectionBySource[sourceKey];
+      modelSelectionBySourceRef.current = nextSelectionBySource;
+    }
 
     try {
       window.localStorage.setItem(MODEL_SELECTION_BY_SOURCE_STORAGE_KEY, JSON.stringify(modelSelectionBySourceRef.current));
     } catch {
       // ignore storage access errors gracefully
     }
-  }, [selectedModels, isModelSelectionLoaded]);
+  }, [selectedModels, isModelSelectionLoaded, allModelNames, defaultSelectedModels]);
 
   useEffect(() => {
     const listener = () => {
@@ -2338,18 +2450,41 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   );
 
   const sourceMatchedModelSet = useMemo(() => {
-    if (!sourceModelHint) return new Set<string>();
+    if (!sourceTabMatchLabel) return new Set<string>();
 
     return new Set(
-      modelColumns.filter((modelName) => normalizeMatchToken(modelName).includes(sourceModelHint))
+      modelColumns.filter((modelName) => isSourceHeaderPrefixMatch(modelName, sourceTabMatchLabel))
     );
-  }, [modelColumns, sourceModelHint]);
+  }, [modelColumns, sourceTabMatchLabel]);
+
+  const sourceMatchedGroupBoundaryByModel = useMemo(() => {
+    const firstSet = new Set<string>();
+    const lastSet = new Set<string>();
+
+    modelColumns.forEach((modelName, index) => {
+      if (!sourceMatchedModelSet.has(modelName)) return;
+
+      const previousModel = modelColumns[index - 1];
+      const nextModel = modelColumns[index + 1];
+      const hasPreviousMatched = previousModel ? sourceMatchedModelSet.has(previousModel) : false;
+      const hasNextMatched = nextModel ? sourceMatchedModelSet.has(nextModel) : false;
+
+      if (!hasPreviousMatched) {
+        firstSet.add(modelName);
+      }
+
+      if (!hasNextMatched) {
+        lastSet.add(modelName);
+      }
+    });
+
+    return {
+      firstSet,
+      lastSet
+    };
+  }, [modelColumns, sourceMatchedModelSet]);
 
   const modelColumnMeta = useMemo(() => {
-    const sourceMatchedOrderedModels = modelColumns.filter((modelName) => sourceMatchedModelSet.has(modelName));
-    const firstMatchedModel = sourceMatchedOrderedModels[0] ?? null;
-    const lastMatchedModel = sourceMatchedOrderedModels[sourceMatchedOrderedModels.length - 1] ?? null;
-
     return modelColumns.map((modelName) => {
       const providerName = modelProviderMap.get(modelName) ?? "Unknown";
       const columnWidthKey = getModelColumnWidthKey(modelName);
@@ -2367,31 +2502,38 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         color: getProviderBrandColor(providerName),
         columnWidth,
         isSourceMatched: sourceMatchedModelSet.has(modelName),
-        isSourceMatchedFirst: modelName === firstMatchedModel,
-        isSourceMatchedLast: modelName === lastMatchedModel
+        isSourceMatchedFirst: sourceMatchedGroupBoundaryByModel.firstSet.has(modelName),
+        isSourceMatchedLast: sourceMatchedGroupBoundaryByModel.lastSet.has(modelName)
       };
     });
-  }, [modelColumns, modelProviderMap, sourceMatchedModelSet, autoModelWidthMap, activeColumnWidthMap]);
+  }, [
+    modelColumns,
+    modelProviderMap,
+    sourceMatchedModelSet,
+    sourceMatchedGroupBoundaryByModel,
+    autoModelWidthMap,
+    activeColumnWidthMap
+  ]);
 
   const hiddenResizeHandleKeys = useMemo(() => {
     const hidden = new Set<string>();
 
-    const firstMatchedModelIndex = modelColumnMeta.findIndex((model) => model.isSourceMatchedFirst);
-    if (firstMatchedModelIndex >= 0) {
-      if (firstMatchedModelIndex === 0) {
-        hidden.add(BENCHMARK_COLUMN_WIDTH_KEY);
-      } else {
-        const previousModel = modelColumnMeta[firstMatchedModelIndex - 1];
-        if (previousModel) {
-          hidden.add(previousModel.columnWidthKey);
+    modelColumnMeta.forEach((model, index) => {
+      if (model.isSourceMatchedFirst) {
+        if (index === 0) {
+          hidden.add(BENCHMARK_COLUMN_WIDTH_KEY);
+        } else {
+          const previousModel = modelColumnMeta[index - 1];
+          if (previousModel) {
+            hidden.add(previousModel.columnWidthKey);
+          }
         }
       }
-    }
 
-    const lastMatchedModel = modelColumnMeta.find((model) => model.isSourceMatchedLast);
-    if (lastMatchedModel) {
-      hidden.add(lastMatchedModel.columnWidthKey);
-    }
+      if (model.isSourceMatchedLast) {
+        hidden.add(model.columnWidthKey);
+      }
+    });
 
     return hidden;
   }, [modelColumnMeta]);
@@ -2940,6 +3082,42 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     setSelectedModels([]);
   }
 
+  function restoreDefaultModelsForActiveSource() {
+    const sourceKey = activeSourceRef.current;
+    const fallbackDefaultModels = sourceKey === SOURCE_ALL
+      ? [...allModelNames]
+      : [...defaultSelectedModels];
+
+    const nextSelectionBySource = { ...modelSelectionBySourceRef.current };
+    delete nextSelectionBySource[sourceKey];
+    modelSelectionBySourceRef.current = nextSelectionBySource;
+
+    try {
+      window.localStorage.setItem(MODEL_SELECTION_BY_SOURCE_STORAGE_KEY, JSON.stringify(nextSelectionBySource));
+    } catch {
+      // ignore storage access errors gracefully
+    }
+
+    setModelOrderBySource((prev) => {
+      if (!(sourceKey in prev)) return prev;
+
+      const next = { ...prev };
+      delete next[sourceKey];
+
+      try {
+        window.localStorage.setItem(MODEL_ORDER_BY_SOURCE_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore storage access errors gracefully
+      }
+
+      return next;
+    });
+
+    setSelectedModels(fallbackDefaultModels);
+    setRowPresenceFilterModel(null);
+    setColumnSortBenchmarkKey(null);
+  }
+
   function toggleModality(modality: string, checked: boolean) {
     setSelectedModalities((prev) => {
       const set = new Set(prev);
@@ -3270,6 +3448,9 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
             </button>
             <button type="button" className="btn btn-xs btn-ghost" onClick={clearAllModels}>
               清空模型
+            </button>
+            <button type="button" className="btn btn-xs btn-ghost" onClick={restoreDefaultModelsForActiveSource}>
+              恢复默认
             </button>
           </div>
         </div>
