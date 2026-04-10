@@ -2703,6 +2703,7 @@ export function AdminConsole({
     if (reason === "same-type") return "类型一致";
     if (reason === "general-type-gap") return "General 可覆盖";
     if (reason === "type-mismatch") return "类型不一致";
+    if (reason === "numeric-token-mismatch") return "数字片段不一致（降为低置信）";
     if (reason === "variant-conflict-hint") return "疑似变体冲突";
     if (reason === "version-gap-hint") return "版本差异（已降级）";
     if (reason.startsWith("char-similarity-")) {

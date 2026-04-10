@@ -25,6 +25,7 @@ let parseBenchmarkTextRowsForTest: (
 ) => ParsedTextImportResult;
 let normalizeDuplicateCompareTextForTest: (input: string) => string;
 let getDuplicateNameSimilarityForTest: (left: string, right: string) => number;
+let hasBenchmarkNumericTokenMismatchForTest: (left: string, right: string) => boolean;
 
 beforeAll(async () => {
   process.env.DATABASE_URL ??= "postgres://test:test@127.0.0.1:5432/test";
@@ -34,6 +35,8 @@ beforeAll(async () => {
     module.__normalizeDuplicateCompareTextForTest as typeof normalizeDuplicateCompareTextForTest;
   getDuplicateNameSimilarityForTest =
     module.__getDuplicateNameSimilarityForTest as typeof getDuplicateNameSimilarityForTest;
+  hasBenchmarkNumericTokenMismatchForTest =
+    module.__hasBenchmarkNumericTokenMismatchForTest as typeof hasBenchmarkNumericTokenMismatchForTest;
 });
 
 describe("paper-table 文本解析", () => {
@@ -168,6 +171,22 @@ describe("paper-table 文本解析", () => {
     expect(exactEquivalent).toBe(1);
     expect(superscriptGap).toBeLessThan(1);
     expect(normalizeDuplicateCompareTextForTest("Λ-τ Bench")).toBe("λ τ bench");
+  });
+
+  test("benchmark 数字片段差异会被识别为不一致", () => {
+    expect(
+      hasBenchmarkNumericTokenMismatchForTest(
+        "SongFormBench-HarmonixSet (hr3f)",
+        "SongFormBench-HarmonixSet (hr.5f)"
+      )
+    ).toBe(true);
+
+    expect(
+      hasBenchmarkNumericTokenMismatchForTest(
+        "SongFormBench-HarmonixSet (hr3f)",
+        "SongFormBench-HarmonixSet (hr3f)"
+      )
+    ).toBe(false);
   });
 
   test("VLM 关键词可识别为 Vision 模态", () => {

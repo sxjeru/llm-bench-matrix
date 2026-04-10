@@ -1482,6 +1482,7 @@ export async function mergeEntity(input: {
     if (normalizedTargetBenchmarkName.length > 0) {
       const [targetBenchmark] = await tx
         .select({
+          benchmarkName: benchmarks.benchmarkName,
           benchmarkType: benchmarks.benchmarkType
         })
         .from(benchmarks)
@@ -1498,6 +1499,65 @@ export async function mergeEntity(input: {
         targetBenchmark.benchmarkType,
         dedupeRule
       );
+
+      const [canonicalOwner] = await tx
+        .select({ id: benchmarks.id })
+        .from(benchmarks)
+        .where(eq(benchmarks.canonicalKey, nextCanonicalKey))
+        .limit(1);
+
+      const [nameTypeOwner] = await tx
+        .select({ id: benchmarks.id })
+        .from(benchmarks)
+        .where(
+          and(
+            eq(benchmarks.benchmarkName, normalizedTargetBenchmarkName),
+            eq(benchmarks.benchmarkType, targetBenchmark.benchmarkType)
+          )
+        )
+        .limit(1);
+
+      const hasCanonicalConflict = canonicalOwner && canonicalOwner.id !== input.targetId;
+      const hasNameTypeConflict = nameTypeOwner && nameTypeOwner.id !== input.targetId;
+
+      const canonicalConflictWithSource = hasCanonicalConflict && canonicalOwner.id === input.sourceId;
+      const nameTypeConflictWithSource = hasNameTypeConflict && nameTypeOwner.id === input.sourceId;
+
+      if (hasCanonicalConflict && !canonicalConflictWithSource) {
+        throw new Error(
+          `target benchmark rename conflicts with existing canonical key (benchmarkId=${canonicalOwner.id})`
+        );
+      }
+
+      if (hasNameTypeConflict && !nameTypeConflictWithSource) {
+        throw new Error(
+          `target benchmark rename conflicts with existing benchmark name/type (benchmarkId=${nameTypeOwner.id})`
+        );
+      }
+
+      if (canonicalConflictWithSource || nameTypeConflictWithSource) {
+        const [sourceBenchmarkIdentity] = await tx
+          .select({
+            benchmarkName: benchmarks.benchmarkName,
+            canonicalKey: benchmarks.canonicalKey
+          })
+          .from(benchmarks)
+          .where(eq(benchmarks.id, input.sourceId))
+          .limit(1);
+
+        if (!sourceBenchmarkIdentity) {
+          throw new Error(`source benchmark not found: ${input.sourceId}`);
+        }
+
+        const tempSuffix = `#merged-${input.sourceId}-${Date.now()}`;
+        await tx
+          .update(benchmarks)
+          .set({
+            benchmarkName: `${sourceBenchmarkIdentity.benchmarkName}${tempSuffix}`,
+            canonicalKey: `${sourceBenchmarkIdentity.canonicalKey}${tempSuffix}`
+          })
+          .where(eq(benchmarks.id, input.sourceId));
+      }
 
       await tx
         .update(benchmarks)
@@ -2852,6 +2912,36 @@ function hasBenchmarkVariantConflict(leftName: string, rightName: string): boole
   });
 }
 
+function extractBenchmarkNumericTokens(input: string): string[] {
+  const normalizedInput = input.replace(
+    SUPERSCRIPT_SUBSCRIPT_DIGIT_REGEX,
+    (value) => SUPERSCRIPT_SUBSCRIPT_DIGIT_MAP[value] ?? value
+  );
+
+  const matches = normalizedInput.match(/\d+(?:\.\d+)?/g) ?? [];
+  return matches
+    .map((token) => {
+      const parsed = Number.parseFloat(token);
+      return Number.isFinite(parsed) ? String(parsed) : token;
+    })
+    .filter((token) => token.length > 0);
+}
+
+function hasBenchmarkNumericTokenMismatch(leftName: string, rightName: string): boolean {
+  const leftTokens = extractBenchmarkNumericTokens(leftName);
+  const rightTokens = extractBenchmarkNumericTokens(rightName);
+
+  if (leftTokens.length === 0 || rightTokens.length === 0) {
+    return false;
+  }
+
+  if (leftTokens.length !== rightTokens.length) {
+    return true;
+  }
+
+  return leftTokens.some((token, index) => token !== rightTokens[index]);
+}
+
 function formatBenchmarkSourceSummary(source: string | null): string {
   const normalized = source?.trim() ?? "";
   return normalized.length > 0 ? normalized : "空 source";
@@ -3032,6 +3122,7 @@ export async function detectDuplicateEntityCandidates(): Promise<DuplicateEntity
       const sameType = leftType === rightType;
       const hasGeneralTypeGap = leftType === "general" || rightType === "general";
       const hasVariantConflict = hasBenchmarkVariantConflict(left.benchmarkName, right.benchmarkName);
+      const hasNumericTokenMismatch = hasBenchmarkNumericTokenMismatch(left.benchmarkName, right.benchmarkName);
 
       const reasons: string[] = [];
       let confidence: DuplicateConfidence = "low";
@@ -3059,6 +3150,11 @@ export async function detectDuplicateEntityCandidates(): Promise<DuplicateEntity
         reasons.push("general-type-gap");
       } else {
         reasons.push("type-mismatch");
+      }
+
+      if (hasNumericTokenMismatch) {
+        reasons.push("numeric-token-mismatch");
+        confidence = "low";
       }
 
       if (hasVariantConflict) {
@@ -3115,6 +3211,10 @@ export function __normalizeDuplicateCompareTextForTest(input: string): string {
 export function __getDuplicateNameSimilarityForTest(left: string, right: string): number {
   const similarity = Math.max(getCharacterRepeatScore(left, right), getDiceSimilarity(left, right));
   return Number(similarity.toFixed(4));
+}
+
+export function __hasBenchmarkNumericTokenMismatchForTest(left: string, right: string): boolean {
+  return hasBenchmarkNumericTokenMismatch(left, right);
 }
 
 export async function clearNonSettingsData() {
