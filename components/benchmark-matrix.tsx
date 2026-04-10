@@ -99,17 +99,40 @@ type OverallModelSummary = {
 type RowSortColumn = "category" | "benchmark";
 type RowSortMode = "source" | "alpha" | "data";
 
-const LOWER_IS_BETTER_RULES: Array<{ matcher: RegExp; baseline: number }> = [
-  { matcher: /fleurs/i, baseline: 100 },
-  { matcher: /omnidocbench\s*1\.5/i, baseline: 100 }
+const LOWER_IS_BETTER_RULES: RegExp[] = [
+  /omnidocbench\s*1\.5/i
 ];
+const LOWER_IS_BETTER_ASR_TYPE_REGEX = /\basr\b/i;
 
-function getBenchmarkComparableScore(benchmarkName: string, valueNum: number): number {
-  for (const rule of LOWER_IS_BETTER_RULES) {
-    if (rule.matcher.test(benchmarkName)) {
-      return rule.baseline - valueNum;
-    }
+function isFleursZhTranslationBenchmark(benchmarkName: string): boolean {
+  if (!/fleurs/i.test(benchmarkName)) return false;
+
+  const normalized = benchmarkName
+    .toLowerCase()
+    .replace(/\s+/g, "");
+
+  const hasBiDirectionalHint = /(?:⇄|↔|<->|<=>)/.test(normalized);
+
+  return hasBiDirectionalHint;
+}
+
+function isLowerBetterBenchmark(benchmarkName: string, benchmarkType?: string): boolean {
+  if (benchmarkType && LOWER_IS_BETTER_ASR_TYPE_REGEX.test(benchmarkType)) {
+    return true;
   }
+
+  if (/fleurs/i.test(benchmarkName)) {
+    return !isFleursZhTranslationBenchmark(benchmarkName);
+  }
+
+  return LOWER_IS_BETTER_RULES.some((rule) => rule.test(benchmarkName));
+}
+
+function getBenchmarkComparableScore(benchmarkName: string, valueNum: number, benchmarkType?: string): number {
+  if (isLowerBetterBenchmark(benchmarkName, benchmarkType)) {
+    return 100 - valueNum;
+  }
+
   return valueNum;
 }
 
@@ -2097,7 +2120,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         return;
       }
 
-      const comparableScore = getBenchmarkComparableScore(row.benchmarkName, row.valueNum);
+      const comparableScore = getBenchmarkComparableScore(row.benchmarkName, row.valueNum, row.benchmarkType);
       const previous = benchmarkScoreMap.get(row.modelName);
       if (previous === undefined || comparableScore > previous) {
         benchmarkScoreMap.set(row.modelName, comparableScore);
@@ -2531,11 +2554,11 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
           .filter((value): value is number => value !== null && Number.isFinite(value));
 
         const comparableValues = numericValues.map((valueNum) =>
-          getBenchmarkComparableScore(matrixRow.benchmark, valueNum)
+          getBenchmarkComparableScore(matrixRow.benchmark, valueNum, matrixRow.category)
         );
 
         const comparableValues2 = numericValues2.map((valueNum) =>
-          getBenchmarkComparableScore(matrixRow.benchmark, valueNum)
+          getBenchmarkComparableScore(matrixRow.benchmark, valueNum, matrixRow.category)
         );
 
         const rowDataCount = matrixRow.cells.size;
@@ -2718,7 +2741,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         rowEntries.push({
           modelName,
           original: valueNum,
-          comparable: getBenchmarkComparableScore(row.benchmark, valueNum)
+          comparable: getBenchmarkComparableScore(row.benchmark, valueNum, row.category)
         });
       });
 
@@ -3626,7 +3649,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
             {sortedMatrixRows.map((matrixRow, rowIndex) => {
               const rowKey = matrixRow.rowKey;
               const isLastMatrixRow = rowIndex === sortedMatrixRows.length - 1;
-              const isLowerBetterBenchmark = LOWER_IS_BETTER_RULES.some((rule) => rule.matcher.test(matrixRow.benchmark));
+              const isRowLowerBetter = isLowerBetterBenchmark(matrixRow.benchmark, matrixRow.category);
               const isSelectedRow = selectedRowKey === rowKey;
               const selectedRowColor = "rgba(94, 234, 212, 0)";
               const rowFrameStyle = isSelectedRow
@@ -3736,7 +3759,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                       >
                         {matrixRow.benchmark}
                       </span>
-                      {isLowerBetterBenchmark ? (
+                      {isRowLowerBetter ? (
                         <span
                           className="inline-flex h-4 w-4 shrink-0 cursor-help items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
                           title="该项目为低值更优"
@@ -3753,10 +3776,10 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     const cellNum = cell?.valueNum ?? null;
                     const cellNum2 = cell?.valueNum2 ?? null;
                     const comparableCellNum = cellNum !== null
-                      ? getBenchmarkComparableScore(matrixRow.benchmark, cellNum)
+                      ? getBenchmarkComparableScore(matrixRow.benchmark, cellNum, matrixRow.category)
                       : null;
                     const comparableCellNum2 = cellNum2 !== null
-                      ? getBenchmarkComparableScore(matrixRow.benchmark, cellNum2)
+                      ? getBenchmarkComparableScore(matrixRow.benchmark, cellNum2, matrixRow.category)
                       : null;
                     const rawText = cell?.displayValue ?? "--";
                     const noteText = cell?.noteText ?? "";

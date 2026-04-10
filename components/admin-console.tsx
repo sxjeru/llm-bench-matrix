@@ -75,6 +75,7 @@ type TextImportPreviewRow = {
   benchmarkName: string;
   benchmarkType: string;
   benchmarkTypeProvided?: boolean;
+  higherIsBetter?: boolean;
   modalities?: string[];
   rawValue: string;
   valueNum: number | null;
@@ -129,6 +130,7 @@ type MatrixPreviewRow = {
   key: string;
   benchmarkName: string;
   benchmarkType: string;
+  higherIsBetter: boolean;
   modalities: string[];
   cellRowIndexByModel: Record<string, number>;
 };
@@ -139,6 +141,7 @@ type StructuredCsvImportRow = {
   benchmarkName: string;
   benchmarkType: string;
   benchmarkTypeProvided: boolean;
+  higherIsBetter: boolean;
   modalities: string[];
   rawValue: string;
   valueNote: string | null;
@@ -210,7 +213,8 @@ const BENCHMARK_NAME_REPLACERS = [/\bno\s*tools?\b/gi, /\bwith\s*search\b/gi, /\
 const HARDCODED_BENCHMARK_ALIAS_RULES: Array<{ pattern: RegExp; targetName: string }> = [
   { pattern: /^\s*hle\s+with\s+tools?\s*$/i, targetName: "HLE w/ tool" }
 ];
-const LOWER_IS_BETTER_PREVIEW_RULES = [/fleurs/i, /omnidocbench\s*1\.5/i];
+const LOWER_IS_BETTER_PREVIEW_RULES = [/omnidocbench\s*1\.5/i];
+const LOWER_IS_BETTER_PREVIEW_ASR_TYPE_REGEX = /\basr\b/i;
 const OMNIDOCBENCH_15_MATCHER = /omnidocbench\s*1\.5/i;
 const MULTIMODAL_HINT_PATTERN = /(\bmultimodal(?:ity)?\b|\bmulti[\s-_]?modal(?:ity)?\b|多模态)/i;
 const MODEL_HYPHEN_VARIANT_REGEX = /[\-\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g;
@@ -383,7 +387,27 @@ function toDomSafeId(input: string): string {
   return input.replace(/[^a-zA-Z0-9_-]+/g, "-");
 }
 
-function isLowerBetterPreviewBenchmark(benchmarkName: string): boolean {
+function isFleursZhTranslationPreviewBenchmark(benchmarkName: string): boolean {
+  if (!/fleurs/i.test(benchmarkName)) return false;
+
+  const normalized = benchmarkName
+    .toLowerCase()
+    .replace(/\s+/g, "");
+
+  const hasBiDirectionalHint = /(?:⇄|↔|<->|<=>)/.test(normalized);
+
+  return hasBiDirectionalHint;
+}
+
+function isLowerBetterPreviewBenchmark(benchmarkName: string, benchmarkType?: string): boolean {
+  if (benchmarkType && LOWER_IS_BETTER_PREVIEW_ASR_TYPE_REGEX.test(benchmarkType)) {
+    return true;
+  }
+
+  if (/fleurs/i.test(benchmarkName)) {
+    return !isFleursZhTranslationPreviewBenchmark(benchmarkName);
+  }
+
   return LOWER_IS_BETTER_PREVIEW_RULES.some((rule) => rule.test(benchmarkName));
 }
 
@@ -500,6 +524,7 @@ function buildStructuredCsvText(rows: StructuredCsvImportRow[]): string {
     "benchmark",
     "benchmark_type",
     "benchmark_type_provided",
+    "higher_is_better",
     "value_raw",
     "value_note",
     "modalities",
@@ -514,6 +539,7 @@ function buildStructuredCsvText(rows: StructuredCsvImportRow[]): string {
       row.benchmarkName,
       row.benchmarkType,
       row.benchmarkTypeProvided ? "1" : "0",
+      row.higherIsBetter ? "1" : "0",
       row.rawValue,
       row.valueNote ?? "",
       row.modalities.join(","),
@@ -1080,11 +1106,15 @@ export function AdminConsole({
             existingBenchmarkModalitiesMap.get(getBenchmarkExactLookupKey(row.benchmarkName, row.benchmarkType))
             ?? [normalizeModalityName(row.benchmarkType)]
           );
+        const inferredHigherIsBetter = typeof row.higherIsBetter === "boolean"
+          ? row.higherIsBetter
+          : !isLowerBetterPreviewBenchmark(row.benchmarkName, row.benchmarkType);
 
         rowMap.set(key, {
           key,
           benchmarkName: row.benchmarkName,
           benchmarkType: row.benchmarkType,
+          higherIsBetter: inferredHigherIsBetter,
           modalities,
           cellRowIndexByModel: {}
         });
@@ -1092,6 +1122,10 @@ export function AdminConsole({
 
       const entry = rowMap.get(key);
       if (!entry) return;
+
+      if (typeof row.higherIsBetter === "boolean") {
+        entry.higherIsBetter = row.higherIsBetter;
+      }
 
       if (entry.cellRowIndexByModel[row.modelName] === undefined) {
         entry.cellRowIndexByModel[row.modelName] = rowIndex;
@@ -1321,6 +1355,9 @@ export function AdminConsole({
         const normalizedModalities = normalizeModalityList(
           row.modalities?.length ? row.modalities : [benchmarkType]
         );
+        const inferredHigherIsBetter = typeof row.higherIsBetter === "boolean"
+          ? row.higherIsBetter
+          : !isLowerBetterPreviewBenchmark(benchmarkName, benchmarkType);
 
         return {
           providerName,
@@ -1328,6 +1365,7 @@ export function AdminConsole({
           benchmarkName,
           benchmarkType,
           benchmarkTypeProvided: row.benchmarkTypeProvided ?? true,
+          higherIsBetter: inferredHigherIsBetter,
           modalities: normalizedModalities,
           rawValue,
           valueNote,
@@ -1372,6 +1410,7 @@ export function AdminConsole({
       benchmarkName: row.benchmarkName,
       benchmarkType: row.benchmarkType,
       benchmarkTypeProvided: row.benchmarkTypeProvided,
+      higherIsBetter: row.higherIsBetter,
       modalities: row.modalities,
       rawValue: row.rawValue,
       valueNum: null,
@@ -1653,6 +1692,7 @@ export function AdminConsole({
       const providerName = existingModel
         ? (providerById.get(existingModel.providerId)?.name ?? inferProviderNameFromModelName(normalizedModelName))
         : inferProviderNameFromModelName(normalizedModelName);
+      const inferredHigherIsBetter = !isLowerBetterPreviewBenchmark(row.benchmarkName, benchmarkType);
 
       return {
         rowNumber: row.rowNumber,
@@ -1661,6 +1701,7 @@ export function AdminConsole({
         benchmarkName: row.benchmarkName,
         benchmarkType,
         benchmarkTypeProvided: currentBenchmarkTypeProvided,
+        higherIsBetter: inferredHigherIsBetter,
         modalities: normalizeModalityList([benchmarkType]),
         rawValue: row.rawValue,
         valueNum: row.valueNum,
@@ -2095,6 +2136,21 @@ export function AdminConsole({
           : row
       );
     });
+  }
+
+  function onToggleMatrixBenchmarkLowerIsBetter(benchmarkKey: string, checkedLowerIsBetter: boolean) {
+    const nextHigherIsBetter = !checkedLowerIsBetter;
+
+    setTextImportDraftRows((prev) =>
+      prev.map((row) =>
+        getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType) === benchmarkKey
+          ? {
+              ...row,
+              higherIsBetter: nextHigherIsBetter
+            }
+          : row
+      )
+    );
   }
 
   function onRenameTextImportBenchmark(benchmarkKey: string, nextBenchmarkName: string) {
@@ -3752,7 +3808,7 @@ export function AdminConsole({
                           const hasVisibleModality = rowModalities.some(
                             (modality) => normalizeModalityName(modality) !== "Text"
                           );
-                          const isLowerBetter = isLowerBetterPreviewBenchmark(matrixRow.benchmarkName);
+                          const isLowerBetter = !matrixRow.higherIsBetter;
 
                           return (
                             <tr key={matrixRow.key}>
@@ -3883,9 +3939,9 @@ export function AdminConsole({
                                 </div>
                               </th>
                               <td className="whitespace-nowrap text-sm">
-                                <div className="flex items-center gap-1">
+                                <div className="flex min-w-0 items-center gap-1">
                                   <input
-                                    className="input input-bordered input-xs w-full min-w-[90px]"
+                                    className="input input-bordered input-xs min-w-[90px] flex-1"
                                     value={matrixBenchmarkTypeDrafts[matrixRow.key] ?? matrixRow.benchmarkType}
                                     onChange={(e) => onMatrixBenchmarkTypeInputChange(matrixRow.key, e.target.value)}
                                     onBlur={(e) =>
@@ -3896,7 +3952,17 @@ export function AdminConsole({
                                       )
                                     }
                                   />
-                                  {isLowerBetter ? <span className="text-xs opacity-80">↓</span> : null}
+                                  <label className="inline-flex shrink-0 cursor-pointer items-center gap-0.5" title="以小为好">
+                                    <input
+                                      type="checkbox"
+                                      className="checkbox checkbox-xs"
+                                      checked={isLowerBetter}
+                                      onChange={(e) =>
+                                        onToggleMatrixBenchmarkLowerIsBetter(matrixRow.key, e.target.checked)
+                                      }
+                                    />
+                                    {isLowerBetter ? <span className="text-xs opacity-80">↓</span> : null}
+                                  </label>
                                 </div>
                               </td>
                               {matrixPreview.modelNames.map((modelName) => {
@@ -3919,19 +3985,21 @@ export function AdminConsole({
                                       <span className="opacity-40">-</span>
                                     ) : (
                                       <div className="space-y-1">
-                                        <input
-                                          className="input input-bordered input-xs w-full min-w-[90px]"
-                                          value={textImportDraftRows[rowIndex]?.rawValue ?? ""}
-                                          onChange={(e) => onUpdateTextImportDraftValue(rowIndex, e.target.value)}
-                                        />
-                                        {noteText ? (
-                                          <span
-                                            className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
-                                            title={noteText}
-                                          >
-                                            ?
-                                          </span>
-                                        ) : null}
+                                        <div className="relative">
+                                          <input
+                                            className="input input-bordered input-xs w-full min-w-[90px] pr-7"
+                                            value={textImportDraftRows[rowIndex]?.rawValue ?? ""}
+                                            onChange={(e) => onUpdateTextImportDraftValue(rowIndex, e.target.value)}
+                                          />
+                                          {noteText ? (
+                                            <span
+                                              className="pointer-events-auto absolute right-2 top-1/2 inline-flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
+                                              title={noteText}
+                                            >
+                                              ?
+                                            </span>
+                                          ) : null}
+                                        </div>
                                         {normalizedHint ? (
                                           <div className="text-[10px] text-warning">入库校对 → {normalizedHint}</div>
                                         ) : null}

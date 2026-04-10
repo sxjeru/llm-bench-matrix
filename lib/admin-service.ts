@@ -67,7 +67,8 @@ type TextParseWarning = {
 type DbExecutor = Pick<typeof db, "select" | "insert" | "update" | "delete" | "execute">;
 
 const EMPTY_VALUE_MARKERS = new Set(["", "-", "--", "—", "na", "n/a", "null", "none"]);
-const LOWER_IS_BETTER_BENCHMARK_RULES = [/fleurs/i, /omnidocbench\s*1\.5/i];
+const LOWER_IS_BETTER_BENCHMARK_RULES = [/omnidocbench\s*1\.5/i];
+const LOWER_IS_BETTER_ASR_TYPE_REGEX = /\basr\b/i;
 const OMNIDOCBENCH_15_MATCHER = /omnidocbench\s*1\.5/i;
 const MULTIMODAL_HINT_PATTERN = /(\bmultimodal(?:ity)?\b|\bmulti[\s-_]?modal(?:ity)?\b|多模态)/i;
 const PAPER_TABLE_VALUE_TOKEN_REGEX = /^(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[%％])?(?:[*^][0-9A-Za-z]*)?$/;
@@ -115,6 +116,7 @@ const IMPORT_VALUE_PAIR_REGEX =
   /^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/;
 const IMPORT_VALUE_SINGLE_REGEX =
   /^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/;
+const IMPORT_MULTI_VALUE_SEPARATOR_REGEX = /[|｜]/;
 const MODEL_DUPLICATE_NOISE_TOKENS = new Set([
   "high",
   "reasoning",
@@ -156,7 +158,27 @@ const SUPERSCRIPT_SUBSCRIPT_DIGIT_MAP: Record<string, string> = {
 };
 const SUPERSCRIPT_SUBSCRIPT_DIGIT_REGEX = /[⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉]/g;
 
-function isLowerBetterBenchmark(benchmarkName: string): boolean {
+function isFleursZhTranslationBenchmark(benchmarkName: string): boolean {
+  if (!/fleurs/i.test(benchmarkName)) return false;
+
+  const normalized = benchmarkName
+    .toLowerCase()
+    .replace(/\s+/g, "");
+
+  const hasBiDirectionalHint = /(?:⇄|↔|<->|<=>)/.test(normalized);
+
+  return hasBiDirectionalHint;
+}
+
+function isLowerBetterBenchmark(benchmarkName: string, benchmarkType?: string): boolean {
+  if (benchmarkType && LOWER_IS_BETTER_ASR_TYPE_REGEX.test(benchmarkType)) {
+    return true;
+  }
+
+  if (/fleurs/i.test(benchmarkName)) {
+    return !isFleursZhTranslationBenchmark(benchmarkName);
+  }
+
   return LOWER_IS_BETTER_BENCHMARK_RULES.some((rule) => rule.test(benchmarkName));
 }
 
@@ -217,6 +239,15 @@ function normalizeImportedValueAndExtractNote(rawInput: string, explicitNoteInpu
 } {
   const normalizedRaw = normalizeImportedValueRaw(rawInput);
   const explicitNote = explicitNoteInput?.trim() || null;
+
+  const multiValueSegments = splitImportMultiValueTokens(normalizedRaw);
+  if (multiValueSegments.length >= 2 && multiValueSegments.every((segment) => isNumericLikeImportValue(segment))) {
+    return {
+      valueRaw: multiValueSegments.join(" | "),
+      valueNote: explicitNote
+    };
+  }
+
   const parsed = parseBenchmarkValue(normalizedRaw);
   const parsedNote = parsed.valueNote === "non-numeric" ? null : parsed.valueNote;
 
@@ -252,6 +283,105 @@ function normalizeImportedValueAndExtractNote(rawInput: string, explicitNoteInpu
     valueRaw,
     valueNote
   };
+}
+
+function splitImportMultiValueTokens(rawInput: string): string[] {
+  return rawInput
+    .split(IMPORT_MULTI_VALUE_SEPARATOR_REGEX)
+    .map((item) => normalizeImportedValueRaw(item))
+    .filter((item) => item.length > 0);
+}
+
+function extractBenchmarkMetricLabels(benchmarkName: string): {
+  baseBenchmarkName: string;
+  labels: string[];
+  labelsNote: string;
+} | null {
+  const match = benchmarkName.match(/^(.*?)[\s]*[（(]([^()（）]*[|｜][^()（）]*)[)）]\s*$/);
+  if (!match) return null;
+
+  const [, baseRaw, labelsRaw] = match;
+  const baseBenchmarkName = normalizeNameParenthesisSpacing(baseRaw).trim();
+  const labels = labelsRaw
+    .split(IMPORT_MULTI_VALUE_SEPARATOR_REGEX)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (!baseBenchmarkName || labels.length < 2) {
+    return null;
+  }
+
+  return {
+    baseBenchmarkName,
+    labels,
+    labelsNote: `(${labels.join("|")})`
+  };
+}
+
+function isNumericLikeImportValue(rawInput: string): boolean {
+  const parsed = parseBenchmarkValue(rawInput);
+  return parsed.valueNum !== null || parsed.valueNum2 !== null;
+}
+
+function expandMetricLabeledImportRows(rows: NormalizedTextImportRow[]): NormalizedTextImportRow[] {
+  const expandedRows: NormalizedTextImportRow[] = [];
+
+  rows.forEach((row) => {
+    const metricLabels = extractBenchmarkMetricLabels(row.benchmarkName);
+    if (!metricLabels) {
+      expandedRows.push(row);
+      return;
+    }
+
+    const valueSegments = splitImportMultiValueTokens(row.valueRaw);
+    if (valueSegments.length < 2 || valueSegments.length !== metricLabels.labels.length) {
+      expandedRows.push(row);
+      return;
+    }
+
+    const normalizedSegments = valueSegments.map((segment) => normalizeImportedValueAndExtractNote(segment));
+    const allSegmentsNumeric = normalizedSegments.every((segment) => isNumericLikeImportValue(segment.valueRaw));
+
+    if (!allSegmentsNumeric) {
+      expandedRows.push(row);
+      return;
+    }
+
+    if (metricLabels.labels.length === 2) {
+      const [firstSegment, secondSegment] = normalizedSegments;
+      if (!firstSegment || !secondSegment) {
+        expandedRows.push(row);
+        return;
+      }
+
+      const pairRawValue = `${firstSegment.valueRaw} / ${secondSegment.valueRaw}`;
+      const pairSegmentNote = mergeImportValueNotes(firstSegment.valueNote, secondSegment.valueNote);
+      const rowNoteWithLabels = mergeImportValueNotes(row.valueNote, metricLabels.labelsNote);
+
+      expandedRows.push({
+        ...row,
+        benchmarkName: metricLabels.baseBenchmarkName,
+        valueRaw: pairRawValue,
+        valueNote: mergeImportValueNotes(rowNoteWithLabels, pairSegmentNote)
+      });
+
+      return;
+    }
+
+    normalizedSegments.forEach((segment, index) => {
+      const metricLabel = metricLabels.labels[index];
+      if (!metricLabel) return;
+
+      expandedRows.push({
+        ...row,
+        benchmarkName: `${metricLabels.baseBenchmarkName} (${metricLabel})`,
+        valueRaw: segment.valueRaw,
+        valueNote: mergeImportValueNotes(row.valueNote, segment.valueNote)
+      });
+    });
+  });
+
+  return expandedRows;
 }
 
 function normalizeNameParenthesisSpacing(rawName: string): string {
@@ -1202,7 +1332,7 @@ export async function ensureBenchmark(
   const dedupeRule = options?.dedupeRule ?? await getModelDedupeRule();
   const canonicalKey = buildBenchmarkCanonicalKey(cleanName, cleanType, dedupeRule);
   const modalities = normalizeModalities(input.modalities);
-  const forceLowerIsBetter = isLowerBetterBenchmark(cleanName) || input.higherIsBetter === false;
+  const forceLowerIsBetter = isLowerBetterBenchmark(cleanName, cleanType) || input.higherIsBetter === false;
   const higherIsBetter = forceLowerIsBetter ? false : (input.higherIsBetter ?? true);
   const executor = options?.db ?? db;
 
@@ -1534,7 +1664,10 @@ export async function importParsedRecords(
       valueNote: null,
       benchTime: options?.benchTime ?? new Date(),
       unit: "score",
-      higherIsBetter: true,
+      higherIsBetter: !isLowerBetterBenchmark(
+        normalizeNameParenthesisSpacing(record.benchmarkName),
+        (record.category || "general").trim() || "general"
+      ),
       modalities: inferModalitiesFromCategory(record.category),
       source: options?.source ?? "xlsm-import",
       modelAlias: null,
@@ -1542,10 +1675,11 @@ export async function importParsedRecords(
       sourceBenchmarkId: null
     }));
 
-  const { inserted } = await importNormalizedRows(rows);
+  const expandedRows = expandMetricLabeledImportRows(rows);
+  const { inserted } = await importNormalizedRows(expandedRows);
 
   return {
-    total: records.length,
+    total: expandedRows.length,
     inserted
   };
 }
@@ -1661,7 +1795,8 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
           throw new Error(`未能解析 benchmark：${row.benchmarkName}`);
         }
 
-        const shouldForceLowerIsBetter = isLowerBetterBenchmark(benchmark.benchmarkName) || row.higherIsBetter === false;
+        const shouldForceLowerIsBetter = isLowerBetterBenchmark(benchmark.benchmarkName, benchmark.benchmarkType)
+          || row.higherIsBetter === false;
         if (shouldForceLowerIsBetter && benchmark.higherIsBetter) {
           const updatedBenchmarkResult = await tx
             .update(benchmarks)
@@ -1788,6 +1923,9 @@ function parseStructuredCsvRows(inputText: string, defaultSource: string | null)
       ? ["1", "true", "yes", "y"].includes(benchmarkTypeProvidedFlagRaw)
       : benchmarkTypeInput.length > 0;
     const benchmarkType = benchmarkTypeInput || "general";
+    const inferredHigherIsBetter = benchmarkDirection.hadDirectionMarker
+      ? benchmarkDirection.higherIsBetter
+      : parseBoolean(row.higher_is_better, !isLowerBetterBenchmark(benchmarkName, benchmarkType));
     const modalitiesInput = (row.modalities || "").trim();
     const benchTimeRaw = row.bench_time || row.time || row.date || new Date().toISOString();
     const benchTime = new Date(benchTimeRaw);
@@ -1808,9 +1946,7 @@ function parseStructuredCsvRows(inputText: string, defaultSource: string | null)
       valueNote,
       benchTime,
       unit: (row.unit || "score").trim() || "score",
-      higherIsBetter: benchmarkDirection.hadDirectionMarker
-        ? benchmarkDirection.higherIsBetter
-        : parseBoolean(row.higher_is_better, true),
+      higherIsBetter: inferredHigherIsBetter,
       modalities: modalitiesInput
         ? modalitiesInput.split(",").map((item) => item.trim()).filter(Boolean)
         : inferModalitiesFromCategory(benchmarkType),
@@ -1990,7 +2126,9 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
         valueNote: normalizedValue.valueNote,
         benchTime: new Date(),
         unit: "score",
-        higherIsBetter: benchmarkDirection.higherIsBetter,
+        higherIsBetter: benchmarkDirection.hadDirectionMarker
+          ? benchmarkDirection.higherIsBetter
+          : !isLowerBetterBenchmark(benchmarkName, currentBenchmarkType),
         modalities: currentModalities,
         source: defaultSource,
         modelAlias: null,
@@ -2207,7 +2345,9 @@ function parsePaperCopiedTableRows(inputText: string, defaultSource: string | nu
         valueNote: normalizedValue.valueNote,
         benchTime: new Date(),
         unit: "score",
-        higherIsBetter: benchmarkDirection.higherIsBetter,
+        higherIsBetter: benchmarkDirection.hadDirectionMarker
+          ? benchmarkDirection.higherIsBetter
+          : !isLowerBetterBenchmark(benchmarkName, currentBenchmarkType),
         modalities: currentModalities,
         source: defaultSource,
         modelAlias: null,
@@ -2274,10 +2414,11 @@ function parseBenchmarkTextRows(inputText: string, sourceInput?: string | null):
   })();
 
   const sanitized = sanitizeUnsupportedValueSymbols(selectedParsed.rows);
+  const expandedRows = expandMetricLabeledImportRows(sanitized.rows);
 
   return {
     ...selectedParsed,
-    rows: sanitized.rows,
+    rows: expandedRows,
     warnings: [...(selectedParsed.warnings ?? []), ...sanitized.warnings]
   };
 }
@@ -2376,6 +2517,7 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
       benchmarkName: row.benchmarkName,
       benchmarkType: row.benchmarkType,
       benchmarkTypeProvided: row.benchmarkTypeProvided,
+      higherIsBetter: row.higherIsBetter,
       modalities: normalizeModalities(row.modalities),
       rawValue: row.valueRaw,
       valueNum: parsedValue.valueNum,

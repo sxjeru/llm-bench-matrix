@@ -6,6 +6,7 @@ type ParsedTextImportResult = {
     benchmarkName: string;
     benchmarkType: string;
     benchmarkTypeProvided?: boolean;
+    higherIsBetter?: boolean;
     modelName: string;
     valueRaw: string;
     valueNote?: string | null;
@@ -88,6 +89,49 @@ describe("paper-table 文本解析", () => {
     expect(valueByModel.get("M5")).toBe("77.3");
   });
 
+  test("三值指标标签会自动拆成多个 benchmark", () => {
+    const inputText = [
+      "Benchmark\tModel-A\tModel-B\tModel-C",
+      "SongFormBench-HarmonixSet(acc|hr.5f|hr3f)\t75.6|46.8|77.9\t80.6|67.8|83.4\t81.1|72.9|85.3"
+    ].join("\n");
+
+    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const benchmarkNames = new Set(parsed.rows.map((row) => row.benchmarkName));
+
+    expect(benchmarkNames).toEqual(
+      new Set([
+        "SongFormBench-HarmonixSet (acc)",
+        "SongFormBench-HarmonixSet (hr.5f)",
+        "SongFormBench-HarmonixSet (hr3f)"
+      ])
+    );
+
+    const valueByBenchmarkModel = new Map(
+      parsed.rows.map((row) => [`${row.benchmarkName}::${row.modelName}`, row.valueRaw])
+    );
+
+    expect(valueByBenchmarkModel.get("SongFormBench-HarmonixSet (acc)::Model-A")).toBe("75.6");
+    expect(valueByBenchmarkModel.get("SongFormBench-HarmonixSet (hr.5f)::Model-B")).toBe("67.8");
+    expect(valueByBenchmarkModel.get("SongFormBench-HarmonixSet (hr3f)::Model-C")).toBe("85.3");
+  });
+
+  test("双值指标标签会保留双值并写入注释", () => {
+    const inputText = [
+      "Benchmark\tM1\tM2\tM3",
+      "Librispeech(clean|other)\t3.36|4.41\t1.30|2.43\t1.11|2.23"
+    ].join("\n");
+
+    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const byModel = new Map(parsed.rows.map((row) => [row.modelName, row]));
+
+    expect(parsed.rows).toHaveLength(3);
+    expect(parsed.rows.every((row) => row.benchmarkName === "Librispeech")).toBe(true);
+    expect(byModel.get("M1")?.valueRaw).toBe("3.36 / 4.41");
+    expect(byModel.get("M2")?.valueRaw).toBe("1.30 / 2.43");
+    expect(byModel.get("M3")?.valueRaw).toBe("1.11 / 2.23");
+    expect(byModel.get("M1")?.valueNote).toContain("(clean|other)");
+  });
+
   test("可将分行的 τ / 2 / -Bench 前缀合并为 τ2-Bench", () => {
     const inputText = [
       "Benchmark M1 M2 M3 M4 M5",
@@ -139,6 +183,39 @@ describe("paper-table 文本解析", () => {
     expect(sceneRows.length).toBeGreaterThan(0);
     expect(new Set(sceneRows.map((row) => row.benchmarkType))).toEqual(new Set(["VLM Arena"]));
     expect(sceneRows.every((row) => row.modalities.includes("Vision"))).toBe(true);
+  });
+
+  test("Fleurs 只要含双向标记就不再默认 low-is-better", () => {
+    const inputText = [
+      "Benchmark\tM1",
+      "Fleurs en⇄zh\t12.3",
+      "Fleurs en⇄fr\t13.1",
+      "Fleurs en-fr\t14.1"
+    ].join("\n");
+
+    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const fleursZhRow = parsed.rows.find((row) => row.benchmarkName === "Fleurs en⇄zh");
+    const fleursBiDirectionalRow = parsed.rows.find((row) => row.benchmarkName === "Fleurs en⇄fr");
+    const fleursGeneralRow = parsed.rows.find((row) => row.benchmarkName === "Fleurs en-fr");
+
+    expect(fleursZhRow?.higherIsBetter).toBe(true);
+    expect(fleursBiDirectionalRow?.higherIsBetter).toBe(true);
+    expect(fleursGeneralRow?.higherIsBetter).toBe(false);
+  });
+
+  test("分类含 ASR 时默认 low-is-better", () => {
+    const inputText = [
+      "Benchmark\tM1",
+      "ASR\t",
+      "Librispeech\t3.2"
+    ].join("\n");
+
+    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const row = parsed.rows.find((item) => item.benchmarkName === "Librispeech");
+
+    expect(row).toBeDefined();
+    expect(row?.benchmarkType).toBe("ASR");
+    expect(row?.higherIsBetter).toBe(false);
   });
 
   test("Tab 矩阵文本可正确识别 Vision/Audio 分类与模态", () => {

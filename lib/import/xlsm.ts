@@ -7,6 +7,7 @@ const CATEGORY_HEADERS = new Set(["category", "类别", "分类", "type", "group
 const numberPattern = "(?:[$¥€£]\\s*)?[+-]?(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d+)?";
 const pairRegex = new RegExp(`^${numberPattern}\\s*\\/\\s*${numberPattern}(?:\\s*[\\*\\^][0-9A-Za-z]*)?$`);
 const singleRegex = new RegExp(`^${numberPattern}(?:\\s*[\\*\\^][0-9A-Za-z]*)?$`);
+const pipeSeparatorRegex = /[|｜]/;
 
 export type ImportWarning = {
   rowNumber: number;
@@ -56,6 +57,86 @@ function normalizeNameParenthesisSpacing(rawName: string): string {
     .replace(/\s+([（(])/g, " $1");
 }
 
+function mergeValueNotes(primary: string | null | undefined, secondary: string | null | undefined): string | null {
+  const first = primary?.trim() ?? "";
+  const second = secondary?.trim() ?? "";
+
+  if (first && second) {
+    return first === second ? first : `${first}; ${second}`;
+  }
+
+  if (first) return first;
+  if (second) return second;
+  return null;
+}
+
+function extractBenchmarkMetricLabels(benchmarkName: string): {
+  baseBenchmarkName: string;
+  labels: string[];
+  labelsNote: string;
+} | null {
+  const match = benchmarkName.match(/^(.*?)[\s]*[（(]([^()（）]*[|｜][^()（）]*)[)）]\s*$/);
+  if (!match) return null;
+
+  const [, baseRaw, labelsRaw] = match;
+  const baseBenchmarkName = normalizeNameParenthesisSpacing(baseRaw).trim();
+  const labels = labelsRaw
+    .split(pipeSeparatorRegex)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (!baseBenchmarkName || labels.length < 2) {
+    return null;
+  }
+
+  return {
+    baseBenchmarkName,
+    labels,
+    labelsNote: `(${labels.join("|")})`
+  };
+}
+
+function expandMetricLabeledCellValue(benchmarkName: string, rawValue: string): Array<{
+  benchmarkName: string;
+  rawValue: string;
+  valueNote: string | null;
+}> | null {
+  const metricLabels = extractBenchmarkMetricLabels(benchmarkName);
+  if (!metricLabels) return null;
+
+  const valueSegments = rawValue
+    .split(pipeSeparatorRegex)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (valueSegments.length < 2 || valueSegments.length !== metricLabels.labels.length) {
+    return null;
+  }
+
+  if (!valueSegments.every((segment) => singleRegex.test(segment))) {
+    return null;
+  }
+
+  if (metricLabels.labels.length === 2) {
+    const [first, second] = valueSegments;
+    if (!first || !second) return null;
+
+    return [
+      {
+        benchmarkName: metricLabels.baseBenchmarkName,
+        rawValue: `${first} / ${second}`,
+        valueNote: metricLabels.labelsNote
+      }
+    ];
+  }
+
+  return metricLabels.labels.map((label, index) => ({
+    benchmarkName: `${metricLabels.baseBenchmarkName} (${label})`,
+    rawValue: valueSegments[index] ?? "",
+    valueNote: null
+  }));
+}
+
 function isEmptyMarker(value: string): boolean {
   const normalized = value.trim().toLowerCase();
   return EMPTY_MARKERS.has(normalized);
@@ -64,7 +145,25 @@ function isEmptyMarker(value: string): boolean {
 function isValidRawValue(raw: string): boolean {
   const value = raw.trim();
   if (isEmptyMarker(value)) return true;
-  return pairRegex.test(value) || singleRegex.test(value);
+
+  if (pairRegex.test(value) || singleRegex.test(value)) {
+    return true;
+  }
+
+  if (!pipeSeparatorRegex.test(value)) {
+    return false;
+  }
+
+  const pipeSegments = value
+    .split(pipeSeparatorRegex)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (pipeSegments.length < 2) {
+    return false;
+  }
+
+  return pipeSegments.every((segment) => singleRegex.test(segment));
 }
 
 function getNonEmptyColumnIndices(headerRow: string[]): number[] {
@@ -148,29 +247,42 @@ export function parseWorkbookBuffer(buffer: Buffer, sheetName?: string): Workboo
       const rawValue = normalizeCell(row[modelIndex]);
       if (isEmptyMarker(rawValue)) continue;
 
-      const valid = isValidRawValue(rawValue);
-      const parsed = parseBenchmarkValue(rawValue);
-
-      if (!valid) {
-        warnings.push({
-          rowNumber: rowIndex + 1,
-          modelName,
+      const expandedCells = expandMetricLabeledCellValue(benchmarkName, rawValue) ?? [
+        {
           benchmarkName,
           rawValue,
-          reason: "值格式不符合规则（允许：98.7、98.7/57.2、65.2*、--/- 空值）"
-        });
-      }
+          valueNote: null
+        }
+      ];
 
-      records.push({
-        rowNumber: rowIndex + 1,
-        category,
-        benchmarkName,
-        modelName,
-        rawValue,
-        valueNum: parsed.valueNum,
-        valueNum2: parsed.valueNum2,
-        valueNote: parsed.valueNote,
-        valid
+      expandedCells.forEach((cell) => {
+        const valid = isValidRawValue(cell.rawValue);
+        const parsed = parseBenchmarkValue(cell.rawValue);
+
+        if (!valid) {
+          warnings.push({
+            rowNumber: rowIndex + 1,
+            modelName,
+            benchmarkName: cell.benchmarkName,
+            rawValue: cell.rawValue,
+            reason: "值格式不符合规则（允许：98.7、98.7/57.2、75.6 | 46.8 | 77.9、65.2*、--/- 空值）"
+          });
+        }
+
+        const parsedValueNote = parsed.valueNote === "non-numeric" ? null : parsed.valueNote;
+        const mergedValueNote = mergeValueNotes(cell.valueNote, parsedValueNote);
+
+        records.push({
+          rowNumber: rowIndex + 1,
+          category,
+          benchmarkName: cell.benchmarkName,
+          modelName,
+          rawValue: cell.rawValue,
+          valueNum: parsed.valueNum,
+          valueNum2: parsed.valueNum2,
+          valueNote: mergedValueNote ?? (parsed.valueNote === "non-numeric" ? "non-numeric" : null),
+          valid
+        });
       });
     }
   }

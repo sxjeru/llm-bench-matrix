@@ -65,4 +65,46 @@ describe("parseWorkbookBuffer", () => {
     expect(row?.valueNum2).toBeCloseTo(60.7);
     expect(parsed.warnings).toHaveLength(0);
   });
+
+  test("支持 75.6 | 46.8 | 77.9 三值管道格式", () => {
+    const buffer = buildWorkbookBuffer([
+      ["Category", "Benchmark", "Model A"],
+      ["Audio", "SongFormBench-HarmonixSet(acc|hr.5f|hr3f)", "75.6 | 46.8 | 77.9"]
+    ]);
+
+    const parsed = parseWorkbookBuffer(buffer, "Sheet1");
+    const benchmarkNames = new Set(parsed.records.map((item) => item.benchmarkName));
+    const valueByBenchmark = new Map(parsed.records.map((item) => [item.benchmarkName, item.rawValue]));
+
+    expect(benchmarkNames).toEqual(
+      new Set([
+        "SongFormBench-HarmonixSet (acc)",
+        "SongFormBench-HarmonixSet (hr.5f)",
+        "SongFormBench-HarmonixSet (hr3f)"
+      ])
+    );
+    expect(parsed.records.every((item) => item.valid)).toBe(true);
+    expect(valueByBenchmark.get("SongFormBench-HarmonixSet (acc)")).toBe("75.6");
+    expect(valueByBenchmark.get("SongFormBench-HarmonixSet (hr.5f)")).toBe("46.8");
+    expect(valueByBenchmark.get("SongFormBench-HarmonixSet (hr3f)")).toBe("77.9");
+    expect(parsed.warnings).toHaveLength(0);
+  });
+
+  test("支持 3.36 | 4.41 两值管道格式", () => {
+    const buffer = buildWorkbookBuffer([
+      ["Category", "Benchmark", "Model A"],
+      ["Audio", "Librispeech(clean|other)", "3.36 | 4.41"]
+    ]);
+
+    const parsed = parseWorkbookBuffer(buffer, "Sheet1");
+    const row = parsed.records.find((item) => item.benchmarkName === "Librispeech");
+
+    expect(row).toBeDefined();
+    expect(row?.valid).toBe(true);
+    expect(row?.rawValue).toBe("3.36 / 4.41");
+    expect(row?.valueNum).toBeCloseTo(3.36);
+    expect(row?.valueNum2).toBeCloseTo(4.41);
+    expect(row?.valueNote).toContain("(clean|other)");
+    expect(parsed.warnings).toHaveLength(0);
+  });
 });
