@@ -1,6 +1,14 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent
+} from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Check,
@@ -174,11 +182,15 @@ const MIN_BENCHMARK_COLUMN_WIDTH = 140;
 const MAX_BENCHMARK_COLUMN_WIDTH = 560;
 const DEFAULT_MODEL_COLUMN_BASELINE_WIDTH = 88;
 const MIN_MODEL_COLUMN_RESIZE_WIDTH = 24;
+const COMPARE_BASELINE_DEFAULT_EXPANDED_WIDTH = 86;
+const COMPARE_BADGE_DEFAULT_EXPANDED_WIDTH = 100;
 const MAX_MODEL_COLUMN_WIDTH = 320;
 const COLUMN_WIDTH_STORAGE_DEBOUNCE_MS = 250;
 const ALL_SOURCE_ROW_COVERAGE_THRESHOLD = 0.4;
 const ALL_SOURCE_COLUMN_COVERAGE_THRESHOLD = 0.2;
 const SOURCE_MATCH_FRAME_COLOR = "rgba(93, 167, 255, 0.42)";
+const COMPARE_BASELINE_FRAME_COLOR = "rgba(250, 211, 106, 0.74)";
+const COMPARE_BASELINE_FRAME_EXPORT_COLOR = "rgba(250, 211, 106, 0.92)";
 const WEBP_EXPORT_QUALITY = 0.94;
 const AVIF_EXPORT_QUALITY = 0.9;
 const HEATMAP_PRESETS = {
@@ -247,6 +259,10 @@ function getModelColumnWidthKey(modelName: string): string {
   return `model:${modelName}`;
 }
 
+function getColumnWidthOverrideKey(sourceKey: string, columnKey: string): string {
+  return `${sourceKey}::${columnKey}`;
+}
+
 function clampColumnWidth(width: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(width)));
 }
@@ -308,6 +324,15 @@ type SourceFrameShadowBuildInput = {
   exportMode?: boolean;
 };
 
+type CompareDirection = "up" | "down" | "flat";
+
+type CompareBaselineShadowBuildInput = {
+  isBaseline: boolean;
+  includeTop?: boolean;
+  includeBottom?: boolean;
+  exportMode?: boolean;
+};
+
 function buildSourceFrameShadows(input: SourceFrameShadowBuildInput): string[] {
   if (!input.isMatched) {
     return [];
@@ -338,6 +363,32 @@ export function __buildSourceFrameShadowsForTest(input: SourceFrameShadowBuildIn
   return buildSourceFrameShadows(input);
 }
 
+function buildCompareBaselineShadows(input: CompareBaselineShadowBuildInput): string[] {
+  if (!input.isBaseline) {
+    return [];
+  }
+
+  const edgeSize = 2;
+  const frameColor = input.exportMode ? COMPARE_BASELINE_FRAME_EXPORT_COLOR : COMPARE_BASELINE_FRAME_COLOR;
+  const shadows = [
+    `inset ${edgeSize}px 0 0 ${frameColor}`,
+    `inset -${edgeSize}px 0 0 ${frameColor}`
+  ];
+
+  if (input.includeTop) {
+    shadows.push(`inset 0 ${edgeSize}px 0 ${frameColor}`);
+  }
+  if (input.includeBottom) {
+    shadows.push(`inset 0 -${edgeSize}px 0 ${frameColor}`);
+  }
+
+  return shadows;
+}
+
+export function __buildCompareBaselineShadowsForTest(input: CompareBaselineShadowBuildInput): string[] {
+  return buildCompareBaselineShadows(input);
+}
+
 function applyExportSourceFrameFallback(root: HTMLElement, color: string, width: number): void {
   const sourceMatchedCells = root.querySelectorAll<HTMLElement>("[data-source-match='1']");
 
@@ -354,6 +405,23 @@ function applyExportSourceFrameFallback(root: HTMLElement, color: string, width:
       cell.style.borderTop = `${width}px solid ${color}`;
     }
     if (cell.dataset.sourceMatchBottom === "1") {
+      cell.style.borderBottom = `${width}px solid ${color}`;
+    }
+  });
+}
+
+function applyExportCompareBaselineFallback(root: HTMLElement, color: string, width: number): void {
+  const baselineCells = root.querySelectorAll<HTMLElement>("[data-compare-baseline='1']");
+
+  baselineCells.forEach((cell) => {
+    cell.style.borderLeft = `${width}px solid ${color}`;
+    cell.style.borderRight = `${width}px solid ${color}`;
+
+    if (cell.tagName === "TH") {
+      cell.style.borderTop = `${width}px solid ${color}`;
+    }
+
+    if (cell.dataset.compareBaselineBottom === "1") {
       cell.style.borderBottom = `${width}px solid ${color}`;
     }
   });
@@ -382,6 +450,10 @@ function applyExportOverallRowNudgeFallback(root: HTMLElement): void {
 
 export function __applyExportSourceFrameFallbackForTest(root: HTMLElement, color = "rgba(93, 167, 255, 0.65)", width = 2): void {
   applyExportSourceFrameFallback(root, color, width);
+}
+
+export function __applyExportCompareBaselineFallbackForTest(root: HTMLElement, color = "rgba(250, 211, 106, 0.9)", width = 2): void {
+  applyExportCompareBaselineFallback(root, color, width);
 }
 
 type ExportPresetKey = keyof typeof EXPORT_PRESET_MAP;
@@ -923,6 +995,81 @@ function getHeatCellStyle(
   } as const;
 }
 
+function isCompareModifierClick(event: Pick<ReactMouseEvent<HTMLElement>, "ctrlKey" | "metaKey">): boolean {
+  return Boolean(event.ctrlKey || event.metaKey);
+}
+
+function formatComparisonDeltaValue(value: number): string {
+  const absValue = Math.abs(value);
+  if (!Number.isFinite(absValue)) return "0";
+
+  if (absValue >= 100) return Number(absValue.toFixed(1)).toString();
+  if (absValue >= 10) return Number(absValue.toFixed(2)).toString();
+  if (absValue >= 1) return Number(absValue.toFixed(2)).toString();
+  return Number(absValue.toFixed(3)).toString();
+}
+
+function clampCompareIntensity(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(1, Math.max(0, value));
+}
+
+function getCompareDeltaBadgeStyle(
+  direction: CompareDirection,
+  intensity: number,
+  exportMode: boolean
+): {
+  textColor: string;
+  borderColor: string;
+  backgroundColor: string;
+  separatorColor: string;
+  boxShadow: string;
+  textShadow: string;
+  textStroke: string;
+} {
+  const safeIntensity = clampCompareIntensity(intensity);
+
+  if (direction === "flat") {
+    const borderAlpha = exportMode ? 0.74 : 0.62;
+    const color = "rgba(236, 241, 249, 0.98)";
+    return {
+      textColor: color,
+      borderColor: `rgba(148, 163, 184, ${borderAlpha})`,
+      backgroundColor: "rgba(19, 28, 45, 0.9)",
+      separatorColor: "rgba(148, 163, 184, 0.58)",
+      boxShadow: exportMode
+        ? "0 0 0 1px rgba(148, 163, 184, 0.24), 0 1px 2px rgba(2, 6, 23, 0.64)"
+        : "0 1px 2px rgba(2, 6, 23, 0.62), 0 0 8px rgba(2, 6, 23, 0.24)",
+      textShadow: "0 1px 1px rgba(2, 6, 23, 0.9)",
+      textStroke: "0.2px rgba(2, 6, 23, 0.8)"
+    };
+  }
+
+  const bgStart = direction === "up" ? ([22, 76, 56] as const) : ([108, 26, 36] as const);
+  const bgEnd = direction === "up" ? ([7, 94, 69] as const) : ([126, 19, 31] as const);
+  const borderStart = direction === "up" ? ([45, 180, 132] as const) : ([241, 92, 113] as const);
+  const borderEnd = direction === "up" ? ([52, 211, 153] as const) : ([248, 113, 113] as const);
+  const textColor = direction === "up" ? "rgba(236, 253, 245, 0.98)" : "rgba(255, 241, 242, 0.98)";
+
+  const [bgR, bgG, bgB] = blendColor(bgStart, bgEnd, safeIntensity);
+  const [bdR, bdG, bdB] = blendColor(borderStart, borderEnd, safeIntensity);
+  const borderAlpha = exportMode ? 0.9 : 0.84;
+  const separatorAlpha = exportMode ? 0.78 : 0.65;
+  const glowAlpha = exportMode ? 0.12 : 0.22;
+
+  return {
+    textColor,
+    borderColor: `rgba(${bdR}, ${bdG}, ${bdB}, ${borderAlpha})`,
+    backgroundColor: `rgba(${bgR}, ${bgG}, ${bgB}, 0.93)`,
+    separatorColor: `rgba(${bdR}, ${bdG}, ${bdB}, ${separatorAlpha})`,
+    boxShadow: exportMode
+      ? `0 0 0 1px rgba(${bdR}, ${bdG}, ${bdB}, 0.22), 0 1px 2px rgba(2, 6, 23, 0.66)`
+      : `0 1px 2px rgba(2, 6, 23, 0.62), 0 0 8px rgba(${bdR}, ${bdG}, ${bdB}, ${glowAlpha})`,
+    textShadow: "0 1px 1px rgba(2, 6, 23, 0.88)",
+    textStroke: "0.2px rgba(2, 6, 23, 0.85)"
+  };
+}
+
 function formatTooltipTime(input: string): string {
   const date = new Date(input);
   if (Number.isNaN(date.getTime())) {
@@ -1200,8 +1347,11 @@ async function renderElementToImageBlob(
 
           const exportSourceFrameColor = "rgba(93, 167, 255, 0.65)";
           const exportSourceFrameWidth = 2;
+          const exportCompareBaselineColor = "rgba(250, 211, 106, 0.9)";
+          const exportCompareBaselineWidth = 2;
           applyExportOverallRowNudgeFallback(clonedRoot);
           applyExportSourceFrameFallback(clonedRoot, exportSourceFrameColor, exportSourceFrameWidth);
+          applyExportCompareBaselineFallback(clonedRoot, exportCompareBaselineColor, exportCompareBaselineWidth);
         }
       });
     } finally {
@@ -1278,6 +1428,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const isSyncingSelectionFromSourceRef = useRef(false);
   const skipSelectionPersistenceOnceRef = useRef(false);
   const columnWidthBySourceRef = useRef<Record<string, Record<string, number>>>({});
+  const columnWidthOverrideKeySetRef = useRef<Set<string>>(new Set());
   const columnWidthPersistTimeoutRef = useRef<number | null>(null);
   const heatmapPaletteLoadedRef = useRef(false);
   const columnResizeStateRef = useRef<{
@@ -1325,6 +1476,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   });
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [rowPresenceFilterModel, setRowPresenceFilterModel] = useState<string | null>(null);
+  const [compareModelOrder, setCompareModelOrder] = useState<string[]>([]);
   const [isDownloadingTableImage, setIsDownloadingTableImage] = useState(false);
   const [isCopyingTableImage, setIsCopyingTableImage] = useState(false);
   const [isExportCaptureMode, setIsExportCaptureMode] = useState(false);
@@ -1827,6 +1979,10 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     const handlePointerMove = (event: PointerEvent) => {
       const resizeState = columnResizeStateRef.current;
       if (!resizeState) return;
+
+      columnWidthOverrideKeySetRef.current.add(
+        getColumnWidthOverrideKey(activeSourceRef.current, resizeState.columnKey)
+      );
 
       const nextWidth = clampColumnWidth(
         resizeState.startWidth + (event.clientX - resizeState.startX),
@@ -2343,6 +2499,17 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     return () => document.removeEventListener("fullscreenchange", listener);
   }, []);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+
+      setCompareModelOrder((prev) => (prev.length > 0 ? [] : prev));
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   const selectedModelSet = useMemo(() => new Set(selectedModels), [selectedModels]);
   const selectedModalitySet = useMemo(() => new Set(selectedModalities), [selectedModalities]);
 
@@ -2608,6 +2775,19 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     });
   }, [coveragePrunedRows, sourceModelHint, columnSortBenchmarkKey, showDuplicateRows, modelOrderBySource, activeSource]);
 
+  const compareModelSet = useMemo(() => new Set(compareModelOrder), [compareModelOrder]);
+  const compareBaselineModelName = compareModelOrder[0] ?? null;
+  const isCompareActive = compareModelOrder.length >= 2;
+
+  useEffect(() => {
+    const visibleModelSet = new Set(modelColumns);
+
+    setCompareModelOrder((prev) => {
+      const next = prev.filter((modelName) => visibleModelSet.has(modelName));
+      return areStringArraysEqual(prev, next) ? prev : next;
+    });
+  }, [modelColumns]);
+
   useEffect(() => {
     if (!rowPresenceFilterModel) return;
     if (modelColumns.includes(rowPresenceFilterModel)) return;
@@ -2841,8 +3021,21 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       const providerName = modelProviderMap.get(modelName) ?? "Unknown";
       const columnWidthKey = getModelColumnWidthKey(modelName);
       const autoWidth = autoModelWidthMap.get(columnWidthKey) ?? DEFAULT_MODEL_COLUMN_BASELINE_WIDTH;
+      const storedWidth = activeColumnWidthMap[columnWidthKey];
+      const isCompareSelected = compareModelSet.has(modelName);
+      const isCompareBaseline = compareBaselineModelName === modelName;
+      const hasManualWidthOverride = columnWidthOverrideKeySetRef.current.has(
+        getColumnWidthOverrideKey(activeSource, columnWidthKey)
+      );
+      const compareExpandedDefaultWidth = isCompareBaseline
+        ? COMPARE_BASELINE_DEFAULT_EXPANDED_WIDTH
+        : COMPARE_BADGE_DEFAULT_EXPANDED_WIDTH;
+      const shouldApplyCompareExpandedDefault = isCompareSelected && !hasManualWidthOverride;
+      const preferredWidth = shouldApplyCompareExpandedDefault
+        ? Math.max(storedWidth ?? autoWidth, compareExpandedDefaultWidth)
+        : (storedWidth ?? autoWidth);
       const columnWidth = clampColumnWidth(
-        activeColumnWidthMap[columnWidthKey] ?? autoWidth,
+        preferredWidth,
         MIN_MODEL_COLUMN_RESIZE_WIDTH,
         MAX_MODEL_COLUMN_WIDTH
       );
@@ -2864,7 +3057,10 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     sourceMatchedModelSet,
     sourceMatchedGroupBoundaryByModel,
     autoModelWidthMap,
-    activeColumnWidthMap
+    activeColumnWidthMap,
+    compareModelSet,
+    compareBaselineModelName,
+    activeSource
   ]);
 
   const hiddenResizeHandleKeys = useMemo(() => {
@@ -3418,6 +3614,20 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     });
   }
 
+  function toggleCompareModelSelection(modelName: string) {
+    setCompareModelOrder((prev) => {
+      if (prev.includes(modelName)) {
+        return prev.filter((item) => item !== modelName);
+      }
+
+      return [...prev, modelName];
+    });
+  }
+
+  function clearCompareSelection() {
+    setCompareModelOrder((prev) => (prev.length > 0 ? [] : prev));
+  }
+
   function toggleProvider(providerName: string, checked: boolean) {
     const group = providerGroups.find((item) => item.providerName === providerName);
     if (!group) return;
@@ -3477,6 +3687,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     setSelectedModels(fallbackDefaultModels);
     setRowPresenceFilterModel(null);
     setColumnSortBenchmarkKey(null);
+    setCompareModelOrder([]);
   }
 
   function toggleModality(modality: string, checked: boolean) {
@@ -3785,7 +3996,25 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
           </button>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center gap-2 px-3">
+          <div className="mr-auto flex min-w-0 flex-wrap items-center gap-2 text-xs">
+            {compareModelOrder.length > 0 ? (
+              <>
+                <span className="font-semibold text-amber-200">比较模式</span>
+                <span className="opacity-80">
+                  基准：
+                  <span className="font-semibold text-amber-100">{compareBaselineModelName ?? "--"}</span>
+                </span>
+                <span className="opacity-75">已选 {compareModelOrder.length} 个模型</span>
+                <button type="button" className="btn btn-xs btn-ghost h-7 min-h-0 px-2" onClick={clearCompareSelection}>
+                  清空比较
+                </button>
+              </>
+            ) : (
+              <span className="opacity-70">按住 Ctrl 点击模型表头，可选择并比较模型间差异</span>
+            )}
+          </div>
+
           <div
             className="relative"
             ref={exportMenuRef}
@@ -4180,10 +4409,17 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
               </th>
 
               {modelColumnMeta.map((model) => {
+                const isCompareBaseline = compareBaselineModelName === model.modelName;
+                const isCompareSelected = compareModelSet.has(model.modelName);
                 const headerFrameShadows = buildSourceFrameShadows({
                   isMatched: model.isSourceMatched,
                   isFirst: model.isSourceMatchedFirst,
                   isLast: model.isSourceMatchedLast,
+                  includeTop: true,
+                  exportMode: isExportCaptureMode
+                });
+                const compareBaselineShadows = buildCompareBaselineShadows({
+                  isBaseline: isCompareBaseline,
                   includeTop: true,
                   exportMode: isExportCaptureMode
                 });
@@ -4201,7 +4437,16 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                 const activeUnderlineShadow = isPresenceFilterActive
                   ? "inset 0 -2px 0 rgba(166, 203, 255, 0.96), inset 0 -6px 12px rgba(124, 177, 255, 0.28)"
                   : "";
-                const combinedHeaderShadow = [...headerFrameShadows, dragIndicatorShadow, activeUnderlineShadow]
+                const compareSelectedRing = isCompareSelected && !isCompareBaseline
+                  ? "inset 0 0 0 1px rgba(148, 163, 184, 0.52)"
+                  : "";
+                const combinedHeaderShadow = [
+                  ...headerFrameShadows,
+                  ...compareBaselineShadows,
+                  compareSelectedRing,
+                  dragIndicatorShadow,
+                  activeUnderlineShadow
+                ]
                   .filter(Boolean)
                   .join(", ");
 
@@ -4212,11 +4457,16 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     data-source-match={model.isSourceMatched ? "1" : undefined}
                     data-source-match-first={model.isSourceMatchedFirst ? "1" : undefined}
                     data-source-match-last={model.isSourceMatchedLast ? "1" : undefined}
+                    data-compare-baseline={isCompareBaseline ? "1" : undefined}
                     aria-grabbed={isDraggingCurrentModel ? "true" : "false"}
-                    title={isPresenceFilterActive ? "再次点击显示全部行" : "点击仅保留该模型有值的行"}
+                    title={isCompareBaseline
+                      ? "基准模型（Ctrl/Cmd+点击可取消）"
+                      : isPresenceFilterActive
+                        ? "再次点击显示全部行（Ctrl/Cmd+点击加入比较）"
+                        : "点击仅保留该模型有值的行（Ctrl/Cmd+点击加入比较）"}
                     onDragStart={(event) => {
                       const target = event.target as HTMLElement;
-                      if (resizingColumnKey || target.closest(".column-resize-handle")) {
+                      if (event.ctrlKey || event.metaKey || resizingColumnKey || target.closest(".column-resize-handle")) {
                         event.preventDefault();
                         return;
                       }
@@ -4258,8 +4508,16 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                       resetModelColumnDragState();
                     }}
                     onDragEnd={resetModelColumnDragState}
-                    onClick={() => {
+                    onClick={(event) => {
                       if (draggingModelName || shouldSuppressHeaderInteractions()) return;
+
+                      if (isCompareModifierClick(event)) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        toggleCompareModelSelection(model.modelName);
+                        return;
+                      }
+
                       setRowPresenceFilterModel((prev) => (prev === model.modelName ? null : model.modelName));
                     }}
                     style={{
@@ -4281,11 +4539,42 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                       style={{
                         color: model.color,
                         fontWeight: 700,
-                        lineHeight: 1.15,
-                        wordBreak: "break-word"
+                        lineHeight: 1.15
                       }}
                     >
-                      {model.modelName}
+                      <span
+                        style={{
+                          display: "block",
+                          wordBreak: "break-word"
+                        }}
+                      >
+                        {model.modelName}
+                      </span>
+                      {isCompareBaseline ? (
+                        <span
+                          className="mt-1 inline-flex w-fit shrink-0 items-center whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[10px] leading-none"
+                          style={{
+                            borderColor: "rgba(250, 211, 106, 0.8)",
+                            color: "rgba(250, 219, 133, 0.98)",
+                            backgroundColor: "rgba(43, 32, 13, 0.58)",
+                            wordBreak: "keep-all"
+                          }}
+                        >
+                          Baseline
+                        </span>
+                      ) : isCompareSelected ? (
+                        <span
+                          className="mt-1 inline-flex w-fit shrink-0 items-center whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[10px] leading-none"
+                          style={{
+                            borderColor: "rgba(148, 163, 184, 0.68)",
+                            color: "rgba(226, 232, 240, 0.96)",
+                            backgroundColor: "rgba(15, 23, 42, 0.45)",
+                            wordBreak: "keep-all"
+                          }}
+                        >
+                          Compare
+                        </span>
+                      ) : null}
                     </div>
                     <span
                       className={`column-resize-handle${hiddenResizeHandleKeys.has(model.columnWidthKey) ? " column-resize-handle-transparent" : ""}`}
@@ -4394,6 +4683,33 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     textUnderlineOffset: "2px"
                   };
 
+              const baselineCellForRow = compareBaselineModelName
+                ? matrixRow.cells.get(compareBaselineModelName)
+                : undefined;
+              const baselineValueNum = baselineCellForRow?.valueNum ?? null;
+              const compareAbsEffectiveDeltaValues =
+                isCompareActive && compareBaselineModelName && baselineValueNum !== null
+                  ? modelColumnMeta
+                      .filter((model) => compareModelSet.has(model.modelName) && model.modelName !== compareBaselineModelName)
+                      .map((model) => {
+                        const compareCellNum = matrixRow.cells.get(model.modelName)?.valueNum;
+                        if (compareCellNum === null || compareCellNum === undefined || !Number.isFinite(compareCellNum)) {
+                          return null;
+                        }
+
+                        const deltaRaw = compareCellNum - baselineValueNum;
+                        const deltaEffective = isRowLowerBetter ? -deltaRaw : deltaRaw;
+                        return Math.abs(deltaEffective);
+                      })
+                      .filter((value): value is number => value !== null && Number.isFinite(value))
+                  : [];
+              const compareAbsEffectiveDeltaP90 = compareAbsEffectiveDeltaValues.length > 0
+                ? Math.max(
+                    getSortedQuantile([...compareAbsEffectiveDeltaValues].sort((a, b) => a - b), 0.9),
+                    Number.EPSILON
+                  )
+                : null;
+
               return (
                 <tr
                   key={rowKey}
@@ -4495,6 +4811,8 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     const cell = matrixRow.cells.get(model.modelName);
                     const cellNum = cell?.valueNum ?? null;
                     const cellNum2 = cell?.valueNum2 ?? null;
+                    const isCompareBaseline = compareBaselineModelName === model.modelName;
+                    const isCompareSelected = compareModelSet.has(model.modelName);
                     const comparableCellNum = cellNum !== null
                       ? getBenchmarkComparableScore(matrixRow.benchmark, cellNum, matrixRow.category, matrixRow.higherIsBetter)
                       : null;
@@ -4528,9 +4846,47 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                       pairFirstDisplay !== null &&
                       pairSecondDisplay !== null &&
                       !/[$¥€£]/.test(cell?.valueRaw ?? "");
-                    const cellPaddingRight = shouldShowQuestionMark
-                      ? (isPairNumericDisplay ? "18px" : "22px")
-                      : "6px";
+
+                    const compareDeltaRaw =
+                      isCompareActive
+                      && compareAbsEffectiveDeltaP90 !== null
+                      && baselineValueNum !== null
+                      && cellNum !== null
+                      && isCompareSelected
+                      && !isCompareBaseline
+                        ? cellNum - baselineValueNum
+                        : null;
+                    const compareDeltaEffective = compareDeltaRaw === null
+                      ? null
+                      : (isRowLowerBetter ? -compareDeltaRaw : compareDeltaRaw);
+                    const compareDirection: CompareDirection = compareDeltaEffective === null
+                      ? "flat"
+                      : Math.abs(compareDeltaEffective) < Number.EPSILON
+                        ? "flat"
+                        : compareDeltaEffective > 0
+                          ? "up"
+                          : "down";
+                    const compareIntensity =
+                      compareDeltaEffective === null || compareAbsEffectiveDeltaP90 === null
+                        ? 0
+                        : clampCompareIntensity(Math.abs(compareDeltaEffective) / compareAbsEffectiveDeltaP90);
+                    const showCompareBadge = compareDeltaRaw !== null;
+                    const compareBadgeStyle = showCompareBadge
+                      ? getCompareDeltaBadgeStyle(compareDirection, compareIntensity, isExportCaptureMode)
+                      : null;
+                    const showQuestionMarkIcon = shouldShowQuestionMark && !showCompareBadge;
+                    const compareArrow = compareDirection === "up" ? "▲" : compareDirection === "down" ? "▼" : "•";
+                    const compareDeltaText = showCompareBadge && compareDeltaRaw !== null
+                      ? formatComparisonDeltaValue(compareDeltaRaw)
+                      : "";
+
+                    const basePadding = showQuestionMarkIcon
+                      ? (isPairNumericDisplay ? 18 : 22)
+                      : 6;
+                    const comparePadding = showCompareBadge
+                      ? Math.min(28, 9 + compareDeltaText.length * 3)
+                      : 0;
+                    const cellPaddingRight = `${basePadding + comparePadding}px`;
                     const singleCellScoreStyle = !isPairNumericDisplay
                       ? (isTopCellFirst ? topRankSegmentStyle : isSecondCellFirst ? secondRankSegmentStyle : undefined)
                       : undefined;
@@ -4558,7 +4914,16 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                       includeBottom: isLastMatrixRow,
                       exportMode: isExportCaptureMode
                     });
-                    const mergedCellBoxShadow = [rowCellBoxShadow, ...sourceFrameShadows].filter(Boolean).join(", ");
+                    const compareBaselineShadows = buildCompareBaselineShadows({
+                      isBaseline: isCompareBaseline,
+                      includeBottom: isLastMatrixRow,
+                      exportMode: isExportCaptureMode
+                    });
+                    const mergedCellBoxShadow = [
+                      rowCellBoxShadow,
+                      ...sourceFrameShadows,
+                      ...compareBaselineShadows
+                    ].filter(Boolean).join(", ");
 
                     return (
                       <td
@@ -4566,6 +4931,10 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                         data-source-match={model.isSourceMatched ? "1" : undefined}
                         data-source-match-first={model.isSourceMatchedFirst ? "1" : undefined}
                         data-source-match-last={model.isSourceMatchedLast ? "1" : undefined}
+                        data-compare-baseline={isCompareBaseline ? "1" : undefined}
+                        data-compare-baseline-bottom={
+                          isCompareBaseline && isLastMatrixRow ? "1" : undefined
+                        }
                         data-source-match-bottom={
                           model.isSourceMatched && isLastMatrixRow ? "1" : undefined
                         }
@@ -4596,7 +4965,47 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                         ) : (
                           <span style={singleCellScoreStyle}>{rawText}</span>
                         )}
-                        {shouldShowQuestionMark ? (
+                        {showCompareBadge && compareBadgeStyle ? (
+                          <span
+                            data-compare-delta-badge="1"
+                            data-compare-direction={compareDirection}
+                            className="absolute top-1/2 inline-flex h-[14px] -translate-y-1/2 items-center overflow-hidden rounded-[5px] border text-[9px] font-semibold leading-none"
+                            style={{
+                              right: "3px",
+                              color: compareBadgeStyle.textColor,
+                              borderColor: compareBadgeStyle.borderColor,
+                              backgroundColor: compareBadgeStyle.backgroundColor,
+                              boxShadow: compareBadgeStyle.boxShadow,
+                              textShadow: compareBadgeStyle.textShadow,
+                              WebkitTextStroke: compareBadgeStyle.textStroke
+                            }}
+                            title={`相对基准 ${compareBaselineModelName} 的差值`}
+                          >
+                            <span
+                              className="inline-flex h-full min-w-[11px] items-center justify-center px-[2px] text-[9px] font-bold leading-none"
+                              style={{
+                                color: compareBadgeStyle.textColor
+                              }}
+                            >
+                              {compareArrow}
+                            </span>
+                            <span
+                              className="h-[8px] w-px"
+                              style={{
+                                backgroundColor: compareBadgeStyle.separatorColor
+                              }}
+                            />
+                            <span
+                              className="inline-flex h-full items-center px-[3px] text-[9px] font-semibold leading-none"
+                              style={{
+                                color: compareBadgeStyle.textColor
+                              }}
+                            >
+                              {compareDeltaText}
+                            </span>
+                          </span>
+                        ) : null}
+                        {showQuestionMarkIcon ? (
                           <span
                             className="absolute right-1 top-1/2 inline-flex h-4 w-4 -translate-y-1/2 cursor-help items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
                             onMouseEnter={(event) => {
