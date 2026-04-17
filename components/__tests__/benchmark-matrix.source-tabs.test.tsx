@@ -78,7 +78,7 @@ describe("BenchmarkMatrix source tabs", () => {
     expect(screen.getByRole("tab", { name: "未标注" })).toBeInTheDocument();
 
     const tablist = screen.getByRole("tablist");
-    expect(tablist.className).toContain("overflow-x-auto");
+    expect(tablist.className).toContain("overflow-hidden");
   });
 
   test("从 Gemma 4 切回全部时，模型选择会恢复到全量 allRows", async () => {

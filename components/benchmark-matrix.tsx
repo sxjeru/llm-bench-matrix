@@ -285,6 +285,18 @@ function areColumnWidthMapsEqual(left: Record<string, number>, right: Record<str
   return true;
 }
 
+function areStringArraysEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
+
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 type SourceFrameShadowBuildInput = {
   isMatched: boolean;
   isFirst?: boolean;
@@ -1247,6 +1259,9 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: 
 export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSourceOptions = [] }: Props) {
   const sectionRef = useRef<HTMLElement | null>(null);
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
+  const sourceTabsViewportRef = useRef<HTMLDivElement | null>(null);
+  const sourceTabsMeasureRef = useRef<HTMLDivElement | null>(null);
+  const sourceTabsMenuRef = useRef<HTMLDivElement | null>(null);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const showCategoryLoadedRef = useRef(false);
   const showDuplicateLoadedRef = useRef(false);
@@ -1286,6 +1301,8 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const [supportsWebpExport, setSupportsWebpExport] = useState(true);
   const [supportsAvifExport, setSupportsAvifExport] = useState(false);
   const [isModelFilterExpanded, setIsModelFilterExpanded] = useState(false);
+  const [overflowSourceKeys, setOverflowSourceKeys] = useState<string[]>([]);
+  const [isSourceOverflowMenuOpen, setIsSourceOverflowMenuOpen] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [isExportMenuHovered, setIsExportMenuHovered] = useState(false);
   const [suppressHoverMenu, setSuppressHoverMenu] = useState(false);
@@ -1327,6 +1344,15 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
   const [activeSource, setActiveSource] = useState(SOURCE_ALL);
   const activeSourceRef = useRef(SOURCE_ALL);
+  const overflowSourceKeySet = useMemo(() => new Set(overflowSourceKeys), [overflowSourceKeys]);
+  const visibleSourceOptions = useMemo(
+    () => sourceOptions.filter((source) => !overflowSourceKeySet.has(source.key)),
+    [sourceOptions, overflowSourceKeySet]
+  );
+  const overflowSourceOptions = useMemo(
+    () => sourceOptions.filter((source) => overflowSourceKeySet.has(source.key)),
+    [sourceOptions, overflowSourceKeySet]
+  );
 
   useEffect(() => {
     const sourceFromUrl = searchParams.get("source");
@@ -1350,6 +1376,144 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   useEffect(() => {
     activeSourceRef.current = activeSource;
   }, [activeSource]);
+
+  useLayoutEffect(() => {
+    if (!isClientReady) return;
+
+    const allKeys = sourceOptions.map((item) => item.key);
+
+    const computeOverflowKeys = () => {
+      const viewportElement = sourceTabsViewportRef.current;
+      const measureElement = sourceTabsMeasureRef.current;
+
+      if (!viewportElement || !measureElement || allKeys.length === 0) {
+        setOverflowSourceKeys((prev) => (prev.length > 0 ? [] : prev));
+        return;
+      }
+
+      const availableWidth = viewportElement.clientWidth;
+      const widthByKey = new Map<string, number>();
+
+      measureElement.querySelectorAll<HTMLElement>("[data-source-tab-measure='item']").forEach((node) => {
+        const key = node.dataset.sourceTabMeasureKey;
+        if (!key) return;
+
+        const width = Math.ceil(node.getBoundingClientRect().width);
+        if (width > 0) {
+          widthByKey.set(key, width);
+        }
+      });
+
+      const overflowMeasureNode = measureElement.querySelector<HTMLElement>("[data-source-tab-measure='more']");
+      const overflowButtonWidth = Math.ceil(overflowMeasureNode?.getBoundingClientRect().width ?? 72);
+
+      const hasValidMeasurements =
+        availableWidth > 0 &&
+        allKeys.every((key) => (widthByKey.get(key) ?? 0) > 0);
+
+      if (!hasValidMeasurements) {
+        setOverflowSourceKeys((prev) => (prev.length > 0 ? [] : prev));
+        return;
+      }
+
+      const totalWidth = allKeys.reduce((sum, key) => sum + (widthByKey.get(key) ?? 0), 0);
+      if (totalWidth <= availableWidth) {
+        setOverflowSourceKeys((prev) => (prev.length > 0 ? [] : prev));
+        return;
+      }
+
+      const widthLimit = Math.max(availableWidth - overflowButtonWidth - 8, 0);
+      if (widthLimit <= 0) {
+        const fallbackVisibleKeys = allKeys.includes(activeSource) ? [activeSource] : allKeys.slice(0, 1);
+        const fallbackVisibleSet = new Set(fallbackVisibleKeys);
+        const nextOverflowKeys = allKeys.filter((key) => !fallbackVisibleSet.has(key));
+
+        setOverflowSourceKeys((prev) => (areStringArraysEqual(prev, nextOverflowKeys) ? prev : nextOverflowKeys));
+        return;
+      }
+
+      const visibleKeys: string[] = [];
+      let usedWidth = 0;
+
+      for (const key of allKeys) {
+        const width = widthByKey.get(key) ?? 0;
+        if (usedWidth + width <= widthLimit || visibleKeys.length === 0) {
+          visibleKeys.push(key);
+          usedWidth += width;
+        } else {
+          break;
+        }
+      }
+
+      const forceIncludeKey = (key: string, mandatory: boolean) => {
+        if (!allKeys.includes(key) || visibleKeys.includes(key)) return;
+
+        const width = widthByKey.get(key) ?? 0;
+
+        while (visibleKeys.length > 0 && usedWidth + width > widthLimit) {
+          const removed = visibleKeys.pop();
+          if (!removed) break;
+          usedWidth -= widthByKey.get(removed) ?? 0;
+        }
+
+        if (usedWidth + width <= widthLimit || visibleKeys.length === 0) {
+          visibleKeys.push(key);
+          usedWidth += width;
+          return;
+        }
+
+        if (mandatory) {
+          visibleKeys.splice(0, visibleKeys.length, key);
+          usedWidth = width;
+        }
+      };
+
+      forceIncludeKey(activeSource, true);
+      if (activeSource !== SOURCE_ALL) {
+        forceIncludeKey(SOURCE_ALL, false);
+      }
+
+      const orderMap = new Map(allKeys.map((key, index) => [key, index]));
+      const visibleSet = new Set(
+        Array.from(new Set(visibleKeys)).sort(
+          (left, right) => (orderMap.get(left) ?? 0) - (orderMap.get(right) ?? 0)
+        )
+      );
+
+      const nextOverflowKeys = allKeys.filter((key) => !visibleSet.has(key));
+
+      setOverflowSourceKeys((prev) => (areStringArraysEqual(prev, nextOverflowKeys) ? prev : nextOverflowKeys));
+      if (nextOverflowKeys.length === 0) {
+        setIsSourceOverflowMenuOpen(false);
+      }
+    };
+
+    computeOverflowKeys();
+
+    let observer: ResizeObserver | null = null;
+    const handleWindowResize = () => {
+      computeOverflowKeys();
+    };
+
+    if (typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(() => {
+        computeOverflowKeys();
+      });
+
+      if (sourceTabsViewportRef.current) {
+        observer.observe(sourceTabsViewportRef.current);
+      }
+    } else {
+      window.addEventListener("resize", handleWindowResize);
+    }
+
+    return () => {
+      observer?.disconnect();
+      if (!observer) {
+        window.removeEventListener("resize", handleWindowResize);
+      }
+    };
+  }, [isClientReady, sourceOptions, activeSource]);
 
   useEffect(() => {
     try {
@@ -1619,6 +1783,21 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   }, [isExportMenuOpen]);
 
   useEffect(() => {
+    if (!isSourceOverflowMenuOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (!sourceTabsMenuRef.current?.contains(target)) {
+        setIsSourceOverflowMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [isSourceOverflowMenuOpen]);
+
+  useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
       const resizeState = columnResizeStateRef.current;
       if (!resizeState) return;
@@ -1773,6 +1952,8 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   }
 
   function setSourceAndUrl(nextSource: string) {
+    setIsSourceOverflowMenuOpen(false);
+
     const params = new URLSearchParams(searchParams.toString());
     if (nextSource === SOURCE_ALL) {
       params.delete("source");
@@ -3314,35 +3495,143 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div
-          role="tablist"
-          className="tabs tabs-boxed max-w-full overflow-x-auto whitespace-nowrap bg-base-200/70 p-1"
-        >
-          {sourceOptions.map((source) => (
-            <button
-              key={source.key}
-              type="button"
-              role="tab"
-              className={`tab transition-all ${
-                activeSource === source.key
-                  ? "tab-active !rounded-xl !bg-primary/50 !text-primary-content font-semibold shadow-[0_0_0_0px_rgba(93,167,255,0.55),0_4px_20px_rgba(93,167,255,0.22)] scale-[1.01]"
-                  : "hover:!rounded-xl hover:bg-base-100/60"
-              }`}
-              onClick={() => setSourceAndUrl(source.key)}
-              title={source.key === SOURCE_ALL ? source.label : sourceTabDisplayLabel(source.key)}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 mb-2">
+          <div
+            className="relative z-[70] min-w-0 flex-1"
+            ref={sourceTabsMenuRef}
+            onMouseLeave={() => setIsSourceOverflowMenuOpen(false)}
+          >
+            {/* 固定高度占位槽，防止下拉时撑开导致页面抖动：tab(36px) + p-0.5(4px) + border(2px) = 42px */}
+            <div className="h-[42px] w-full" />
+
+            <div ref={sourceTabsViewportRef} className="absolute left-0 top-0 w-full min-w-0" data-source-tabs-viewport="1">
+              <div
+                role="tablist"
+                className="tabs tabs-boxed w-full overflow-hidden whitespace-nowrap rounded-2xl border border-white/10 bg-[radial-gradient(140%_180%_at_0%_0%,rgba(255,255,255,0.14)_0%,rgba(255,255,255,0)_35%),radial-gradient(120%_160%_at_100%_100%,rgba(72,140,255,0.18)_0%,rgba(72,140,255,0)_42%),linear-gradient(135deg,rgba(21,36,64,0.58),rgba(14,24,43,0.38))] p-0.5 shadow-[0_10px_30px_rgba(2,8,20,0.24),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md"
+              >
+                <div className="flex min-w-0 items-center justify-between gap-1 w-full relative">
+                  <div className="flex flex-1 min-w-0 items-center overflow-hidden">
+                    {visibleSourceOptions.map((source) => (
+                      <button
+                        key={source.key}
+                        type="button"
+                        role="tab"
+                        className={`tab h-9 min-h-0 shrink-0 rounded-xl text-base-content/80 transition-all duration-150 ${
+                          activeSource === source.key
+                            ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content font-semibold shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
+                            : "hover:!rounded-xl hover:bg-white/10 hover:text-base-content"
+                        }`}
+                        onClick={() => setSourceAndUrl(source.key)}
+                        title={source.key === SOURCE_ALL ? source.label : sourceTabDisplayLabel(source.key)}
+                      >
+                        {source.key === SOURCE_ALL ? source.label : sourceTabDisplayLabel(source.key)}
+                      </button>
+                    ))}
+                  </div>
+
+                  {overflowSourceOptions.length > 0 ? (
+                    <div className="absolute right-0 top-0 bottom-0 flex items-center bg-gradient-to-l from-[#19243a]/90 via-[#19243a]/80 to-transparent pl-4 pr-1">
+                      <button
+                        type="button"
+                        className="tab h-9 min-h-0 w-7 shrink-0 !rounded-lg bg-transparent px-0 text-xs font-medium text-base-content/65 hover:bg-white/8 hover:text-base-content"
+                        aria-label="展开溢出页签"
+                        aria-haspopup="menu"
+                        aria-expanded={isSourceOverflowMenuOpen}
+                        onMouseEnter={() => setIsSourceOverflowMenuOpen(true)}
+                        onFocus={() => setIsSourceOverflowMenuOpen(true)}
+                        onClick={() => setIsSourceOverflowMenuOpen((prev) => !prev)}
+                      >
+                        <ChevronDown
+                          size={14}
+                          className={`transition-transform duration-150 ${isSourceOverflowMenuOpen ? "rotate-180" : ""}`}
+                        />
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+
+                {overflowSourceOptions.length > 0 ? (
+                  <div
+                    role="menu"
+                    onMouseEnter={() => setIsSourceOverflowMenuOpen(true)}
+                    className={`grid transition-all duration-180 ${
+                      isSourceOverflowMenuOpen
+                        ? "pointer-events-auto opacity-100"
+                        : "pointer-events-none opacity-0"
+                    }`}
+                    style={{
+                      gridTemplateRows: isSourceOverflowMenuOpen ? "1fr" : "0fr"
+                    }}
+                  >
+                    <div className="overflow-hidden border-t border-white/8 mt-0.5">
+                      <div className="flex flex-wrap items-center gap-1 py-1">
+                        {overflowSourceOptions.map((source) => (
+                          <button
+                            key={`overflow-${source.key}`}
+                            type="button"
+                            role="tab"
+                            className={`tab h-9 min-h-0 rounded-xl text-base-content/80 transition-all duration-150 ${
+                              activeSource === source.key
+                                ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content font-semibold shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
+                                : "hover:!rounded-xl hover:bg-white/10 hover:text-base-content"
+                            }`}
+                            onClick={() => setSourceAndUrl(source.key)}
+                            title={source.key === SOURCE_ALL ? source.label : sourceTabDisplayLabel(source.key)}
+                          >
+                            {source.key === SOURCE_ALL ? source.label : sourceTabDisplayLabel(source.key)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <div
+              ref={sourceTabsMeasureRef}
+              aria-hidden="true"
+              className="pointer-events-none absolute -left-[9999px] top-0 opacity-0"
             >
-              {source.key === SOURCE_ALL ? source.label : sourceTabDisplayLabel(source.key)}
-            </button>
-          ))}
+              <div className="tabs tabs-boxed whitespace-nowrap rounded-2xl border border-white/10 p-1">
+                {sourceOptions.map((source) => (
+                  <button
+                    key={`measure-${source.key}`}
+                    type="button"
+                    data-source-tab-measure="item"
+                    data-source-tab-measure-key={source.key}
+                    className={`tab h-9 min-h-0 shrink-0 rounded-xl text-base-content/80 transition-all duration-150 ${
+                      activeSource === source.key
+                        ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content font-semibold shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
+                        : "hover:!rounded-xl hover:bg-white/10 hover:text-base-content"
+                    }`}
+                  >
+                    {source.key === SOURCE_ALL ? source.label : sourceTabDisplayLabel(source.key)}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  data-source-tab-measure="more"
+                  className="tab h-9 min-h-0 w-7 shrink-0 !rounded-lg bg-transparent px-0 text-xs font-medium text-base-content/65"
+                >
+                  <ChevronDown size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="btn btn-sm h-[42px] min-h-[42px] shrink-0 rounded-2xl border border-white/25 bg-[linear-gradient(135deg,rgba(24,38,66,0.32),rgba(14,24,43,0.2))] px-5 text-base-content/90 shadow-[0_8px_22px_rgba(2,8,20,0.22),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-sm hover:border-white/35 hover:bg-white/10"
+            onClick={toggleFullscreen}
+          >
+            {isFullscreen ? <Minimize2 size={15} /> : <Expand size={15} />}
+            {isFullscreen ? "退出全屏" : "全屏显示表格"}
+          </button>
         </div>
 
-        <button type="button" className="btn btn-sm btn-outline ml-auto" onClick={toggleFullscreen}>
-          {isFullscreen ? <Minimize2 size={15} /> : <Expand size={15} />}
-          {isFullscreen ? "退出全屏" : "全屏显示表格"}
-        </button>
-
-        <div className="flex w-full flex-wrap items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <div
             className="relative"
             ref={exportMenuRef}
