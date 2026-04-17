@@ -930,7 +930,7 @@ function lerp(start: number, end: number, t: number): number {
   return Math.round(start + (end - start) * t);
 }
 
-function blendColor(from: [number, number, number], to: [number, number, number], t: number) {
+function blendColor(from: readonly [number, number, number], to: readonly [number, number, number], t: number) {
   return [lerp(from[0], to[0], t), lerp(from[1], to[1], t), lerp(from[2], to[2], t)] as const;
 }
 

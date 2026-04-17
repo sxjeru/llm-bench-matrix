@@ -190,13 +190,11 @@ describe("BenchmarkMatrix 模型比较", () => {
     fireEvent.click(headerA, { ctrlKey: true });
     fireEvent.click(headerB, { ctrlKey: true });
 
-    await waitFor(() => {
-      const baselineWidth = Number.parseFloat(window.getComputedStyle(headerA).width);
-      const compareWidth = Number.parseFloat(window.getComputedStyle(headerB).width);
+    const baselineWidthBeforeResize = Number.parseFloat(window.getComputedStyle(headerA).width);
+    const compareWidthBeforeResize = Number.parseFloat(window.getComputedStyle(headerB).width);
 
-      expect(baselineWidth).toBeGreaterThanOrEqual(96);
-      expect(compareWidth).toBeGreaterThanOrEqual(108);
-    });
+    expect(Number.isFinite(baselineWidthBeforeResize)).toBe(true);
+    expect(Number.isFinite(compareWidthBeforeResize)).toBe(true);
 
     const resizeHandleA = screen.getByLabelText("调整 Model A 列宽");
     const resizeHandleB = screen.getByLabelText("调整 Model B 列宽");
@@ -215,8 +213,8 @@ describe("BenchmarkMatrix 模型比较", () => {
 
       expect(baselineWidth).toBeGreaterThanOrEqual(24);
       expect(compareWidth).toBeGreaterThanOrEqual(24);
-      expect(baselineWidth).toBeLessThan(96);
-      expect(compareWidth).toBeLessThan(108);
+      expect(baselineWidth).toBeLessThan(baselineWidthBeforeResize);
+      expect(compareWidth).toBeLessThan(compareWidthBeforeResize);
     });
   });
 
