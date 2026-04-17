@@ -176,6 +176,8 @@ const DEFAULT_MODEL_COLUMN_BASELINE_WIDTH = 88;
 const MIN_MODEL_COLUMN_RESIZE_WIDTH = 24;
 const MAX_MODEL_COLUMN_WIDTH = 320;
 const COLUMN_WIDTH_STORAGE_DEBOUNCE_MS = 250;
+const ALL_SOURCE_ROW_COVERAGE_THRESHOLD = 0.4;
+const ALL_SOURCE_COLUMN_COVERAGE_THRESHOLD = 0.2;
 const SOURCE_MATCH_FRAME_COLOR = "rgba(93, 167, 255, 0.42)";
 const WEBP_EXPORT_QUALITY = 0.94;
 const AVIF_EXPORT_QUALITY = 0.9;
@@ -620,6 +622,13 @@ function renderModalityBadge(modalityInput: string, key: string) {
 
 function normalizeMatchToken(input: string): string {
   return input.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function hasMeaningfulMatrixRawValue(rawValue: string): boolean {
+  const normalized = rawValue.trim().toLowerCase();
+  if (!normalized) return false;
+
+  return !new Set(["-", "--", "—", "na", "n/a", "null", "none"]).has(normalized);
 }
 
 const MATCH_HYPHEN_VARIANT_REGEX = /[\-\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g;
@@ -1284,6 +1293,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showCategory, setShowCategory] = useState(true);
   const [showDuplicateRows, setShowDuplicateRows] = useState(false);
+  const [showLowCoverageRows, setShowLowCoverageRows] = useState(false);
   const [isClientReady, setIsClientReady] = useState(false);
   const [isModelSelectionLoaded, setIsModelSelectionLoaded] = useState(false);
   const [isModelOrderLoaded, setIsModelOrderLoaded] = useState(false);
@@ -2308,12 +2318,103 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     return result;
   }, [allRowsIndex, selectedModelSet, selectedModels, baseBenchmarkKeySet]);
 
+  const coveragePrunedRows = useMemo(() => {
+    if (activeSource !== SOURCE_ALL || showLowCoverageRows) {
+      return filteredRows;
+    }
+
+    if (filteredRows.length === 0) {
+      return filteredRows;
+    }
+
+    const candidateModels = Array.from(new Set(filteredRows.map((row) => row.modelName)));
+    if (candidateModels.length === 0) {
+      return filteredRows;
+    }
+
+    const rowModelsWithValue = new Map<string, Set<string>>();
+    filteredRows.forEach((row) => {
+      if (!hasMeaningfulMatrixRawValue(row.valueRaw)) return;
+
+      const matrixKey = getMatrixGroupingKey(row, showDuplicateRows);
+      if (!rowModelsWithValue.has(matrixKey)) {
+        rowModelsWithValue.set(matrixKey, new Set<string>());
+      }
+      rowModelsWithValue.get(matrixKey)!.add(row.modelName);
+    });
+
+    if (rowModelsWithValue.size === 0) {
+      return filteredRows;
+    }
+
+    const firstPassRowKeys = new Set<string>();
+    rowModelsWithValue.forEach((modelsWithValue, matrixKey) => {
+      const rowCoverage = modelsWithValue.size / candidateModels.length;
+      if (rowCoverage >= ALL_SOURCE_ROW_COVERAGE_THRESHOLD) {
+        firstPassRowKeys.add(matrixKey);
+      }
+    });
+
+    if (firstPassRowKeys.size === 0) {
+      return filteredRows;
+    }
+
+    const modelCoveredRowCount = new Map<string, number>();
+    firstPassRowKeys.forEach((matrixKey) => {
+      const modelsWithValue = rowModelsWithValue.get(matrixKey);
+      if (!modelsWithValue) return;
+
+      modelsWithValue.forEach((modelName) => {
+        modelCoveredRowCount.set(modelName, (modelCoveredRowCount.get(modelName) ?? 0) + 1);
+      });
+    });
+
+    const keptModels = new Set<string>();
+    modelCoveredRowCount.forEach((coveredRowCount, modelName) => {
+      const columnCoverage = coveredRowCount / firstPassRowKeys.size;
+      if (columnCoverage >= ALL_SOURCE_COLUMN_COVERAGE_THRESHOLD) {
+        keptModels.add(modelName);
+      }
+    });
+
+    if (keptModels.size === 0) {
+      return filteredRows;
+    }
+
+    const secondPassRowKeys = new Set<string>();
+    rowModelsWithValue.forEach((modelsWithValue, matrixKey) => {
+      let keptValueCount = 0;
+      modelsWithValue.forEach((modelName) => {
+        if (keptModels.has(modelName)) {
+          keptValueCount += 1;
+        }
+      });
+
+      const rowCoverage = keptValueCount / keptModels.size;
+      if (rowCoverage >= ALL_SOURCE_ROW_COVERAGE_THRESHOLD) {
+        secondPassRowKeys.add(matrixKey);
+      }
+    });
+
+    if (secondPassRowKeys.size === 0) {
+      return filteredRows;
+    }
+
+    const prunedRows = filteredRows.filter((row) => {
+      if (!keptModels.has(row.modelName)) return false;
+      const matrixKey = getMatrixGroupingKey(row, showDuplicateRows);
+      return secondPassRowKeys.has(matrixKey);
+    });
+
+    return prunedRows.length > 0 ? prunedRows : filteredRows;
+  }, [activeSource, filteredRows, showDuplicateRows, showLowCoverageRows]);
+
   const modelColumns = useMemo(() => {
     const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 
     const modelStats = new Map<string, { providerName: string; numericCount: number; totalCount: number }>();
 
-    filteredRows.forEach((row) => {
+    coveragePrunedRows.forEach((row) => {
       const current = modelStats.get(row.modelName) ?? {
         providerName: row.providerName || "Unknown",
         numericCount: 0,
@@ -2420,7 +2521,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     }
 
     const benchmarkScoreMap = new Map<string, number>();
-    filteredRows.forEach((row) => {
+    coveragePrunedRows.forEach((row) => {
       if (getMatrixGroupingKey(row, showDuplicateRows) !== columnSortBenchmarkKey || row.valueNum === null) {
         return;
       }
@@ -2452,7 +2553,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
       return (baseOrderIndex.get(leftModel) ?? 0) - (baseOrderIndex.get(rightModel) ?? 0);
     });
-  }, [filteredRows, sourceModelHint, columnSortBenchmarkKey, showDuplicateRows, modelOrderBySource, activeSource]);
+  }, [coveragePrunedRows, sourceModelHint, columnSortBenchmarkKey, showDuplicateRows, modelOrderBySource, activeSource]);
 
   useEffect(() => {
     if (!rowPresenceFilterModel) return;
@@ -2486,7 +2587,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     const preferredEntryByGroup = new Map<string, MatrixCellEntry>();
     const modelNameByGroup = new Map<string, string>();
 
-    filteredRows.forEach((row) => {
+    coveragePrunedRows.forEach((row) => {
       const groupKey = `${getMatrixGroupingKey(row, showDuplicateRows)}::${row.modelName}`;
 
       const entry: MatrixCellEntry = {
@@ -2558,7 +2659,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     });
 
     return map;
-  }, [modelColumns, filteredRows, showDuplicateRows]);
+  }, [modelColumns, coveragePrunedRows, showDuplicateRows]);
 
   useEffect(() => {
     if (!isColumnWidthLoaded) return;
@@ -2809,7 +2910,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       );
     });
 
-    filteredRows.forEach((row) => {
+    coveragePrunedRows.forEach((row) => {
       const matrixKey = getMatrixGroupingKey(row, showDuplicateRows);
       const matrixRow = matrixMap.get(matrixKey);
       if (!matrixRow) {
@@ -2929,7 +3030,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       })
       .filter((row) => row.rowDataCount > 0)
       .sort((a, b) => a.firstSeenIndex - b.firstSeenIndex);
-  }, [baseSourceRows, filteredRows, showDuplicateRows]);
+  }, [baseSourceRows, coveragePrunedRows, showDuplicateRows]);
 
   function getRowSortCycle(): RowSortMode[] {
     return activeSource === SOURCE_ALL
@@ -3735,6 +3836,17 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
             {showDuplicateRows ? <Eye size={14} /> : <EyeOff size={14} />}
             显示重名行
           </button>
+
+          {activeSource === SOURCE_ALL ? (
+            <button
+              type="button"
+              className="btn btn-xs btn-ghost"
+              onClick={() => setShowLowCoverageRows((prev) => !prev)}
+            >
+              {showLowCoverageRows ? <Eye size={14} /> : <EyeOff size={14} />}
+              {showLowCoverageRows ? "隐藏低覆盖行" : "显示低覆盖行"}
+            </button>
+          ) : null}
         </div>
       </div>
 
