@@ -260,6 +260,79 @@ describe("paper-table 文本解析", () => {
     expect(covostRows.every((row) => row.modalities.includes("Audio"))).toBe(true);
   });
 
+  test("多行堆叠模型表头可重建并正确对齐数值列", () => {
+    const inputText = [
+      "Evaluation Claude family",
+      "models",
+      "Other models",
+      "Claude",
+      "Opus 4.7",
+      "Claude",
+      "Opus 4.6",
+      "GPT-5.4 GPT-5.4",
+      "Pro",
+      "Gemini",
+      "3.1 Pro",
+      "SWE-bench Verified 87.6% 80.8% - - 80.6%",
+      "SWE-bench Pro 64.3% 53.4% 57.7% - 54.2%",
+      "SWE-bench Plus 60.0% 50.0% 55.0% 54.0% 52.0%"
+    ].join("\n");
+
+    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+
+    expect(parsed.format).toBe("paper-table");
+
+    const modelNames = new Set(parsed.rows.map((row) => row.modelName));
+    expect(modelNames).toEqual(
+      new Set([
+        "Claude Opus 4.7",
+        "Claude Opus 4.6",
+        "GPT-5.4",
+        "GPT-5.4 Pro",
+        "Gemini 3.1 Pro"
+      ])
+    );
+
+    expect(modelNames.has("Evaluation")).toBe(false);
+    expect(modelNames.has("Other")).toBe(false);
+
+    const verifiedByModel = new Map(
+      parsed.rows
+        .filter((row) => row.benchmarkName === "SWE-bench Verified")
+        .map((row) => [row.modelName, row.valueRaw])
+    );
+
+    expect(verifiedByModel.get("Claude Opus 4.7")).toBe("87.6");
+    expect(verifiedByModel.get("Claude Opus 4.6")).toBe("80.8");
+    expect(verifiedByModel.get("Gemini 3.1 Pro")).toBe("80.6");
+    expect(verifiedByModel.has("GPT-5.4")).toBe(false);
+    expect(verifiedByModel.has("GPT-5.4 Pro")).toBe(false);
+
+    const proByModel = new Map(
+      parsed.rows
+        .filter((row) => row.benchmarkName === "SWE-bench Pro")
+        .map((row) => [row.modelName, row.valueRaw])
+    );
+
+    expect(proByModel.get("Claude Opus 4.7")).toBe("64.3");
+    expect(proByModel.get("Claude Opus 4.6")).toBe("53.4");
+    expect(proByModel.get("GPT-5.4")).toBe("57.7");
+    expect(proByModel.get("GPT-5.4 Pro")).toBeUndefined();
+    expect(proByModel.get("Gemini 3.1 Pro")).toBe("54.2");
+
+    const plusByModel = new Map(
+      parsed.rows
+        .filter((row) => row.benchmarkName === "SWE-bench Plus")
+        .map((row) => [row.modelName, row.valueRaw])
+    );
+
+    expect(plusByModel.get("Claude Opus 4.7")).toBe("60.0");
+    expect(plusByModel.get("Claude Opus 4.6")).toBe("50.0");
+    expect(plusByModel.get("GPT-5.4")).toBe("55.0");
+    expect(plusByModel.get("GPT-5.4 Pro")).toBe("54.0");
+    expect(plusByModel.get("Gemini 3.1 Pro")).toBe("52.0");
+  });
+
   test("Category + Benchmark 双列表头可正确解析并继承分类", () => {
     const inputText = [
       "Category\tBenchmark\tGPT‑5.4\tGPT‑5.4 Pro\tGPT‑5.4 mini\tGPT‑5.4 nano\tGPT‑5.3-Codex\tGPT‑5.2\tGPT‑5.2 Pro\tGPT-5 mini",
@@ -310,6 +383,59 @@ describe("paper-table 文本解析", () => {
     const opusRow = charxivRows.find((row) => row.modelName === "Opus 4.6 Max");
     expect(opusRow?.valueRaw).toBe("65.3");
     expect(opusRow?.valueNote).toBe("(Self-Reported: 61.5)");
+  });
+
+  test("逗号分隔矩阵首列为评测维度时不会被当作模型", () => {
+    const inputText = [
+      "评测维度,Claude Opus 4.7,Claude Opus 4.6,GPT-5.4,GPT-5.4 Pro,Gemini 3.1 Pro",
+      "SWE-bench Verified,87.6%,80.8%,-,-,80.6%"
+    ].join("\n");
+
+    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+
+    expect(parsed.format).toBe("matrix-table");
+
+    const modelNames = new Set(parsed.rows.map((row) => row.modelName));
+    expect(modelNames.has("评测维度")).toBe(false);
+    expect(modelNames).toEqual(
+      new Set([
+        "Claude Opus 4.7",
+        "Claude Opus 4.6",
+        "Gemini 3.1 Pro"
+      ])
+    );
+
+    const benchmarkNames = new Set(parsed.rows.map((row) => row.benchmarkName));
+    expect(benchmarkNames).toEqual(new Set(["SWE-bench Verified"]));
+
+    const valueByModel = new Map(parsed.rows.map((row) => [row.modelName, row.valueRaw]));
+    expect(valueByModel.get("Claude Opus 4.7")).toBe("87.6");
+    expect(valueByModel.get("Claude Opus 4.6")).toBe("80.8");
+    expect(valueByModel.get("Gemini 3.1 Pro")).toBe("80.6");
+  });
+
+  test("逗号分隔矩阵首列为任意标签时按右侧数据列推断模型数", () => {
+    const inputText = [
+      "随便写点,Claude Opus 4.7,Claude Opus 4.6,GPT-5.4,GPT-5.4 Pro,Gemini 3.1 Pro",
+      "SWE-bench Verified,87.6%,80.8%,-,-,80.6%"
+    ].join("\n");
+
+    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+
+    expect(parsed.format).toBe("matrix-table");
+
+    const modelNames = new Set(parsed.rows.map((row) => row.modelName));
+    expect(modelNames.has("随便写点")).toBe(false);
+    expect(modelNames).toEqual(
+      new Set([
+        "Claude Opus 4.7",
+        "Claude Opus 4.6",
+        "Gemini 3.1 Pro"
+      ])
+    );
+
+    const benchmarkNames = new Set(parsed.rows.map((row) => row.benchmarkName));
+    expect(benchmarkNames).toEqual(new Set(["SWE-bench Verified"]));
   });
 
   test("结构化 CSV 识别不受逗号矩阵支持影响", () => {

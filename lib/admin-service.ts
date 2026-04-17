@@ -109,6 +109,46 @@ const PAPER_MODALITY_HINT_TOKENS = new Set([
   "多模态",
   "文本"
 ]);
+const PAPER_HEADER_NOISE_TOKENS = new Set([
+  "evaluation",
+  "evaluations",
+  "model",
+  "models",
+  "other",
+  "family",
+  "families",
+  "capability",
+  "capabilities",
+  "benchmark",
+  "benchmarks",
+  "category",
+  "categories",
+  "type",
+  "types"
+]);
+const PAPER_MODEL_TAIL_PREFIX_TOKENS = new Set([
+  "opus",
+  "sonnet",
+  "haiku",
+  "high",
+  "low",
+  "pro",
+  "plus",
+  "max",
+  "mini",
+  "nano",
+  "ultra",
+  "turbo",
+  "flash",
+  "lite",
+  "thinking",
+  "think",
+  "reasoning",
+  "preview",
+  "exp",
+  "experimental",
+  "default"
+]);
 const PAPER_HEADER_LABEL_REGEX = /\b(capability|benchmark|benchmarks|category|categories|type|types|model|models)\b/gi;
 const UNSUPPORTED_SPECIAL_VALUE_SYMBOL_REGEX = /[‡†§¶※¤]/g;
 const UNSUPPORTED_SPECIAL_VALUE_SYMBOL_TEST_REGEX = /[‡†§¶※¤]/;
@@ -733,6 +773,152 @@ function mergePaperHeaderFragments(fragments: string[]): string[] {
   return mergedFragments;
 }
 
+function isPaperHeaderNoiseFragment(fragment: string): boolean {
+  const normalized = fragment
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) return true;
+
+  const tokens = normalized.split(" ").filter(Boolean);
+  if (tokens.length === 0) return true;
+
+  if (tokens.includes("evaluation")) {
+    return true;
+  }
+
+  return tokens.every((token) => PAPER_HEADER_NOISE_TOKENS.has(token));
+}
+
+function normalizeStackedHeaderAtom(token: string): string {
+  return token
+    .toLowerCase()
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g, "-")
+    .replace(/[^a-z0-9\u4e00-\u9fa5.\-]+/g, "")
+    .trim();
+}
+
+function splitStackedPaperHeaderLineFragments(line: string): string[] {
+  const cleaned = normalizeNameParenthesisSpacing(cleanPaperHeaderFragment(line));
+  if (!cleaned) return [];
+  if (isPaperModalityHintFragment(cleaned)) return [];
+  if (isPaperHeaderNoiseFragment(cleaned)) return [];
+
+  const tokens = splitWhitespaceTokens(cleaned);
+  if (tokens.length === 2) {
+    const left = normalizeStackedHeaderAtom(tokens[0] ?? "");
+    const right = normalizeStackedHeaderAtom(tokens[1] ?? "");
+
+    if (left && right && left === right) {
+      return [tokens[0] ?? "", tokens[1] ?? ""]
+        .map((item) => normalizeNameParenthesisSpacing(item).trim())
+        .filter(Boolean);
+    }
+  }
+
+  const duplicatedTokenMatch = cleaned.match(/^(\S+)\s+\1$/i);
+  if (duplicatedTokenMatch) {
+    const duplicatedToken = normalizeNameParenthesisSpacing(duplicatedTokenMatch[1] ?? "").trim();
+    if (!duplicatedToken) return [];
+    return [duplicatedToken, duplicatedToken];
+  }
+
+  return [cleaned];
+}
+
+function isPaperModelTailFragment(fragment: string): boolean {
+  if (isPaperHeaderContinuationFragment(fragment)) {
+    return true;
+  }
+
+  const normalized = fragment
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5.\-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) return false;
+
+  if (/^\d+(?:\.\d+)*(?:\s+[a-z0-9.\-]+){0,2}$/.test(normalized)) {
+    return true;
+  }
+
+  const tokens = normalized.split(" ").filter(Boolean);
+  if (tokens.length === 0 || tokens.length > 4) {
+    return false;
+  }
+
+  return PAPER_MODEL_TAIL_PREFIX_TOKENS.has(tokens[0] ?? "");
+}
+
+function shouldUseStackedPaperHeaderFallback(headerLines: string[], modelCount: number): boolean {
+  if (modelCount < 2) return false;
+  if (headerLines.length < modelCount + 1) return false;
+
+  const cleanedLines = headerLines
+    .map((line) => normalizeNameParenthesisSpacing(cleanPaperHeaderFragment(line)))
+    .filter(Boolean);
+
+  if (cleanedLines.length < modelCount + 1) {
+    return false;
+  }
+
+  const shortLineCount = cleanedLines
+    .filter((line) => splitWhitespaceTokens(line).length <= 3)
+    .length;
+
+  return shortLineCount / cleanedLines.length >= 0.6;
+}
+
+function buildStackedPaperTableModelNames(headerLines: string[], modelCount: number): string[] | null {
+  if (!shouldUseStackedPaperHeaderFallback(headerLines, modelCount)) {
+    return null;
+  }
+
+  const fragments = headerLines
+    .flatMap((line) => splitStackedPaperHeaderLineFragments(line))
+    .map((item) => normalizeNameParenthesisSpacing(item).trim())
+    .filter(Boolean);
+
+  if (fragments.length < modelCount) {
+    return null;
+  }
+
+  const merged: string[] = [];
+  fragments.forEach((fragment) => {
+    if (merged.length > 0 && isPaperModelTailFragment(fragment)) {
+      merged[merged.length - 1] = joinPaperHeaderFragments(merged[merged.length - 1] ?? "", fragment);
+      return;
+    }
+
+    merged.push(fragment);
+  });
+
+  const compacted = [...merged];
+  while (compacted.length > modelCount) {
+    const mergeIndex = compacted.findIndex((fragment, index) => index > 0 && isPaperModelTailFragment(fragment));
+    if (mergeIndex <= 0) {
+      break;
+    }
+
+    compacted[mergeIndex - 1] = joinPaperHeaderFragments(
+      compacted[mergeIndex - 1] ?? "",
+      compacted[mergeIndex] ?? ""
+    );
+    compacted.splice(mergeIndex, 1);
+  }
+
+  if (compacted.length !== modelCount) {
+    return null;
+  }
+
+  return compacted
+    .map((item) => normalizeNameParenthesisSpacing(item).trim())
+    .filter(Boolean);
+}
+
 function isPaperCategoryFragment(line: string): boolean {
   const normalized = normalizeNameParenthesisSpacing(cleanPaperHeaderFragment(line));
   if (!normalized) return false;
@@ -753,6 +939,11 @@ function estimatePaperHeaderModelCount(headerLines: string[]): number {
 }
 
 function buildPaperTableModelNames(headerLines: string[], modelCount: number): string[] {
+  const stackedModelNames = buildStackedPaperTableModelNames(headerLines, modelCount);
+  if (stackedModelNames && stackedModelNames.length === modelCount) {
+    return stackedModelNames;
+  }
+
   const fragments = headerLines.flatMap((line) => extractPaperHeaderFragments(line));
   const mergedFragments = mergePaperHeaderFragments(fragments);
 
@@ -2048,6 +2239,77 @@ function looksLikeModelHeaderRow(cells: string[]): boolean {
   return numericLikeCount <= 1;
 }
 
+function isMatrixValueLikeCell(cell: string): boolean {
+  const normalizedCell = cell.trim();
+  if (!normalizedCell) return false;
+
+  if (isEmptyImportValue(normalizedCell)) {
+    return true;
+  }
+
+  if (isPaperTableValueToken(normalizedCell)) {
+    return true;
+  }
+
+  const normalizedValue = normalizeImportedValueAndExtractNote(normalizedCell).valueRaw;
+  const parsedValue = parseBenchmarkValue(normalizedValue);
+
+  return parsedValue.valueNum !== null || parsedValue.valueNum2 !== null;
+}
+
+function getTrailingMatrixValueCellCount(cells: string[]): number {
+  let count = 0;
+
+  for (let index = cells.length - 1; index >= 0; index -= 1) {
+    const currentCell = (cells[index] ?? "").trim();
+    if (!currentCell) {
+      if (count > 0) {
+        break;
+      }
+      continue;
+    }
+
+    if (isMatrixValueLikeCell(currentCell)) {
+      count += 1;
+      continue;
+    }
+
+    if (count > 0) {
+      break;
+    }
+  }
+
+  return count;
+}
+
+function inferMatrixModelCountFromDataLines(lines: string[], startLineIndex: number): number | null {
+  const trailingValueCounts = lines
+    .slice(startLineIndex)
+    .map((line) => getTrailingMatrixValueCellCount(splitTableLine(line)))
+    .filter((count) => count >= 2);
+
+  if (trailingValueCounts.length === 0) {
+    return null;
+  }
+
+  const frequency = new Map<number, number>();
+  trailingValueCounts.forEach((count) => {
+    frequency.set(count, (frequency.get(count) ?? 0) + 1);
+  });
+
+  let bestCount = trailingValueCounts[0] ?? 0;
+  let bestSupport = -1;
+
+  frequency.forEach((support, count) => {
+    if (support > bestSupport || (support === bestSupport && count > bestCount)) {
+      bestCount = count;
+      bestSupport = support;
+    }
+  });
+
+  return bestCount >= 2 ? bestCount : null;
+}
+
 function parseMatrixTextRows(inputText: string, defaultSource: string | null): ParsedTextImportResult {
   const rawLines = inputText
     .split(/\r?\n/)
@@ -2077,27 +2339,46 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
 
   const headerCells = splitTableLine(rawLines[headerLineIndex]);
   const normalizedHeaderCells = headerCells.map((cell) => cell.trim().toLowerCase());
+  const inferredModelCountFromData = inferMatrixModelCountFromDataLines(rawLines, headerLineIndex + 1);
+  const inferredModelHeaderStartIndex = inferredModelCountFromData !== null
+    && inferredModelCountFromData <= headerCells.length
+    ? headerCells.length - inferredModelCountFromData
+    : null;
   const benchmarkLabelIndex = normalizedHeaderCells.findIndex((cell) =>
-    /^(benchmark|benchmarks|指标|基准|评测|任务|项目)$/.test(cell)
+    /^(benchmark|benchmarks|metric|metrics|dimension|dimensions|指标|基准|评测|评测维度|维度|任务|项目)$/.test(cell)
   );
   const categoryLabelIndex = normalizedHeaderCells.findIndex((cell) =>
     /^(category|categories|type|types|domain|domains|类别|分类|领域|赛道)$/.test(cell)
   );
+  const hasExplicitBenchmarkColumn = benchmarkLabelIndex >= 0;
+  const benchmarkColumnIndex = hasExplicitBenchmarkColumn
+    ? benchmarkLabelIndex
+    : (inferredModelHeaderStartIndex !== null && inferredModelHeaderStartIndex > 0
+      ? inferredModelHeaderStartIndex - 1
+      : 0);
+  const categoryColumnIndex = categoryLabelIndex >= 0
+    && categoryLabelIndex !== benchmarkColumnIndex
+    ? categoryLabelIndex
+    : (
+      inferredModelHeaderStartIndex !== null
+      && inferredModelHeaderStartIndex >= 2
+      && /^(category|categories|type|types|domain|domains|类别|分类|领域|赛道)$/.test(
+        normalizedHeaderCells[inferredModelHeaderStartIndex - 2] ?? ""
+      )
+      ? inferredModelHeaderStartIndex - 2
+      : -1
+    );
+
   const firstHeaderCell = (headerCells[0] || "").trim();
   const startsWithBenchmarkLabel =
     !firstHeaderCell
-    || /benchmark|type|category|指标|类别|分类/i.test(firstHeaderCell);
+    || /benchmark|metric|dimension|type|category|指标|评测|维度|类别|分类/i.test(firstHeaderCell);
 
-  const hasExplicitBenchmarkColumn = benchmarkLabelIndex >= 0;
-  const benchmarkColumnIndex = hasExplicitBenchmarkColumn ? benchmarkLabelIndex : 0;
-  const categoryColumnIndex = hasExplicitBenchmarkColumn
-    && categoryLabelIndex >= 0
-    && categoryLabelIndex !== benchmarkColumnIndex
-    ? categoryLabelIndex
-    : -1;
-  const modelHeaderStartIndex = hasExplicitBenchmarkColumn
-    ? benchmarkColumnIndex + 1
-    : (startsWithBenchmarkLabel ? 1 : 0);
+  const modelHeaderStartIndex = inferredModelHeaderStartIndex !== null
+    ? inferredModelHeaderStartIndex
+    : (hasExplicitBenchmarkColumn
+      ? benchmarkColumnIndex + 1
+      : (startsWithBenchmarkLabel ? 1 : 0));
   const modelValueStartIndex = benchmarkColumnIndex + 1;
 
   const modelNames = headerCells
