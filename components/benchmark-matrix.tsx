@@ -3333,7 +3333,9 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
   const sortedMatrixRows = useMemo(() => {
     const rowsCopy = [...presenceFilteredMatrixRows];
-    const effectiveMode = getEffectiveSortMode(rowSortState.mode);
+    const effectiveMode = activeSource === SOURCE_ALL && rowSortState.mode === "source"
+      ? "data"
+      : rowSortState.mode;
 
     if (effectiveMode === "source") {
       rowsCopy.sort((a, b) => {
@@ -3401,7 +3403,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       return a.firstSeenIndex - b.firstSeenIndex;
     });
     return rowsCopy;
-  }, [presenceFilteredMatrixRows, rowSortState]);
+  }, [presenceFilteredMatrixRows, rowSortState, activeSource]);
 
   const headerUniqueCounts = useMemo(() => {
     const uniqueCategories = new Set<string>();
@@ -3700,14 +3702,6 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       }
       return MODALITY_OPTIONS.filter((item) => set.has(item));
     });
-  }
-
-  function selectAllModalities() {
-    setSelectedModalities([...MODALITY_OPTIONS]);
-  }
-
-  function clearAllModalities() {
-    setSelectedModalities([]);
   }
 
   async function toggleFullscreen() {

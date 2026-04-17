@@ -16,19 +16,13 @@ type RenameEntityFn = (input: {
   mergedSourceName?: string;
 }>;
 
+type TransactionCallback = (tx: unknown) => Promise<unknown>;
+
 let renameEntityForTest: RenameEntityFn;
-let adminServiceModuleForTest: {
-  mergeEntity: (input: {
-    entityType: "model" | "benchmark";
-    sourceId: number;
-    targetId: number;
-    targetBenchmarkName?: string;
-  }) => Promise<void>;
-};
 let dbForTest: {
   select: (...args: unknown[]) => unknown;
   update: (...args: unknown[]) => unknown;
-  transaction: (callback: (tx: any) => Promise<unknown>) => Promise<unknown>;
+  transaction: (callback: TransactionCallback) => Promise<unknown>;
 };
 
 function createSelectWhereMock(results: unknown[]) {
@@ -50,7 +44,6 @@ beforeAll(async () => {
 
   const adminServiceModule = await import("@/lib/admin-service");
   renameEntityForTest = adminServiceModule.renameEntity as RenameEntityFn;
-  adminServiceModuleForTest = adminServiceModule as typeof adminServiceModuleForTest;
 
   const dbClientModule = await import("@/lib/db/client");
   dbForTest = dbClientModule.db as typeof dbForTest;
@@ -64,7 +57,7 @@ describe("renameEntity", () => {
   test("model 改名命中重名时会合并冲突实体并完成改名", async () => {
     const dbSelectWhere = createSelectWhereMock([[]]);
     const dbSelectFrom = vi.fn(() => ({ where: dbSelectWhere }));
-    vi.spyOn(dbForTest, "select").mockImplementation(() => ({ from: dbSelectFrom }) as any);
+    vi.spyOn(dbForTest, "select").mockImplementation(() => ({ from: dbSelectFrom }));
 
     const txSelectWhere = createSelectWhereMock([
       [
@@ -89,17 +82,19 @@ describe("renameEntity", () => {
     const txSelect = vi.fn(() => ({ from: txSelectFrom }));
 
     const updateWhere = vi.fn().mockResolvedValue(undefined);
-    const updateSet = vi.fn(() => ({ where: updateWhere }));
+    const updateSet = vi.fn<(payload: Record<string, unknown>) => { where: typeof updateWhere }>(
+      () => ({ where: updateWhere })
+    );
     const update = vi.fn(() => ({ set: updateSet }));
 
     const tx = {
       select: txSelect,
       update
-    } as any;
+    };
 
     vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
 
     const result = await renameEntityForTest({
       entityType: "model",
@@ -113,7 +108,7 @@ describe("renameEntity", () => {
     expect(result.mergedSourceId).toBe(202);
     expect(result.nextName).toBe("Model B");
 
-    const updatePayloads = updateSet.mock.calls.map((call) => call[0]);
+    const updatePayloads = updateSet.mock.calls.map(([payload]) => payload);
 
     expect(updatePayloads).toEqual(
       expect.arrayContaining([
@@ -125,9 +120,9 @@ describe("renameEntity", () => {
 
     expect(
       updatePayloads.some((payload) =>
-        typeof payload?.modelName === "string"
+        typeof payload.modelName === "string"
         && payload.modelName.includes("#merged-202-")
-        && typeof payload?.canonicalKey === "string"
+        && typeof payload.canonicalKey === "string"
         && payload.canonicalKey.includes("#merged-202-")
       )
     ).toBe(true);
@@ -148,11 +143,13 @@ describe("renameEntity", () => {
       []
     ]);
     const dbSelectFrom = vi.fn(() => ({ where: dbSelectWhere }));
-    vi.spyOn(dbForTest, "select").mockImplementation(() => ({ from: dbSelectFrom }) as any);
+    vi.spyOn(dbForTest, "select").mockImplementation(() => ({ from: dbSelectFrom }));
 
     const updateWhere = vi.fn().mockResolvedValue(undefined);
-    const updateSet = vi.fn(() => ({ where: updateWhere }));
-    vi.spyOn(dbForTest, "update").mockImplementation(() => ({ set: updateSet }) as any);
+    const updateSet = vi.fn<(payload: Record<string, unknown>) => { where: typeof updateWhere }>(
+      () => ({ where: updateWhere })
+    );
+    vi.spyOn(dbForTest, "update").mockImplementation(() => ({ set: updateSet }));
 
     const result = await renameEntityForTest({
       entityType: "benchmark",
@@ -193,7 +190,7 @@ describe("renameEntity", () => {
       ]
     ]);
     const dbSelectFrom = vi.fn(() => ({ where: dbSelectWhere }));
-    vi.spyOn(dbForTest, "select").mockImplementation(() => ({ from: dbSelectFrom }) as any);
+    vi.spyOn(dbForTest, "select").mockImplementation(() => ({ from: dbSelectFrom }));
 
     const txSelectWhere = createSelectWhereMock([
       [{ benchmarkName: "Bench-Alpha", benchmarkType: "Type-A" }],
@@ -207,7 +204,9 @@ describe("renameEntity", () => {
     const txSelect = vi.fn(() => ({ from: txSelectFrom }));
 
     const updateWhere = vi.fn().mockResolvedValue(undefined);
-    const updateSet = vi.fn(() => ({ where: updateWhere }));
+    const updateSet = vi.fn<(payload: Record<string, unknown>) => { where: typeof updateWhere }>(
+      () => ({ where: updateWhere })
+    );
     const update = vi.fn(() => ({ set: updateSet }));
 
     const onConflictDoNothing = vi.fn().mockResolvedValue(undefined);
@@ -222,11 +221,11 @@ describe("renameEntity", () => {
       update,
       insert,
       delete: deleteFn
-    } as any;
+    };
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
 
     const result = await renameEntityForTest({
       entityType: "benchmark",

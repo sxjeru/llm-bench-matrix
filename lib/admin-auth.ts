@@ -48,6 +48,8 @@ type AdminSessionEntry = {
 
 type AdminSessionMap = Record<string, AdminSessionEntry>;
 
+type DbTransactionClient = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 if (process.env.NODE_ENV === "production" && !process.env.ADMIN_PASSWORD) {
   throw new Error(
     [
@@ -292,7 +294,7 @@ async function atomicUpdateSetting<T>(
   updater: (currentJson: unknown) => { nextJson: unknown; shouldWrite: boolean; result: T },
   meta: { note: string; updatedBy?: string }
 ): Promise<T> {
-  return db.transaction(async (tx: any) => {
+  return db.transaction(async (tx: DbTransactionClient) => {
     // Acquire a transaction-scoped advisory lock keyed on the settings key.
     // This serialises concurrent read-modify-write cycles for the same key.
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${key}))`);

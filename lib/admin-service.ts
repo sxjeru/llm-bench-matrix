@@ -65,6 +65,7 @@ type TextParseWarning = {
 
 /** Structural type covering the Drizzle methods used by entity-ensure helpers. */
 type DbExecutor = Pick<typeof db, "select" | "insert" | "update" | "delete" | "execute">;
+type DbTransactionClient = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 const EMPTY_VALUE_MARKERS = new Set(["", "-", "--", "—", "na", "n/a", "null", "none"]);
 const LOWER_IS_BETTER_BENCHMARK_RULES = [/omnidocbench\s*1\.5/i, /\b(?:r?mse)\b/i];
@@ -1299,7 +1300,7 @@ export async function rebuildModelCanonicalKeysByRule(rawRule: unknown) {
   const tempSuffix = Date.now();
   let mergedCount = 0;
 
-  await db.transaction(async (tx: any) => {
+  await db.transaction(async (tx: DbTransactionClient) => {
     // Phase 1: Batch assign temporary keys to all models in a single UPDATE
     await tx.execute(
       sql`UPDATE models SET canonical_key = 'tmp-model-' || id::text || '-' || ${String(tempSuffix)}`
@@ -1388,7 +1389,7 @@ export async function rebuildBenchmarkCanonicalKeysByRule(rawRule: unknown) {
   const tempSuffix = Date.now();
   let mergedCount = 0;
 
-  await db.transaction(async (tx: any) => {
+  await db.transaction(async (tx: DbTransactionClient) => {
     // Phase 1: Batch assign temporary keys to all benchmarks in a single UPDATE
     await tx.execute(
       sql`UPDATE benchmarks SET canonical_key = 'tmp-benchmark-' || id::text || '-' || ${String(tempSuffix)}`
@@ -1669,7 +1670,7 @@ export async function mergeEntity(input: {
     throw new Error("sourceId and targetId cannot be the same");
   }
 
-  await db.transaction(async (tx: any) => {
+  await db.transaction(async (tx: DbTransactionClient) => {
     if (input.entityType === "model") {
       await tx
         .update(benchmarkValues)
@@ -1991,7 +1992,7 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
     };
   }
 
-  const result: RenameEntityResult = await db.transaction(async (tx: any): Promise<RenameEntityResult> => {
+  const result: RenameEntityResult = await db.transaction(async (tx: DbTransactionClient): Promise<RenameEntityResult> => {
     const [current] = await tx
       .select({
         id: models.id,
@@ -2202,7 +2203,7 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
 
   const dedupeRule = await getModelDedupeRule();
 
-  const result = await db.transaction(async (tx: any) => {
+  const result = await db.transaction(async (tx: DbTransactionClient) => {
     const providerCache = new Map<string, Awaited<ReturnType<typeof ensureProvider>>>();
     const modelCache = new Map<string, Awaited<ReturnType<typeof ensureModelByProviderId>>>();
     const benchmarkByNameCache = new Map<string, Array<typeof benchmarks.$inferSelect>>();
@@ -3167,7 +3168,7 @@ export async function deleteModelAndAllValues(modelId: number) {
     throw new Error(`model not found: ${modelId}`);
   }
 
-  await db.transaction(async (tx: any) => {
+  await db.transaction(async (tx: DbTransactionClient) => {
     await tx
       .update(models)
       .set({ mergedIntoModelId: null })
@@ -3813,7 +3814,7 @@ export function __hasBenchmarkVariantNoiseNormalizedNameMatchForTest(left: strin
 }
 
 export async function clearNonSettingsData() {
-  await db.transaction(async (tx: any) => {
+  await db.transaction(async (tx: DbTransactionClient) => {
     await tx.delete(benchmarkValues);
     await tx.delete(benchmarkSourceMeta);
     await tx.delete(models);

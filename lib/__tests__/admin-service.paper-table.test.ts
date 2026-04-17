@@ -30,16 +30,16 @@ let hasBenchmarkVariantNoiseNormalizedNameMatchForTest: (left: string, right: st
 
 beforeAll(async () => {
   process.env.DATABASE_URL ??= "postgres://test:test@127.0.0.1:5432/test";
-  const module = await import("@/lib/admin-service");
-  parseBenchmarkTextRowsForTest = module.__parseBenchmarkTextRowsForTest as typeof parseBenchmarkTextRowsForTest;
+  const adminServiceModule = await import("@/lib/admin-service");
+  parseBenchmarkTextRowsForTest = adminServiceModule.__parseBenchmarkTextRowsForTest as typeof parseBenchmarkTextRowsForTest;
   normalizeDuplicateCompareTextForTest =
-    module.__normalizeDuplicateCompareTextForTest as typeof normalizeDuplicateCompareTextForTest;
+    adminServiceModule.__normalizeDuplicateCompareTextForTest as typeof normalizeDuplicateCompareTextForTest;
   getDuplicateNameSimilarityForTest =
-    module.__getDuplicateNameSimilarityForTest as typeof getDuplicateNameSimilarityForTest;
+    adminServiceModule.__getDuplicateNameSimilarityForTest as typeof getDuplicateNameSimilarityForTest;
   hasBenchmarkNumericTokenMismatchForTest =
-    module.__hasBenchmarkNumericTokenMismatchForTest as typeof hasBenchmarkNumericTokenMismatchForTest;
+    adminServiceModule.__hasBenchmarkNumericTokenMismatchForTest as typeof hasBenchmarkNumericTokenMismatchForTest;
   hasBenchmarkVariantNoiseNormalizedNameMatchForTest =
-    module.__hasBenchmarkVariantNoiseNormalizedNameMatchForTest as typeof hasBenchmarkVariantNoiseNormalizedNameMatchForTest;
+    adminServiceModule.__hasBenchmarkVariantNoiseNormalizedNameMatchForTest as typeof hasBenchmarkVariantNoiseNormalizedNameMatchForTest;
 });
 
 describe("paper-table 文本解析", () => {

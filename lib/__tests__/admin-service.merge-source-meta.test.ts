@@ -7,9 +7,12 @@ type MergeEntityFn = (input: {
   targetBenchmarkName?: string;
 }) => Promise<void>;
 
+type TransactionCallback = (tx: unknown) => Promise<unknown>;
+
 let mergeEntityForTest: MergeEntityFn;
 let dbForTest: {
-  transaction: (callback: (tx: any) => Promise<unknown>) => Promise<unknown>;
+  select: (...args: unknown[]) => unknown;
+  transaction: (callback: TransactionCallback) => Promise<unknown>;
 };
 
 beforeAll(async () => {
@@ -47,7 +50,9 @@ describe("mergeEntity benchmark source meta migration", () => {
     ];
 
     const updateWhere = vi.fn().mockResolvedValue(undefined);
-    const updateSet = vi.fn(() => ({ where: updateWhere }));
+    const updateSet = vi.fn<(payload: Record<string, unknown>) => { where: typeof updateWhere }>(
+      () => ({ where: updateWhere })
+    );
     const update = vi.fn(() => ({ set: updateSet }));
 
     const selectWhere = createSelectWhereMock([
@@ -70,11 +75,11 @@ describe("mergeEntity benchmark source meta migration", () => {
       select,
       insert,
       delete: deleteFn
-    } as any;
+    };
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
 
     await mergeEntityForTest({
       entityType: "benchmark",
@@ -98,7 +103,9 @@ describe("mergeEntity benchmark source meta migration", () => {
 
   test("当 source benchmark 没有 source meta 但有 source value 时，会按 source benchmark 回填 meta", async () => {
     const updateWhere = vi.fn().mockResolvedValue(undefined);
-    const updateSet = vi.fn(() => ({ where: updateWhere }));
+    const updateSet = vi.fn<(payload: Record<string, unknown>) => { where: typeof updateWhere }>(
+      () => ({ where: updateWhere })
+    );
     const update = vi.fn(() => ({ set: updateSet }));
 
     const selectWhere = createSelectWhereMock([
@@ -121,11 +128,11 @@ describe("mergeEntity benchmark source meta migration", () => {
       select,
       insert,
       delete: deleteFn
-    } as any;
+    };
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
 
     await mergeEntityForTest({
       entityType: "benchmark",
@@ -149,7 +156,9 @@ describe("mergeEntity benchmark source meta migration", () => {
 
   test("当 source benchmark 没有 source value 且没有 source meta 时，不会执行 meta 迁移写入", async () => {
     const updateWhere = vi.fn().mockResolvedValue(undefined);
-    const updateSet = vi.fn(() => ({ where: updateWhere }));
+    const updateSet = vi.fn<(payload: Record<string, unknown>) => { where: typeof updateWhere }>(
+      () => ({ where: updateWhere })
+    );
     const update = vi.fn(() => ({ set: updateSet }));
 
     const selectWhere = createSelectWhereMock([
@@ -172,11 +181,11 @@ describe("mergeEntity benchmark source meta migration", () => {
       select,
       insert,
       delete: deleteFn
-    } as any;
+    };
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
 
     await mergeEntityForTest({
       entityType: "benchmark",
@@ -194,10 +203,12 @@ describe("mergeEntity benchmark source meta migration", () => {
   test("benchmark 改名命中 source canonical 冲突时，会先给 source 临时避让再更新 target", async () => {
     const dbSelectWhere = createSelectWhereMock([[]]);
     const dbSelectFrom = vi.fn(() => ({ where: dbSelectWhere }));
-    const dbSelectSpy = vi.spyOn(dbForTest, "select").mockImplementation(() => ({ from: dbSelectFrom }) as any);
+    const dbSelectSpy = vi.spyOn(dbForTest, "select").mockImplementation(() => ({ from: dbSelectFrom }));
 
     const updateWhere = vi.fn().mockResolvedValue(undefined);
-    const updateSet = vi.fn(() => ({ where: updateWhere }));
+    const updateSet = vi.fn<(payload: Record<string, unknown>) => { where: typeof updateWhere }>(
+      () => ({ where: updateWhere })
+    );
     const update = vi.fn(() => ({ set: updateSet }));
 
     const selectWhere = createSelectWhereMock([
@@ -224,11 +235,11 @@ describe("mergeEntity benchmark source meta migration", () => {
       select,
       insert,
       delete: deleteFn
-    } as any;
+    };
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
 
     await mergeEntityForTest({
       entityType: "benchmark",
@@ -239,7 +250,9 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     const benchmarkRenameCalls = updateSet.mock.calls
       .map((call) => call[0])
-      .filter((payload) => payload && typeof payload === "object" && "benchmarkName" in payload);
+      .filter((payload): payload is Record<string, unknown> =>
+        Boolean(payload) && typeof payload === "object" && "benchmarkName" in payload
+      );
 
     expect(
       benchmarkRenameCalls.some((payload) =>

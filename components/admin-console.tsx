@@ -1538,18 +1538,20 @@ export function AdminConsole({
   const visibleModelDuplicateCandidates = useMemo(() => {
     if (!duplicateDetectionResult) return [];
     return duplicateDetectionResult.modelCandidates.filter((candidate) =>
-      shouldDisplayDuplicateCandidate(candidate.confidence)
+      duplicateConfidenceFilter === "all" || candidate.confidence !== "low"
     );
   }, [duplicateDetectionResult, duplicateConfidenceFilter]);
 
   const visibleBenchmarkDuplicateCandidates = useMemo(() => {
     if (!duplicateDetectionResult) return [];
     return duplicateDetectionResult.benchmarkCandidates.filter((candidate) =>
-      shouldDisplayDuplicateCandidate(candidate.confidence)
+      duplicateConfidenceFilter === "all" || candidate.confidence !== "low"
     );
   }, [duplicateDetectionResult, duplicateConfidenceFilter]);
 
   useEffect(() => {
+    const noticeTimers = noticeTimersRef.current;
+
     return () => {
       if (importProgressTimerRef.current) {
         clearInterval(importProgressTimerRef.current);
@@ -1571,11 +1573,11 @@ export function AdminConsole({
         renameSubmitResetTimerRef.current = null;
       }
 
-      noticeTimersRef.current.forEach(({ hideTimer, clearTimer }) => {
+      noticeTimers.forEach(({ hideTimer, clearTimer }) => {
         clearTimeout(hideTimer);
         clearTimeout(clearTimer);
       });
-      noticeTimersRef.current.clear();
+      noticeTimers.clear();
     };
   }, []);
 
@@ -2817,11 +2819,6 @@ export function AdminConsole({
       return "字符相似";
     }
     return reason;
-  }
-
-  function shouldDisplayDuplicateCandidate(confidence: DuplicateConfidence): boolean {
-    if (duplicateConfidenceFilter === "all") return true;
-    return confidence !== "low";
   }
 
   function applyModelDuplicateCandidate(candidate: DuplicateModelCandidate) {
@@ -4123,6 +4120,7 @@ export function AdminConsole({
                                                 <div
                                                   key={`matrix-benchmark-override-option-${matrixRow.key}-${option.targetId}`}
                                                   role="option"
+                                                  aria-selected={false}
                                                   tabIndex={0}
                                                   className="cursor-pointer rounded-sm px-2 py-1 text-left text-xs leading-5 text-base-content hover:bg-base-200/90"
                                                   onMouseDown={(event) => {
