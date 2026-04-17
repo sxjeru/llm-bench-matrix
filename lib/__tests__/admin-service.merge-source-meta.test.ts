@@ -192,6 +192,10 @@ describe("mergeEntity benchmark source meta migration", () => {
   });
 
   test("benchmark 改名命中 source canonical 冲突时，会先给 source 临时避让再更新 target", async () => {
+    const dbSelectWhere = createSelectWhereMock([[]]);
+    const dbSelectFrom = vi.fn(() => ({ where: dbSelectWhere }));
+    const dbSelectSpy = vi.spyOn(dbForTest, "select").mockImplementation(() => ({ from: dbSelectFrom }) as any);
+
     const updateWhere = vi.fn().mockResolvedValue(undefined);
     const updateSet = vi.fn(() => ({ where: updateWhere }));
     const update = vi.fn(() => ({ set: updateSet }));
@@ -254,6 +258,7 @@ describe("mergeEntity benchmark source meta migration", () => {
       )
     ).toBe(true);
 
+    dbSelectSpy.mockRestore();
     transactionSpy.mockRestore();
   });
 });

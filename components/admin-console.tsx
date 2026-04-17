@@ -101,7 +101,7 @@ type ModelDedupeRule = {
   removeDot: boolean;
 };
 
-type TabKey = "import" | "entry" | "merge" | "settings";
+type TabKey = "import" | "entry" | "rename" | "merge" | "settings";
 
 type BenchmarkWarningLevel = "info" | "warn" | "danger";
 
@@ -160,6 +160,8 @@ type NoticeItem = NoticeState & {
 };
 
 type MergeSubmitState = "idle" | "submitting" | "success";
+
+type RenameSubmitState = "idle" | "submitting" | "success";
 
 type DuplicateConfidence = "high" | "medium" | "low";
 
@@ -221,6 +223,9 @@ const MODEL_HYPHEN_VARIANT_REGEX = /[\-\u2010\u2011\u2012\u2013\u2014\u2015\u221
 const PAIR_NOTE_HISTORY_STORAGE_KEY = "admin-console:pair-note-history";
 const STAR_NOTE_HISTORY_STORAGE_KEY = "admin-console:star-note-history";
 const MODALITY_OPTIONS = ["Text", "Vision", "Audio", "Video", "Multimodal"] as const;
+const RENAME_LIST_ROW_HEIGHT = 38;
+const RENAME_LIST_VIEWPORT_HEIGHT = 320;
+const RENAME_LIST_OVERSCAN = 8;
 
 function normalizeModelDedupeRule(raw: unknown): ModelDedupeRule {
   if (!raw || typeof raw !== "object") {
@@ -782,6 +787,16 @@ export function AdminConsole({
   const [duplicateDetectionResult, setDuplicateDetectionResult] = useState<DuplicateDetectionResult | null>(null);
   const [duplicateDetectionEntityType, setDuplicateDetectionEntityType] = useState<"model" | "benchmark">("model");
   const [duplicateConfidenceFilter, setDuplicateConfidenceFilter] = useState<"high-medium" | "all">("high-medium");
+
+  const [renameEntityType, setRenameEntityType] = useState<"model" | "benchmark">("model");
+  const [renameSearchKeyword, setRenameSearchKeyword] = useState("");
+  const [renameSelectedEntityId, setRenameSelectedEntityId] = useState<number | null>(null);
+  const [renameNextName, setRenameNextName] = useState("");
+  const [renameMergeOnConflict, setRenameMergeOnConflict] = useState(true);
+  const [renameSubmitState, setRenameSubmitState] = useState<RenameSubmitState>("idle");
+  const [renameListScrollTop, setRenameListScrollTop] = useState(0);
+  const renameListViewportRef = useRef<HTMLDivElement | null>(null);
+  const renameSubmitResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [settingKey, setSettingKey] = useState("");
   const [settingValue, setSettingValue] = useState("{}");
@@ -1452,6 +1467,64 @@ export function AdminConsole({
     return benchmarkEntityOptions;
   }, [mergeType, modelEntityOptions, benchmarkEntityOptions]);
 
+  const renameEntityOptions = useMemo(() => {
+    if (renameEntityType === "model") {
+      return modelEntityOptions;
+    }
+
+    return benchmarkEntityOptions;
+  }, [renameEntityType, modelEntityOptions, benchmarkEntityOptions]);
+
+  const filteredRenameEntityOptions = useMemo(() => {
+    const keyword = renameSearchKeyword.trim().toLowerCase();
+
+    return renameEntityOptions.filter((item) => {
+      if (!keyword) return true;
+
+      return (
+        item.label.toLowerCase().includes(keyword)
+        || String(item.id).includes(keyword)
+      );
+    });
+  }, [renameEntityOptions, renameSearchKeyword]);
+
+  const renameVirtualWindow = useMemo(() => {
+    const total = filteredRenameEntityOptions.length;
+    if (total === 0) {
+      return { start: 0, end: 0 };
+    }
+
+    const visibleCount = Math.ceil(RENAME_LIST_VIEWPORT_HEIGHT / RENAME_LIST_ROW_HEIGHT);
+    const start = Math.max(
+      0,
+      Math.floor(renameListScrollTop / RENAME_LIST_ROW_HEIGHT) - RENAME_LIST_OVERSCAN
+    );
+    const end = Math.min(
+      total,
+      start + visibleCount + RENAME_LIST_OVERSCAN * 2
+    );
+
+    return { start, end };
+  }, [filteredRenameEntityOptions.length, renameListScrollTop]);
+
+  const visibleRenameEntityOptions = useMemo(
+    () => filteredRenameEntityOptions.slice(renameVirtualWindow.start, renameVirtualWindow.end),
+    [filteredRenameEntityOptions, renameVirtualWindow.start, renameVirtualWindow.end]
+  );
+
+  const renameListSpacerHeight = useMemo(
+    () => filteredRenameEntityOptions.length * RENAME_LIST_ROW_HEIGHT,
+    [filteredRenameEntityOptions.length]
+  );
+
+  const renameSelectedEntityLabel = useMemo(() => {
+    if (renameSelectedEntityId === null) return "";
+
+    const selected = renameEntityOptions.find((item) => item.id === renameSelectedEntityId);
+    if (!selected) return `#${renameSelectedEntityId}`;
+    return `${selected.label} [${selected.id}]`;
+  }, [renameEntityOptions, renameSelectedEntityId]);
+
   const resolvedMergeSourceId = useMemo(
     () => parseMergeEntityId(mergeSourceInput, mergeEntityOptions),
     [mergeSourceInput, mergeEntityOptions]
@@ -1493,6 +1566,11 @@ export function AdminConsole({
         mergeSubmitResetTimerRef.current = null;
       }
 
+      if (renameSubmitResetTimerRef.current) {
+        clearTimeout(renameSubmitResetTimerRef.current);
+        renameSubmitResetTimerRef.current = null;
+      }
+
       noticeTimersRef.current.forEach(({ hideTimer, clearTimer }) => {
         clearTimeout(hideTimer);
         clearTimeout(clearTimer);
@@ -1510,6 +1588,30 @@ export function AdminConsole({
       }, {})
     );
   }, [mergedRecords]);
+
+  useEffect(() => {
+    setRenameSearchKeyword("");
+    setRenameSelectedEntityId(null);
+    setRenameNextName("");
+    setRenameSubmitState("idle");
+    setRenameListScrollTop(0);
+
+    if (renameListViewportRef.current) {
+      renameListViewportRef.current.scrollTop = 0;
+    }
+
+    if (renameSubmitResetTimerRef.current) {
+      clearTimeout(renameSubmitResetTimerRef.current);
+      renameSubmitResetTimerRef.current = null;
+    }
+  }, [renameEntityType]);
+
+  useEffect(() => {
+    setRenameListScrollTop(0);
+    if (renameListViewportRef.current) {
+      renameListViewportRef.current.scrollTop = 0;
+    }
+  }, [renameSearchKeyword]);
 
   useEffect(() => {
     try {
@@ -2991,6 +3093,105 @@ export function AdminConsole({
     }
   }
 
+  function onPickRenameEntity(entityId: number) {
+    setRenameSelectedEntityId(entityId);
+    setRenameSubmitState("idle");
+
+    if (renameEntityType === "model") {
+      const matchedModel = modelById.get(entityId);
+      setRenameNextName(matchedModel?.modelName ?? "");
+      return;
+    }
+
+    const matchedBenchmark = benchmarkById.get(entityId);
+    setRenameNextName(matchedBenchmark?.benchmarkName ?? "");
+  }
+
+  async function onRenameEntity(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (renameSubmitState === "submitting") {
+      return;
+    }
+
+    if (renameSelectedEntityId === null) {
+      notifyError("请先在上方搜索结果中选择一个实体");
+      return;
+    }
+
+    const normalizedNextName = renameNextName.trim();
+    if (!normalizedNextName) {
+      notifyError("新名称不能为空");
+      return;
+    }
+
+    if (renameSubmitResetTimerRef.current) {
+      clearTimeout(renameSubmitResetTimerRef.current);
+      renameSubmitResetTimerRef.current = null;
+    }
+
+    setRenameSubmitState("submitting");
+
+    try {
+      const result = await postJson("/api/admin/rename-entity", {
+        entityType: renameEntityType,
+        entityId: renameSelectedEntityId,
+        nextName: normalizedNextName,
+        mergeOnConflict: renameMergeOnConflict
+      });
+
+      const action = typeof result?.action === "string" ? result.action : "renamed";
+      const persistedNextName = typeof result?.nextName === "string" ? result.nextName : normalizedNextName;
+
+      setRenameNextName(persistedNextName);
+      setRenameSubmitState("success");
+
+      renameSubmitResetTimerRef.current = setTimeout(() => {
+        setRenameSubmitState("idle");
+        renameSubmitResetTimerRef.current = null;
+      }, 1200);
+
+      if (action === "unchanged") {
+        notifySuccess("名称未变化，无需更新。", ["实体当前名称与目标名称一致"]);
+        return;
+      }
+
+      if (action === "merged-and-renamed") {
+        const mergedSourceId = Number(result?.mergedSourceId);
+        const mergedSourceName = typeof result?.mergedSourceName === "string"
+          ? result.mergedSourceName
+          : undefined;
+
+        if (Number.isFinite(mergedSourceId) && mergedSourceId > 0 && mergedSourceId !== renameSelectedEntityId) {
+          const fallbackSourceName = renameEntityType === "model"
+            ? (modelById.get(mergedSourceId)?.modelName ?? `#${mergedSourceId}`)
+            : (benchmarkById.get(mergedSourceId)?.benchmarkName ?? `#${mergedSourceId}`);
+
+          upsertMergedRecordAfterMerge(
+            renameEntityType,
+            mergedSourceId,
+            renameSelectedEntityId,
+            renameEntityType === "benchmark" ? persistedNextName : undefined
+          );
+
+          notifySuccess("改名完成，并已自动合并重名实体。", [
+            `合并来源：${mergedSourceName ?? fallbackSourceName} [${mergedSourceId}]`,
+            "建议刷新页面以同步最新实体下拉数据"
+          ]);
+          return;
+        }
+
+        notifySuccess("改名完成，并已处理重名冲突。", ["建议刷新页面以同步最新实体下拉数据"]);
+        return;
+      }
+
+      notifySuccess("名称已更新并写入数据库。", ["建议刷新页面以同步最新实体下拉数据"]);
+    } catch (error) {
+      setRenameSubmitState("idle");
+      notifyError(error instanceof Error ? error.message : "实体改名失败");
+    }
+  }
+
   async function onSaveSetting(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
@@ -3378,6 +3579,15 @@ export function AdminConsole({
             onClick={() => setActiveTab("entry")}
           >
             数据录入
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "rename"}
+            className={tabClass("rename")}
+            onClick={() => setActiveTab("rename")}
+          >
+            名称维护
           </button>
           <button
             type="button"
@@ -4482,6 +4692,151 @@ export function AdminConsole({
               </form>
             </section>
           </div>
+        ) : null}
+
+        {activeTab === "rename" ? (
+          <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
+            <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold">
+              <Search size={18} />
+              实体名称维护
+            </h3>
+            <p className="mb-3 text-sm opacity-80">
+              支持搜索并更改已有 model / benchmark 名称。若命中重名冲突，可自动合并并保留当前选中实体。
+            </p>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
+              <div className="md:col-span-3">
+                <select
+                  className="select select-bordered w-full"
+                  value={renameEntityType}
+                  onChange={(event) => setRenameEntityType(event.target.value as "model" | "benchmark")}
+                >
+                  <option value="model">model</option>
+                  <option value="benchmark">benchmark</option>
+                </select>
+              </div>
+              <div className="md:col-span-9">
+                <input
+                  className="input input-bordered w-full"
+                  value={renameSearchKeyword}
+                  onChange={(event) => setRenameSearchKeyword(event.target.value)}
+                  placeholder="输入名称或 ID 关键字搜索实体"
+                />
+              </div>
+              <div className="md:col-span-12 text-xs opacity-70">
+                匹配 {filteredRenameEntityOptions.length} 条（虚拟列表渲染）
+              </div>
+            </div>
+
+            {filteredRenameEntityOptions.length > 0 ? (
+              <div className="mt-3 rounded-box border border-base-300">
+                <div className="grid grid-cols-[80px_minmax(0,1fr)_180px] border-b border-base-300 bg-base-100/60 px-1 py-2 text-xs font-semibold">
+                  <span className="px-2">ID</span>
+                  <span className="px-2">名称</span>
+                  <span className="px-2">{renameEntityType === "model" ? "Provider" : "Type"}</span>
+                </div>
+                <div
+                  ref={renameListViewportRef}
+                  className="overflow-auto"
+                  style={{ height: `${RENAME_LIST_VIEWPORT_HEIGHT}px` }}
+                  onScroll={(event) => setRenameListScrollTop(event.currentTarget.scrollTop)}
+                >
+                  <div className="relative" style={{ height: `${renameListSpacerHeight}px` }}>
+                    {visibleRenameEntityOptions.map((item, visibleIndex) => {
+                      const index = renameVirtualWindow.start + visibleIndex;
+                      const top = index * RENAME_LIST_ROW_HEIGHT;
+                      const isSelected = renameSelectedEntityId === item.id;
+                      const detailText = renameEntityType === "model"
+                        ? (() => {
+                            const model = modelById.get(item.id);
+                            if (!model) return "-";
+                            return providerById.get(model.providerId)?.name ?? "-";
+                          })()
+                        : (benchmarkById.get(item.id)?.benchmarkType ?? "-");
+
+                      return (
+                        <div
+                          key={`rename-entity-${renameEntityType}-${item.id}`}
+                          role="button"
+                          tabIndex={0}
+                          className={`absolute left-0 right-0 grid cursor-pointer grid-cols-[80px_minmax(0,1fr)_180px] items-center border-b border-base-300/50 px-1 text-left transition-colors ${
+                            isSelected
+                              ? "bg-base-200/55 text-base-content border-l-2 border-base-content/25"
+                              : "bg-transparent hover:bg-base-200/35"
+                          }`}
+                          style={{
+                            top: `${top}px`,
+                            height: `${RENAME_LIST_ROW_HEIGHT}px`
+                          }}
+                          onClick={() => onPickRenameEntity(item.id)}
+                          onKeyDown={(event) => {
+                            if (event.key !== "Enter" && event.key !== " ") return;
+                            event.preventDefault();
+                            onPickRenameEntity(item.id);
+                          }}
+                        >
+                          <span className="truncate px-2 text-xs opacity-80">{item.id}</span>
+                          <span className="truncate px-2 text-sm">{item.label}</span>
+                          <span className="truncate px-2 text-xs opacity-80">{detailText}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-3 text-sm opacity-70">未匹配到实体，请调整关键词。</p>
+            )}
+
+            <form onSubmit={onRenameEntity} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-12">
+              <div className="md:col-span-4">
+                <div className="mb-1 text-xs opacity-70">当前实体</div>
+                <input
+                  className="input input-bordered w-full"
+                  value={renameSelectedEntityLabel}
+                  readOnly
+                  placeholder="请先在上方列表选中实体"
+                />
+              </div>
+              <div className="md:col-span-5">
+                <div className="mb-1 text-xs opacity-70">新名称</div>
+                <input
+                  className="input input-bordered w-full"
+                  value={renameNextName}
+                  onChange={(event) => setRenameNextName(event.target.value)}
+                  placeholder={renameEntityType === "model" ? "输入新的 model 名称" : "输入新的 benchmark 名称"}
+                  required
+                />
+              </div>
+              <div className="md:col-span-3 flex items-end">
+                <label className="label cursor-pointer justify-start gap-2">
+                  <input
+                    type="checkbox"
+                    className="checkbox checkbox-sm"
+                    checked={renameMergeOnConflict}
+                    onChange={(event) => setRenameMergeOnConflict(event.target.checked)}
+                  />
+                  <span className="label-text text-xs">重名时自动合并</span>
+                </label>
+              </div>
+              <div className="md:col-span-12 flex flex-wrap items-center gap-3">
+                <button
+                  type="submit"
+                  className={`btn ${renameSubmitState === "success" ? "btn-success" : "btn-primary"}`}
+                  disabled={renameSubmitState === "submitting" || renameSelectedEntityId === null}
+                >
+                  {renameSubmitState === "submitting"
+                    ? "提交中..."
+                    : renameSubmitState === "success"
+                      ? "已提交"
+                      : "保存名称变更"}
+                </button>
+                <span className="text-xs opacity-70">
+                  自动合并开启时：若命中重名冲突，会把冲突实体并入当前选中实体后再完成改名。
+                </span>
+              </div>
+            </form>
+          </section>
         ) : null}
 
         {activeTab === "merge" ? (

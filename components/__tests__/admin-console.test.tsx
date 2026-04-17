@@ -1279,3 +1279,96 @@ describe("AdminConsole merge interactions", () => {
     expect(within(mergedRow).getByDisplayValue("Bench-2-Renamed [Type-B] [12]")).toBeInTheDocument();
   });
 });
+
+describe("AdminConsole rename tab", () => {
+  test("可在名称维护页签搜索并提交 model 改名", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetchSequence({
+      ok: true,
+      entityType: "model",
+      entityId: 1,
+      previousName: "Model A",
+      nextName: "Model A Prime",
+      action: "renamed"
+    });
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await user.click(screen.getByRole("tab", { name: "名称维护" }));
+
+    const searchInput = screen.getByPlaceholderText("输入名称或 ID 关键字搜索实体");
+    await user.clear(searchInput);
+    await user.type(searchInput, "Model A");
+
+    await user.click(await screen.findByText("Model A"));
+
+    const renameInput = screen.getByPlaceholderText("输入新的 model 名称");
+    await user.clear(renameInput);
+    await user.type(renameInput, "Model A Prime");
+
+    await user.click(screen.getByRole("button", { name: "保存名称变更" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const call = fetchMock.mock.calls[0];
+    expect(call?.[0]).toBe("/api/admin/rename-entity");
+
+    const payload = JSON.parse(((call?.[1] as RequestInit).body ?? "{}") as string) as {
+      entityType?: string;
+      entityId?: number;
+      nextName?: string;
+      mergeOnConflict?: boolean;
+    };
+
+    expect(payload).toMatchObject({
+      entityType: "model",
+      entityId: 1,
+      nextName: "Model A Prime",
+      mergeOnConflict: true
+    });
+
+    expect(await screen.findByText(/名称已更新并写入数据库/i)).toBeInTheDocument();
+  });
+
+  test("benchmark 改名命中冲突时会提示自动合并并写入合并记录", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetchSequence({
+      ok: true,
+      entityType: "benchmark",
+      entityId: 11,
+      previousName: "Bench-1",
+      nextName: "Bench-2",
+      action: "merged-and-renamed",
+      mergedSourceId: 12,
+      mergedSourceName: "Bench-2"
+    });
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await user.click(screen.getByRole("tab", { name: "名称维护" }));
+    await user.selectOptions(screen.getByRole("combobox"), "benchmark");
+
+    const searchInput = screen.getByPlaceholderText("输入名称或 ID 关键字搜索实体");
+    await user.clear(searchInput);
+    await user.type(searchInput, "Bench-1");
+
+    await user.click(await screen.findByText("Bench-1 [Type-A]"));
+
+    const renameInput = screen.getByPlaceholderText("输入新的 benchmark 名称");
+    await user.clear(renameInput);
+    await user.type(renameInput, "Bench-2");
+
+    await user.click(screen.getByRole("button", { name: "保存名称变更" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    expect(await screen.findByText(/自动合并重名实体/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "实体去重" }));
+    expect(await screen.findByText(/Bench-2 \[Type-B\] \[12\]/i)).toBeInTheDocument();
+  });
+});

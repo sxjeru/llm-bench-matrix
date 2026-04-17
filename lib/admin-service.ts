@@ -1,5 +1,5 @@
 import { parse } from "csv-parse/sync";
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
   buildBenchmarkCanonicalKey,
@@ -1864,6 +1864,248 @@ export async function mergeEntity(input: {
   });
 
   invalidateAllCaches();
+}
+
+export type RenameEntityInput = {
+  entityType: "model" | "benchmark";
+  entityId: number;
+  nextName: string;
+  mergeOnConflict?: boolean;
+};
+
+export type RenameEntityResult = {
+  ok: true;
+  entityType: "model" | "benchmark";
+  entityId: number;
+  previousName: string;
+  nextName: string;
+  action: "renamed" | "merged-and-renamed" | "unchanged";
+  mergedSourceId?: number;
+  mergedSourceName?: string;
+};
+
+export async function renameEntity(input: RenameEntityInput): Promise<RenameEntityResult> {
+  const nextName = normalizeNameParenthesisSpacing(input.nextName);
+  if (!nextName) {
+    throw new Error("nextName is required");
+  }
+
+  const mergeOnConflict = input.mergeOnConflict !== false;
+  const dedupeRule = await getModelDedupeRule();
+
+  if (input.entityType === "benchmark") {
+    const [current] = await db
+      .select({
+        id: benchmarks.id,
+        benchmarkName: benchmarks.benchmarkName,
+        benchmarkType: benchmarks.benchmarkType,
+        canonicalKey: benchmarks.canonicalKey,
+        mergedIntoBenchmarkId: benchmarks.mergedIntoBenchmarkId
+      })
+      .from(benchmarks)
+      .where(eq(benchmarks.id, input.entityId))
+      .limit(1);
+
+    if (!current) {
+      throw new Error(`benchmark not found: ${input.entityId}`);
+    }
+
+    if (current.mergedIntoBenchmarkId !== null) {
+      throw new Error(`benchmark ${input.entityId} 已被合并到 ${current.mergedIntoBenchmarkId}，请改名目标实体`);
+    }
+
+    const nextCanonicalKey = buildBenchmarkCanonicalKey(nextName, current.benchmarkType, dedupeRule);
+
+    const [conflict] = await db
+      .select({
+        id: benchmarks.id,
+        benchmarkName: benchmarks.benchmarkName,
+        mergedIntoBenchmarkId: benchmarks.mergedIntoBenchmarkId
+      })
+      .from(benchmarks)
+      .where(
+        and(
+          ne(benchmarks.id, input.entityId),
+          or(
+            eq(benchmarks.canonicalKey, nextCanonicalKey),
+            and(eq(benchmarks.benchmarkName, nextName), eq(benchmarks.benchmarkType, current.benchmarkType))
+          )
+        )
+      )
+      .limit(1);
+
+    if (!conflict) {
+      if (current.benchmarkName === nextName && current.canonicalKey === nextCanonicalKey) {
+        return {
+          ok: true,
+          entityType: "benchmark",
+          entityId: current.id,
+          previousName: current.benchmarkName,
+          nextName,
+          action: "unchanged"
+        };
+      }
+
+      await db
+        .update(benchmarks)
+        .set({
+          benchmarkName: nextName,
+          canonicalKey: nextCanonicalKey
+        })
+        .where(eq(benchmarks.id, current.id));
+
+      invalidateAllCaches();
+
+      return {
+        ok: true,
+        entityType: "benchmark",
+        entityId: current.id,
+        previousName: current.benchmarkName,
+        nextName,
+        action: "renamed"
+      };
+    }
+
+    if (!mergeOnConflict) {
+      throw new Error(
+        `benchmark rename conflicts with existing entity (benchmarkId=${conflict.id})，可开启 mergeOnConflict 自动合并`
+      );
+    }
+
+    await mergeEntity({
+      entityType: "benchmark",
+      sourceId: conflict.id,
+      targetId: current.id,
+      targetBenchmarkName: nextName
+    });
+
+    return {
+      ok: true,
+      entityType: "benchmark",
+      entityId: current.id,
+      previousName: current.benchmarkName,
+      nextName,
+      action: "merged-and-renamed",
+      mergedSourceId: conflict.id,
+      mergedSourceName: conflict.benchmarkName
+    };
+  }
+
+  const result: RenameEntityResult = await db.transaction(async (tx: any): Promise<RenameEntityResult> => {
+    const [current] = await tx
+      .select({
+        id: models.id,
+        providerId: models.providerId,
+        modelName: models.modelName,
+        canonicalKey: models.canonicalKey,
+        mergedIntoModelId: models.mergedIntoModelId
+      })
+      .from(models)
+      .where(eq(models.id, input.entityId))
+      .limit(1);
+
+    if (!current) {
+      throw new Error(`model not found: ${input.entityId}`);
+    }
+
+    if (current.mergedIntoModelId !== null) {
+      throw new Error(`model ${input.entityId} 已被合并到 ${current.mergedIntoModelId}，请改名目标实体`);
+    }
+
+    const nextCanonicalKey = buildModelCanonicalKey(nextName, dedupeRule);
+
+    const [conflict] = await tx
+      .select({
+        id: models.id,
+        modelName: models.modelName,
+        canonicalKey: models.canonicalKey,
+        mergedIntoModelId: models.mergedIntoModelId
+      })
+      .from(models)
+      .where(
+        and(
+          ne(models.id, input.entityId),
+          or(
+            eq(models.canonicalKey, nextCanonicalKey),
+            and(eq(models.providerId, current.providerId), eq(models.modelName, nextName))
+          )
+        )
+      )
+      .limit(1);
+
+    let action: RenameEntityResult["action"] = "renamed";
+    let mergedSourceId: number | undefined;
+    let mergedSourceName: string | undefined;
+
+    if (!conflict) {
+      if (current.modelName === nextName && current.canonicalKey === nextCanonicalKey) {
+        return {
+          ok: true,
+          entityType: "model" as const,
+          entityId: current.id,
+          previousName: current.modelName,
+          nextName,
+          action: "unchanged" as const
+        };
+      }
+    } else {
+      if (!mergeOnConflict) {
+        throw new Error(
+          `model rename conflicts with existing entity (modelId=${conflict.id})，可开启 mergeOnConflict 自动合并`
+        );
+      }
+
+      const tempSuffix = `#merged-${conflict.id}-${Date.now()}`;
+
+      if (conflict.mergedIntoModelId === null) {
+        await tx
+          .update(benchmarkValues)
+          .set({ modelId: current.id })
+          .where(eq(benchmarkValues.modelId, conflict.id));
+
+        await tx
+          .update(models)
+          .set({ mergedIntoModelId: current.id })
+          .where(eq(models.mergedIntoModelId, conflict.id));
+      }
+
+      await tx
+        .update(models)
+        .set({
+          mergedIntoModelId: conflict.mergedIntoModelId ?? current.id,
+          modelName: `${conflict.modelName}${tempSuffix}`,
+          canonicalKey: `${conflict.canonicalKey}${tempSuffix}`
+        })
+        .where(eq(models.id, conflict.id));
+
+      action = "merged-and-renamed";
+      mergedSourceId = conflict.id;
+      mergedSourceName = conflict.modelName;
+    }
+
+    await tx
+      .update(models)
+      .set({
+        modelName: nextName,
+        canonicalKey: nextCanonicalKey
+      })
+      .where(eq(models.id, current.id));
+
+    return {
+      ok: true,
+      entityType: "model" as const,
+      entityId: current.id,
+      previousName: current.modelName,
+      nextName,
+      action,
+      mergedSourceId,
+      mergedSourceName
+    };
+  });
+
+  invalidateAllCaches();
+
+  return result;
 }
 
 export async function updateMergedEntityRecord(input: {
