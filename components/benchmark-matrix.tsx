@@ -2746,6 +2746,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
           maxNum2: numericValues2.length > 0 ? Math.max(...numericValues2) : null
         };
       })
+      .filter((row) => row.rowDataCount > 0)
       .sort((a, b) => a.firstSeenIndex - b.firstSeenIndex);
   }, [baseSourceRows, filteredRows, showDuplicateRows]);
 
@@ -3883,6 +3884,58 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
               const rowRightEdgeStyle = isSelectedRow
                 ? { borderRight: `1px solid ${selectedRowColor}` }
                 : undefined;
+              const primaryComparableValues = modelColumnMeta
+                .map((model) => {
+                  const valueNum = matrixRow.cells.get(model.modelName)?.valueNum;
+                  if (valueNum === null || valueNum === undefined || !Number.isFinite(valueNum)) {
+                    return null;
+                  }
+
+                  return getBenchmarkComparableScore(
+                    matrixRow.benchmark,
+                    valueNum,
+                    matrixRow.category,
+                    matrixRow.higherIsBetter
+                  );
+                })
+                .filter((value): value is number => value !== null && Number.isFinite(value));
+              const secondaryComparableValues = modelColumnMeta
+                .map((model) => {
+                  const valueNum2 = matrixRow.cells.get(model.modelName)?.valueNum2;
+                  if (valueNum2 === null || valueNum2 === undefined || !Number.isFinite(valueNum2)) {
+                    return null;
+                  }
+
+                  return getBenchmarkComparableScore(
+                    matrixRow.benchmark,
+                    valueNum2,
+                    matrixRow.category,
+                    matrixRow.higherIsBetter
+                  );
+                })
+                .filter((value): value is number => value !== null && Number.isFinite(value));
+              const primaryComparableDistinctDesc = Array.from(new Set(primaryComparableValues)).sort((a, b) => b - a);
+              const secondaryComparableDistinctDesc = Array.from(new Set(secondaryComparableValues)).sort((a, b) => b - a);
+              const primaryComparableTop = primaryComparableDistinctDesc[0] ?? null;
+              const primaryComparableSecond = primaryComparableDistinctDesc[1] ?? null;
+              const secondaryComparableTop = secondaryComparableDistinctDesc[0] ?? null;
+              const secondaryComparableSecond = secondaryComparableDistinctDesc[1] ?? null;
+              const topRankSegmentStyle = {
+                fontWeight: 800
+              };
+              const secondRankSegmentStyle = isExportCaptureMode
+                ? {
+                    display: "inline-block",
+                    borderBottom: "1.5px solid rgba(15, 23, 42, 0.45)",
+                    paddingBottom: "0.5px",
+                    lineHeight: 1
+                  }
+                : {
+                    textDecoration: "underline",
+                    textDecorationColor: "rgba(15, 23, 42, 0.35)",
+                    textDecorationThickness: "1px",
+                    textUnderlineOffset: "2px"
+                  };
 
               return (
                 <tr
@@ -3995,14 +4048,22 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     const noteText = cell?.noteText ?? "";
                     const shouldShowQuestionMark = cell?.shouldShowQuestionMark ?? false;
                     const uniqueEntries = cell?.uniqueEntries ?? [];
-                    const isMaxCellFirst =
+                    const isTopCellFirst =
                       comparableCellNum !== null &&
-                      matrixRow.maxComparable !== null &&
-                      comparableCellNum === matrixRow.maxComparable;
-                    const isMaxCellSecond =
+                      primaryComparableTop !== null &&
+                      comparableCellNum === primaryComparableTop;
+                    const isSecondCellFirst =
+                      comparableCellNum !== null &&
+                      primaryComparableSecond !== null &&
+                      comparableCellNum === primaryComparableSecond;
+                    const isTopCellSecond =
                       comparableCellNum2 !== null &&
-                      matrixRow.maxComparable2 !== null &&
-                      comparableCellNum2 === matrixRow.maxComparable2;
+                      secondaryComparableTop !== null &&
+                      comparableCellNum2 === secondaryComparableTop;
+                    const isSecondCellSecond =
+                      comparableCellNum2 !== null &&
+                      secondaryComparableSecond !== null &&
+                      comparableCellNum2 === secondaryComparableSecond;
                     const pairFirstDisplay = cell ? formatValueNumForDisplay(cell.valueNum) : null;
                     const pairSecondDisplay = cell ? formatValueNumForDisplay(cell.valueNum2) : null;
                     const isPairNumericDisplay =
@@ -4013,7 +4074,9 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     const cellPaddingRight = shouldShowQuestionMark
                       ? (isPairNumericDisplay ? "18px" : "22px")
                       : "6px";
-                    const isSingleMaxCell = !isPairNumericDisplay && isMaxCellFirst;
+                    const singleCellScoreStyle = !isPairNumericDisplay
+                      ? (isTopCellFirst ? topRankSegmentStyle : isSecondCellFirst ? secondRankSegmentStyle : undefined)
+                      : undefined;
                     const heatStyle = getHeatCellStyle(
                       comparableCellNum,
                       matrixRow.minComparable,
@@ -4039,21 +4102,6 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                       exportMode: isExportCaptureMode
                     });
                     const mergedCellBoxShadow = [rowCellBoxShadow, ...sourceFrameShadows].filter(Boolean).join(", ");
-                    const maxSegmentStyle = isExportCaptureMode
-                      ? {
-                          fontWeight: 800,
-                          display: "inline-block",
-                          borderBottom: "1.5px solid rgba(15, 23, 42, 0.45)",
-                          paddingBottom: "0.5px",
-                          lineHeight: 1
-                        }
-                      : {
-                          fontWeight: 800,
-                          textDecoration: "underline",
-                          textDecorationColor: "rgba(15, 23, 42, 0.35)",
-                          textDecorationThickness: "1px",
-                          textUnderlineOffset: "2px"
-                        };
 
                     return (
                       <td
@@ -4084,12 +4132,12 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                       >
                         {isPairNumericDisplay && pairFirstDisplay && pairSecondDisplay ? (
                           <span className="inline-flex items-center gap-0 leading-none">
-                            <span style={isMaxCellFirst ? maxSegmentStyle : undefined}>{pairFirstDisplay}</span>
+                            <span style={isTopCellFirst ? topRankSegmentStyle : isSecondCellFirst ? secondRankSegmentStyle : undefined}>{pairFirstDisplay}</span>
                             <span className="mx-[1px] opacity-85">/</span>
-                            <span style={isMaxCellSecond ? maxSegmentStyle : undefined}>{pairSecondDisplay}</span>
+                            <span style={isTopCellSecond ? topRankSegmentStyle : isSecondCellSecond ? secondRankSegmentStyle : undefined}>{pairSecondDisplay}</span>
                           </span>
                         ) : (
-                          <span style={isSingleMaxCell ? maxSegmentStyle : undefined}>{rawText}</span>
+                          <span style={singleCellScoreStyle}>{rawText}</span>
                         )}
                         {shouldShowQuestionMark ? (
                           <span

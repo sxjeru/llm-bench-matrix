@@ -271,6 +271,45 @@ const pairMaxSplitRows = [
   }
 ] as const;
 
+const singleRankRows = [
+  {
+    providerName: "Single",
+    modelName: "Model S1",
+    benchmarkName: "Bench-Single",
+    benchmarkType: "General",
+    benchmarkCanonicalKey: "bench-single:general",
+    benchTime: "2026-04-06T00:00:00.000Z",
+    valueRaw: "93",
+    valueNum: 93,
+    valueNote: null,
+    source: "text:single"
+  },
+  {
+    providerName: "Single",
+    modelName: "Model S2",
+    benchmarkName: "Bench-Single",
+    benchmarkType: "General",
+    benchmarkCanonicalKey: "bench-single:general",
+    benchTime: "2026-04-06T00:00:00.000Z",
+    valueRaw: "90",
+    valueNum: 90,
+    valueNote: null,
+    source: "text:single"
+  },
+  {
+    providerName: "Single",
+    modelName: "Model S3",
+    benchmarkName: "Bench-Single",
+    benchmarkType: "General",
+    benchmarkCanonicalKey: "bench-single:general",
+    benchTime: "2026-04-06T00:00:00.000Z",
+    valueRaw: "88",
+    valueNum: 88,
+    valueNote: null,
+    source: "text:single"
+  }
+] as const;
+
 describe("BenchmarkMatrix 跨页签模型覆盖", () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -597,7 +636,7 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     ]);
   });
 
-  test("双值场景下前后值最大值分开统计并分别高亮", () => {
+  test("双值场景下第一名加粗、第二名下划线（前后值独立排序）", () => {
     render(
       <BenchmarkMatrix
         sourceOptions={["text:pair"]}
@@ -606,10 +645,28 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
       />
     );
 
-    expect(screen.getByText("80")).toHaveStyle("text-decoration: underline");
-    expect(screen.getByText("95")).toHaveStyle("text-decoration: underline");
+    expect(screen.getByText("80")).toHaveStyle("font-weight: 800");
+    expect(screen.getByText("95")).toHaveStyle("font-weight: 800");
+    expect(screen.getByText("80")).not.toHaveStyle("text-decoration: underline");
+    expect(screen.getByText("95")).not.toHaveStyle("text-decoration: underline");
 
-    expect(screen.getByText("70")).not.toHaveStyle("text-decoration: underline");
-    expect(screen.getByText("90")).not.toHaveStyle("text-decoration: underline");
+    expect(screen.getByText("70")).toHaveStyle("text-decoration: underline");
+    expect(screen.getByText("90")).toHaveStyle("text-decoration: underline");
+  });
+
+  test("单值场景下第一名加粗、第二名下划线", () => {
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:single"]}
+        rows={[...singleRankRows]}
+        allRows={[...singleRankRows]}
+      />
+    );
+
+    expect(screen.getByText("93")).toHaveStyle("font-weight: 800");
+    expect(screen.getByText("93")).not.toHaveStyle("text-decoration: underline");
+
+    expect(screen.getByText("90")).toHaveStyle("text-decoration: underline");
+    expect(screen.getByText("88")).not.toHaveStyle("text-decoration: underline");
   });
 });
