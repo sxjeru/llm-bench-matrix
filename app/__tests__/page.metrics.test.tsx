@@ -16,6 +16,7 @@ vi.mock("@/lib/db/queries", () => ({
       modelName: "OnlyOneModelInRows",
       benchmarkName: "OnlyOneBenchmarkInRows",
       benchmarkType: "General",
+      higherIsBetter: true,
       benchmarkCanonicalKey: "only-one-benchmark-in-rows:general",
       modalities: ["Text"],
       benchTime: "2026-04-06T00:00:00.000Z",

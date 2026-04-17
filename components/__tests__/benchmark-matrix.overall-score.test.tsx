@@ -149,4 +149,39 @@ describe("BenchmarkMatrix 总评行", () => {
     expect(screen.getByText(/修正后名次：/)).toBeInTheDocument();
     expect(screen.getByText(/主展示名次按原始总评分计算/)).toBeInTheDocument();
   });
+
+  test("当行数据标记 higherIsBetter=false 时，显示低值更优提示", () => {
+    render(
+      <BenchmarkMatrix
+        rows={[
+          {
+            providerName: "OpenAI",
+            modelName: "Model A",
+            benchmarkName: "Latency Score",
+            benchmarkType: "General",
+            higherIsBetter: false,
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "10",
+            valueNum: 10,
+            valueNote: null,
+            source: "text:overall"
+          },
+          {
+            providerName: "OpenAI",
+            modelName: "Model B",
+            benchmarkName: "Latency Score",
+            benchmarkType: "General",
+            higherIsBetter: false,
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "20",
+            valueNum: 20,
+            valueNote: null,
+            source: "text:overall"
+          }
+        ]}
+      />
+    );
+
+    expect(screen.getByTitle("该项目为低值更优")).toBeInTheDocument();
+  });
 });

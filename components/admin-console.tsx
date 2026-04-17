@@ -213,7 +213,7 @@ const BENCHMARK_NAME_REPLACERS = [/\bno\s*tools?\b/gi, /\bwith\s*search\b/gi, /\
 const HARDCODED_BENCHMARK_ALIAS_RULES: Array<{ pattern: RegExp; targetName: string }> = [
   { pattern: /^\s*hle\s+with\s+tools?\s*$/i, targetName: "HLE w/ tool" }
 ];
-const LOWER_IS_BETTER_PREVIEW_RULES = [/omnidocbench\s*1\.5/i];
+const LOWER_IS_BETTER_PREVIEW_RULES = [/omnidocbench\s*1\.5/i, /\b(?:r?mse)\b/i];
 const LOWER_IS_BETTER_PREVIEW_ASR_TYPE_REGEX = /\basr\b/i;
 const OMNIDOCBENCH_15_MATCHER = /omnidocbench\s*1\.5/i;
 const MULTIMODAL_HINT_PATTERN = /(\bmultimodal(?:ity)?\b|\bmulti[\s-_]?modal(?:ity)?\b|多模态)/i;
@@ -2700,6 +2700,7 @@ export function AdminConsole({
     if (reason === "strict-normalized-equal") return "严格归一化一致";
     if (reason === "ignore-high-reasoning-tokens-equal") return "去噪词后名称一致";
     if (reason === "normalized-name-equal") return "名称归一化一致";
+    if (reason === "variant-noise-normalized-name-equal") return "去变体后缀后名称一致";
     if (reason === "same-type") return "类型一致";
     if (reason === "general-type-gap") return "General 可覆盖";
     if (reason === "type-mismatch") return "类型不一致";

@@ -67,7 +67,7 @@ type TextParseWarning = {
 type DbExecutor = Pick<typeof db, "select" | "insert" | "update" | "delete" | "execute">;
 
 const EMPTY_VALUE_MARKERS = new Set(["", "-", "--", "—", "na", "n/a", "null", "none"]);
-const LOWER_IS_BETTER_BENCHMARK_RULES = [/omnidocbench\s*1\.5/i];
+const LOWER_IS_BETTER_BENCHMARK_RULES = [/omnidocbench\s*1\.5/i, /\b(?:r?mse)\b/i];
 const LOWER_IS_BETTER_ASR_TYPE_REGEX = /\basr\b/i;
 const OMNIDOCBENCH_15_MATCHER = /omnidocbench\s*1\.5/i;
 const MULTIMODAL_HINT_PATTERN = /(\bmultimodal(?:ity)?\b|\bmulti[\s-_]?modal(?:ity)?\b|多模态)/i;
@@ -167,6 +167,24 @@ const MODEL_DUPLICATE_NOISE_TOKENS = new Set([
   "exp",
   "experimental",
   "default"
+]);
+const BENCHMARK_DUPLICATE_VARIANT_NOISE_TOKENS = new Set([
+  "max",
+  "effort",
+  "high",
+  "low",
+  "reasoning",
+  "reason",
+  "thinking",
+  "think",
+  "preview",
+  "exp",
+  "experimental",
+  "default",
+  "self",
+  "reported",
+  "selfreported",
+  "best"
 ]);
 const BENCHMARK_VARIANT_CONFLICT_HINTS: Array<[RegExp, RegExp]> = [
   [/with\s*tools?/i, /no\s*tools?/i],
@@ -3050,6 +3068,45 @@ function buildBenchmarkDuplicateKey(input: string): string {
   return normalizeLooseText(stripBenchmarkCitationRefs(input));
 }
 
+function buildBenchmarkDuplicateVariantNoiseKey(input: string): {
+  normalizedKey: string;
+  removedTokenCount: number;
+} {
+  const normalized = buildBenchmarkDuplicateKey(input);
+  if (!normalized) {
+    return {
+      normalizedKey: "",
+      removedTokenCount: 0
+    };
+  }
+
+  const tokens = normalized
+    .split(" ")
+    .filter(Boolean);
+
+  const filteredTokens = tokens.filter((token) => !BENCHMARK_DUPLICATE_VARIANT_NOISE_TOKENS.has(token));
+
+  return {
+    normalizedKey: filteredTokens.join(" "),
+    removedTokenCount: Math.max(0, tokens.length - filteredTokens.length)
+  };
+}
+
+function hasBenchmarkVariantNoiseNormalizedNameMatch(leftName: string, rightName: string): boolean {
+  const left = buildBenchmarkDuplicateVariantNoiseKey(leftName);
+  const right = buildBenchmarkDuplicateVariantNoiseKey(rightName);
+
+  if (left.removedTokenCount === 0 && right.removedTokenCount === 0) {
+    return false;
+  }
+
+  if (!left.normalizedKey || !right.normalizedKey) {
+    return false;
+  }
+
+  return compactAlphaNum(left.normalizedKey) === compactAlphaNum(right.normalizedKey);
+}
+
 function buildBigramCounts(input: string): Map<string, number> {
   const compact = compactAlphaNum(input);
   const map = new Map<string, number>();
@@ -3389,12 +3446,16 @@ export async function detectDuplicateEntityCandidates(): Promise<DuplicateEntity
       const normalizedLeftName = buildBenchmarkDuplicateKey(left.benchmarkName);
       const normalizedRightName = buildBenchmarkDuplicateKey(right.benchmarkName);
       const sameNormalizedName = normalizedLeftName.length > 0 && normalizedLeftName === normalizedRightName;
+      const sameVariantNoiseNormalizedName = hasBenchmarkVariantNoiseNormalizedNameMatch(
+        left.benchmarkName,
+        right.benchmarkName
+      );
 
       const charRepeatScore = getCharacterRepeatScore(left.benchmarkName, right.benchmarkName);
       const diceScore = getDiceSimilarity(left.benchmarkName, right.benchmarkName);
       const similarity = Math.max(charRepeatScore, diceScore);
 
-      if (!sameNormalizedName && similarity < 0.9) {
+      if (!sameNormalizedName && !sameVariantNoiseNormalizedName && similarity < 0.9) {
         continue;
       }
 
@@ -3411,6 +3472,13 @@ export async function detectDuplicateEntityCandidates(): Promise<DuplicateEntity
       if (sameNormalizedName) {
         reasons.push("normalized-name-equal");
         confidence = sameType || hasGeneralTypeGap ? "high" : "medium";
+      }
+
+      if (sameVariantNoiseNormalizedName) {
+        reasons.push("variant-noise-normalized-name-equal");
+        if (confidence === "low") {
+          confidence = sameType || hasGeneralTypeGap ? "medium" : "low";
+        }
       }
 
       if (similarity >= 0.95) {
@@ -3496,6 +3564,10 @@ export function __getDuplicateNameSimilarityForTest(left: string, right: string)
 
 export function __hasBenchmarkNumericTokenMismatchForTest(left: string, right: string): boolean {
   return hasBenchmarkNumericTokenMismatch(left, right);
+}
+
+export function __hasBenchmarkVariantNoiseNormalizedNameMatchForTest(left: string, right: string): boolean {
+  return hasBenchmarkVariantNoiseNormalizedNameMatch(left, right);
 }
 
 export async function clearNonSettingsData() {

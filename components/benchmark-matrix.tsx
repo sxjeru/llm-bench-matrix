@@ -25,6 +25,7 @@ type MatrixInputRow = {
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
+  higherIsBetter?: boolean;
   benchmarkCanonicalKey?: string | null;
   modalities?: string[];
   benchTime: string;
@@ -69,6 +70,7 @@ type MatrixRow = {
   rowKey: string;
   category: string;
   benchmark: string;
+  higherIsBetter: boolean;
   modalities: string[];
   cells: Map<string, MatrixCell>;
   firstSeenIndex: number;
@@ -100,7 +102,8 @@ type RowSortColumn = "category" | "benchmark";
 type RowSortMode = "source" | "alpha" | "data";
 
 const LOWER_IS_BETTER_RULES: RegExp[] = [
-  /omnidocbench\s*1\.5/i
+  /omnidocbench\s*1\.5/i,
+  /\b(?:r?mse)\b/i
 ];
 const LOWER_IS_BETTER_ASR_TYPE_REGEX = /\basr\b/i;
 
@@ -116,7 +119,11 @@ function isFleursZhTranslationBenchmark(benchmarkName: string): boolean {
   return hasBiDirectionalHint;
 }
 
-function isLowerBetterBenchmark(benchmarkName: string, benchmarkType?: string): boolean {
+function isLowerBetterBenchmark(benchmarkName: string, benchmarkType?: string, higherIsBetter?: boolean): boolean {
+  if (typeof higherIsBetter === "boolean") {
+    return !higherIsBetter;
+  }
+
   if (benchmarkType && LOWER_IS_BETTER_ASR_TYPE_REGEX.test(benchmarkType)) {
     return true;
   }
@@ -128,8 +135,13 @@ function isLowerBetterBenchmark(benchmarkName: string, benchmarkType?: string): 
   return LOWER_IS_BETTER_RULES.some((rule) => rule.test(benchmarkName));
 }
 
-function getBenchmarkComparableScore(benchmarkName: string, valueNum: number, benchmarkType?: string): number {
-  if (isLowerBetterBenchmark(benchmarkName, benchmarkType)) {
+function getBenchmarkComparableScore(
+  benchmarkName: string,
+  valueNum: number,
+  benchmarkType?: string,
+  higherIsBetter?: boolean
+): number {
+  if (isLowerBetterBenchmark(benchmarkName, benchmarkType, higherIsBetter)) {
     return 100 - valueNum;
   }
 
@@ -2232,7 +2244,12 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         return;
       }
 
-      const comparableScore = getBenchmarkComparableScore(row.benchmarkName, row.valueNum, row.benchmarkType);
+      const comparableScore = getBenchmarkComparableScore(
+        row.benchmarkName,
+        row.valueNum,
+        row.benchmarkType,
+        row.higherIsBetter
+      );
       const previous = benchmarkScoreMap.get(row.modelName);
       if (previous === undefined || comparableScore > previous) {
         benchmarkScoreMap.set(row.modelName, comparableScore);
@@ -2552,12 +2569,16 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       const benchmark = row.benchmarkName;
       const matrixKey = getMatrixGroupingKey(row, showDuplicateRows);
       const normalizedModalities = normalizeModalityList(row.modalities, row.benchmarkType);
+      const initialHigherIsBetter = typeof row.higherIsBetter === "boolean"
+        ? row.higherIsBetter
+        : !isLowerBetterBenchmark(row.benchmarkName, row.benchmarkType);
 
       if (!matrixMap.has(matrixKey)) {
         matrixMap.set(matrixKey, {
           rowKey: matrixKey,
           category,
           benchmark,
+          higherIsBetter: initialHigherIsBetter,
           categoryValues: [category],
           benchmarkValues: [benchmark],
           modalities: normalizedModalities,
@@ -2578,6 +2599,10 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       }
 
       const matrixRow = matrixMap.get(matrixKey)!;
+
+      if (row.higherIsBetter === false) {
+        matrixRow.higherIsBetter = false;
+      }
 
       if (typeof row.recordId === "number") {
         if (matrixRow.sourceOrderKey === null || row.recordId < matrixRow.sourceOrderKey) {
@@ -2696,11 +2721,11 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
           .filter((value): value is number => value !== null && Number.isFinite(value));
 
         const comparableValues = numericValues.map((valueNum) =>
-          getBenchmarkComparableScore(matrixRow.benchmark, valueNum, matrixRow.category)
+          getBenchmarkComparableScore(matrixRow.benchmark, valueNum, matrixRow.category, matrixRow.higherIsBetter)
         );
 
         const comparableValues2 = numericValues2.map((valueNum) =>
-          getBenchmarkComparableScore(matrixRow.benchmark, valueNum, matrixRow.category)
+          getBenchmarkComparableScore(matrixRow.benchmark, valueNum, matrixRow.category, matrixRow.higherIsBetter)
         );
 
         const rowDataCount = matrixRow.cells.size;
@@ -2883,7 +2908,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         rowEntries.push({
           modelName,
           original: valueNum,
-          comparable: getBenchmarkComparableScore(row.benchmark, valueNum, row.category)
+          comparable: getBenchmarkComparableScore(row.benchmark, valueNum, row.category, row.higherIsBetter)
         });
       });
 
@@ -3830,7 +3855,11 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
             {sortedMatrixRows.map((matrixRow, rowIndex) => {
               const rowKey = matrixRow.rowKey;
               const isLastMatrixRow = rowIndex === sortedMatrixRows.length - 1;
-              const isRowLowerBetter = isLowerBetterBenchmark(matrixRow.benchmark, matrixRow.category);
+              const isRowLowerBetter = isLowerBetterBenchmark(
+                matrixRow.benchmark,
+                matrixRow.category,
+                matrixRow.higherIsBetter
+              );
               const isSelectedRow = selectedRowKey === rowKey;
               const selectedRowColor = "rgba(94, 234, 212, 0)";
               const rowFrameStyle = isSelectedRow
@@ -3957,10 +3986,10 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     const cellNum = cell?.valueNum ?? null;
                     const cellNum2 = cell?.valueNum2 ?? null;
                     const comparableCellNum = cellNum !== null
-                      ? getBenchmarkComparableScore(matrixRow.benchmark, cellNum, matrixRow.category)
+                      ? getBenchmarkComparableScore(matrixRow.benchmark, cellNum, matrixRow.category, matrixRow.higherIsBetter)
                       : null;
                     const comparableCellNum2 = cellNum2 !== null
-                      ? getBenchmarkComparableScore(matrixRow.benchmark, cellNum2, matrixRow.category)
+                      ? getBenchmarkComparableScore(matrixRow.benchmark, cellNum2, matrixRow.category, matrixRow.higherIsBetter)
                       : null;
                     const rawText = cell?.displayValue ?? "--";
                     const noteText = cell?.noteText ?? "";

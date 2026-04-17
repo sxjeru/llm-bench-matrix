@@ -36,6 +36,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     modelName: row.modelName,
     benchmarkName: row.benchmarkName,
     benchmarkType: row.benchmarkType,
+    higherIsBetter: row.higherIsBetter,
     benchmarkCanonicalKey: row.benchmarkCanonicalKey,
     modalities: row.modalities,
     benchTime: row.benchTime,

@@ -26,6 +26,7 @@ let parseBenchmarkTextRowsForTest: (
 let normalizeDuplicateCompareTextForTest: (input: string) => string;
 let getDuplicateNameSimilarityForTest: (left: string, right: string) => number;
 let hasBenchmarkNumericTokenMismatchForTest: (left: string, right: string) => boolean;
+let hasBenchmarkVariantNoiseNormalizedNameMatchForTest: (left: string, right: string) => boolean;
 
 beforeAll(async () => {
   process.env.DATABASE_URL ??= "postgres://test:test@127.0.0.1:5432/test";
@@ -37,6 +38,8 @@ beforeAll(async () => {
     module.__getDuplicateNameSimilarityForTest as typeof getDuplicateNameSimilarityForTest;
   hasBenchmarkNumericTokenMismatchForTest =
     module.__hasBenchmarkNumericTokenMismatchForTest as typeof hasBenchmarkNumericTokenMismatchForTest;
+  hasBenchmarkVariantNoiseNormalizedNameMatchForTest =
+    module.__hasBenchmarkVariantNoiseNormalizedNameMatchForTest as typeof hasBenchmarkVariantNoiseNormalizedNameMatchForTest;
 });
 
 describe("paper-table 文本解析", () => {
@@ -189,6 +192,22 @@ describe("paper-table 文本解析", () => {
     ).toBe(false);
   });
 
+  test("判重可识别 Max effort 等变体后缀并兼容空格差异", () => {
+    expect(
+      hasBenchmarkVariantNoiseNormalizedNameMatchForTest(
+        "Vending Bench 2",
+        "VendingBench 2 (Max effort)"
+      )
+    ).toBe(true);
+
+    expect(
+      hasBenchmarkVariantNoiseNormalizedNameMatchForTest(
+        "SongFormBench-HarmonixSet (hr3f)",
+        "SongFormBench-HarmonixSet (hr.5f)"
+      )
+    ).toBe(false);
+  });
+
   test("VLM 关键词可识别为 Vision 模态", () => {
     const inputText = [
       "Benchmark M1 M2",
@@ -234,6 +253,19 @@ describe("paper-table 文本解析", () => {
 
     expect(row).toBeDefined();
     expect(row?.benchmarkType).toBe("ASR");
+    expect(row?.higherIsBetter).toBe(false);
+  });
+
+  test("benchmark 名包含 MSE 时默认 low-is-better", () => {
+    const inputText = [
+      "Benchmark\tM1",
+      "Depth MSE\t0.12"
+    ].join("\n");
+
+    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const row = parsed.rows.find((item) => item.benchmarkName === "Depth MSE");
+
+    expect(row).toBeDefined();
     expect(row?.higherIsBetter).toBe(false);
   });
 

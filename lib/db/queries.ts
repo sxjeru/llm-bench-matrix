@@ -18,6 +18,7 @@ export type DashboardRow = {
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
+  higherIsBetter: boolean;
   benchmarkCanonicalKey: string;
   modalities: string[];
   benchTime: string;
@@ -140,6 +141,7 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
           modelName: models.modelName,
           benchmarkName: benchmarks.benchmarkName,
           benchmarkType: benchmarks.benchmarkType,
+          higherIsBetter: benchmarks.higherIsBetter,
           benchmarkTypeOverride: benchmarkSourceMeta.benchmarkType,
           benchmarkCanonicalKey: benchmarks.canonicalKey,
           modalities: benchmarks.modalities,
@@ -180,6 +182,7 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
         benchmarkType: shouldUseSourceMeta
           ? (row.benchmarkTypeOverride ?? row.benchmarkType)
           : row.benchmarkType,
+        higherIsBetter: row.higherIsBetter,
         benchmarkCanonicalKey: row.benchmarkCanonicalKey,
         modalities: shouldUseSourceMeta
           ? (row.modalitiesOverride ?? row.modalities ?? [])
