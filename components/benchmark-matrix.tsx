@@ -1275,6 +1275,8 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const showCategoryLoadedRef = useRef(false);
   const showDuplicateLoadedRef = useRef(false);
   const modelSelectionBySourceRef = useRef<Record<string, string[]>>({});
+  const isSyncingSelectionFromSourceRef = useRef(false);
+  const skipSelectionPersistenceOnceRef = useRef(false);
   const columnWidthBySourceRef = useRef<Record<string, Record<string, number>>>({});
   const columnWidthPersistTimeoutRef = useRef<number | null>(null);
   const heatmapPaletteLoadedRef = useRef(false);
@@ -1354,6 +1356,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
   const [activeSource, setActiveSource] = useState(SOURCE_ALL);
   const activeSourceRef = useRef(SOURCE_ALL);
+  const pendingSourceSyncRef = useRef<string | null>(null);
   const overflowSourceKeySet = useMemo(() => new Set(overflowSourceKeys), [overflowSourceKeys]);
   const visibleSourceOptions = useMemo(
     () => sourceOptions.filter((source) => !overflowSourceKeySet.has(source.key)),
@@ -1371,7 +1374,20 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       : false;
     const nextSource = sourceFromUrl && isKnown ? sourceFromUrl : SOURCE_ALL;
 
-    setActiveSource((prev) => (prev === nextSource ? prev : nextSource));
+    const pendingSource = pendingSourceSyncRef.current;
+    if (pendingSource) {
+      if (nextSource === pendingSource) {
+        pendingSourceSyncRef.current = null;
+      } else {
+        return;
+      }
+    }
+
+    setActiveSource((prev) => {
+      if (prev === nextSource) return prev;
+      skipSelectionPersistenceOnceRef.current = true;
+      return nextSource;
+    });
 
     if (activeSourceRef.current !== nextSource) {
       const nextMode: RowSortMode = nextSource === SOURCE_ALL ? "data" : "source";
@@ -1964,6 +1980,14 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   function setSourceAndUrl(nextSource: string) {
     setIsSourceOverflowMenuOpen(false);
 
+    if (activeSourceRef.current !== nextSource) {
+      skipSelectionPersistenceOnceRef.current = true;
+      pendingSourceSyncRef.current = nextSource;
+      setActiveSource(nextSource);
+      const nextMode: RowSortMode = nextSource === SOURCE_ALL ? "data" : "source";
+      setRowSortState((prev) => (prev.mode === nextMode ? prev : { ...prev, mode: nextMode }));
+    }
+
     const params = new URLSearchParams(searchParams.toString());
     if (nextSource === SOURCE_ALL) {
       params.delete("source");
@@ -2024,15 +2048,27 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
   const baseSourceRows = useMemo(() => {
     if (activeSource === SOURCE_ALL) {
-      return allRows;
-    }
+      if (rows.length === 0) {
+        return allRows;
+      }
 
-    if (rows.length > 0) {
+      const sourceCount = new Set(rows.map((row) => getSourceKey(row.source))).size;
+      const benchmarkCount = new Set(rows.map((row) => getMatrixGroupingKey(row, showDuplicateRows))).size;
+
+      if (sourceCount === 1 && benchmarkCount <= 1) {
+        return allRows;
+      }
+
       return rows;
     }
 
-    return rowsBySource.get(activeSource) ?? [];
-  }, [allRows, rows, rowsBySource, activeSource]);
+    const sourceScopedRows = rowsBySource.get(activeSource) ?? [];
+    if (sourceScopedRows.length > 0) {
+      return sourceScopedRows;
+    }
+
+    return rows;
+  }, [allRows, rows, rowsBySource, activeSource, showDuplicateRows]);
 
   const baseBenchmarkKeySet = useMemo(() => {
     const keys = new Set<string>();
@@ -2095,6 +2131,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   }, [allRowsIndex, baseBenchmarkKeySet, baseModelNameSet]);
 
   const providerGroups = useMemo(() => {
+    const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
     const map = new Map<string, string[]>();
 
     coverageMetaByModel.forEach((meta, modelName) => {
@@ -2122,7 +2159,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
             return rightCoverage - leftCoverage;
           }
 
-          return left.localeCompare(right, "zh-Hans-CN", { sensitivity: "base" });
+          return compareModelNameByColumnOrder(left, right, collator);
         });
 
         const providerCoverageAverage = models.length > 0
@@ -2204,8 +2241,14 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       .sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
   }, [allModelNames, baseModelNameSet]);
 
+  const defaultAllSourceModels = useMemo(() => {
+    return baseModelNameSet.size <= 1
+      ? [...allModelNames]
+      : [...defaultSelectedModels];
+  }, [allModelNames, defaultSelectedModels, baseModelNameSet]);
+
   const [selectedModalities, setSelectedModalities] = useState<string[]>([...MODALITY_OPTIONS]);
-  const [selectedModels, setSelectedModels] = useState<string[]>(allModelNames);
+  const [selectedModels, setSelectedModels] = useState<string[]>(defaultAllSourceModels);
 
   useLayoutEffect(() => {
     if (!isModelSelectionLoaded) return;
@@ -2217,7 +2260,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     const allModelSet = new Set(allModelNames);
     const savedForSource = modelSelectionBySourceRef.current[activeSource];
     const fallbackDefaultModels = activeSource === SOURCE_ALL
-      ? [...allModelNames]
+      ? [...defaultAllSourceModels]
       : [...defaultSelectedModels];
     let nextSelected: string[];
 
@@ -2232,21 +2275,31 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
     const normalized = Array.from(new Set(nextSelected)).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
 
+    isSyncingSelectionFromSourceRef.current = true;
     setSelectedModels((prev) => {
       if (prev.length === normalized.length && prev.every((item, index) => item === normalized[index])) {
+        isSyncingSelectionFromSourceRef.current = false;
         return prev;
       }
       return normalized;
     });
-  }, [activeSource, allModelNames, defaultSelectedModels, isModelSelectionLoaded, rows.length, baseSourceRows.length]);
+  }, [activeSource, allModelNames, defaultSelectedModels, defaultAllSourceModels, isModelSelectionLoaded, rows.length, baseSourceRows.length]);
 
   useEffect(() => {
     if (!isModelSelectionLoaded) return;
+    if (skipSelectionPersistenceOnceRef.current) {
+      skipSelectionPersistenceOnceRef.current = false;
+      return;
+    }
+    if (isSyncingSelectionFromSourceRef.current) {
+      isSyncingSelectionFromSourceRef.current = false;
+      return;
+    }
 
-    const sourceKey = activeSourceRef.current;
+    const sourceKey = activeSource;
     const normalized = Array.from(new Set(selectedModels)).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
     const fallbackDefaultModels = sourceKey === SOURCE_ALL
-      ? [...allModelNames]
+      ? [...defaultAllSourceModels]
       : [...defaultSelectedModels];
     const normalizedDefault = Array.from(new Set(fallbackDefaultModels)).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
     const isDefaultSelection =
@@ -2279,7 +2332,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     } catch {
       // ignore storage access errors gracefully
     }
-  }, [selectedModels, isModelSelectionLoaded, allModelNames, defaultSelectedModels]);
+  }, [selectedModels, activeSource, isModelSelectionLoaded, allModelNames, defaultSelectedModels, defaultAllSourceModels]);
 
   useEffect(() => {
     const listener = () => {
@@ -3391,9 +3444,9 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   }
 
   function restoreDefaultModelsForActiveSource() {
-    const sourceKey = activeSourceRef.current;
+    const sourceKey = activeSource;
     const fallbackDefaultModels = sourceKey === SOURCE_ALL
-      ? [...allModelNames]
+      ? [...defaultAllSourceModels]
       : [...defaultSelectedModels];
 
     const nextSelectionBySource = { ...modelSelectionBySourceRef.current };
@@ -3905,6 +3958,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                       <input
                         type="checkbox"
                         className="checkbox checkbox-xs"
+                        aria-label={group.providerName}
                         checked={providerChecked}
                         aria-checked={providerChecked ? "true" : selectedCount > 0 ? "mixed" : "false"}
                         ref={(element) => {
@@ -3925,6 +3979,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     {group.models.map((model) => {
                       const isBaseModel = baseModelNameSet.has(model);
                       const coveragePercent = modelCoveragePercentMap.get(model) ?? 0;
+                      const coverageText = isBaseModel ? `${coveragePercent}%\u200b` : `${coveragePercent}%`;
 
                       return (
                         <label
@@ -3936,16 +3991,17 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                           <input
                             type="checkbox"
                             className="checkbox checkbox-xs"
+                            aria-label={model}
                             checked={selectedModelSet.has(model)}
                             onChange={(e) => toggleModel(model, e.target.checked)}
                           />
                           <span className="flex min-w-0 flex-1 items-center gap-1.5">
                             <span className="truncate" title={model}>{model}</span>
                             {isBaseModel ? null : (
-                              <span className="rounded border border-dashed border-base-content/40 px-1 text-[10px] opacity-70">跨页签</span>
+                              <span className="shrink-0 whitespace-nowrap rounded border border-dashed border-base-content/40 px-1 text-[10px] leading-none opacity-70">跨页签</span>
                             )}
                           </span>
-                          <span className="shrink-0 text-[10px] opacity-70">{coveragePercent}%</span>
+                          <span className="shrink-0 whitespace-nowrap text-[10px] opacity-70">{coverageText}</span>
                         </label>
                       );
                     })}
