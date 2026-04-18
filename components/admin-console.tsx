@@ -101,7 +101,7 @@ type ModelDedupeRule = {
   removeDot: boolean;
 };
 
-type TabKey = "import" | "entry" | "rename" | "merge" | "settings";
+type TabKey = "import" | "entry" | "rename" | "merge" | "maintenance" | "settings";
 
 type BenchmarkWarningLevel = "info" | "warn" | "danger";
 
@@ -201,6 +201,29 @@ type DuplicateDetectionResult = {
   generatedAt: string;
   modelCandidates: DuplicateModelCandidate[];
   benchmarkCandidates: DuplicateBenchmarkCandidate[];
+};
+
+type ScaleConsistencyIssue = {
+  valueDetails: Array<{
+    value: number;
+    field: "valueNum" | "valueNum2";
+    modelName: string;
+    source: string | null;
+    benchTime: string;
+  }>;
+  benchmarkId: number;
+  benchmarkName: string;
+  benchmarkType: string;
+  valueCount: number;
+  smallValueCount: number;
+  largeValueCount: number;
+  minValue: number;
+  maxValue: number;
+};
+
+type ScaleConsistencyCheckResult = {
+  generatedAt: string;
+  issues: ScaleConsistencyIssue[];
 };
 
 const DEFAULT_MODEL_DEDUPE_RULE: ModelDedupeRule = {
@@ -787,6 +810,10 @@ export function AdminConsole({
   const [duplicateDetectionResult, setDuplicateDetectionResult] = useState<DuplicateDetectionResult | null>(null);
   const [duplicateDetectionEntityType, setDuplicateDetectionEntityType] = useState<"model" | "benchmark">("model");
   const [duplicateConfidenceFilter, setDuplicateConfidenceFilter] = useState<"high-medium" | "all">("high-medium");
+  const [isCheckingScaleConsistency, setIsCheckingScaleConsistency] = useState(false);
+  const [scaleConsistencyIssues, setScaleConsistencyIssues] = useState<ScaleConsistencyIssue[]>([]);
+  const [scaleConsistencyCheckedAt, setScaleConsistencyCheckedAt] = useState<string | null>(null);
+  const [normalizingScaleBenchmarkId, setNormalizingScaleBenchmarkId] = useState<number | null>(null);
 
   const [renameEntityType, setRenameEntityType] = useState<"model" | "benchmark">("model");
   const [renameSearchKeyword, setRenameSearchKeyword] = useState("");
@@ -1548,6 +1575,11 @@ export function AdminConsole({
       duplicateConfidenceFilter === "all" || candidate.confidence !== "low"
     );
   }, [duplicateDetectionResult, duplicateConfidenceFilter]);
+
+  const scaleConsistencyAffectedValueCount = useMemo(
+    () => scaleConsistencyIssues.reduce((sum, item) => sum + item.smallValueCount + item.largeValueCount, 0),
+    [scaleConsistencyIssues]
+  );
 
   useEffect(() => {
     const noticeTimers = noticeTimersRef.current;
@@ -2954,6 +2986,55 @@ export function AdminConsole({
     }
   }
 
+  async function onCheckScaleConsistency() {
+    if (isCheckingScaleConsistency) return;
+
+    setIsCheckingScaleConsistency(true);
+    try {
+      const result = await postJson("/api/admin/data-maintenance/consistency-check", {});
+      const typedResult = result as ScaleConsistencyCheckResult;
+      const issues = (Array.isArray(typedResult.issues) ? typedResult.issues : []).map((item) => ({
+        ...item,
+        valueDetails: Array.isArray(item.valueDetails) ? item.valueDetails : []
+      }));
+
+      setScaleConsistencyIssues(issues);
+      setScaleConsistencyCheckedAt(
+        typeof typedResult.generatedAt === "string"
+          ? typedResult.generatedAt
+          : new Date().toISOString()
+      );
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "数据一致性检测失败");
+    } finally {
+      setIsCheckingScaleConsistency(false);
+    }
+  }
+
+  async function onNormalizeBenchmarkScale(issue: ScaleConsistencyIssue, targetScale: 1 | 100) {
+    if (normalizingScaleBenchmarkId !== null) {
+      return;
+    }
+
+    setNormalizingScaleBenchmarkId(issue.benchmarkId);
+    try {
+      const result = await postJson("/api/admin/data-maintenance/normalize-scale", {
+        benchmarkId: issue.benchmarkId,
+        targetScale
+      });
+
+      notifySuccess(
+        `已将 ${issue.benchmarkName} [${issue.benchmarkType}] 同化为 ${targetScale} 量纲（更新 ${result.updatedRows ?? 0} 行 / ${result.updatedCells ?? 0} 个值）`
+      );
+
+      await onCheckScaleConsistency();
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "量纲同化失败");
+    } finally {
+      setNormalizingScaleBenchmarkId(null);
+    }
+  }
+
   async function onMerge(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (mergeSubmitState === "submitting") return;
@@ -3594,6 +3675,15 @@ export function AdminConsole({
             onClick={() => setActiveTab("merge")}
           >
             实体去重
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "maintenance"}
+            className={tabClass("maintenance")}
+            onClick={() => setActiveTab("maintenance")}
+          >
+            数据维护
           </button>
           <button
             type="button"
@@ -5157,6 +5247,177 @@ export function AdminConsole({
                 <option key={`merge-edit-benchmark-${item.id}`} value={`${item.label} [${item.id}]`} />
               ))}
             </datalist>
+          </section>
+        ) : null}
+
+        {activeTab === "maintenance" ? (
+          <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
+            <div className="relative overflow-hidden rounded-2xl border border-warning/35 bg-gradient-to-br from-warning/10 via-base-100 to-primary/10 p-5">
+              <div className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-warning/20 blur-3xl" />
+              <div className="pointer-events-none absolute -bottom-20 -left-10 h-48 w-48 rounded-full bg-primary/20 blur-3xl" />
+
+              <div className="relative flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h3 className="flex items-center gap-2 text-lg font-semibold">
+                    <Database size={18} />
+                    数据一致性检测
+                  </h3>
+                  <p className="mt-1 text-sm opacity-80">
+                    检测同一 benchmark 是否同时出现 <code>&lt;1</code> 与 <code>&gt;10</code> 的混合量纲，并可一键同化到 1 或 100。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-warning shadow-md"
+                  onClick={() => onCheckScaleConsistency()}
+                  disabled={isCheckingScaleConsistency || normalizingScaleBenchmarkId !== null}
+                >
+                  {isCheckingScaleConsistency ? "检测中..." : "开始一致性检测"}
+                </button>
+              </div>
+
+              <div className="relative mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="rounded-xl border border-base-300/70 bg-base-100/75 px-3 py-2">
+                  <div className="text-xs uppercase tracking-wide opacity-60">最近检测</div>
+                  <div className="mt-1 text-sm font-medium">
+                    {scaleConsistencyCheckedAt
+                      ? new Date(scaleConsistencyCheckedAt).toLocaleString("zh-CN", { hour12: false })
+                      : "尚未检测"}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-base-300/70 bg-base-100/75 px-3 py-2">
+                  <div className="text-xs uppercase tracking-wide opacity-60">异常 benchmark</div>
+                  <div className="mt-1 text-sm font-medium">{scaleConsistencyIssues.length} 个</div>
+                </div>
+                <div className="rounded-xl border border-base-300/70 bg-base-100/75 px-3 py-2">
+                  <div className="text-xs uppercase tracking-wide opacity-60">待处理混合值</div>
+                  <div className="mt-1 text-sm font-medium">{scaleConsistencyAffectedValueCount} 条</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              {scaleConsistencyIssues.length === 0 ? (
+                <div className="rounded-xl border border-base-300/70 bg-base-200/40 px-4 py-6 text-sm opacity-80">
+                  {scaleConsistencyCheckedAt
+                    ? "最近一次检测未发现混合量纲问题。"
+                    : "点击“开始一致性检测”后将在这里展示异常 benchmark。"}
+                </div>
+              ) : (
+                scaleConsistencyIssues.map((issue) => {
+                  const isNormalizingCurrent = normalizingScaleBenchmarkId === issue.benchmarkId;
+                  const issueValueDetails = issue.valueDetails ?? [];
+                  const hasTtsSource = issueValueDetails.some((detail) =>
+                    (detail.source ?? "").toLowerCase().includes("tts")
+                  );
+                  const belowOneDetails = issueValueDetails.filter((detail) => detail.value < 1);
+                  const hasOnlyZeroInSmallValues =
+                    belowOneDetails.length > 0
+                    && belowOneDetails.every((detail) => Math.abs(detail.value) < 1e-12);
+                  const shouldDefaultCollapse = hasTtsSource || hasOnlyZeroInSmallValues;
+
+                  return (
+                    <details
+                      open={!shouldDefaultCollapse}
+                      key={`scale-consistency-${issue.benchmarkId}`}
+                      className="rounded-2xl border border-warning/40 bg-base-100 shadow-sm transition-shadow open:shadow-md"
+                    >
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <span className="badge badge-warning badge-outline">混合量纲告警</span>
+                          <h4 className="truncate text-base font-semibold">{issue.benchmarkName}</h4>
+                          <span className="text-xs opacity-70">[{issue.benchmarkType}]</span>
+                          {shouldDefaultCollapse ? (
+                            <span className="badge badge-ghost badge-sm">默认折叠</span>
+                          ) : null}
+                          {hasTtsSource ? <span className="badge badge-info badge-outline badge-sm">source: tts</span> : null}
+                          {hasOnlyZeroInSmallValues ? <span className="badge badge-outline badge-sm">&lt;1 仅 0 值</span> : null}
+                        </div>
+                        <span className="text-xs opacity-55">点击展开/折叠</span>
+                      </summary>
+
+                      <div className="border-t border-base-300/50 px-4 pb-4 pt-2">
+                        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                          <div>
+                            <p className="text-sm opacity-80">
+                              该 benchmark 同时出现 <code>&lt;1</code> 与 <code>&gt;10</code> 的值，请选择目标量纲进行同化。
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                              <div className="group relative inline-flex items-center">
+                                <span className="cursor-help rounded-full border border-base-300 bg-base-200/60 px-2 py-1">
+                                  总值 {issue.valueCount}
+                                </span>
+
+                                {issueValueDetails.length > 0 ? (
+                                  <div className="invisible absolute left-0 top-full z-20 mt-2 max-h-64 w-[min(82vw,300px)] overflow-auto rounded-lg border border-base-300/70 bg-base-100 p-1.5 opacity-0 shadow-lg transition-all duration-150 group-hover:visible group-hover:opacity-100">
+                                    <ul className="space-y-1">
+                                      {issueValueDetails.map((detail, index) => {
+                                        const benchTimeText = detail.benchTime
+                                          ? new Date(detail.benchTime).toLocaleString("zh-CN", { hour12: false })
+                                          : "-";
+                                        const sourceText = detail.source?.trim() ? detail.source : "空 source";
+
+                                        return (
+                                          <li
+                                            key={`scale-detail-${issue.benchmarkId}-${index}`}
+                                            className="rounded-md border border-base-300/50 bg-base-200/30 px-2 py-0.5"
+                                          >
+                                            <div className="flex items-center gap-1 text-[11px] text-base-content">
+                                              <span className="font-mono font-semibold">
+                                                {Number(detail.value.toFixed(6)).toString()}
+                                              </span>
+                                              <span className="truncate opacity-75">· {detail.modelName}</span>
+                                            </div>
+                                            <div className="mt-0.5 break-all text-[11px] leading-4 opacity-75">
+                                              {sourceText} · {benchTimeText}
+                                            </div>
+                                          </li>
+                                        );
+                                      })}
+                                    </ul>
+                                  </div>
+                                ) : null}
+                              </div>
+                              <span className="rounded-full border border-info/35 bg-info/10 px-2 py-1">
+                                &lt;1：{issue.smallValueCount}
+                              </span>
+                              <span className="rounded-full border border-warning/35 bg-warning/10 px-2 py-1">
+                                &gt;10：{issue.largeValueCount}
+                              </span>
+                              <span className="rounded-full border border-base-300 bg-base-200/60 px-2 py-1">
+                                min={Number(issue.minValue.toFixed(6)).toString()}
+                              </span>
+                              <span className="rounded-full border border-base-300 bg-base-200/60 px-2 py-1">
+                                max={Number(issue.maxValue.toFixed(6)).toString()}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline btn-primary"
+                              onClick={() => onNormalizeBenchmarkScale(issue, 1)}
+                              disabled={isCheckingScaleConsistency || normalizingScaleBenchmarkId !== null}
+                            >
+                              {isNormalizingCurrent ? "处理中..." : "同化为 1 量纲"}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline btn-secondary"
+                              onClick={() => onNormalizeBenchmarkScale(issue, 100)}
+                              disabled={isCheckingScaleConsistency || normalizingScaleBenchmarkId !== null}
+                            >
+                              {isNormalizingCurrent ? "处理中..." : "同化为 100 量纲"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </details>
+                  );
+                })
+              )}
+            </div>
           </section>
         ) : null}
 

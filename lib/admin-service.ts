@@ -216,6 +216,8 @@ const SUPERSCRIPT_SUBSCRIPT_DIGIT_MAP: Record<string, string> = {
   "₉": "9"
 };
 const SUPERSCRIPT_SUBSCRIPT_DIGIT_REGEX = /[⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉]/g;
+const SCALE_NORMALIZED_NOTE_TO_ONE = "normalized-scale-to-1";
+const SCALE_NORMALIZED_NOTE_TO_HUNDRED = "normalized-scale-to-100";
 
 function isFleursZhTranslationBenchmark(benchmarkName: string): boolean {
   if (!/fleurs/i.test(benchmarkName)) return false;
@@ -1264,6 +1266,95 @@ function firstResultRow<T>(result: unknown): T | undefined {
   }
 
   return undefined;
+}
+
+function resultRows<T>(result: unknown): T[] {
+  if (Array.isArray(result)) {
+    return result as T[];
+  }
+
+  if (result && typeof result === "object" && "rows" in (result as Record<string, unknown>)) {
+    const rows = (result as { rows?: unknown[] }).rows;
+    return Array.isArray(rows) ? (rows as T[]) : [];
+  }
+
+  return [];
+}
+
+function toFiniteNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+function toIsoDateTime(value: unknown): string {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? "" : value.toISOString();
+  }
+
+  if (typeof value === "string" || typeof value === "number") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString();
+  }
+
+  return "";
+}
+
+function hasMeaningfulNumericChange(previous: number | null, next: number | null): boolean {
+  if (previous === null && next === null) return false;
+  if (previous === null || next === null) return true;
+
+  return Math.abs(previous - next) > 1e-12;
+}
+
+function normalizeScaleNumericValue(value: number | null, targetScale: 1 | 100): number | null {
+  if (value === null || !Number.isFinite(value)) {
+    return value;
+  }
+
+  if (targetScale === 1) {
+    if (value > 10) {
+      return Number((value / 100).toFixed(6));
+    }
+
+    return value;
+  }
+
+  if (value < 1) {
+    return Number((value * 100).toFixed(6));
+  }
+
+  return value;
+}
+
+function formatScaledNumericValue(value: number): string {
+  return Number(value.toFixed(6)).toString();
+}
+
+function appendScaleNormalizationNote(valueNote: string | null | undefined, targetScale: 1 | 100): string {
+  const marker = targetScale === 1
+    ? SCALE_NORMALIZED_NOTE_TO_ONE
+    : SCALE_NORMALIZED_NOTE_TO_HUNDRED;
+
+  const current = valueNote?.trim() ?? "";
+  if (!current) {
+    return marker;
+  }
+
+  if (current.includes(marker)) {
+    return current;
+  }
+
+  return `${current}; ${marker}`;
 }
 
 async function getModelDedupeRule() {
@@ -3241,6 +3332,43 @@ export async function deleteBenchmarkValuesBySource(sourceInput: string) {
   };
 }
 
+export type BenchmarkScaleValueDetail = {
+  value: number;
+  field: "valueNum" | "valueNum2";
+  modelName: string;
+  source: string | null;
+  benchTime: string;
+};
+
+export type BenchmarkScaleConsistencyIssue = {
+  benchmarkId: number;
+  benchmarkName: string;
+  benchmarkType: string;
+  valueCount: number;
+  smallValueCount: number;
+  largeValueCount: number;
+  minValue: number;
+  maxValue: number;
+  valueDetails: BenchmarkScaleValueDetail[];
+};
+
+export type BenchmarkScaleConsistencyCheckResult = {
+  generatedAt: string;
+  issues: BenchmarkScaleConsistencyIssue[];
+};
+
+export type BenchmarkScaleNormalizationTarget = 1 | 100;
+
+export type BenchmarkScaleNormalizationResult = {
+  ok: true;
+  benchmarkId: number;
+  benchmarkName: string;
+  benchmarkType: string;
+  targetScale: BenchmarkScaleNormalizationTarget;
+  updatedRows: number;
+  updatedCells: number;
+};
+
 type DuplicateConfidence = "high" | "medium" | "low";
 
 export type ModelDuplicateCandidate = {
@@ -3811,6 +3939,259 @@ export function __hasBenchmarkNumericTokenMismatchForTest(left: string, right: s
 
 export function __hasBenchmarkVariantNoiseNormalizedNameMatchForTest(left: string, right: string): boolean {
   return hasBenchmarkVariantNoiseNormalizedNameMatch(left, right);
+}
+
+export async function detectBenchmarkScaleConsistencyIssues(): Promise<BenchmarkScaleConsistencyCheckResult> {
+  type RawRow = {
+    benchmark_id: number | string;
+    benchmark_name: string;
+    benchmark_type: string;
+    value_count: number | string;
+    small_count: number | string;
+    large_count: number | string;
+    min_value: number | string;
+    max_value: number | string;
+  };
+
+  type RawValueDetailRow = {
+    benchmark_id: number | string;
+    value_num: number | string | null;
+    value_num2: number | string | null;
+    model_name: string;
+    source: string | null;
+    bench_time: string | Date;
+  };
+
+  const result = await db.execute(sql`
+    WITH expanded_values AS (
+      SELECT benchmark_id, value_num::numeric AS numeric_value
+      FROM benchmark_values
+      WHERE value_num IS NOT NULL
+      UNION ALL
+      SELECT benchmark_id, value_num2::numeric AS numeric_value
+      FROM benchmark_values
+      WHERE value_num2 IS NOT NULL
+    ),
+    grouped AS (
+      SELECT
+        benchmark_id,
+        COUNT(*)::int AS value_count,
+        COUNT(*) FILTER (WHERE numeric_value < 1)::int AS small_count,
+        COUNT(*) FILTER (WHERE numeric_value > 10)::int AS large_count,
+        MIN(numeric_value)::numeric AS min_value,
+        MAX(numeric_value)::numeric AS max_value
+      FROM expanded_values
+      GROUP BY benchmark_id
+      HAVING COUNT(*) FILTER (WHERE numeric_value < 1) > 0
+         AND COUNT(*) FILTER (WHERE numeric_value > 10) > 0
+    )
+    SELECT
+      grouped.benchmark_id,
+      benchmarks.benchmark_name,
+      benchmarks.benchmark_type,
+      grouped.value_count,
+      grouped.small_count,
+      grouped.large_count,
+      grouped.min_value,
+      grouped.max_value
+    FROM grouped
+    INNER JOIN benchmarks ON benchmarks.id = grouped.benchmark_id
+    WHERE benchmarks.merged_into_benchmark_id IS NULL
+    ORDER BY grouped.large_count DESC, grouped.small_count DESC, benchmarks.benchmark_name ASC, benchmarks.benchmark_type ASC
+  `);
+
+  const baseIssues = resultRows<RawRow>(result)
+    .map((row) => {
+      const benchmarkId = Number(row.benchmark_id);
+      const minValue = toFiniteNumber(row.min_value);
+      const maxValue = toFiniteNumber(row.max_value);
+
+      if (!Number.isFinite(benchmarkId) || minValue === null || maxValue === null) {
+        return null;
+      }
+
+      return {
+        benchmarkId,
+        benchmarkName: row.benchmark_name,
+        benchmarkType: row.benchmark_type,
+        valueCount: Number(row.value_count ?? 0),
+        smallValueCount: Number(row.small_count ?? 0),
+        largeValueCount: Number(row.large_count ?? 0),
+        minValue,
+        maxValue
+      };
+    })
+    .filter((item): item is Omit<BenchmarkScaleConsistencyIssue, "valueDetails"> => item !== null);
+
+  if (baseIssues.length === 0) {
+    return {
+      generatedAt: new Date().toISOString(),
+      issues: []
+    };
+  }
+
+  const issueBenchmarkIds = baseIssues.map((item) => item.benchmarkId);
+
+  const valueDetailsResult = await db.execute(sql`
+    SELECT
+      benchmark_values.benchmark_id,
+      benchmark_values.value_num,
+      benchmark_values.value_num2,
+      models.model_name,
+      benchmark_values.source,
+      benchmark_values.bench_time
+    FROM benchmark_values
+    INNER JOIN models ON models.id = benchmark_values.model_id
+    WHERE benchmark_values.benchmark_id IN (${sql.join(issueBenchmarkIds.map((item) => sql`${item}`), sql`, `)})
+      AND (benchmark_values.value_num IS NOT NULL OR benchmark_values.value_num2 IS NOT NULL)
+    ORDER BY benchmark_values.benchmark_id ASC, benchmark_values.bench_time DESC, benchmark_values.id DESC
+  `);
+
+  const valueDetailMap = new Map<number, BenchmarkScaleValueDetail[]>();
+
+  resultRows<RawValueDetailRow>(valueDetailsResult).forEach((row) => {
+    const benchmarkId = Number(row.benchmark_id);
+    if (!Number.isFinite(benchmarkId)) {
+      return;
+    }
+
+    const benchTime = toIsoDateTime(row.bench_time);
+    const source = row.source?.trim() ? row.source.trim() : null;
+
+    const pushDetail = (rawValue: unknown, field: BenchmarkScaleValueDetail["field"]) => {
+      const value = toFiniteNumber(rawValue);
+      if (value === null) {
+        return;
+      }
+
+      if (!valueDetailMap.has(benchmarkId)) {
+        valueDetailMap.set(benchmarkId, []);
+      }
+
+      valueDetailMap.get(benchmarkId)?.push({
+        value,
+        field,
+        modelName: row.model_name,
+        source,
+        benchTime
+      });
+    };
+
+    pushDetail(row.value_num, "valueNum");
+    pushDetail(row.value_num2, "valueNum2");
+  });
+
+  const issues: BenchmarkScaleConsistencyIssue[] = baseIssues.map((item) => ({
+    ...item,
+    valueDetails: valueDetailMap.get(item.benchmarkId) ?? []
+  }));
+
+  return {
+    generatedAt: new Date().toISOString(),
+    issues
+  };
+}
+
+export async function normalizeBenchmarkScaleByTarget(input: {
+  benchmarkId: number;
+  targetScale: BenchmarkScaleNormalizationTarget;
+}): Promise<BenchmarkScaleNormalizationResult> {
+  const [benchmark] = await db
+    .select({
+      id: benchmarks.id,
+      benchmarkName: benchmarks.benchmarkName,
+      benchmarkType: benchmarks.benchmarkType
+    })
+    .from(benchmarks)
+    .where(and(eq(benchmarks.id, input.benchmarkId), isNull(benchmarks.mergedIntoBenchmarkId)))
+    .limit(1);
+
+  if (!benchmark) {
+    throw new Error(`benchmark not found or merged: ${input.benchmarkId}`);
+  }
+
+  const checkResult = await db.execute(sql`
+    WITH expanded_values AS (
+      SELECT benchmark_id, value_num::numeric AS numeric_value
+      FROM benchmark_values
+      WHERE benchmark_id = ${input.benchmarkId} AND value_num IS NOT NULL
+      UNION ALL
+      SELECT benchmark_id, value_num2::numeric AS numeric_value
+      FROM benchmark_values
+      WHERE benchmark_id = ${input.benchmarkId} AND value_num2 IS NOT NULL
+    )
+    SELECT
+      COUNT(*) FILTER (WHERE numeric_value < 1)::int AS small_count,
+      COUNT(*) FILTER (WHERE numeric_value > 10)::int AS large_count
+    FROM expanded_values
+  `);
+
+  const checkRow = firstResultRow<{ small_count: number | string; large_count: number | string }>(checkResult);
+  const smallCount = Number(checkRow?.small_count ?? 0);
+  const largeCount = Number(checkRow?.large_count ?? 0);
+
+  if (smallCount <= 0 || largeCount <= 0) {
+    throw new Error("该 benchmark 未检测到同时存在 <1 与 >10 的混合量纲，无需同化");
+  }
+
+  const { updatedRows, updatedCells } = await db.transaction(async (tx: DbTransactionClient) => {
+    const rows = await tx
+      .select({
+        id: benchmarkValues.id,
+        valueNum: benchmarkValues.valueNum,
+        valueNum2: benchmarkValues.valueNum2,
+        valueNote: benchmarkValues.valueNote
+      })
+      .from(benchmarkValues)
+      .where(eq(benchmarkValues.benchmarkId, input.benchmarkId));
+
+    let nextUpdatedRows = 0;
+    let nextUpdatedCells = 0;
+
+    for (const row of rows) {
+      const currentValueNum = toFiniteNumber(row.valueNum);
+      const currentValueNum2 = toFiniteNumber(row.valueNum2);
+
+      const nextValueNum = normalizeScaleNumericValue(currentValueNum, input.targetScale);
+      const nextValueNum2 = normalizeScaleNumericValue(currentValueNum2, input.targetScale);
+
+      const valueNumChanged = hasMeaningfulNumericChange(currentValueNum, nextValueNum);
+      const valueNum2Changed = hasMeaningfulNumericChange(currentValueNum2, nextValueNum2);
+
+      if (!valueNumChanged && !valueNum2Changed) {
+        continue;
+      }
+
+      nextUpdatedRows += 1;
+      nextUpdatedCells += (valueNumChanged ? 1 : 0) + (valueNum2Changed ? 1 : 0);
+
+      await tx
+        .update(benchmarkValues)
+        .set({
+          valueNum: nextValueNum === null ? null : formatScaledNumericValue(nextValueNum),
+          valueNum2: nextValueNum2 === null ? null : formatScaledNumericValue(nextValueNum2),
+          valueNote: appendScaleNormalizationNote(row.valueNote, input.targetScale)
+        })
+        .where(eq(benchmarkValues.id, row.id));
+    }
+
+    return {
+      updatedRows: nextUpdatedRows,
+      updatedCells: nextUpdatedCells
+    };
+  });
+
+  invalidateAllCaches();
+
+  return {
+    ok: true,
+    benchmarkId: benchmark.id,
+    benchmarkName: benchmark.benchmarkName,
+    benchmarkType: benchmark.benchmarkType,
+    targetScale: input.targetScale,
+    updatedRows,
+    updatedCells
+  };
 }
 
 export async function clearNonSettingsData() {

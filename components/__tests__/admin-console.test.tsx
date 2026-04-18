@@ -1129,6 +1129,95 @@ describe("AdminConsole text import", () => {
   });
 });
 
+describe("AdminConsole data maintenance", () => {
+  test("可检测混合量纲并触发同化为 1 量纲", async () => {
+    const user = userEvent.setup();
+
+    const consistencyResponse = {
+      generatedAt: "2026-04-18T10:00:00.000Z",
+      issues: [
+        {
+          benchmarkId: 11,
+          benchmarkName: "Bench-1",
+          benchmarkType: "Type-A",
+          valueCount: 12,
+          smallValueCount: 4,
+          largeValueCount: 8,
+          minValue: 0.12,
+          maxValue: 87.4,
+          valueDetails: [
+            {
+              value: 0.12,
+              field: "valueNum",
+              modelName: "Model A",
+              source: "text:seed",
+              benchTime: "2026-04-18T09:00:00.000Z"
+            },
+            {
+              value: 87.4,
+              field: "valueNum",
+              modelName: "Model B",
+              source: "text:seed",
+              benchTime: "2026-04-18T09:05:00.000Z"
+            }
+          ]
+        }
+      ]
+    };
+
+    const normalizeResponse = {
+      ok: true,
+      benchmarkId: 11,
+      benchmarkName: "Bench-1",
+      benchmarkType: "Type-A",
+      targetScale: 1,
+      updatedRows: 8,
+      updatedCells: 8
+    };
+
+    const consistencyAfterNormalizedResponse = {
+      generatedAt: "2026-04-18T10:05:00.000Z",
+      issues: []
+    };
+
+    const fetchMock = mockFetchSequence(
+      consistencyResponse,
+      normalizeResponse,
+      consistencyAfterNormalizedResponse
+    );
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await user.click(screen.getByRole("tab", { name: "数据维护" }));
+    await user.click(screen.getByRole("button", { name: "开始一致性检测" }));
+
+    expect(await screen.findByText("Bench-1")).toBeInTheDocument();
+    expect(screen.getByText("总值 12")).toBeInTheDocument();
+    expect(screen.getByText("text:seed")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "同化为 1 量纲" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
+    const normalizeCall = fetchMock.mock.calls[1];
+    expect(normalizeCall?.[0]).toBe("/api/admin/data-maintenance/normalize-scale");
+
+    const normalizePayload = JSON.parse(((normalizeCall?.[1] as RequestInit).body ?? "{}") as string) as {
+      benchmarkId?: number;
+      targetScale?: number;
+    };
+
+    expect(normalizePayload).toEqual({
+      benchmarkId: 11,
+      targetScale: 1
+    });
+
+    expect(await screen.findByText("最近一次检测未发现混合量纲问题。")).toBeInTheDocument();
+  });
+});
+
 describe("AdminConsole merge interactions", () => {
   test("重复候选页签显示计数，点击填充可正确写入合并输入", async () => {
     const user = userEvent.setup();
