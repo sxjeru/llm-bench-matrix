@@ -143,6 +143,28 @@ describe("benchmark scale consistency", () => {
     ]);
   });
 
+  test("detectBenchmarkScaleConsistencyIssues 忽略 small_count=0 的结果（负值不触发 <1 告警）", async () => {
+    const executeSpy = vi.spyOn(dbForTest, "execute").mockResolvedValue({
+      rows: [
+        {
+          benchmark_id: 12,
+          benchmark_name: "Bench-Neg",
+          benchmark_type: "Type-N",
+          value_count: "6",
+          small_count: "0",
+          large_count: "3",
+          min_value: "-0.42",
+          max_value: "91.5"
+        }
+      ]
+    });
+
+    const result = await detectScaleIssuesForTest();
+
+    expect(result.issues).toEqual([]);
+    expect(executeSpy).toHaveBeenCalledTimes(1);
+  });
+
   test("normalizeBenchmarkScaleByTarget 会把 >10 同化为 1 量纲并追加标记", async () => {
     const dbSelectWhere = createSelectWhereMock([
       [

@@ -341,6 +341,53 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     expect(screen.getByText(/覆盖率 50%/)).toBeInTheDocument();
   });
 
+  test("点击模型列后按展示行重算模型筛选覆盖率", () => {
+    const scopedAllRows = [
+      ...baseRows,
+      {
+        providerName: "Anthropic",
+        modelName: "Model C",
+        benchmarkName: "Bench-1",
+        benchmarkType: "General",
+        benchmarkCanonicalKey: "bench-1:general",
+        benchTime: "2026-04-06T00:00:00.000Z",
+        valueRaw: "68",
+        valueNum: 68,
+        valueNote: null,
+        source: "text:S2"
+      },
+      {
+        providerName: "Anthropic",
+        modelName: "Model C",
+        benchmarkName: "Bench-2",
+        benchmarkType: "General",
+        benchmarkCanonicalKey: "bench-2:general",
+        benchTime: "2026-04-06T00:00:00.000Z",
+        valueRaw: "--",
+        valueNum: null,
+        valueNote: null,
+        source: "text:S2"
+      }
+    ] as const;
+
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:S1", "text:S2"]}
+        rows={[...baseRows]}
+        allRows={[...scopedAllRows]}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "展开模型筛选" }));
+
+    expect(screen.getByLabelText("Model C").closest("label")).toHaveTextContent("50%");
+
+    fireEvent.click(screen.getByRole("columnheader", { name: /Model B/ }));
+
+    expect(screen.queryByText("Bench-2")).toBeNull();
+    expect(screen.getByLabelText("Model C").closest("label")).toHaveTextContent("100%");
+  });
+
   test("Category / Benchmark 表头显示唯一项计数", () => {
     render(
       <BenchmarkMatrix

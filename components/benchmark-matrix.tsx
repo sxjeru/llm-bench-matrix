@@ -2202,6 +2202,25 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     };
   }, [allRows, showDuplicateRows]);
 
+  const coveredModelsByGroupingKey = useMemo(() => {
+    const coveredMap = new Map<string, Set<string>>();
+
+    allRowsIndex.rowsByGroupingKey.forEach((groupedRows, matrixKey) => {
+      const coveredModels = new Set<string>();
+
+      groupedRows.forEach(({ row }) => {
+        if (!hasMeaningfulMatrixRawValue(row.valueRaw)) return;
+        coveredModels.add(row.modelName);
+      });
+
+      if (coveredModels.size > 0) {
+        coveredMap.set(matrixKey, coveredModels);
+      }
+    });
+
+    return coveredMap;
+  }, [allRowsIndex]);
+
   const baseSourceRows = useMemo(() => {
     if (activeSource === SOURCE_ALL) {
       if (rows.length === 0) {
@@ -2357,33 +2376,6 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         models: item.models
       }));
   }, [coverageMetaByModel, sourceModelHint]);
-
-  const modelCoveragePercentMap = useMemo(() => {
-    const map = new Map<string, number>();
-    coverageMetaByModel.forEach((meta, modelName) => {
-      map.set(modelName, Math.round(meta.coverageRate * 100));
-    });
-    return map;
-  }, [coverageMetaByModel]);
-
-  const providerAverageCoveragePercentMap = useMemo(() => {
-    const map = new Map<string, number>();
-
-    providerGroups.forEach((group) => {
-      if (group.models.length === 0) {
-        map.set(group.providerName, 0);
-        return;
-      }
-
-      const totalCoverage = group.models.reduce((acc, modelName) => {
-        return acc + (coverageMetaByModel.get(modelName)?.coverageRate ?? 0);
-      }, 0);
-
-      map.set(group.providerName, Math.round((totalCoverage / group.models.length) * 100));
-    });
-
-    return map;
-  }, [providerGroups, coverageMetaByModel]);
 
   const allModelNames = useMemo(
     () => providerGroups.flatMap((group) => group.models).sort((a, b) => a.localeCompare(b, "zh-Hans-CN")),
@@ -3330,6 +3322,64 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       return cell.displayValue.trim() !== "--";
     });
   }, [modalityFilteredMatrixRows, rowPresenceFilterModel]);
+
+  const displayedCoverageMetaByModel = useMemo(() => {
+    const displayedRowKeys = Array.from(new Set(presenceFilteredMatrixRows.map((row) => row.rowKey)));
+    const displayedRowCount = displayedRowKeys.length;
+    const coveredRowCountByModel = new Map<string, number>();
+    const candidateModelSet = new Set(allModelNames);
+
+    displayedRowKeys.forEach((rowKey) => {
+      const coveredModels = coveredModelsByGroupingKey.get(rowKey);
+      if (!coveredModels || coveredModels.size === 0) return;
+
+      coveredModels.forEach((modelName) => {
+        if (!candidateModelSet.has(modelName)) return;
+        coveredRowCountByModel.set(modelName, (coveredRowCountByModel.get(modelName) ?? 0) + 1);
+      });
+    });
+
+    const metaMap = new Map<string, { coveredCount: number; coverageRate: number }>();
+    allModelNames.forEach((modelName) => {
+      const coveredCount = coveredRowCountByModel.get(modelName) ?? 0;
+      metaMap.set(modelName, {
+        coveredCount,
+        coverageRate: displayedRowCount > 0 ? coveredCount / displayedRowCount : 0
+      });
+    });
+
+    return {
+      displayedRowCount,
+      metaMap
+    };
+  }, [allModelNames, coveredModelsByGroupingKey, presenceFilteredMatrixRows]);
+
+  const modelCoveragePercentMap = useMemo(() => {
+    const map = new Map<string, number>();
+    displayedCoverageMetaByModel.metaMap.forEach((meta, modelName) => {
+      map.set(modelName, Math.round(meta.coverageRate * 100));
+    });
+    return map;
+  }, [displayedCoverageMetaByModel]);
+
+  const providerAverageCoveragePercentMap = useMemo(() => {
+    const map = new Map<string, number>();
+
+    providerGroups.forEach((group) => {
+      if (group.models.length === 0) {
+        map.set(group.providerName, 0);
+        return;
+      }
+
+      const totalCoverage = group.models.reduce((acc, modelName) => {
+        return acc + (displayedCoverageMetaByModel.metaMap.get(modelName)?.coverageRate ?? 0);
+      }, 0);
+
+      map.set(group.providerName, Math.round((totalCoverage / group.models.length) * 100));
+    });
+
+    return map;
+  }, [providerGroups, displayedCoverageMetaByModel]);
 
   const sortedMatrixRows = useMemo(() => {
     const rowsCopy = [...presenceFilteredMatrixRows];

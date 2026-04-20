@@ -3976,13 +3976,13 @@ export async function detectBenchmarkScaleConsistencyIssues(): Promise<Benchmark
       SELECT
         benchmark_id,
         COUNT(*)::int AS value_count,
-        COUNT(*) FILTER (WHERE numeric_value < 1)::int AS small_count,
+        COUNT(*) FILTER (WHERE numeric_value >= 0 AND numeric_value < 1)::int AS small_count,
         COUNT(*) FILTER (WHERE numeric_value > 10)::int AS large_count,
         MIN(numeric_value)::numeric AS min_value,
         MAX(numeric_value)::numeric AS max_value
       FROM expanded_values
       GROUP BY benchmark_id
-      HAVING COUNT(*) FILTER (WHERE numeric_value < 1) > 0
+      HAVING COUNT(*) FILTER (WHERE numeric_value >= 0 AND numeric_value < 1) > 0
          AND COUNT(*) FILTER (WHERE numeric_value > 10) > 0
     )
     SELECT
@@ -4005,8 +4005,16 @@ export async function detectBenchmarkScaleConsistencyIssues(): Promise<Benchmark
       const benchmarkId = Number(row.benchmark_id);
       const minValue = toFiniteNumber(row.min_value);
       const maxValue = toFiniteNumber(row.max_value);
+      const smallValueCount = Number(row.small_count ?? 0);
+      const largeValueCount = Number(row.large_count ?? 0);
 
-      if (!Number.isFinite(benchmarkId) || minValue === null || maxValue === null) {
+      if (
+        !Number.isFinite(benchmarkId)
+        || minValue === null
+        || maxValue === null
+        || smallValueCount <= 0
+        || largeValueCount <= 0
+      ) {
         return null;
       }
 
@@ -4015,8 +4023,8 @@ export async function detectBenchmarkScaleConsistencyIssues(): Promise<Benchmark
         benchmarkName: row.benchmark_name,
         benchmarkType: row.benchmark_type,
         valueCount: Number(row.value_count ?? 0),
-        smallValueCount: Number(row.small_count ?? 0),
-        largeValueCount: Number(row.large_count ?? 0),
+        smallValueCount,
+        largeValueCount,
         minValue,
         maxValue
       };
@@ -4121,7 +4129,7 @@ export async function normalizeBenchmarkScaleByTarget(input: {
       WHERE benchmark_id = ${input.benchmarkId} AND value_num2 IS NOT NULL
     )
     SELECT
-      COUNT(*) FILTER (WHERE numeric_value < 1)::int AS small_count,
+      COUNT(*) FILTER (WHERE numeric_value >= 0 AND numeric_value < 1)::int AS small_count,
       COUNT(*) FILTER (WHERE numeric_value > 10)::int AS large_count
     FROM expanded_values
   `);
