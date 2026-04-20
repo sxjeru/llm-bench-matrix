@@ -188,6 +188,7 @@ const MAX_MODEL_COLUMN_WIDTH = 320;
 const COLUMN_WIDTH_STORAGE_DEBOUNCE_MS = 250;
 const ALL_SOURCE_ROW_COVERAGE_THRESHOLD = 0.4;
 const ALL_SOURCE_COLUMN_COVERAGE_THRESHOLD = 0.2;
+const PROVIDER_MODEL_AUTO_COLLAPSE_LIMIT = 8;
 const SOURCE_MATCH_FRAME_COLOR = "rgba(93, 167, 255, 0.42)";
 const COMPARE_BASELINE_FRAME_COLOR = "rgba(250, 211, 106, 0.74)";
 const COMPARE_BASELINE_FRAME_EXPORT_COLOR = "rgba(250, 211, 106, 0.92)";
@@ -1464,6 +1465,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const [supportsWebpExport, setSupportsWebpExport] = useState(true);
   const [supportsAvifExport, setSupportsAvifExport] = useState(false);
   const [isModelFilterExpanded, setIsModelFilterExpanded] = useState(false);
+  const [expandedLowCoverageProviders, setExpandedLowCoverageProviders] = useState<Record<string, boolean>>({});
   const [overflowSourceKeys, setOverflowSourceKeys] = useState<string[]>([]);
   const [isSourceOverflowMenuOpen, setIsSourceOverflowMenuOpen] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
@@ -4215,6 +4217,34 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
               const providerChecked = selectedCount > 0 && selectedCount === group.models.length;
               const providerAverageCoverage = providerAverageCoveragePercentMap.get(group.providerName) ?? 0;
               const providerHasBaseModel = group.models.some((model) => baseModelNameSet.has(model));
+              const baseOrderIndexByModel = new Map(group.models.map((model, index) => [model, index]));
+              const modelsSortedByCoverage = [...group.models].sort((leftModel, rightModel) => {
+                const leftCoverage = modelCoveragePercentMap.get(leftModel) ?? 0;
+                const rightCoverage = modelCoveragePercentMap.get(rightModel) ?? 0;
+
+                if (rightCoverage !== leftCoverage) {
+                  return rightCoverage - leftCoverage;
+                }
+
+                return (baseOrderIndexByModel.get(leftModel) ?? 0) - (baseOrderIndexByModel.get(rightModel) ?? 0);
+              });
+              const hasOverflowModels = modelsSortedByCoverage.length > PROVIDER_MODEL_AUTO_COLLAPSE_LIMIT;
+              const leadingModels = hasOverflowModels
+                ? modelsSortedByCoverage.slice(0, PROVIDER_MODEL_AUTO_COLLAPSE_LIMIT)
+                : modelsSortedByCoverage;
+              const trailingModels = hasOverflowModels
+                ? modelsSortedByCoverage.slice(PROVIDER_MODEL_AUTO_COLLAPSE_LIMIT)
+                : [];
+              const isLowCoverageExpanded = expandedLowCoverageProviders[group.providerName] === true;
+              const providerModelsToRender = hasOverflowModels
+                ? [
+                    ...leadingModels,
+                    ...(isLowCoverageExpanded ? trailingModels : [])
+                  ]
+                : modelsSortedByCoverage;
+              const hiddenTrailingModelCount = hasOverflowModels && !isLowCoverageExpanded
+                ? trailingModels.length
+                : 0;
 
               return (
                 <details
@@ -4249,7 +4279,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                   </summary>
 
                   <div className="grid grid-cols-1 gap-1 pb-2 pt-1">
-                    {group.models.map((model) => {
+                    {providerModelsToRender.map((model) => {
                       const isBaseModel = baseModelNameSet.has(model);
                       const coveragePercent = modelCoveragePercentMap.get(model) ?? 0;
                       const coverageText = isBaseModel ? `${coveragePercent}%\u200b` : `${coveragePercent}%`;
@@ -4278,6 +4308,24 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                         </label>
                       );
                     })}
+
+                    {trailingModels.length > 0 ? (
+                      <button
+                        type="button"
+                        className="btn btn-xs btn-ghost h-7 min-h-0 justify-start px-1 text-[11px] opacity-80 hover:opacity-100"
+                        onClick={() => {
+                          setExpandedLowCoverageProviders((prev) => ({
+                            ...prev,
+                            [group.providerName]: !prev[group.providerName]
+                          }));
+                        }}
+                      >
+                        {isLowCoverageExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                        {isLowCoverageExpanded
+                          ? `收起后续模型（${trailingModels.length}）`
+                          : `展开后续模型（${hiddenTrailingModelCount}）`}
+                      </button>
+                    ) : null}
                   </div>
                 </details>
               );

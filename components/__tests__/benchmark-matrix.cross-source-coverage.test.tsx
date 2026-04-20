@@ -388,6 +388,124 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     expect(screen.getByLabelText("Model C").closest("label")).toHaveTextContent("100%");
   });
 
+  test("单 provider 超过 8 个模型时会默认折叠后续模型，并支持展开", () => {
+    const providerRows: Array<{
+      providerName: string;
+      modelName: string;
+      benchmarkName: string;
+      benchmarkType: string;
+      benchmarkCanonicalKey: string;
+      benchTime: string;
+      valueRaw: string;
+      valueNum: number;
+      valueNote: null;
+      source: string;
+    }> = [];
+
+    const models = Array.from({ length: 10 }, (_, index) => `Model ${index + 1}`);
+    const benchmarks = ["Bench-A", "Bench-B", "Bench-C"] as const;
+
+    models.forEach((modelName, modelIndex) => {
+      const coveredBenchmarks = modelIndex < 8 ? benchmarks : [benchmarks[0]];
+
+      coveredBenchmarks.forEach((benchmarkName, benchmarkIndex) => {
+        const score = 90 - modelIndex - benchmarkIndex;
+
+        providerRows.push({
+          providerName: "MegaAI",
+          modelName,
+          benchmarkName,
+          benchmarkType: "General",
+          benchmarkCanonicalKey: `${benchmarkName.toLowerCase()}:general`,
+          benchTime: "2026-04-06T00:00:00.000Z",
+          valueRaw: String(score),
+          valueNum: score,
+          valueNote: null,
+          source: "text:mega"
+        });
+      });
+    });
+
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:mega"]}
+        rows={[...providerRows]}
+        allRows={[...providerRows]}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "展开模型筛选" }));
+
+    expect(screen.queryByLabelText("Model 9")).toBeNull();
+    expect(screen.queryByLabelText("Model 10")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /展开后续模型（2）/ }));
+
+    expect(screen.getByLabelText("Model 9")).toBeInTheDocument();
+    expect(screen.getByLabelText("Model 10")).toBeInTheDocument();
+  });
+
+  test("provider 内模型按当前覆盖率降序排序", () => {
+    const benchmarks = ["Bench-1", "Bench-2", "Bench-3", "Bench-4"] as const;
+    const rows: Array<{
+      providerName: string;
+      modelName: string;
+      benchmarkName: string;
+      benchmarkType: string;
+      benchmarkCanonicalKey: string;
+      benchTime: string;
+      valueRaw: string;
+      valueNum: number;
+      valueNote: null;
+      source: string;
+    }> = [];
+
+    const pushRows = (modelName: string, coveredCount: number) => {
+      benchmarks.slice(0, coveredCount).forEach((benchmarkName, index) => {
+        rows.push({
+          providerName: "SortLab",
+          modelName,
+          benchmarkName,
+          benchmarkType: "General",
+          benchmarkCanonicalKey: `${benchmarkName.toLowerCase()}:general`,
+          benchTime: "2026-04-06T00:00:00.000Z",
+          valueRaw: String(90 - index),
+          valueNum: 90 - index,
+          valueNote: null,
+          source: "text:sort"
+        });
+      });
+    };
+
+    pushRows("Model A", 4); // 100%
+    pushRows("Model B", 2); // 50%
+    pushRows("Model C", 3); // 75%
+
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:sort"]}
+        rows={[...rows]}
+        allRows={[...rows]}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "展开模型筛选" }));
+
+    const providerDetails = screen.getByText("SortLab").closest("details");
+    expect(providerDetails).not.toBeNull();
+    if (!providerDetails) {
+      throw new Error("SortLab provider details not found");
+    }
+
+    const orderedModels = Array.from(
+      providerDetails.querySelectorAll<HTMLInputElement>("input[type='checkbox'][aria-label]")
+    )
+      .map((input) => input.getAttribute("aria-label"))
+      .filter((name): name is string => Boolean(name) && name !== "SortLab");
+
+    expect(orderedModels.slice(0, 3)).toEqual(["Model A", "Model C", "Model B"]);
+  });
+
   test("Category / Benchmark 表头显示唯一项计数", () => {
     render(
       <BenchmarkMatrix
