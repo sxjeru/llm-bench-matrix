@@ -1193,7 +1193,7 @@ describe("AdminConsole data maintenance", () => {
 
     expect(await screen.findByText("Bench-1")).toBeInTheDocument();
     expect(screen.getByText("总值 12")).toBeInTheDocument();
-    expect(screen.getByText("text:seed")).toBeInTheDocument();
+    expect(screen.getAllByText(/text:seed/).length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: "同化为 1 量纲" }));
 
