@@ -4,6 +4,7 @@ type RenameEntityFn = (input: {
   entityType: "model" | "benchmark";
   entityId: number;
   nextName: string;
+  nextBenchmarkType?: string;
   mergeOnConflict?: boolean;
 }) => Promise<{
   ok: true;
@@ -11,6 +12,8 @@ type RenameEntityFn = (input: {
   entityId: number;
   previousName: string;
   nextName: string;
+  previousBenchmarkType?: string;
+  nextBenchmarkType?: string;
   action: "renamed" | "merged-and-renamed" | "unchanged";
   mergedSourceId?: number;
   mergedSourceName?: string;
@@ -165,6 +168,50 @@ describe("renameEntity", () => {
       expect.objectContaining({
         benchmarkName: "Bench New",
         canonicalKey: "benchnew:typea"
+      })
+    );
+  });
+
+  test("benchmark 可在改名时同步修改 type", async () => {
+    const dbSelectWhere = createSelectWhereMock([
+      [],
+      [
+        {
+          id: 302,
+          benchmarkName: "Bench-Old",
+          benchmarkType: "Type-A",
+          canonicalKey: "benchold:typea",
+          mergedIntoBenchmarkId: null
+        }
+      ],
+      []
+    ]);
+    const dbSelectFrom = vi.fn(() => ({ where: dbSelectWhere }));
+    vi.spyOn(dbForTest, "select").mockImplementation(() => ({ from: dbSelectFrom }));
+
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const updateSet = vi.fn<(payload: Record<string, unknown>) => { where: typeof updateWhere }>(
+      () => ({ where: updateWhere })
+    );
+    vi.spyOn(dbForTest, "update").mockImplementation(() => ({ set: updateSet }));
+
+    const result = await renameEntityForTest({
+      entityType: "benchmark",
+      entityId: 302,
+      nextName: "Bench New",
+      nextBenchmarkType: "Type-Z"
+    });
+
+    expect(result.action).toBe("renamed");
+    expect(result.entityId).toBe(302);
+    expect(result.nextName).toBe("Bench New");
+    expect(result.nextBenchmarkType).toBe("Type-Z");
+
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        benchmarkName: "Bench New",
+        benchmarkType: "Type-Z",
+        canonicalKey: "benchnew:typez"
       })
     );
   });

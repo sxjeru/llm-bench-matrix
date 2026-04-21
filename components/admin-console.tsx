@@ -821,6 +821,7 @@ export function AdminConsole({
   const [renameSearchKeyword, setRenameSearchKeyword] = useState("");
   const [renameSelectedEntityId, setRenameSelectedEntityId] = useState<number | null>(null);
   const [renameNextName, setRenameNextName] = useState("");
+  const [renameNextBenchmarkType, setRenameNextBenchmarkType] = useState("");
   const [renameMergeOnConflict, setRenameMergeOnConflict] = useState(true);
   const [renameSubmitState, setRenameSubmitState] = useState<RenameSubmitState>("idle");
   const [renameListScrollTop, setRenameListScrollTop] = useState(0);
@@ -1629,6 +1630,7 @@ export function AdminConsole({
     setRenameSearchKeyword("");
     setRenameSelectedEntityId(null);
     setRenameNextName("");
+    setRenameNextBenchmarkType("");
     setRenameSubmitState("idle");
     setRenameListScrollTop(0);
 
@@ -3202,11 +3204,13 @@ export function AdminConsole({
     if (renameEntityType === "model") {
       const matchedModel = modelById.get(entityId);
       setRenameNextName(matchedModel?.modelName ?? "");
+      setRenameNextBenchmarkType("");
       return;
     }
 
     const matchedBenchmark = benchmarkById.get(entityId);
     setRenameNextName(matchedBenchmark?.benchmarkName ?? "");
+    setRenameNextBenchmarkType(matchedBenchmark?.benchmarkType ?? "");
   }
 
   async function onRenameEntity(event: FormEvent<HTMLFormElement>) {
@@ -3227,6 +3231,15 @@ export function AdminConsole({
       return;
     }
 
+    const normalizedNextBenchmarkType = renameEntityType === "benchmark"
+      ? renameNextBenchmarkType.trim()
+      : "";
+
+    if (renameEntityType === "benchmark" && !normalizedNextBenchmarkType) {
+      notifyError("benchmark 的新 type 不能为空");
+      return;
+    }
+
     if (renameSubmitResetTimerRef.current) {
       clearTimeout(renameSubmitResetTimerRef.current);
       renameSubmitResetTimerRef.current = null;
@@ -3239,13 +3252,20 @@ export function AdminConsole({
         entityType: renameEntityType,
         entityId: renameSelectedEntityId,
         nextName: normalizedNextName,
+        nextBenchmarkType: renameEntityType === "benchmark" ? normalizedNextBenchmarkType : undefined,
         mergeOnConflict: renameMergeOnConflict
       });
 
       const action = typeof result?.action === "string" ? result.action : "renamed";
       const persistedNextName = typeof result?.nextName === "string" ? result.nextName : normalizedNextName;
+      const persistedNextBenchmarkType = renameEntityType === "benchmark"
+        ? (typeof result?.nextBenchmarkType === "string" ? result.nextBenchmarkType : normalizedNextBenchmarkType)
+        : "";
 
       setRenameNextName(persistedNextName);
+      if (renameEntityType === "benchmark") {
+        setRenameNextBenchmarkType(persistedNextBenchmarkType);
+      }
       setRenameSubmitState("success");
 
       renameSubmitResetTimerRef.current = setTimeout(() => {
@@ -4920,7 +4940,7 @@ export function AdminConsole({
                   placeholder="请先在上方列表选中实体"
                 />
               </div>
-              <div className="md:col-span-5">
+              <div className={renameEntityType === "benchmark" ? "md:col-span-3" : "md:col-span-5"}>
                 <div className="mb-1 text-xs opacity-70">新名称</div>
                 <input
                   className="input input-bordered w-full"
@@ -4930,7 +4950,19 @@ export function AdminConsole({
                   required
                 />
               </div>
-              <div className="md:col-span-3 flex items-end">
+              {renameEntityType === "benchmark" ? (
+                <div className="md:col-span-2">
+                  <div className="mb-1 text-xs opacity-70">新 Type</div>
+                  <input
+                    className="input input-bordered w-full"
+                    value={renameNextBenchmarkType}
+                    onChange={(event) => setRenameNextBenchmarkType(event.target.value)}
+                    placeholder="输入新的 benchmark type"
+                    required
+                  />
+                </div>
+              ) : null}
+              <div className={renameEntityType === "benchmark" ? "md:col-span-3 flex items-end" : "md:col-span-3 flex items-end"}>
                 <label className="label cursor-pointer justify-start gap-2">
                   <input
                     type="checkbox"

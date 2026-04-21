@@ -1876,6 +1876,7 @@ export async function mergeEntity(input: {
   sourceId: number;
   targetId: number;
   targetBenchmarkName?: string;
+  targetBenchmarkType?: string;
 }) {
   if (input.sourceId === input.targetId) {
     throw new Error("sourceId and targetId cannot be the same");
@@ -1899,8 +1900,11 @@ export async function mergeEntity(input: {
     const normalizedTargetBenchmarkName = input.targetBenchmarkName
       ? normalizeNameParenthesisSpacing(input.targetBenchmarkName)
       : "";
+    const normalizedTargetBenchmarkType = input.targetBenchmarkType
+      ? normalizeNameParenthesisSpacing(input.targetBenchmarkType).trim()
+      : "";
 
-    if (normalizedTargetBenchmarkName.length > 0) {
+    if (normalizedTargetBenchmarkName.length > 0 || normalizedTargetBenchmarkType.length > 0) {
       const [targetBenchmark] = await tx
         .select({
           benchmarkName: benchmarks.benchmarkName,
@@ -1914,10 +1918,17 @@ export async function mergeEntity(input: {
         throw new Error(`target benchmark not found: ${input.targetId}`);
       }
 
+      const nextBenchmarkName = normalizedTargetBenchmarkName.length > 0
+        ? normalizedTargetBenchmarkName
+        : targetBenchmark.benchmarkName;
+      const nextBenchmarkType = normalizedTargetBenchmarkType.length > 0
+        ? normalizedTargetBenchmarkType
+        : targetBenchmark.benchmarkType;
+
       const dedupeRule = await getModelDedupeRule();
       const nextCanonicalKey = buildBenchmarkCanonicalKey(
-        normalizedTargetBenchmarkName,
-        targetBenchmark.benchmarkType,
+        nextBenchmarkName,
+        nextBenchmarkType,
         dedupeRule
       );
 
@@ -1932,8 +1943,8 @@ export async function mergeEntity(input: {
         .from(benchmarks)
         .where(
           and(
-            eq(benchmarks.benchmarkName, normalizedTargetBenchmarkName),
-            eq(benchmarks.benchmarkType, targetBenchmark.benchmarkType)
+            eq(benchmarks.benchmarkName, nextBenchmarkName),
+            eq(benchmarks.benchmarkType, nextBenchmarkType)
           )
         )
         .limit(1);
@@ -1983,7 +1994,8 @@ export async function mergeEntity(input: {
       await tx
         .update(benchmarks)
         .set({
-          benchmarkName: normalizedTargetBenchmarkName,
+          benchmarkName: nextBenchmarkName,
+          benchmarkType: nextBenchmarkType,
           canonicalKey: nextCanonicalKey
         })
         .where(eq(benchmarks.id, input.targetId));
@@ -2082,6 +2094,7 @@ export type RenameEntityInput = {
   entityType: "model" | "benchmark";
   entityId: number;
   nextName: string;
+  nextBenchmarkType?: string;
   mergeOnConflict?: boolean;
 };
 
@@ -2091,6 +2104,8 @@ export type RenameEntityResult = {
   entityId: number;
   previousName: string;
   nextName: string;
+  previousBenchmarkType?: string;
+  nextBenchmarkType?: string;
   action: "renamed" | "merged-and-renamed" | "unchanged";
   mergedSourceId?: number;
   mergedSourceName?: string;
@@ -2126,12 +2141,17 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
       throw new Error(`benchmark ${input.entityId} 已被合并到 ${current.mergedIntoBenchmarkId}，请改名目标实体`);
     }
 
-    const nextCanonicalKey = buildBenchmarkCanonicalKey(nextName, current.benchmarkType, dedupeRule);
+    const normalizedNextBenchmarkType = normalizeNameParenthesisSpacing(
+      input.nextBenchmarkType?.trim() || current.benchmarkType
+    ).trim() || current.benchmarkType;
+
+    const nextCanonicalKey = buildBenchmarkCanonicalKey(nextName, normalizedNextBenchmarkType, dedupeRule);
 
     const [conflict] = await db
       .select({
         id: benchmarks.id,
         benchmarkName: benchmarks.benchmarkName,
+        benchmarkType: benchmarks.benchmarkType,
         mergedIntoBenchmarkId: benchmarks.mergedIntoBenchmarkId
       })
       .from(benchmarks)
@@ -2140,20 +2160,26 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
           ne(benchmarks.id, input.entityId),
           or(
             eq(benchmarks.canonicalKey, nextCanonicalKey),
-            and(eq(benchmarks.benchmarkName, nextName), eq(benchmarks.benchmarkType, current.benchmarkType))
+            and(eq(benchmarks.benchmarkName, nextName), eq(benchmarks.benchmarkType, normalizedNextBenchmarkType))
           )
         )
       )
       .limit(1);
 
     if (!conflict) {
-      if (current.benchmarkName === nextName && current.canonicalKey === nextCanonicalKey) {
+      if (
+        current.benchmarkName === nextName
+        && current.benchmarkType === normalizedNextBenchmarkType
+        && current.canonicalKey === nextCanonicalKey
+      ) {
         return {
           ok: true,
           entityType: "benchmark",
           entityId: current.id,
           previousName: current.benchmarkName,
           nextName,
+          previousBenchmarkType: current.benchmarkType,
+          nextBenchmarkType: normalizedNextBenchmarkType,
           action: "unchanged"
         };
       }
@@ -2162,6 +2188,7 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
         .update(benchmarks)
         .set({
           benchmarkName: nextName,
+          benchmarkType: normalizedNextBenchmarkType,
           canonicalKey: nextCanonicalKey
         })
         .where(eq(benchmarks.id, current.id));
@@ -2174,6 +2201,8 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
         entityId: current.id,
         previousName: current.benchmarkName,
         nextName,
+        previousBenchmarkType: current.benchmarkType,
+        nextBenchmarkType: normalizedNextBenchmarkType,
         action: "renamed"
       };
     }
@@ -2188,7 +2217,8 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
       entityType: "benchmark",
       sourceId: conflict.id,
       targetId: current.id,
-      targetBenchmarkName: nextName
+      targetBenchmarkName: nextName,
+      targetBenchmarkType: normalizedNextBenchmarkType
     });
 
     return {
@@ -2197,6 +2227,8 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
       entityId: current.id,
       previousName: current.benchmarkName,
       nextName,
+      previousBenchmarkType: current.benchmarkType,
+      nextBenchmarkType: normalizedNextBenchmarkType,
       action: "merged-and-renamed",
       mergedSourceId: conflict.id,
       mergedSourceName: conflict.benchmarkName

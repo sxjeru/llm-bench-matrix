@@ -1408,6 +1408,7 @@ describe("AdminConsole rename tab", () => {
       entityType?: string;
       entityId?: number;
       nextName?: string;
+      nextBenchmarkType?: string;
       mergeOnConflict?: boolean;
     };
 
@@ -1415,6 +1416,66 @@ describe("AdminConsole rename tab", () => {
       entityType: "model",
       entityId: 1,
       nextName: "Model A Prime",
+      mergeOnConflict: true
+    });
+
+    expect(await screen.findByText(/名称已更新并写入数据库/i)).toBeInTheDocument();
+  });
+
+  test("benchmark 改名时可一并维护 type", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetchSequence({
+      ok: true,
+      entityType: "benchmark",
+      entityId: 11,
+      previousName: "Bench-1",
+      previousBenchmarkType: "Type-A",
+      nextName: "Bench-1 Prime",
+      nextBenchmarkType: "Type-Z",
+      action: "renamed"
+    });
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await user.click(screen.getByRole("tab", { name: "名称维护" }));
+    await user.selectOptions(screen.getByRole("combobox"), "benchmark");
+
+    const searchInput = screen.getByPlaceholderText("输入名称或 ID 关键字搜索实体");
+    await user.clear(searchInput);
+    await user.type(searchInput, "Bench-1");
+
+    await user.click(await screen.findByText("Bench-1 [Type-A]"));
+
+    const renameInput = screen.getByPlaceholderText("输入新的 benchmark 名称");
+    await user.clear(renameInput);
+    await user.type(renameInput, "Bench-1 Prime");
+
+    const renameTypeInput = screen.getByPlaceholderText("输入新的 benchmark type");
+    await user.clear(renameTypeInput);
+    await user.type(renameTypeInput, "Type-Z");
+
+    await user.click(screen.getByRole("button", { name: "保存名称变更" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const call = fetchMock.mock.calls[0];
+    expect(call?.[0]).toBe("/api/admin/rename-entity");
+
+    const payload = JSON.parse(((call?.[1] as RequestInit).body ?? "{}") as string) as {
+      entityType?: string;
+      entityId?: number;
+      nextName?: string;
+      nextBenchmarkType?: string;
+      mergeOnConflict?: boolean;
+    };
+
+    expect(payload).toMatchObject({
+      entityType: "benchmark",
+      entityId: 11,
+      nextName: "Bench-1 Prime",
+      nextBenchmarkType: "Type-Z",
       mergeOnConflict: true
     });
 
