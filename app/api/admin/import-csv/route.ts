@@ -5,6 +5,7 @@ import { importBenchmarkCsv } from "../../../../lib/admin-service";
 
 const schema = z.object({
   csvText: z.string().min(1),
+  htmlText: z.string().optional(),
   source: z.string().optional()
 });
 
@@ -20,7 +21,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await importBenchmarkCsv(parsed.data.csvText, parsed.data.source);
+    const result = await importBenchmarkCsv(parsed.data.csvText, parsed.data.source, parsed.data.htmlText);
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "文本导入失败";

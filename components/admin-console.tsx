@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type ClipboardEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   Database,
@@ -732,6 +732,8 @@ export function AdminConsole({
   const [csvText, setCsvText] = useState(
     ""
   );
+  const [csvHtmlText, setCsvHtmlText] = useState("");
+  const [hasParsedHtmlTable, setHasParsedHtmlTable] = useState(false);
   const [csvSource, setCsvSource] = useState("");
   const [confirmImportWithoutPreviewOpen, setConfirmImportWithoutPreviewOpen] = useState(false);
   const [confirmImportWithoutSourceOpen, setConfirmImportWithoutSourceOpen] = useState(false);
@@ -2624,8 +2626,10 @@ export function AdminConsole({
     try {
       const result = await postJson("/api/admin/import-csv/preview", {
         csvText,
+        htmlText: csvHtmlText || undefined,
         source: csvSource || undefined
       });
+      setHasParsedHtmlTable(result.parseSource === "html");
       const previewRows = (result.previewRows ?? []) as TextImportPreviewRow[];
       setTextImportPreviewRows(previewRows);
       setTextImportDraftRows(previewRows.map((row) => ({ ...row })));
@@ -2662,9 +2666,28 @@ export function AdminConsole({
         notifySuccess(`文本预览完成：可导入 ${result.total ?? 0} 条，跳过 ${result.skipped ?? 0} 条`);
       }
     } catch (error) {
+      setHasParsedHtmlTable(false);
       notifyError(error instanceof Error ? error.message : "文本预览失败");
     } finally {
       setIsPreviewingTextImport(false);
+    }
+  }
+
+  function onCsvTextPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const htmlText = event.clipboardData.getData("text/html").trim();
+    if (!/<table[\s>]/i.test(htmlText)) {
+      setCsvHtmlText("");
+      setHasParsedHtmlTable(false);
+      return;
+    }
+
+    event.preventDefault();
+
+    const plainText = event.clipboardData.getData("text/plain");
+    setCsvHtmlText(htmlText);
+    setHasParsedHtmlTable(false);
+    if (plainText.length > 0) {
+      setCsvText(plainText);
     }
   }
 
@@ -2726,6 +2749,7 @@ export function AdminConsole({
       } else {
         const result = await postJson("/api/admin/import-csv", {
           csvText,
+          htmlText: csvHtmlText || undefined,
           source: csvSource || undefined
         });
 
@@ -3888,7 +3912,12 @@ export function AdminConsole({
                 <textarea
                   className="textarea textarea-bordered min-h-[180px] w-full"
                   value={csvText}
-                  onChange={(e) => setCsvText(e.target.value)}
+                  onChange={(e) => {
+                    setCsvText(e.target.value);
+                    setCsvHtmlText("");
+                    setHasParsedHtmlTable(false);
+                  }}
+                  onPaste={onCsvTextPaste}
                   required
                 />
                 <div className="mt-1 grid grid-cols-1 gap-3 xl:grid-cols-[auto_auto_minmax(320px,1fr)] xl:items-center">
@@ -3900,9 +3929,14 @@ export function AdminConsole({
                   >
                     {isPreviewingTextImport ? "预览中..." : "预览导入结果"}
                   </button>
-                  <button type="submit" className="btn btn-primary" disabled={isImportingTextCsv}>
-                    {isImportingTextCsv ? "导入中..." : "执行导入"}
-                  </button>
+                  <div className="inline-flex items-center gap-2">
+                    <button type="submit" className="btn btn-primary" disabled={isImportingTextCsv}>
+                      {isImportingTextCsv ? "导入中..." : "执行导入"}
+                    </button>
+                    {hasParsedHtmlTable ? (
+                      <span className="text-xs font-medium text-success">已成功解析 HTML 表格</span>
+                    ) : null}
+                  </div>
                   {textImportStatus !== "idle" ? (
                     <div className="w-full xl:justify-self-end">
                       <progress

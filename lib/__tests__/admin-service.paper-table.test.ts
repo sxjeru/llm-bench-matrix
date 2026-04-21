@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, test } from "vitest";
 
 type ParsedTextImportResult = {
   format: string;
+  parseSource?: string;
   rows: Array<{
     benchmarkName: string;
     benchmarkType: string;
@@ -21,7 +22,8 @@ type ParsedTextImportResult = {
 
 let parseBenchmarkTextRowsForTest: (
   inputText: string,
-  sourceInput?: string | null
+  sourceInput?: string | null,
+  htmlInput?: string | null
 ) => ParsedTextImportResult;
 let normalizeDuplicateCompareTextForTest: (input: string) => string;
 let getDuplicateNameSimilarityForTest: (left: string, right: string) => number;
@@ -290,6 +292,119 @@ describe("paper-table 文本解析", () => {
     expect(covostRows.length).toBeGreaterThan(0);
     expect(new Set(covostRows.map((row) => row.benchmarkType))).toEqual(new Set(["Audio"]));
     expect(covostRows.every((row) => row.modalities.includes("Audio"))).toBe(true);
+  });
+
+  test("Tab 矩阵文本支持 benchmark 换行并继承上一类型", () => {
+    const inputText = [
+      "Benchmark\tKimi K2.6\tGPT-5.4\tClaude Opus 4.6\tGemini 3.1 Pro\tKimi K2.5",
+      "Agentic",
+      "HLE-Full",
+      "(w/ tools)\t54.0\t52.1\t53.0\t51.4\t50.2",
+      "BrowseComp\t83.2\t82.7\t83.7\t85.9\t74.9"
+    ].join("\n");
+
+    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+
+    expect(parsed.format).toBe("matrix-table");
+
+    const hleRows = parsed.rows.filter((row) => row.benchmarkName === "HLE-Full (w/ tools)");
+    expect(hleRows).toHaveLength(5);
+    expect(new Set(hleRows.map((row) => row.benchmarkType))).toEqual(new Set(["Agentic"]));
+
+    const hleValueByModel = new Map(hleRows.map((row) => [row.modelName, row.valueRaw]));
+    expect(hleValueByModel.get("Kimi K2.6")).toBe("54.0");
+    expect(hleValueByModel.get("GPT-5.4")).toBe("52.1");
+    expect(hleValueByModel.get("Claude Opus 4.6")).toBe("53.0");
+    expect(hleValueByModel.get("Gemini 3.1 Pro")).toBe("51.4");
+    expect(hleValueByModel.get("Kimi K2.5")).toBe("50.2");
+
+    const browseCompRows = parsed.rows.filter((row) => row.benchmarkName === "BrowseComp");
+    expect(browseCompRows).toHaveLength(5);
+    expect(new Set(browseCompRows.map((row) => row.benchmarkType))).toEqual(new Set(["Agentic"]));
+  });
+
+  test("提供 htmlText 时优先按 HTML 表格解析，并识别 colspan 分类行", () => {
+    const fallbackText = [
+      "Benchmark\tM1",
+      "Fallback\t1.0"
+    ].join("\n");
+
+    const htmlInput = [
+      "<html><body><table>",
+      "<thead>",
+      "<tr><th>Benchmark</th><th>Kimi K2.6</th><th>GPT-5.4<br>(xhigh)</th><th>Kimi K2.5</th></tr>",
+      "</thead>",
+      "<tbody>",
+      "<tr><td colspan=\"4\">Agentic</td></tr>",
+      "<tr><td>HLE-Full<br>(w/ tools)</td><td>54.0</td><td>52.1</td><td>50.2</td></tr>",
+      "</tbody>",
+      "</table></body></html>"
+    ].join("");
+
+    const parsed = parseBenchmarkTextRowsForTest(fallbackText, "text:unit-test", htmlInput);
+
+    expect(parsed.format).toBe("matrix-table");
+    expect(parsed.parseSource).toBe("html");
+
+    const benchmarkNames = new Set(parsed.rows.map((row) => row.benchmarkName));
+    expect(benchmarkNames.has("Fallback")).toBe(false);
+    expect(benchmarkNames.has("HLE-Full (w/ tools)")).toBe(true);
+
+    const hleRows = parsed.rows.filter((row) => row.benchmarkName === "HLE-Full (w/ tools)");
+    expect(hleRows).toHaveLength(3);
+    expect(new Set(hleRows.map((row) => row.benchmarkType))).toEqual(new Set(["Agentic"]));
+
+    const valueByModel = new Map(hleRows.map((row) => [row.modelName, row.valueRaw]));
+    expect(Number(valueByModel.get("Kimi K2.6"))).toBeCloseTo(54.0);
+    expect(Array.from(valueByModel.entries()).some(([modelName, value]) => modelName.includes("GPT-5.4") && value === "52.1")).toBe(true);
+    expect(valueByModel.get("Kimi K2.5")).toBe("50.2");
+  });
+
+  test("HTML 表格 rowspan 分数会复制到覆盖行", () => {
+    const htmlInput = [
+      "<html><body><table>",
+      "<thead>",
+      "<tr><th>Benchmark</th><th>M1</th><th>M2</th><th>M3</th><th>M4</th><th>M5</th></tr>",
+      "</thead>",
+      "<tbody>",
+      "<tr><td>BrowseComp</td><td>83.2</td><td rowspan=\"2\">82.7</td><td rowspan=\"2\">83.7</td><td rowspan=\"2\">85.9</td><td>74.9</td></tr>",
+      "<tr><td>BrowseComp<br>(Agent Swarm)</td><td>86.3</td><td>78.4</td></tr>",
+      "</tbody>",
+      "</table></body></html>"
+    ].join("");
+
+    const parsed = parseBenchmarkTextRowsForTest(htmlInput, "text:unit-test");
+    expect(parsed.format).toBe("matrix-table");
+
+    const valueByBenchmarkAndModel = new Map(
+      parsed.rows.map((row) => [`${row.benchmarkName}::${row.modelName}`, row.valueRaw])
+    );
+
+    expect(valueByBenchmarkAndModel.get("BrowseComp::M2")).toBe("82.7");
+    expect(valueByBenchmarkAndModel.get("BrowseComp::M3")).toBe("83.7");
+    expect(valueByBenchmarkAndModel.get("BrowseComp::M4")).toBe("85.9");
+
+    expect(valueByBenchmarkAndModel.get("BrowseComp (Agent Swarm)::M2")).toBe("82.7");
+    expect(valueByBenchmarkAndModel.get("BrowseComp (Agent Swarm)::M3")).toBe("83.7");
+    expect(valueByBenchmarkAndModel.get("BrowseComp (Agent Swarm)::M4")).toBe("85.9");
+    expect(valueByBenchmarkAndModel.get("BrowseComp (Agent Swarm)::M1")).toBe("86.3");
+    expect(valueByBenchmarkAndModel.get("BrowseComp (Agent Swarm)::M5")).toBe("78.4");
+  });
+
+  test("HTML 表格中的星号值会保留原始写法", () => {
+    const htmlInput = [
+      "<html><body><table>",
+      "<thead><tr><th>Benchmark</th><th>M1</th></tr></thead>",
+      "<tbody><tr><td>Star Bench</td><td>65.4*</td></tr></tbody>",
+      "</table></body></html>"
+    ].join("");
+
+    const parsed = parseBenchmarkTextRowsForTest("Benchmark\tX\nFallback\t1", "text:unit-test", htmlInput);
+    const starRow = parsed.rows.find((row) => row.benchmarkName === "Star Bench" && row.modelName === "M1");
+
+    expect(parsed.parseSource).toBe("html");
+    expect(starRow).toBeDefined();
+    expect(starRow?.valueRaw).toBe("65.4*");
   });
 
   test("多行堆叠模型表头可重建并正确对齐数值列", () => {

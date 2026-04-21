@@ -1,4 +1,5 @@
 import { parse } from "csv-parse/sync";
+import * as XLSX from "xlsx";
 import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
@@ -48,6 +49,7 @@ type ParsedTextImportResult = {
   rows: NormalizedTextImportRow[];
   skipped: number;
   confidence?: number;
+  parseSource?: "text" | "html";
   warnings?: TextParseWarning[];
 };
 
@@ -68,6 +70,7 @@ type DbExecutor = Pick<typeof db, "select" | "insert" | "update" | "delete" | "e
 type DbTransactionClient = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 const EMPTY_VALUE_MARKERS = new Set(["", "-", "--", "—", "na", "n/a", "null", "none"]);
+const HTML_TABLE_TAG_REGEX = /<table[\s>]/i;
 const LOWER_IS_BETTER_BENCHMARK_RULES = [/omnidocbench\s*1\.5/i, /\b(?:r?mse)\b/i];
 const LOWER_IS_BETTER_ASR_TYPE_REGEX = /\basr\b/i;
 const OMNIDOCBENCH_15_MATCHER = /omnidocbench\s*1\.5/i;
@@ -549,6 +552,123 @@ function splitTableLine(line: string): string[] {
     .trim()
     .split(/\s{2,}/)
     .map((item) => item.trim());
+}
+
+function getHtmlTableInput(input: string | null | undefined): string | null {
+  if (!input) return null;
+
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  return HTML_TABLE_TAG_REGEX.test(trimmed) ? trimmed : null;
+}
+
+function normalizeHtmlImportCellText(value: unknown): string {
+  const normalized = value === null || value === undefined
+    ? ""
+    : String(value)
+      .replace(/\u00A0/g, " ")
+      .replace(/\r?\n+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  return normalizeNameParenthesisSpacing(normalized);
+}
+
+function ensureHtmlRowCell(rows: string[][], rowIndex: number, columnIndex: number) {
+  while (rows.length <= rowIndex) {
+    rows.push([]);
+  }
+
+  const row = rows[rowIndex];
+  if (!row) return;
+
+  while (row.length <= columnIndex) {
+    row.push("");
+  }
+}
+
+function parseHtmlTableToText(inputHtml: string): string | null {
+  try {
+    const workbook = XLSX.read(inputHtml, { type: "string", raw: true });
+    const selectedSheet = workbook.SheetNames[0];
+    if (!selectedSheet) return null;
+
+    const worksheet = workbook.Sheets[selectedSheet];
+    if (!worksheet) return null;
+
+    const rows = (XLSX.utils.sheet_to_json(worksheet, {
+      header: 1,
+      raw: true,
+      defval: ""
+    }) as unknown[][]).map((row) => row.map((cell) => normalizeHtmlImportCellText(cell)));
+
+    const merges = Array.isArray(worksheet["!merges"])
+      ? (worksheet["!merges"] as Array<{ s?: { r?: number; c?: number }; e?: { r?: number; c?: number } }> )
+      : [];
+
+    merges.forEach((merge) => {
+      const startRow = merge.s?.r;
+      const startCol = merge.s?.c;
+      const endRow = merge.e?.r;
+      const endCol = merge.e?.c;
+
+      if (
+        startRow === undefined
+        || startCol === undefined
+        || endRow === undefined
+        || endCol === undefined
+      ) {
+        return;
+      }
+
+      if (startRow < 0 || startCol < 0 || endRow <= startRow || endCol !== startCol) {
+        return;
+      }
+
+      ensureHtmlRowCell(rows, startRow, startCol);
+      const seedValue = normalizeHtmlImportCellText(rows[startRow]?.[startCol] ?? "");
+      if (!seedValue) {
+        return;
+      }
+
+      for (let rowIndex = startRow + 1; rowIndex <= endRow; rowIndex += 1) {
+        ensureHtmlRowCell(rows, rowIndex, startCol);
+        const currentValue = normalizeHtmlImportCellText(rows[rowIndex]?.[startCol] ?? "");
+        if (currentValue) {
+          continue;
+        }
+
+        const targetRow = rows[rowIndex];
+        if (!targetRow) continue;
+        targetRow[startCol] = seedValue;
+      }
+    });
+
+    const textLines = rows
+      .map((row) => {
+        const normalizedCells = row.map((cell) => normalizeHtmlImportCellText(cell));
+
+        let lastNonEmptyCellIndex = -1;
+        for (let index = normalizedCells.length - 1; index >= 0; index -= 1) {
+          if (normalizedCells[index]) {
+            lastNonEmptyCellIndex = index;
+            break;
+          }
+        }
+
+        if (lastNonEmptyCellIndex < 0) {
+          return "";
+        }
+
+        return normalizedCells.slice(0, lastNonEmptyCellIndex + 1).join("\t");
+      })
+      .filter((line) => line.trim().length > 0);
+
+    return textLines.length > 0 ? textLines.join("\n") : null;
+  } catch {
+    return null;
+  }
 }
 
 function normalizePaperTableLine(line: string): string {
@@ -2662,6 +2782,13 @@ function inferMatrixModelCountFromDataLines(lines: string[], startLineIndex: num
   return bestCount >= 2 ? bestCount : null;
 }
 
+function isMatrixBenchmarkContinuationFragment(label: string): boolean {
+  const trimmed = label.trim();
+  if (!trimmed) return false;
+
+  return /^[（(]/.test(trimmed) || /^[-–—/:]/.test(trimmed);
+}
+
 function parseMatrixTextRows(inputText: string, defaultSource: string | null): ParsedTextImportResult {
   const rawLines = inputText
     .split(/\r?\n/)
@@ -2752,6 +2879,7 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
   let currentBenchmarkType = preambleTypeHint ?? "General";
   let currentBenchmarkTypeProvided = Boolean(preambleTypeHint && preambleTypeHint.trim().length > 0);
   let currentModalities = defaultModalities;
+  let pendingBenchmarkPrefix: string | null = null;
 
   for (let lineIndex = headerLineIndex + 1; lineIndex < rawLines.length; lineIndex += 1) {
     const cells = splitTableLine(rawLines[lineIndex]);
@@ -2764,16 +2892,48 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
       currentBenchmarkTypeProvided = true;
       const sectionTypeHint = inferTypeFromPreambleLine(categoryInput);
       currentModalities = sectionTypeHint ? inferModalitiesFromCategory(sectionTypeHint) : defaultModalities;
+      pendingBenchmarkPrefix = null;
     }
 
-    const benchmarkInput = normalizeNameParenthesisSpacing(cells[benchmarkColumnIndex] || "");
-    const normalizedBenchmarkInput = normalizeBenchmarkImportName(benchmarkInput);
-    const benchmarkDirection = parseBenchmarkNameAndDirection(normalizedBenchmarkInput);
-    const benchmarkName = benchmarkDirection.benchmarkName;
+    const rawBenchmarkInput = normalizeNameParenthesisSpacing(cells[benchmarkColumnIndex] || "");
 
     const allModelValuesEmpty = modelNames.every((_, modelIndex) =>
       isEmptyImportValue((cells[modelValueStartIndex + modelIndex] || "").trim())
     );
+
+    if (allModelValuesEmpty && !categoryInput && rawBenchmarkInput) {
+      const nextRawLine = rawLines[lineIndex + 1];
+      if (nextRawLine) {
+        const nextCells = splitTableLine(nextRawLine);
+        const nextBenchmarkInput = normalizeNameParenthesisSpacing(nextCells[benchmarkColumnIndex] || "");
+        const nextHasAnyModelValue = modelNames.some((_, modelIndex) =>
+          !isEmptyImportValue((nextCells[modelValueStartIndex + modelIndex] || "").trim())
+        );
+
+        if (nextHasAnyModelValue && isMatrixBenchmarkContinuationFragment(nextBenchmarkInput)) {
+          pendingBenchmarkPrefix = rawBenchmarkInput;
+          continue;
+        }
+      }
+    }
+
+    const shouldAttachPendingBenchmarkPrefix = Boolean(
+      pendingBenchmarkPrefix
+      && rawBenchmarkInput
+      && isMatrixBenchmarkContinuationFragment(rawBenchmarkInput)
+    );
+
+    const benchmarkInput = shouldAttachPendingBenchmarkPrefix
+      ? normalizeNameParenthesisSpacing(`${pendingBenchmarkPrefix} ${rawBenchmarkInput}`)
+      : rawBenchmarkInput;
+
+    if (shouldAttachPendingBenchmarkPrefix || !allModelValuesEmpty) {
+      pendingBenchmarkPrefix = null;
+    }
+
+    const normalizedBenchmarkInput = normalizeBenchmarkImportName(benchmarkInput);
+    const benchmarkDirection = parseBenchmarkNameAndDirection(normalizedBenchmarkInput);
+    const benchmarkName = benchmarkDirection.benchmarkName;
 
     if (!benchmarkName) {
       if (categoryInput && allModelValuesEmpty) {
@@ -2785,6 +2945,7 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
     }
 
     if (allModelValuesEmpty && isMatrixTypeMarker(benchmarkName)) {
+      pendingBenchmarkPrefix = null;
       currentBenchmarkType = benchmarkName;
       currentBenchmarkTypeProvided = true;
 
@@ -3062,8 +3223,7 @@ function parsePaperCopiedTableRows(inputText: string, defaultSource: string | nu
   };
 }
 
-function parseBenchmarkTextRows(inputText: string, sourceInput?: string | null): ParsedTextImportResult {
-  const defaultSource = normalizeTextImportSource(sourceInput);
+function parseBenchmarkTextRowsCore(inputText: string, defaultSource: string | null): ParsedTextImportResult {
   const firstLine = inputText
     .split(/\r?\n/)
     .find((line) => line.trim().length > 0)
@@ -3112,12 +3272,48 @@ function parseBenchmarkTextRows(inputText: string, sourceInput?: string | null):
   return {
     ...selectedParsed,
     rows: expandedRows,
+    parseSource: "text",
     warnings: [...(selectedParsed.warnings ?? []), ...sanitized.warnings]
   };
 }
 
-export function __parseBenchmarkTextRowsForTest(inputText: string, sourceInput?: string | null): ParsedTextImportResult {
-  return parseBenchmarkTextRows(inputText, sourceInput);
+function parseBenchmarkTextRows(
+  inputText: string,
+  sourceInput?: string | null,
+  htmlInput?: string | null
+): ParsedTextImportResult {
+  const defaultSource = normalizeTextImportSource(sourceInput);
+  const textParsed = parseBenchmarkTextRowsCore(inputText, defaultSource);
+
+  const explicitHtmlTableInput = getHtmlTableInput(htmlInput);
+  const inlineHtmlTableInput = getHtmlTableInput(inputText);
+  const htmlTableInput = explicitHtmlTableInput ?? inlineHtmlTableInput;
+  if (!htmlTableInput) {
+    return textParsed;
+  }
+
+  const htmlAsText = parseHtmlTableToText(htmlTableInput);
+  if (!htmlAsText) {
+    return textParsed;
+  }
+
+  const htmlParsed = parseBenchmarkTextRowsCore(htmlAsText, defaultSource);
+  if (htmlParsed.rows.length === 0) {
+    return textParsed;
+  }
+
+  return {
+    ...htmlParsed,
+    parseSource: "html"
+  };
+}
+
+export function __parseBenchmarkTextRowsForTest(
+  inputText: string,
+  sourceInput?: string | null,
+  htmlInput?: string | null
+): ParsedTextImportResult {
+  return parseBenchmarkTextRows(inputText, sourceInput, htmlInput);
 }
 
 type BenchmarkDirectionWarning = {
@@ -3193,8 +3389,8 @@ async function collectBenchmarkDirectionWarnings(rows: NormalizedTextImportRow[]
     });
 }
 
-export async function previewBenchmarkTextImport(inputText: string, sourceInput?: string | null) {
-  const parsed = parseBenchmarkTextRows(inputText, sourceInput);
+export async function previewBenchmarkTextImport(inputText: string, sourceInput?: string | null, htmlInput?: string | null) {
+  const parsed = parseBenchmarkTextRows(inputText, sourceInput, htmlInput);
   const directionWarnings = await collectBenchmarkDirectionWarnings(parsed.rows);
   const parseWarnings = parsed.warnings ?? [];
   const allWarnings = [...parseWarnings, ...directionWarnings];
@@ -3223,6 +3419,7 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
 
   return {
     format: parsed.format,
+    parseSource: parsed.parseSource ?? "text",
     total: parsed.rows.length,
     skipped: parsed.skipped,
     warningCount: allWarnings.length,
@@ -3231,8 +3428,8 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
   };
 }
 
-export async function importBenchmarkCsv(inputText: string, sourceInput?: string | null) {
-  const parsed = parseBenchmarkTextRows(inputText, sourceInput);
+export async function importBenchmarkCsv(inputText: string, sourceInput?: string | null, htmlInput?: string | null) {
+  const parsed = parseBenchmarkTextRows(inputText, sourceInput, htmlInput);
   const directionWarnings = await collectBenchmarkDirectionWarnings(parsed.rows);
   const parseWarnings = parsed.warnings ?? [];
   const allWarnings = [...parseWarnings, ...directionWarnings];
@@ -3240,6 +3437,7 @@ export async function importBenchmarkCsv(inputText: string, sourceInput?: string
 
   return {
     format: parsed.format,
+    parseSource: parsed.parseSource ?? "text",
     total: parsed.rows.length,
     skipped: parsed.skipped,
     warningCount: allWarnings.length,
