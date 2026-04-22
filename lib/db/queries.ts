@@ -1,4 +1,4 @@
-import { and, asc, count, countDistinct, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
+import { and, asc, count, countDistinct, desc, eq, inArray, isNotNull, isNull, ne, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, providerPrefixRules, settings } from "@/lib/db/schema";
 
@@ -391,4 +391,237 @@ export async function saveSetting(input: {
         note: input.note
       }
     });
+}
+
+// ──────────────────────────────────────────────
+// Provider customization helpers
+// ──────────────────────────────────────────────
+
+export const HEX_COLOR_REGEX = /^#[0-9A-Fa-f]{6}$|^#[0-9A-Fa-f]{3}$/;
+
+/**
+ * Normalize a prefix string to a stable lookup key:
+ * lowercase, remove all non-alphanumeric characters (keep letters and digits only).
+ */
+export function normalizePrefixKey(prefix: string): string {
+  return prefix.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+export type ProviderPrefixRule = {
+  id: number;
+  providerId: number;
+  prefix: string;
+  prefixKey: string;
+  priority: number;
+  isEnabled: boolean;
+};
+
+export async function getProviderPrefixRules(providerId?: number): Promise<ProviderPrefixRule[]> {
+  const query = db
+    .select({
+      id: providerPrefixRules.id,
+      providerId: providerPrefixRules.providerId,
+      prefix: providerPrefixRules.prefix,
+      prefixKey: providerPrefixRules.prefixKey,
+      priority: providerPrefixRules.priority,
+      isEnabled: providerPrefixRules.isEnabled
+    })
+    .from(providerPrefixRules)
+    .orderBy(asc(providerPrefixRules.priority), asc(providerPrefixRules.id));
+
+  if (providerId !== undefined) {
+    return query.where(eq(providerPrefixRules.providerId, providerId));
+  }
+
+  return query;
+}
+
+/**
+ * Resolve a provider name from a model name using prefix rules (sorted by priority asc).
+ * Returns the provider name string on match, null when no rule matches
+ * (caller should fall back to inferProviderNameFromModel).
+ */
+export function resolveProviderNameByModelName(
+  modelName: string,
+  prefixRules: ProviderPrefixRule[],
+  providerNameById: Map<number, string>
+): string | null {
+  const normalizedModel = normalizePrefixKey(modelName);
+  const enabledRules = prefixRules.filter((r) => r.isEnabled);
+
+  for (const rule of enabledRules) {
+    if (rule.prefixKey.length > 0 && normalizedModel.startsWith(rule.prefixKey)) {
+      const name = providerNameById.get(rule.providerId);
+      if (name) return name;
+    }
+  }
+
+  return null;
+}
+
+export type ProviderConfigInput = {
+  displayName?: string | null;
+  brandColor?: string | null;
+  brandTextColor?: string | null;
+};
+
+export async function upsertProviderConfig(
+  providerId: number,
+  input: ProviderConfigInput
+): Promise<void> {
+  if (input.brandColor !== null && input.brandColor !== undefined && input.brandColor !== "") {
+    if (!HEX_COLOR_REGEX.test(input.brandColor)) {
+      throw Object.assign(new Error("invalid hex color: brandColor"), { statusCode: 400 });
+    }
+  }
+  if (input.brandTextColor !== null && input.brandTextColor !== undefined && input.brandTextColor !== "") {
+    if (!HEX_COLOR_REGEX.test(input.brandTextColor)) {
+      throw Object.assign(new Error("invalid hex color: brandTextColor"), { statusCode: 400 });
+    }
+  }
+
+  await db
+    .update(providers)
+    .set({
+      displayName: input.displayName ?? null,
+      brandColor: input.brandColor ?? null,
+      brandTextColor: input.brandTextColor ?? null
+    })
+    .where(eq(providers.id, providerId));
+}
+
+export type AddPrefixRuleInput = {
+  providerId: number;
+  prefix: string;
+  priority?: number;
+  isEnabled?: boolean;
+};
+
+export async function addProviderPrefixRule(input: AddPrefixRuleInput): Promise<ProviderPrefixRule> {
+  const prefixKey = normalizePrefixKey(input.prefix.trim());
+
+  if (!prefixKey) {
+    throw Object.assign(new Error("prefix cannot be empty after normalization"), { statusCode: 400 });
+  }
+
+  // Check global uniqueness
+  const existing = await db
+    .select({ id: providerPrefixRules.id })
+    .from(providerPrefixRules)
+    .where(eq(providerPrefixRules.prefixKey, prefixKey))
+    .limit(1);
+
+  if (existing.length > 0) {
+    throw Object.assign(new Error(`prefix_key "${prefixKey}" already exists`), { statusCode: 409 });
+  }
+
+  const [inserted] = await db
+    .insert(providerPrefixRules)
+    .values({
+      providerId: input.providerId,
+      prefix: input.prefix.trim(),
+      prefixKey,
+      priority: input.priority ?? 0,
+      isEnabled: input.isEnabled ?? true
+    })
+    .returning();
+
+  if (!inserted) {
+    throw new Error("failed to insert prefix rule");
+  }
+
+  return {
+    id: inserted.id,
+    providerId: inserted.providerId,
+    prefix: inserted.prefix,
+    prefixKey: inserted.prefixKey,
+    priority: inserted.priority,
+    isEnabled: inserted.isEnabled
+  };
+}
+
+export type UpdatePrefixRuleInput = {
+  prefix?: string;
+  priority?: number;
+  isEnabled?: boolean;
+};
+
+export async function updateProviderPrefixRule(
+  ruleId: number,
+  input: UpdatePrefixRuleInput
+): Promise<ProviderPrefixRule> {
+  const updateValues: Partial<typeof providerPrefixRules.$inferInsert> = {};
+
+  if (input.prefix !== undefined) {
+    const prefixKey = normalizePrefixKey(input.prefix.trim());
+    if (!prefixKey) {
+      throw Object.assign(new Error("prefix cannot be empty after normalization"), { statusCode: 400 });
+    }
+
+    // Check uniqueness (excluding current rule)
+    const existing = await db
+      .select({ id: providerPrefixRules.id })
+      .from(providerPrefixRules)
+      .where(and(eq(providerPrefixRules.prefixKey, prefixKey), ne(providerPrefixRules.id, ruleId)))
+      .limit(1);
+
+    if (existing.length > 0) {
+      throw Object.assign(new Error(`prefix_key "${prefixKey}" already exists`), { statusCode: 409 });
+    }
+
+    updateValues.prefix = input.prefix.trim();
+    updateValues.prefixKey = prefixKey;
+  }
+
+  if (input.priority !== undefined) {
+    updateValues.priority = input.priority;
+  }
+
+  if (input.isEnabled !== undefined) {
+    updateValues.isEnabled = input.isEnabled;
+  }
+
+  if (Object.keys(updateValues).length === 0) {
+    const [current] = await db
+      .select()
+      .from(providerPrefixRules)
+      .where(eq(providerPrefixRules.id, ruleId))
+      .limit(1);
+
+    if (!current) {
+      throw Object.assign(new Error(`rule ${ruleId} not found`), { statusCode: 404 });
+    }
+
+    return current;
+  }
+
+  const [updated] = await db
+    .update(providerPrefixRules)
+    .set(updateValues)
+    .where(eq(providerPrefixRules.id, ruleId))
+    .returning();
+
+  if (!updated) {
+    throw Object.assign(new Error(`rule ${ruleId} not found`), { statusCode: 404 });
+  }
+
+  return {
+    id: updated.id,
+    providerId: updated.providerId,
+    prefix: updated.prefix,
+    prefixKey: updated.prefixKey,
+    priority: updated.priority,
+    isEnabled: updated.isEnabled
+  };
+}
+
+export async function deleteProviderPrefixRule(ruleId: number): Promise<void> {
+  const deleted = await db
+    .delete(providerPrefixRules)
+    .where(eq(providerPrefixRules.id, ruleId))
+    .returning({ id: providerPrefixRules.id });
+
+  if (deleted.length === 0) {
+    throw Object.assign(new Error(`rule ${ruleId} not found`), { statusCode: 404 });
+  }
 }

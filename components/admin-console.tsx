@@ -24,6 +24,9 @@ type ProviderOption = {
   id: number;
   name: string;
   slug: string;
+  displayName?: string | null;
+  brandColor?: string | null;
+  brandTextColor?: string | null;
 };
 
 type ModelOption = {
@@ -101,7 +104,7 @@ type ModelDedupeRule = {
   removeDot: boolean;
 };
 
-type TabKey = "import" | "entry" | "rename" | "merge" | "maintenance" | "settings";
+type TabKey = "import" | "entry" | "rename" | "merge" | "maintenance" | "settings" | "providers";
 
 type BenchmarkWarningLevel = "info" | "warn" | "danger";
 
@@ -315,7 +318,7 @@ function parseExplicitMergeEntityId(rawInput: string): number | null {
 async function postJson(
   url: string,
   payload: unknown,
-  method: "POST" | "PATCH" | "DELETE" = "POST"
+  method: "POST" | "PATCH" | "PUT" | "DELETE" = "POST"
 ) {
   const response = await fetch(url, {
     method,
@@ -838,6 +841,46 @@ export function AdminConsole({
   const [modelDedupeRule, setModelDedupeRule] = useState<ModelDedupeRule>(() =>
     normalizeModelDedupeRule(initialSettings.model_dedupe_rule)
   );
+
+  // ── Provider management tab state ──
+  type PrefixRuleItem = {
+    id: number;
+    providerId: number;
+    prefix: string;
+    prefixKey: string;
+    priority: number;
+    isEnabled: boolean;
+  };
+  type ProviderConfigState = {
+    displayName: string;
+    brandColor: string;
+    brandTextColor: string;
+    prefixRules: PrefixRuleItem[];
+    loading: boolean;
+    saving: boolean;
+    newPrefix: string;
+    newPriority: string;
+  };
+
+  const [providerConfigs, setProviderConfigs] = useState<Record<number, ProviderConfigState>>(() =>
+    Object.fromEntries(
+      providers.map((p) => [
+        p.id,
+        {
+          displayName: p.displayName ?? "",
+          brandColor: p.brandColor ?? "",
+          brandTextColor: p.brandTextColor ?? "",
+          prefixRules: [],
+          loading: false,
+          saving: false,
+          newPrefix: "",
+          newPriority: "0"
+        }
+      ])
+    )
+  );
+  const [expandedProviderId, setExpandedProviderId] = useState<number | null>(null);
+  const [providerPrefixRulesLoaded, setProviderPrefixRulesLoaded] = useState(false);
 
   const sortedSettings = useMemo(() => {
     return Object.entries(initialSettings).sort(([a], [b]) => a.localeCompare(b));
@@ -3460,6 +3503,140 @@ export function AdminConsole({
     && resolvedMergeTargetId !== null
     && resolvedMergeSourceId !== resolvedMergeTargetId;
 
+  // ── Provider management handlers ──
+  async function loadProviderPrefixRules() {
+    if (providerPrefixRulesLoaded) return;
+
+    try {
+      const res = await fetch("/api/admin/providers/config");
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!Array.isArray(data?.providers)) return;
+
+      setProviderConfigs((prev) => {
+        const next = { ...prev };
+        for (const p of data.providers) {
+          if (next[p.id]) {
+            next[p.id] = {
+              ...next[p.id],
+              displayName: p.displayName ?? "",
+              brandColor: p.brandColor ?? "",
+              brandTextColor: p.brandTextColor ?? "",
+              prefixRules: p.prefixRules ?? []
+            };
+          }
+        }
+        return next;
+      });
+      setProviderPrefixRulesLoaded(true);
+    } catch {
+      // non-critical
+    }
+  }
+
+  function handleToggleProviderExpand(id: number) {
+    setExpandedProviderId((prev) => {
+      const next = prev === id ? null : id;
+      if (next !== null) {
+        loadProviderPrefixRules();
+      }
+      return next;
+    });
+  }
+
+  async function onSaveProviderConfig(providerId: number) {
+    const cfg = providerConfigs[providerId];
+    if (!cfg) return;
+
+    setProviderConfigs((prev) => ({
+      ...prev,
+      [providerId]: { ...prev[providerId], saving: true }
+    }));
+
+    try {
+      await postJson("/api/admin/providers/config", {
+        providerId,
+        displayName: cfg.displayName || null,
+        brandColor: cfg.brandColor || null,
+        brandTextColor: cfg.brandTextColor || null
+      }, "PUT");
+      notifySuccess("Provider 配置已保存");
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "保存失败");
+    } finally {
+      setProviderConfigs((prev) => ({
+        ...prev,
+        [providerId]: { ...prev[providerId], saving: false }
+      }));
+    }
+  }
+
+  async function onAddPrefixRule(providerId: number) {
+    const cfg = providerConfigs[providerId];
+    if (!cfg) return;
+
+    const prefix = cfg.newPrefix.trim();
+    if (!prefix) {
+      notifyError("前缀不能为空");
+      return;
+    }
+
+    const priority = Number.parseInt(cfg.newPriority, 10);
+    if (!Number.isFinite(priority)) {
+      notifyError("Priority 必须为整数");
+      return;
+    }
+
+    try {
+      const data = await postJson("/api/admin/providers/prefix-rules", { providerId, prefix, priority });
+      setProviderConfigs((prev) => ({
+        ...prev,
+        [providerId]: {
+          ...prev[providerId],
+          prefixRules: [...prev[providerId].prefixRules, data.rule],
+          newPrefix: "",
+          newPriority: "0"
+        }
+      }));
+      notifySuccess(`前缀 "${prefix}" 已添加`);
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "添加前缀失败");
+    }
+  }
+
+  async function onUpdatePrefixRule(ruleId: number, providerId: number, update: { priority?: number; isEnabled?: boolean }) {
+    try {
+      const data = await postJson(`/api/admin/providers/prefix-rules/${ruleId}`, update, "PUT");
+      setProviderConfigs((prev) => ({
+        ...prev,
+        [providerId]: {
+          ...prev[providerId],
+          prefixRules: prev[providerId].prefixRules.map((r) =>
+            r.id === ruleId ? data.rule : r
+          )
+        }
+      }));
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "更新失败");
+    }
+  }
+
+  async function onDeletePrefixRule(ruleId: number, providerId: number) {
+    try {
+      await postJson(`/api/admin/providers/prefix-rules/${ruleId}`, {}, "DELETE");
+      setProviderConfigs((prev) => ({
+        ...prev,
+        [providerId]: {
+          ...prev[providerId],
+          prefixRules: prev[providerId].prefixRules.filter((r) => r.id !== ruleId)
+        }
+      }));
+      notifySuccess("前缀规则已删除");
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "删除失败");
+    }
+  }
+
   const tabClass = (key: TabKey) =>
     `btn rounded-xl border-0 text-base md:text-base transition-all duration-200 ease-out ${
       activeTab === key
@@ -3737,6 +3914,18 @@ export function AdminConsole({
             onClick={() => setActiveTab("settings")}
           >
             数据库设置
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "providers"}
+            className={tabClass("providers")}
+            onClick={() => {
+              setActiveTab("providers");
+              loadProviderPrefixRules();
+            }}
+          >
+            Provider 管理
           </button>
         </div>
 
@@ -5641,6 +5830,256 @@ export function AdminConsole({
                 </table>
               </div>
             )}
+          </section>
+        ) : null}
+
+        {activeTab === "providers" ? (
+          <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
+            <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold">
+              <Database size={18} />
+              Provider 管理
+            </h3>
+            <p className="mb-4 text-sm opacity-80">
+              为每个 Provider 设置展示名称、品牌色，以及模型名前缀匹配规则（用于导入时自动识别所属 Provider）。
+            </p>
+
+            <div className="flex flex-col gap-3">
+              {providers.map((p) => {
+                const cfg = providerConfigs[p.id];
+                const isExpanded = expandedProviderId === p.id;
+                if (!cfg) return null;
+
+                return (
+                  <div key={p.id} className="rounded-box border border-base-300 bg-base-200/40">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+                      onClick={() => handleToggleProviderExpand(p.id)}
+                    >
+                      <div className="flex items-center gap-3">
+                        {cfg.brandColor ? (
+                          <span
+                            className="inline-block h-5 w-5 rounded-full border border-base-300 shrink-0"
+                            style={{ backgroundColor: cfg.brandColor }}
+                          />
+                        ) : (
+                          <span className="inline-block h-5 w-5 rounded-full border border-base-300 bg-base-300 shrink-0" />
+                        )}
+                        <span className="font-semibold">{p.name}</span>
+                        {cfg.displayName ? (
+                          <span className="text-sm opacity-60">→ {cfg.displayName}</span>
+                        ) : null}
+                        {cfg.prefixRules.length > 0 ? (
+                          <span className="badge badge-sm badge-outline opacity-70">{cfg.prefixRules.length} 条前缀规则</span>
+                        ) : null}
+                      </div>
+                      <span className="text-base-content/50 text-lg">{isExpanded ? "▲" : "▼"}</span>
+                    </button>
+
+                    {isExpanded ? (
+                      <div className="border-t border-base-300 px-4 pb-4 pt-3">
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                          <div>
+                            <label className="label">
+                              <span className="label-text">展示名（留空则使用原始名称）</span>
+                            </label>
+                            <input
+                              className="input input-bordered w-full"
+                              value={cfg.displayName}
+                              placeholder={p.name}
+                              onChange={(e) =>
+                                setProviderConfigs((prev) => ({
+                                  ...prev,
+                                  [p.id]: { ...prev[p.id], displayName: e.target.value }
+                                }))
+                              }
+                            />
+                          </div>
+                          <div>
+                            <label className="label">
+                              <span className="label-text">品牌主色（hex，如 #10a37f）</span>
+                            </label>
+                            <div className="flex gap-2">
+                              <input
+                                type="color"
+                                className="h-10 w-12 cursor-pointer rounded border border-base-300 bg-base-100 p-0.5"
+                                value={cfg.brandColor || "#888888"}
+                                onChange={(e) =>
+                                  setProviderConfigs((prev) => ({
+                                    ...prev,
+                                    [p.id]: { ...prev[p.id], brandColor: e.target.value }
+                                  }))
+                                }
+                              />
+                              <input
+                                className="input input-bordered flex-1"
+                                value={cfg.brandColor}
+                                placeholder="#10a37f"
+                                onChange={(e) =>
+                                  setProviderConfigs((prev) => ({
+                                    ...prev,
+                                    [p.id]: { ...prev[p.id], brandColor: e.target.value }
+                                  }))
+                                }
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="label">
+                              <span className="label-text">品牌文字色（可留空，由前端推断对比色）</span>
+                            </label>
+                            <div className="flex gap-2">
+                              <input
+                                type="color"
+                                className="h-10 w-12 cursor-pointer rounded border border-base-300 bg-base-100 p-0.5"
+                                value={cfg.brandTextColor || "#ffffff"}
+                                onChange={(e) =>
+                                  setProviderConfigs((prev) => ({
+                                    ...prev,
+                                    [p.id]: { ...prev[p.id], brandTextColor: e.target.value }
+                                  }))
+                                }
+                              />
+                              <input
+                                className="input input-bordered flex-1"
+                                value={cfg.brandTextColor}
+                                placeholder="#ffffff（可留空）"
+                                onChange={(e) =>
+                                  setProviderConfigs((prev) => ({
+                                    ...prev,
+                                    [p.id]: { ...prev[p.id], brandTextColor: e.target.value }
+                                  }))
+                                }
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-4">
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            disabled={cfg.saving}
+                            onClick={() => onSaveProviderConfig(p.id)}
+                          >
+                            {cfg.saving ? "保存中..." : "保存配置"}
+                          </button>
+                        </div>
+
+                        <div className="mt-5">
+                          <h4 className="mb-2 font-semibold text-sm">前缀匹配规则</h4>
+                          <p className="mb-3 text-xs opacity-70">
+                            导入时若模型名（归一化后）以某规则的前缀键开头，则自动归属到此 Provider。Priority 越小越优先，全局唯一。
+                          </p>
+
+                          {cfg.prefixRules.length > 0 ? (
+                            <div className="mb-3 overflow-x-auto rounded-box border border-base-300">
+                              <table className="table table-sm">
+                                <thead>
+                                  <tr>
+                                    <th>前缀</th>
+                                    <th>前缀键</th>
+                                    <th>Priority</th>
+                                    <th>启用</th>
+                                    <th>操作</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {cfg.prefixRules.map((rule) => (
+                                    <tr key={rule.id}>
+                                      <td className="font-mono">{rule.prefix}</td>
+                                      <td className="font-mono text-xs opacity-70">{rule.prefixKey}</td>
+                                      <td>
+                                        <input
+                                          type="number"
+                                          className="input input-bordered input-xs w-20"
+                                          defaultValue={rule.priority}
+                                          onBlur={(e) => {
+                                            const val = Number.parseInt(e.target.value, 10);
+                                            if (Number.isFinite(val) && val !== rule.priority) {
+                                              onUpdatePrefixRule(rule.id, p.id, { priority: val });
+                                            }
+                                          }}
+                                        />
+                                      </td>
+                                      <td>
+                                        <input
+                                          type="checkbox"
+                                          className="checkbox checkbox-sm"
+                                          checked={rule.isEnabled}
+                                          onChange={(e) => onUpdatePrefixRule(rule.id, p.id, { isEnabled: e.target.checked })}
+                                        />
+                                      </td>
+                                      <td>
+                                        <button
+                                          type="button"
+                                          className="btn btn-xs btn-outline btn-error"
+                                          onClick={() => onDeletePrefixRule(rule.id, p.id)}
+                                        >
+                                          删除
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : (
+                            <p className="mb-3 text-sm opacity-60">暂无前缀规则</p>
+                          )}
+
+                          <div className="flex flex-wrap items-end gap-2">
+                            <div>
+                              <label className="label py-0.5">
+                                <span className="label-text text-xs">前缀</span>
+                              </label>
+                              <input
+                                className="input input-bordered input-sm w-36 font-mono"
+                                value={cfg.newPrefix}
+                                placeholder="gpt-"
+                                onChange={(e) =>
+                                  setProviderConfigs((prev) => ({
+                                    ...prev,
+                                    [p.id]: { ...prev[p.id], newPrefix: e.target.value }
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div>
+                              <label className="label py-0.5">
+                                <span className="label-text text-xs">Priority</span>
+                              </label>
+                              <input
+                                type="number"
+                                className="input input-bordered input-sm w-20"
+                                value={cfg.newPriority}
+                                onChange={(e) =>
+                                  setProviderConfigs((prev) => ({
+                                    ...prev,
+                                    [p.id]: { ...prev[p.id], newPriority: e.target.value }
+                                  }))
+                                }
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline"
+                              onClick={() => onAddPrefixRule(p.id)}
+                            >
+                              添加前缀
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+
+              {providers.length === 0 ? (
+                <p className="text-sm opacity-70">暂无 Provider 数据</p>
+              ) : null}
+            </div>
           </section>
         ) : null}
       </div>

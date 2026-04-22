@@ -28,7 +28,10 @@ export default async function AdminPage() {
       providers={providers.map((item) => ({
         id: item.id,
         name: item.name,
-        slug: item.slug
+        slug: item.slug,
+        displayName: item.displayName ?? null,
+        brandColor: item.brandColor ?? null,
+        brandTextColor: item.brandTextColor ?? null
       }))}
       models={models.map((item) => ({
         id: item.id,

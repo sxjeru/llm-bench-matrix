@@ -12,7 +12,7 @@ import {
 import { parseBenchmarkValue, type ParsedBenchmarkValue } from "@/lib/db/parse-value";
 import type { ParsedImportRecord } from "@/lib/import/xlsm";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
-import { invalidateAllCaches } from "@/lib/db/queries";
+import { invalidateAllCaches, getProviderPrefixRules, resolveProviderNameByModelName, type ProviderPrefixRule } from "@/lib/db/queries";
 
 type EnsureBenchmarkInput = {
   benchmarkName: string;
@@ -2406,29 +2406,35 @@ export async function importParsedRecords(
     source?: string | null;
   }
 ) {
+  const prefixCtx = await loadPrefixRuleContext();
+
   const rows: NormalizedTextImportRow[] = records
     .filter((record) => record.valid)
-    .map((record, index) => ({
-      rowNumber: record.rowNumber ?? index + 1,
-      providerName: inferProviderNameFromModel(normalizeNameParenthesisSpacing(record.modelName)),
-      modelName: normalizeNameParenthesisSpacing(record.modelName),
-      benchmarkName: normalizeNameParenthesisSpacing(record.benchmarkName),
-      benchmarkType: (record.category || "general").trim() || "general",
-      benchmarkTypeProvided: Boolean(record.category && record.category.trim().length > 0),
-      valueRaw: record.rawValue,
-      valueNote: null,
-      benchTime: options?.benchTime ?? new Date(),
-      unit: "score",
-      higherIsBetter: !isLowerBetterBenchmark(
-        normalizeNameParenthesisSpacing(record.benchmarkName),
-        (record.category || "general").trim() || "general"
-      ),
-      modalities: inferModalitiesFromCategory(record.category),
-      source: options?.source ?? "xlsm-import",
-      modelAlias: null,
-      sourceModelId: null,
-      sourceBenchmarkId: null
-    }));
+    .map((record, index) => {
+      const modelName = normalizeNameParenthesisSpacing(record.modelName);
+      const resolvedProvider = resolveProviderNameByModelName(modelName, prefixCtx.rules, prefixCtx.providerNameById);
+      return {
+        rowNumber: record.rowNumber ?? index + 1,
+        providerName: resolvedProvider ?? inferProviderNameFromModel(modelName),
+        modelName,
+        benchmarkName: normalizeNameParenthesisSpacing(record.benchmarkName),
+        benchmarkType: (record.category || "general").trim() || "general",
+        benchmarkTypeProvided: Boolean(record.category && record.category.trim().length > 0),
+        valueRaw: record.rawValue,
+        valueNote: null,
+        benchTime: options?.benchTime ?? new Date(),
+        unit: "score",
+        higherIsBetter: !isLowerBetterBenchmark(
+          normalizeNameParenthesisSpacing(record.benchmarkName),
+          (record.category || "general").trim() || "general"
+        ),
+        modalities: inferModalitiesFromCategory(record.category),
+        source: options?.source ?? "xlsm-import",
+        modelAlias: null,
+        sourceModelId: null,
+        sourceBenchmarkId: null
+      };
+    });
 
   const expandedRows = expandMetricLabeledImportRows(rows);
   const { inserted } = await importNormalizedRows(expandedRows);
@@ -2639,6 +2645,33 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
   invalidateAllCaches();
 
   return result;
+}
+
+async function loadPrefixRuleContext(): Promise<{
+  rules: ProviderPrefixRule[];
+  providerNameById: Map<number, string>;
+}> {
+  const [rules, providerRows] = await Promise.all([
+    getProviderPrefixRules(),
+    db.select({ id: providers.id, name: providers.name }).from(providers)
+  ]);
+
+  return {
+    rules,
+    providerNameById: new Map(providerRows.map((p) => [p.id, p.name]))
+  };
+}
+
+function applyPrefixRules(
+  rows: NormalizedTextImportRow[],
+  ctx: { rules: ProviderPrefixRule[]; providerNameById: Map<number, string> }
+): NormalizedTextImportRow[] {
+  if (ctx.rules.length === 0) return rows;
+
+  return rows.map((row) => {
+    const resolved = resolveProviderNameByModelName(row.modelName, ctx.rules, ctx.providerNameById);
+    return resolved ? { ...row, providerName: resolved } : row;
+  });
 }
 
 function parseStructuredCsvRows(inputText: string, defaultSource: string | null): ParsedTextImportResult {
@@ -3422,12 +3455,16 @@ async function collectBenchmarkDirectionWarnings(rows: NormalizedTextImportRow[]
 }
 
 export async function previewBenchmarkTextImport(inputText: string, sourceInput?: string | null, htmlInput?: string | null) {
-  const parsed = parseBenchmarkTextRows(inputText, sourceInput, htmlInput);
-  const directionWarnings = await collectBenchmarkDirectionWarnings(parsed.rows);
+  const [parsed, prefixCtx] = await Promise.all([
+    Promise.resolve(parseBenchmarkTextRows(inputText, sourceInput, htmlInput)),
+    loadPrefixRuleContext()
+  ]);
+  const resolvedRows = applyPrefixRules(parsed.rows, prefixCtx);
+  const directionWarnings = await collectBenchmarkDirectionWarnings(resolvedRows);
   const parseWarnings = parsed.warnings ?? [];
   const allWarnings = [...parseWarnings, ...directionWarnings];
 
-  const previewRows = parsed.rows.map((row) => {
+  const previewRows = resolvedRows.map((row) => {
     const parsedValue = parseBenchmarkValue(row.valueRaw);
     const mergedNote = mergeImportValueNotes(row.valueNote, parsedValue.valueNote);
 
@@ -3461,11 +3498,15 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
 }
 
 export async function importBenchmarkCsv(inputText: string, sourceInput?: string | null, htmlInput?: string | null) {
-  const parsed = parseBenchmarkTextRows(inputText, sourceInput, htmlInput);
-  const directionWarnings = await collectBenchmarkDirectionWarnings(parsed.rows);
+  const [parsed, prefixCtx] = await Promise.all([
+    Promise.resolve(parseBenchmarkTextRows(inputText, sourceInput, htmlInput)),
+    loadPrefixRuleContext()
+  ]);
+  const resolvedRows = applyPrefixRules(parsed.rows, prefixCtx);
+  const directionWarnings = await collectBenchmarkDirectionWarnings(resolvedRows);
   const parseWarnings = parsed.warnings ?? [];
   const allWarnings = [...parseWarnings, ...directionWarnings];
-  const { inserted } = await importNormalizedRows(parsed.rows);
+  const { inserted } = await importNormalizedRows(resolvedRows);
 
   return {
     format: parsed.format,
@@ -4170,6 +4211,9 @@ export function __hasBenchmarkNumericTokenMismatchForTest(left: string, right: s
 export function __hasBenchmarkVariantNoiseNormalizedNameMatchForTest(left: string, right: string): boolean {
   return hasBenchmarkVariantNoiseNormalizedNameMatch(left, right);
 }
+
+export { normalizePrefixKey, resolveProviderNameByModelName } from "@/lib/db/queries";
+export type { ProviderPrefixRule } from "@/lib/db/queries";
 
 export async function detectBenchmarkScaleConsistencyIssues(): Promise<BenchmarkScaleConsistencyCheckResult> {
   type RawRow = {
