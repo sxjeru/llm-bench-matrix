@@ -1,6 +1,6 @@
-import { and, count, countDistinct, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
+import { and, asc, count, countDistinct, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
+import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, providerPrefixRules, settings } from "@/lib/db/schema";
 
 function toNullableNumber(value: unknown): number | null {
   if (value === null || value === undefined) return null;
@@ -138,6 +138,7 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
         .select({
           id: benchmarkValues.id,
           providerName: providers.name,
+          providerDisplayName: providers.displayName,
           modelName: models.modelName,
           benchmarkName: benchmarks.benchmarkName,
           benchmarkType: benchmarks.benchmarkType,
@@ -176,7 +177,7 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
 
       return rows.map((row) => ({
         id: row.id,
-        providerName: row.providerName,
+        providerName: row.providerDisplayName ?? row.providerName,
         modelName: row.modelName,
         benchmarkName: row.benchmarkName,
         benchmarkType: shouldUseSourceMeta

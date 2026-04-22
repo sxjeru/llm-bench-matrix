@@ -7,10 +7,32 @@ export const providers = pgTable(
     id: serial("id").primaryKey(),
     name: text("name").notNull(),
     slug: text("slug").notNull(),
+    displayName: text("display_name"),
+    brandColor: text("brand_color"),
+    brandTextColor: text("brand_text_color"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
   },
   (table) => ({
     slugUnique: uniqueIndex("providers_slug_unique").on(table.slug)
+  })
+);
+
+export const providerPrefixRules = pgTable(
+  "provider_prefix_rules",
+  {
+    id: serial("id").primaryKey(),
+    providerId: integer("provider_id")
+      .notNull()
+      .references(() => providers.id, { onDelete: "cascade" }),
+    prefix: text("prefix").notNull(),
+    prefixKey: text("prefix_key").notNull(),
+    priority: integer("priority").notNull().default(0),
+    isEnabled: boolean("is_enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
+  },
+  (table) => ({
+    prefixKeyUnique: uniqueIndex("provider_prefix_rules_prefix_key_unique").on(table.prefixKey),
+    providerIdx: index("provider_prefix_rules_provider_idx").on(table.providerId)
   })
 );
 
