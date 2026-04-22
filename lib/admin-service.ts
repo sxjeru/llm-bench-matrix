@@ -2821,6 +2821,37 @@ function isMatrixBenchmarkContinuationFragment(label: string): boolean {
   return /^[（(]/.test(trimmed) || /^[-–—/:]/.test(trimmed);
 }
 
+function normalizeMatrixHeaderMarkerCell(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[（）()]/g, " ")
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isMatrixBenchmarkHeaderCell(input: string): boolean {
+  const normalized = normalizeMatrixHeaderMarkerCell(input);
+  if (!normalized) return false;
+
+  if (/\b(benchmark|benchmarks|metric|metrics|dimension|dimensions)\b/.test(normalized)) {
+    return true;
+  }
+
+  return /(指标|基准|评测基准|评测维度|维度|任务|项目|评测项)/.test(normalized);
+}
+
+function isMatrixCategoryHeaderCell(input: string): boolean {
+  const normalized = normalizeMatrixHeaderMarkerCell(input);
+  if (!normalized) return false;
+
+  if (/\b(category|categories|type|types|domain|domains)\b/.test(normalized)) {
+    return true;
+  }
+
+  return /(评测大类|大类|类别|分类|领域|赛道)/.test(normalized);
+}
+
 function parseMatrixTextRows(inputText: string, defaultSource: string | null): ParsedTextImportResult {
   const rawLines = inputText
     .split(/\r?\n/)
@@ -2849,17 +2880,16 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
   }
 
   const headerCells = splitTableLine(rawLines[headerLineIndex]);
-  const normalizedHeaderCells = headerCells.map((cell) => cell.trim().toLowerCase());
   const inferredModelCountFromData = inferMatrixModelCountFromDataLines(rawLines, headerLineIndex + 1);
   const inferredModelHeaderStartIndex = inferredModelCountFromData !== null
     && inferredModelCountFromData <= headerCells.length
     ? headerCells.length - inferredModelCountFromData
     : null;
-  const benchmarkLabelIndex = normalizedHeaderCells.findIndex((cell) =>
-    /^(benchmark|benchmarks|metric|metrics|dimension|dimensions|指标|基准|评测|评测维度|维度|任务|项目)$/.test(cell)
+  const benchmarkLabelIndex = headerCells.findIndex((cell) =>
+    isMatrixBenchmarkHeaderCell(cell)
   );
-  const categoryLabelIndex = normalizedHeaderCells.findIndex((cell) =>
-    /^(category|categories|type|types|domain|domains|类别|分类|领域|赛道)$/.test(cell)
+  const categoryLabelIndex = headerCells.findIndex((cell, index) =>
+    index !== benchmarkLabelIndex && isMatrixCategoryHeaderCell(cell)
   );
   const hasExplicitBenchmarkColumn = benchmarkLabelIndex >= 0;
   const benchmarkColumnIndex = hasExplicitBenchmarkColumn
@@ -2873,9 +2903,7 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
     : (
       inferredModelHeaderStartIndex !== null
       && inferredModelHeaderStartIndex >= 2
-      && /^(category|categories|type|types|domain|domains|类别|分类|领域|赛道)$/.test(
-        normalizedHeaderCells[inferredModelHeaderStartIndex - 2] ?? ""
-      )
+      && isMatrixCategoryHeaderCell(headerCells[inferredModelHeaderStartIndex - 2] ?? "")
       ? inferredModelHeaderStartIndex - 2
       : -1
     );

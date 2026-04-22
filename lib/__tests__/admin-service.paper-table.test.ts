@@ -360,6 +360,46 @@ describe("paper-table 文本解析", () => {
     expect(valueByModel.get("Kimi K2.5")).toBe("50.2");
   });
 
+  test("提供 htmlText 时可识别中英混合 Category/Benchmark 表头并继承空白分类", () => {
+    const fallbackText = [
+      "Benchmark\tM1",
+      "Fallback\t1.0"
+    ].join("\n");
+
+    const htmlInput = [
+      "<html><body><table>",
+      "<thead>",
+      "<tr><td><strong>评测大类 (Category)</strong></td><td><strong>评测基准 (Benchmark)</strong></td><td><strong>M1</strong></td><td><strong>M2</strong></td></tr>",
+      "</thead>",
+      "<tbody>",
+      "<tr><td>Knowledge</td><td>C-SimpleQA</td><td>60.30</td><td>47.03</td></tr>",
+      "<tr><td>Math</td><td>AIME26</td><td>73.80</td><td>88.59</td></tr>",
+      "<tr><td></td><td>HMMT-Feb26</td><td>50.76</td><td>76.23</td></tr>",
+      "</tbody>",
+      "</table></body></html>"
+    ].join("");
+
+    const parsed = parseBenchmarkTextRowsForTest(fallbackText, "text:unit-test", htmlInput);
+
+    expect(parsed.format).toBe("matrix-table");
+    expect(parsed.parseSource).toBe("html");
+
+    const simpleQaRows = parsed.rows.filter((row) => row.benchmarkName === "C-SimpleQA");
+    expect(simpleQaRows).toHaveLength(2);
+    expect(new Set(simpleQaRows.map((row) => row.benchmarkType))).toEqual(new Set(["Knowledge"]));
+    expect(simpleQaRows.every((row) => row.benchmarkTypeProvided)).toBe(true);
+
+    const aimeRows = parsed.rows.filter((row) => row.benchmarkName === "AIME26");
+    expect(aimeRows).toHaveLength(2);
+    expect(new Set(aimeRows.map((row) => row.benchmarkType))).toEqual(new Set(["Math"]));
+    expect(aimeRows.every((row) => row.benchmarkTypeProvided)).toBe(true);
+
+    const hmmtRows = parsed.rows.filter((row) => row.benchmarkName === "HMMT-Feb26");
+    expect(hmmtRows).toHaveLength(2);
+    expect(new Set(hmmtRows.map((row) => row.benchmarkType))).toEqual(new Set(["Math"]));
+    expect(hmmtRows.every((row) => row.benchmarkTypeProvided)).toBe(true);
+  });
+
   test("HTML 表格 rowspan 分数会复制到覆盖行", () => {
     const htmlInput = [
       "<html><body><table>",
