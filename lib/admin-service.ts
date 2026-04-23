@@ -237,6 +237,7 @@ const SUPERSCRIPT_SUBSCRIPT_DIGIT_MAP: Record<string, string> = {
 const SUPERSCRIPT_SUBSCRIPT_DIGIT_REGEX = /[⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉]/g;
 const SCALE_NORMALIZED_NOTE_TO_ONE = "normalized-scale-to-1";
 const SCALE_NORMALIZED_NOTE_TO_HUNDRED = "normalized-scale-to-100";
+const HYPHEN_VARIANT_REGEX = /[\-\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g;
 const LATEX_INLINE_GREEK_MAP: Record<string, string> = {
   alpha: "α",
   beta: "β",
@@ -3860,7 +3861,7 @@ function normalizeLooseText(input: string): string {
   return input
     .replace(SUPERSCRIPT_SUBSCRIPT_DIGIT_REGEX, (value) => SUPERSCRIPT_SUBSCRIPT_DIGIT_MAP[value] ?? value)
     .toLowerCase()
-    .replace(/[\u2012-\u2015\u2212]/g, "-")
+    .replace(HYPHEN_VARIANT_REGEX, "-")
     .replace(/[^a-z0-9\u0370-\u03ff\u1f00-\u1fff\u4e00-\u9fa5]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();

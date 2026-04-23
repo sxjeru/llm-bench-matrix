@@ -178,6 +178,14 @@ describe("paper-table 文本解析", () => {
     expect(normalizeDuplicateCompareTextForTest("Λ-τ Bench")).toBe("λ τ bench");
   });
 
+  test("重复比较归一化会折叠 non-breaking hyphen，避免导入预览把同名模型仅标成相似", () => {
+    expect(normalizeDuplicateCompareTextForTest("GPT‑5.4 Pro")).toBe(
+      normalizeDuplicateCompareTextForTest("GPT-5.4 Pro")
+    );
+
+    expect(getDuplicateNameSimilarityForTest("GPT‑5.4 Pro", "GPT-5.4 Pro")).toBe(1);
+  });
+
   test("benchmark 数字片段差异会被识别为不一致", () => {
     expect(
       hasBenchmarkNumericTokenMismatchForTest(
