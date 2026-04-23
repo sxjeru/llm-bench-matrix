@@ -1608,6 +1608,30 @@ function buildSplitBenchmarkValueRaw(valueNum: number | null, valueNum2: number 
   throw new Error("split benchmark value row must retain at least one numeric value");
 }
 
+function normalizeSplitBenchmarkPair(
+  valueNum: number | null,
+  valueNum2: number | null
+): { valueNum: number | null; valueNum2: number | null } {
+  if (valueNum !== null) {
+    return {
+      valueNum,
+      valueNum2
+    };
+  }
+
+  if (valueNum2 !== null) {
+    return {
+      valueNum: valueNum2,
+      valueNum2: null
+    };
+  }
+
+  return {
+    valueNum: null,
+    valueNum2: null
+  };
+}
+
 async function getModelDedupeRule() {
   const [setting] = await db
     .select({ valueJson: settings.valueJson })
@@ -4967,10 +4991,20 @@ export async function splitBenchmarkScaleByMode(input: {
         continue;
       }
 
-      const baseValueNum = valueNumIsBase ? valueNum : null;
-      const baseValueNum2 = valueNum2IsBase ? valueNum2 : null;
-      const eloValueNum = valueNumIsElo ? valueNum : null;
-      const eloValueNum2 = valueNum2IsElo ? valueNum2 : null;
+      const {
+        valueNum: baseValueNum,
+        valueNum2: baseValueNum2
+      } = normalizeSplitBenchmarkPair(
+        valueNumIsBase ? valueNum : null,
+        valueNum2IsBase ? valueNum2 : null
+      );
+      const {
+        valueNum: eloValueNum,
+        valueNum2: eloValueNum2
+      } = normalizeSplitBenchmarkPair(
+        valueNumIsElo ? valueNum : null,
+        valueNum2IsElo ? valueNum2 : null
+      );
 
       await tx
         .update(benchmarkValues)

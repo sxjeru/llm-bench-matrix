@@ -520,6 +520,9 @@ describe("benchmark scale consistency", () => {
 
     const onConflictDoNothing = vi.fn().mockResolvedValue(undefined);
 
+    const splitInsertPayloads: Array<Record<string, unknown>> = [];
+    const splitUpdatePayloads: Array<Record<string, unknown>> = [];
+
     const insertValues = vi.fn((payload: Record<string, unknown> | Array<Record<string, unknown>>) => {
       const rows = Array.isArray(payload) ? payload : [payload];
       const firstRow = rows[0];
@@ -551,9 +554,28 @@ describe("benchmark scale consistency", () => {
         };
       }
 
+      if (firstRow && "modelId" in firstRow) {
+        splitInsertPayloads.push(...rows);
+      }
+
       return Promise.resolve(undefined);
     });
     const insert = vi.fn(() => ({ values: insertValues }));
+
+    updateSet.mockImplementation((payload: Record<string, unknown>) => {
+      if ("canonicalKey" in payload || "benchmarkName" in payload) {
+        return {
+          where: vi.fn(() => ({ returning: updateReturning })),
+          returning: updateReturning
+        };
+      }
+
+      if ("benchmarkId" in payload) {
+        splitUpdatePayloads.push(payload);
+      }
+
+      return { where: updateWhere };
+    });
 
     const tx = { select: txSelect, update, insert };
     vi.spyOn(dbForTest, "transaction").mockImplementation(async (callback: TransactionCallback) => callback(tx));
@@ -570,6 +592,29 @@ describe("benchmark scale consistency", () => {
     expect(result.splitRows).toBe(1);
     expect(result.createdRows).toBe(1);
     expect(result.eloBenchmarkName).toBe("Arena Hard (Elo)");
+
+    expect(splitUpdatePayloads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          benchmarkId: 21,
+          valueRaw: "87",
+          valueNum: "87",
+          valueNum2: null,
+          valueNote: "split-benchmark-base"
+        })
+      ])
+    );
+    expect(splitInsertPayloads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          benchmarkId: 31,
+          valueRaw: "1215",
+          valueNum: "1215",
+          valueNum2: null,
+          valueNote: "split-benchmark-elo"
+        })
+      ])
+    );
   });
 
   test("splitBenchmarkScaleByMode 会为 Elo benchmark 补齐 source meta 继承", async () => {
