@@ -1137,14 +1137,34 @@ describe("AdminConsole data maintenance", () => {
       generatedAt: "2026-04-18T10:00:00.000Z",
       issues: [
         {
+          issueType: "mixed-scale-0-1-vs-100",
+          recommendedAction: "normalize-scale",
           benchmarkId: 11,
           benchmarkName: "Bench-1",
           benchmarkType: "Type-A",
           valueCount: 12,
           smallValueCount: 4,
           largeValueCount: 8,
+          zeroToHundredCount: 12,
+          overHundredCount: 0,
           minValue: 0.12,
           maxValue: 87.4,
+          segments: [
+            {
+              key: "small",
+              label: "0-1",
+              count: 4,
+              minValue: 0.12,
+              maxValue: 0.12
+            },
+            {
+              key: "large",
+              label: ">10",
+              count: 8,
+              minValue: 87.4,
+              maxValue: 87.4
+            }
+          ],
           valueDetails: [
             {
               value: 0.12,
@@ -1212,6 +1232,112 @@ describe("AdminConsole data maintenance", () => {
     expect(normalizePayload).toEqual({
       benchmarkId: 11,
       targetScale: 1
+    });
+
+    expect(await screen.findByText("最近一次检测未发现混合量纲问题。")).toBeInTheDocument();
+  });
+
+  test("可检测 0-100 与 >100 的 Elo 混用并触发拆分", async () => {
+    const user = userEvent.setup();
+
+    const consistencyResponse = {
+      generatedAt: "2026-04-18T10:00:00.000Z",
+      issues: [
+        {
+          issueType: "mixed-scale-100-vs-elo",
+          recommendedAction: "split-benchmark",
+          benchmarkId: 21,
+          benchmarkName: "Arena Hard",
+          benchmarkType: "arena",
+          valueCount: 6,
+          smallValueCount: 0,
+          largeValueCount: 6,
+          zeroToHundredCount: 3,
+          overHundredCount: 3,
+          minValue: 72,
+          maxValue: 1215,
+          segments: [
+            { key: "base", label: "0-100", count: 3, minValue: 72, maxValue: 92 },
+            { key: "elo", label: ">100 (Elo)", count: 3, minValue: 1102, maxValue: 1215 }
+          ],
+          valueDetails: [
+            {
+              value: 87,
+              field: "valueNum",
+              modelName: "Model A",
+              source: "text:seed",
+              benchTime: "2026-04-18T09:00:00.000Z"
+            },
+            {
+              value: 1215,
+              field: "valueNum2",
+              modelName: "Model A",
+              source: "text:seed",
+              benchTime: "2026-04-18T09:00:00.000Z"
+            }
+          ]
+        }
+      ]
+    };
+
+    const splitResponse = {
+      ok: true,
+      benchmarkId: 21,
+      benchmarkName: "Arena Hard",
+      benchmarkType: "arena",
+      splitMode: "hundred-vs-elo",
+      baseBenchmarkId: 21,
+      baseBenchmarkName: "Arena Hard",
+      baseBenchmarkType: "arena",
+      eloBenchmarkId: 31,
+      eloBenchmarkName: "Arena Hard (Elo)",
+      eloBenchmarkType: "arena",
+      movedRows: 1,
+      splitRows: 1,
+      createdRows: 1
+    };
+
+    const consistencyAfterSplitResponse = {
+      generatedAt: "2026-04-18T10:05:00.000Z",
+      issues: []
+    };
+
+    const fetchMock = mockFetchSequence(
+      consistencyResponse,
+      splitResponse,
+      consistencyAfterSplitResponse
+    );
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await user.click(screen.getByRole("tab", { name: "数据维护" }));
+    await user.click(screen.getByRole("button", { name: "开始一致性检测" }));
+
+    expect(await screen.findByText("Arena Hard")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Arena Hard")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Arena Hard (Elo)")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "拆分为原 benchmark + Elo" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
+    const splitCall = fetchMock.mock.calls[1];
+    expect(splitCall?.[0]).toBe("/api/admin/data-maintenance/split-benchmark-scale");
+
+    const splitPayload = JSON.parse(((splitCall?.[1] as RequestInit).body ?? "{}") as string) as {
+      benchmarkId?: number;
+      splitMode?: string;
+      baseBenchmarkName?: string;
+      eloBenchmarkName?: string;
+    };
+
+    expect(splitPayload).toEqual({
+      benchmarkId: 21,
+      splitMode: "hundred-vs-elo",
+      baseBenchmarkName: "Arena Hard",
+      eloBenchmarkName: "Arena Hard (Elo)"
     });
 
     expect(await screen.findByText("最近一次检测未发现混合量纲问题。")).toBeInTheDocument();
