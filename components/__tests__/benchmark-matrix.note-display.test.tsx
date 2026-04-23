@@ -70,6 +70,42 @@ describe("BenchmarkMatrix 星号值显示", () => {
     expect(await screen.findByText("注释：data from the technical report")).toBeInTheDocument();
   });
 
+  test("带#前缀的数值保留#符号显示", () => {
+    render(
+      <BenchmarkMatrix
+        rows={[
+          {
+            providerName: "OpenAI",
+            modelName: "GPT-5",
+            benchmarkName: "MT-Bench",
+            benchmarkType: "Chat",
+            benchTime: "2026-04-23T00:00:00.000Z",
+            valueRaw: "#2",
+            valueNum: 2,
+            valueNote: null,
+            source: "text:demo"
+          },
+          {
+            providerName: "Anthropic",
+            modelName: "Claude 3 Opus",
+            benchmarkName: "MT-Bench",
+            benchmarkType: "Chat",
+            benchTime: "2026-04-23T00:00:00.000Z",
+            valueRaw: "＃1",
+            valueNum: 1,
+            valueNote: null,
+            source: "text:demo"
+          }
+        ]}
+      />
+    );
+
+    expect(screen.getByText("#2")).toBeInTheDocument();
+    expect(screen.getByText("＃1")).toBeInTheDocument();
+    expect(screen.queryByText(/^2$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^1$/)).not.toBeInTheDocument();
+  });
+
   test("tooltip 会隐藏数值和 source 都相同的重复记录", async () => {
     const { container } = render(
       <BenchmarkMatrix

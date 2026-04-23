@@ -1217,7 +1217,9 @@ function getMatrixCellDisplayValue(
 
   const numericDisplay = formatValueNumForDisplay(valueNum);
   if (numericDisplay !== null) {
-    return hasStarMarker ? `${numericDisplay}*` : numericDisplay;
+    const hasHashPrefix = /^[#＃]/.test(raw);
+    const prefix = hasHashPrefix ? raw.match(/^[#＃]+/)?.[0] ?? "" : "";
+    return hasStarMarker ? `${prefix}${numericDisplay}*` : `${prefix}${numericDisplay}`;
   }
 
   const singleMatch = raw.match(/^([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/);
