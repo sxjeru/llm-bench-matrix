@@ -8,3 +8,4 @@ dist
 .DS_Store
 
 codealike.json
+package-lock.json
