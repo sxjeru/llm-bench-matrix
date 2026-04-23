@@ -8,6 +8,7 @@ const numberPattern = "(?:[#＃]\\s*)?(?:[$¥€£]\\s*)?[+-]?(?:\\d{1,3}(?:,\\d
 const pairRegex = new RegExp(`^${numberPattern}\\s*\\/\\s*${numberPattern}(?:\\s*[\\*\\^][0-9A-Za-z]*)?$`);
 const singleRegex = new RegExp(`^${numberPattern}(?:\\s*[\\*\\^][0-9A-Za-z]*)?$`);
 const pipeSeparatorRegex = /[|｜]/;
+const rankPrefixRegex = /^[#＃]/;
 
 export type ImportWarning = {
   rowNumber: number;
@@ -273,7 +274,7 @@ export function parseWorkbookBuffer(buffer: Buffer, sheetName?: string): Workboo
         const parsedValueNote = parsed.valueNote === "non-numeric" ? null : parsed.valueNote;
         const mergedValueNote = mergeValueNotes(cell.valueNote, parsedValueNote);
 
-        const higherIsBetter = /^[#＃]/.test(cell.rawValue.trim()) ? false : undefined;
+        const higherIsBetter = rankPrefixRegex.test(cell.rawValue.trim()) ? false : undefined;
 
         records.push({
           rowNumber: rowIndex + 1,

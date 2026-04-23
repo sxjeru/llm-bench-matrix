@@ -160,6 +160,7 @@ const IMPORT_VALUE_PAIR_REGEX =
   /^((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/;
 const IMPORT_VALUE_SINGLE_REGEX =
   /^((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/;
+const IMPORT_VALUE_RANK_PREFIX_REGEX = /^[#＃]/;
 const IMPORT_MULTI_VALUE_SEPARATOR_REGEX = /[|｜]/;
 const MODEL_DUPLICATE_NOISE_TOKENS = new Set([
   "high",
@@ -2419,9 +2420,8 @@ export async function importParsedRecords(
       valueNote: null,
       benchTime: options?.benchTime ?? new Date(),
       unit: "score",
-      higherIsBetter: record.higherIsBetter === false
-        ? false
-        : !isLowerBetterBenchmark(
+      higherIsBetter: record.higherIsBetter
+        ?? !isLowerBetterBenchmark(
           normalizeNameParenthesisSpacing(record.benchmarkName),
           (record.category || "general").trim() || "general"
         ),
@@ -2684,7 +2684,7 @@ function parseStructuredCsvRows(inputText: string, defaultSource: string | null)
       ? benchmarkDirection.higherIsBetter
       : parseBoolean(
         row.higher_is_better,
-        /^[#＃]/.test(valueRaw) ? false : !isLowerBetterBenchmark(benchmarkName, benchmarkType)
+        IMPORT_VALUE_RANK_PREFIX_REGEX.test(valueRaw) ? false : !isLowerBetterBenchmark(benchmarkName, benchmarkType)
       );
     const modalitiesInput = (row.modalities || "").trim();
     const benchTimeRaw = row.bench_time || row.time || row.date || new Date().toISOString();
@@ -3045,7 +3045,7 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
         valueNote: normalizedValue.valueNote,
         benchTime: new Date(),
         unit: "score",
-        higherIsBetter: /^[#＃]/.test(normalizedValue.valueRaw)
+        higherIsBetter: IMPORT_VALUE_RANK_PREFIX_REGEX.test(normalizedValue.valueRaw)
           ? false
           : benchmarkDirection.hadDirectionMarker
             ? benchmarkDirection.higherIsBetter
@@ -3266,7 +3266,7 @@ function parsePaperCopiedTableRows(inputText: string, defaultSource: string | nu
         valueNote: normalizedValue.valueNote,
         benchTime: new Date(),
         unit: "score",
-        higherIsBetter: /^[#＃]/.test(normalizedValue.valueRaw)
+        higherIsBetter: IMPORT_VALUE_RANK_PREFIX_REGEX.test(normalizedValue.valueRaw)
           ? false
           : benchmarkDirection.hadDirectionMarker
             ? benchmarkDirection.higherIsBetter
