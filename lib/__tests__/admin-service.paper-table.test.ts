@@ -702,4 +702,52 @@ describe("paper-table 文本解析", () => {
     expect(byModel.get("GPT-5")?.valueRaw).toBe("56.2");
     expect(byModel.get("GPT-5")?.valueNote).toBe("(Claude Code)");
   });
+
+  test("值带 # 前缀时自动标记 higherIsBetter 为 false（矩阵表格）", () => {
+    const inputText = [
+      "Benchmark\tModel A\tModel B",
+      "Rank Eval\t#3\t#5"
+    ].join("\n");
+
+    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const rows = parsed.rows.filter((row) => row.benchmarkName === "Rank Eval");
+
+    expect(rows.length).toBe(2);
+    expect(rows.every((row) => row.higherIsBetter === false)).toBe(true);
+  });
+
+  test("值带 # 前缀时自动标记 higherIsBetter 为 false（论文格式）", () => {
+    const inputText = [
+      "Rank Eval  Model A  Model B",
+      "Arena      #3       #5"
+    ].join("\n");
+
+    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const rows = parsed.rows.filter((row) => row.benchmarkName === "Arena");
+
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((row) => row.higherIsBetter === false)).toBe(true);
+  });
+
+  test("benchmark 方向标识优先于 # 前缀值推断 higherIsBetter", () => {
+    const inputText = [
+      "Benchmark\tModel A\tModel B",
+      "Rank Eval ↑\t#3\t#5",
+      "Rank Eval ↓\t#3\t#5"
+    ].join("\n");
+
+    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const rows = parsed.rows.filter((row) => row.benchmarkName === "Rank Eval");
+    const upRows = rows.slice(0, 2);
+    const downRows = rows.slice(2, 4);
+
+    expect(upRows.length).toBe(2);
+    expect(upRows.every((row) => row.benchmarkName === "Rank Eval")).toBe(true);
+    expect(upRows.every((row) => row.higherIsBetter === true)).toBe(true);
+
+    expect(downRows.length).toBe(2);
+    expect(downRows.every((row) => row.benchmarkName === "Rank Eval")).toBe(true);
+    expect(downRows.every((row) => row.higherIsBetter === false)).toBe(true);
+  });
 });
+

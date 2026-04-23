@@ -1,12 +1,10 @@
 import * as XLSX from "xlsx";
 import { parseBenchmarkValue } from "@/lib/db/parse-value";
+import { IMPORT_VALUE_PAIR_REGEX, IMPORT_VALUE_RANK_PREFIX_REGEX, IMPORT_VALUE_SINGLE_REGEX } from "@/lib/import/value-patterns";
 
 const EMPTY_MARKERS = new Set(["", "-", "--", "—", "–", "n/a", "na", "null"]);
 const CATEGORY_HEADERS = new Set(["category", "类别", "分类", "type", "group"]);
 
-const numberPattern = "(?:[$¥€£]\\s*)?[+-]?(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d+)?";
-const pairRegex = new RegExp(`^${numberPattern}\\s*\\/\\s*${numberPattern}(?:\\s*[\\*\\^][0-9A-Za-z]*)?$`);
-const singleRegex = new RegExp(`^${numberPattern}(?:\\s*[\\*\\^][0-9A-Za-z]*)?$`);
 const pipeSeparatorRegex = /[|｜]/;
 
 export type ImportWarning = {
@@ -27,6 +25,7 @@ export type ParsedImportRecord = {
   valueNum2: number | null;
   valueNote: string | null;
   valid: boolean;
+  higherIsBetter?: boolean;
 };
 
 export type WorkbookParseResult = {
@@ -113,7 +112,7 @@ function expandMetricLabeledCellValue(benchmarkName: string, rawValue: string): 
     return null;
   }
 
-  if (!valueSegments.every((segment) => singleRegex.test(segment))) {
+  if (!valueSegments.every((segment) => IMPORT_VALUE_SINGLE_REGEX.test(segment))) {
     return null;
   }
 
@@ -146,7 +145,7 @@ function isValidRawValue(raw: string): boolean {
   const value = raw.trim();
   if (isEmptyMarker(value)) return true;
 
-  if (pairRegex.test(value) || singleRegex.test(value)) {
+  if (IMPORT_VALUE_PAIR_REGEX.test(value) || IMPORT_VALUE_SINGLE_REGEX.test(value)) {
     return true;
   }
 
@@ -163,7 +162,7 @@ function isValidRawValue(raw: string): boolean {
     return false;
   }
 
-  return pipeSegments.every((segment) => singleRegex.test(segment));
+  return pipeSegments.every((segment) => IMPORT_VALUE_SINGLE_REGEX.test(segment));
 }
 
 function getNonEmptyColumnIndices(headerRow: string[]): number[] {
@@ -272,6 +271,8 @@ export function parseWorkbookBuffer(buffer: Buffer, sheetName?: string): Workboo
         const parsedValueNote = parsed.valueNote === "non-numeric" ? null : parsed.valueNote;
         const mergedValueNote = mergeValueNotes(cell.valueNote, parsedValueNote);
 
+        const higherIsBetter = IMPORT_VALUE_RANK_PREFIX_REGEX.test(cell.rawValue.trim()) ? false : undefined;
+
         records.push({
           rowNumber: rowIndex + 1,
           category,
@@ -281,7 +282,8 @@ export function parseWorkbookBuffer(buffer: Buffer, sheetName?: string): Workboo
           valueNum: parsed.valueNum,
           valueNum2: parsed.valueNum2,
           valueNote: mergedValueNote ?? (parsed.valueNote === "non-numeric" ? "non-numeric" : null),
-          valid
+          valid,
+          higherIsBetter
         });
       });
     }

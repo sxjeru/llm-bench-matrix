@@ -29,4 +29,13 @@ describe("parseBenchmarkValue currency", () => {
     expect(parsed.valueNum2).toBeCloseTo(60.7);
     expect(parsed.valueNote).toBe("*");
   });
+
+  test("支持 #3.4 这类名次值", () => {
+    const parsed = parseBenchmarkValue("#3.4");
+
+    expect(parsed.valueRaw).toBe("#3.4");
+    expect(parsed.valueNum).toBeCloseTo(3.4);
+    expect(parsed.valueNum2).toBeNull();
+    expect(parsed.valueNote).toBeNull();
+  });
 });

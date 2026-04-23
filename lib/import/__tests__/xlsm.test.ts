@@ -66,6 +66,25 @@ describe("parseWorkbookBuffer", () => {
     expect(parsed.warnings).toHaveLength(0);
   });
 
+  test("支持 #3.4 这类名次值，且自动标记 higherIsBetter 为 false", () => {
+    const buffer = buildWorkbookBuffer([
+      ["Category", "Benchmark", "Model A"],
+      ["Business", "Rank Bench", "#3.4"]
+    ]);
+
+    const parsed = parseWorkbookBuffer(buffer, "Sheet1");
+    const row = parsed.records.find((item) => item.benchmarkName === "Rank Bench");
+
+    expect(row).toBeDefined();
+    expect(row?.valid).toBe(true);
+    expect(row?.rawValue).toBe("#3.4");
+    expect(row?.valueNum).toBeCloseTo(3.4);
+    expect(row?.valueNum2).toBeNull();
+    expect(row?.valueNote).toBeNull();
+    expect(row?.higherIsBetter).toBe(false);
+    expect(parsed.warnings).toHaveLength(0);
+  });
+
   test("支持 75.6 | 46.8 | 77.9 三值管道格式", () => {
     const buffer = buildWorkbookBuffer([
       ["Category", "Benchmark", "Model A"],
