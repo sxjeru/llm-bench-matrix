@@ -447,6 +447,27 @@ describe("paper-table 文本解析", () => {
     expect(starRow?.valueRaw).toBe("65.4*");
   });
 
+  test("HTML 表格中的 LaTeX 希腊字母会转换为 Unicode 标准字符", () => {
+    const htmlInput = [
+      "<html><body><table>",
+      "<thead><tr><th>Benchmark</th><th>M1</th></tr></thead>",
+      "<tbody>",
+      "<tr><td>$\\tau$3-bench</td><td>72.9</td></tr>",
+      "<tr><td>$\\Gamma$-bench</td><td>70.1</td></tr>",
+      "<tr><td>$\\varphi$-bench</td><td>68.4</td></tr>",
+      "</tbody>",
+      "</table></body></html>"
+    ].join("");
+
+    const parsed = parseBenchmarkTextRowsForTest("Benchmark\tX\nFallback\t1", "text:unit-test", htmlInput);
+    const benchmarkNames = new Set(parsed.rows.map((row) => row.benchmarkName));
+
+    expect(parsed.parseSource).toBe("html");
+    expect(benchmarkNames.has("τ3-bench")).toBe(true);
+    expect(benchmarkNames.has("Γ-bench")).toBe(true);
+    expect(benchmarkNames.has("ϕ-bench")).toBe(true);
+  });
+
   test("多行堆叠模型表头可重建并正确对齐数值列", () => {
     const inputText = [
       "Evaluation Claude family",
