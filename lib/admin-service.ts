@@ -4364,29 +4364,217 @@ export function __hasBenchmarkVariantNoiseNormalizedNameMatchForTest(left: strin
   return hasBenchmarkVariantNoiseNormalizedNameMatch(left, right);
 }
 
+type RawBenchmarkScaleConsistencyAggregateRow = {
+  benchmark_id: number | string;
+  benchmark_name: string;
+  benchmark_type: string;
+  value_count: number | string;
+  small_count: number | string;
+  large_count: number | string;
+  zero_to_hundred_count: number | string;
+  over_hundred_count: number | string;
+  min_value: number | string;
+  max_value: number | string;
+};
+
+type RawBenchmarkScaleValueDetailRow = {
+  benchmark_id: number | string;
+  value_num: number | string | null;
+  value_num2: number | string | null;
+  model_name: string;
+  source: string | null;
+  bench_time: string | Date;
+};
+
+function buildBenchmarkScaleConsistencyIssueBase(
+  row: RawBenchmarkScaleConsistencyAggregateRow
+): Omit<BenchmarkScaleConsistencyIssue, "segments" | "valueDetails"> | null {
+  const benchmarkId = Number(row.benchmark_id);
+  const minValue = toFiniteNumber(row.min_value);
+  const maxValue = toFiniteNumber(row.max_value);
+  const smallValueCount = Number(row.small_count ?? 0);
+  const largeValueCount = Number(row.large_count ?? 0);
+  const zeroToHundredCount = Number(row.zero_to_hundred_count ?? 0);
+  const overHundredCount = Number(row.over_hundred_count ?? 0);
+
+  if (!Number.isFinite(benchmarkId) || minValue === null || maxValue === null) {
+    return null;
+  }
+
+  const hasMixedZeroOneAndHundred = smallValueCount > 0 && largeValueCount > 0;
+  const hasMixedHundredAndElo = zeroToHundredCount > 0 && overHundredCount > 0;
+
+  if (!hasMixedZeroOneAndHundred && !hasMixedHundredAndElo) {
+    return null;
+  }
+
+  const issueType: BenchmarkConsistencyIssueType = hasMixedZeroOneAndHundred
+    ? "mixed-scale-0-1-vs-100"
+    : "mixed-scale-100-vs-elo";
+
+  const recommendedAction: BenchmarkConsistencyRecommendedAction = issueType === "mixed-scale-0-1-vs-100"
+    ? "normalize-scale"
+    : "split-benchmark";
+
+  return {
+    issueType,
+    recommendedAction,
+    benchmarkId,
+    benchmarkName: row.benchmark_name,
+    benchmarkType: row.benchmark_type,
+    valueCount: Number(row.value_count ?? 0),
+    smallValueCount,
+    largeValueCount,
+    zeroToHundredCount,
+    overHundredCount,
+    minValue,
+    maxValue
+  };
+}
+
+function appendBenchmarkScaleValueDetails(
+  item: Omit<BenchmarkScaleConsistencyIssue, "segments" | "valueDetails">,
+  valueDetails: BenchmarkScaleValueDetail[]
+): BenchmarkScaleConsistencyIssue {
+  const smallValues = collectDetailValuesByPredicate(valueDetails, (value) => value >= 0 && value < 1);
+  const largeValues = collectDetailValuesByPredicate(valueDetails, (value) => value > 10);
+  const baseValues = collectDetailValuesByPredicate(valueDetails, (value) => value >= 0 && value <= 100);
+  const eloValues = collectDetailValuesByPredicate(valueDetails, (value) => value > 100);
+
+  return {
+    ...item,
+    segments: item.issueType === "mixed-scale-0-1-vs-100"
+      ? [
+          {
+            key: "small",
+            label: "0-1",
+            count: item.smallValueCount,
+            ...mergeNumericBounds(smallValues)
+          },
+          {
+            key: "large",
+            label: ">10",
+            count: item.largeValueCount,
+            ...mergeNumericBounds(largeValues)
+          }
+        ]
+      : [
+          {
+            key: "base",
+            label: "0-100",
+            count: item.zeroToHundredCount,
+            ...mergeNumericBounds(baseValues)
+          },
+          {
+            key: "elo",
+            label: ">100 (Elo)",
+            count: item.overHundredCount,
+            ...mergeNumericBounds(eloValues)
+          }
+        ],
+    valueDetails
+  };
+}
+
+async function getBenchmarkScaleConsistencyIssueById(
+  benchmarkId: number
+): Promise<BenchmarkScaleConsistencyIssue | null> {
+  const result = await db.execute(sql`
+    WITH expanded_values AS (
+      SELECT benchmark_id, value_num::numeric AS numeric_value
+      FROM benchmark_values
+      WHERE benchmark_id = ${benchmarkId} AND value_num IS NOT NULL
+      UNION ALL
+      SELECT benchmark_id, value_num2::numeric AS numeric_value
+      FROM benchmark_values
+      WHERE benchmark_id = ${benchmarkId} AND value_num2 IS NOT NULL
+    ),
+    grouped AS (
+      SELECT
+        benchmark_id,
+        COUNT(*)::int AS value_count,
+        COUNT(*) FILTER (WHERE numeric_value >= 0 AND numeric_value < 1)::int AS small_count,
+        COUNT(*) FILTER (WHERE numeric_value > 10)::int AS large_count,
+        COUNT(*) FILTER (WHERE numeric_value >= 0 AND numeric_value <= 100)::int AS zero_to_hundred_count,
+        COUNT(*) FILTER (WHERE numeric_value > 100)::int AS over_hundred_count,
+        MIN(numeric_value)::numeric AS min_value,
+        MAX(numeric_value)::numeric AS max_value
+      FROM expanded_values
+      GROUP BY benchmark_id
+    )
+    SELECT
+      grouped.benchmark_id,
+      benchmarks.benchmark_name,
+      benchmarks.benchmark_type,
+      grouped.value_count,
+      grouped.small_count,
+      grouped.large_count,
+      grouped.zero_to_hundred_count,
+      grouped.over_hundred_count,
+      grouped.min_value,
+      grouped.max_value
+    FROM grouped
+    INNER JOIN benchmarks ON benchmarks.id = grouped.benchmark_id
+    WHERE benchmarks.merged_into_benchmark_id IS NULL
+  `);
+
+  const baseIssue = resultRows<RawBenchmarkScaleConsistencyAggregateRow>(result)
+    .map((row) => buildBenchmarkScaleConsistencyIssueBase(row))
+    .find((item): item is Omit<BenchmarkScaleConsistencyIssue, "segments" | "valueDetails"> => item !== null);
+
+  if (!baseIssue) {
+    return null;
+  }
+
+  const valueDetailsResult = await db.execute(sql`
+    SELECT
+      benchmark_values.benchmark_id,
+      benchmark_values.value_num,
+      benchmark_values.value_num2,
+      models.model_name,
+      benchmark_values.source,
+      benchmark_values.bench_time
+    FROM benchmark_values
+    INNER JOIN models ON models.id = benchmark_values.model_id
+    WHERE benchmark_values.benchmark_id = ${benchmarkId}
+      AND (benchmark_values.value_num IS NOT NULL OR benchmark_values.value_num2 IS NOT NULL)
+    ORDER BY benchmark_values.bench_time DESC, benchmark_values.id DESC
+  `);
+
+  const valueDetails: BenchmarkScaleValueDetail[] = [];
+
+  resultRows<RawBenchmarkScaleValueDetailRow>(valueDetailsResult).forEach((row) => {
+    const rowBenchmarkId = Number(row.benchmark_id);
+    if (!Number.isFinite(rowBenchmarkId)) {
+      return;
+    }
+
+    const benchTime = toIsoDateTime(row.bench_time);
+    const source = row.source?.trim() ? row.source.trim() : null;
+
+    const pushDetail = (rawValue: unknown, field: BenchmarkScaleValueDetail["field"]) => {
+      const value = toFiniteNumber(rawValue);
+      if (value === null) {
+        return;
+      }
+
+      valueDetails.push({
+        value,
+        field,
+        modelName: row.model_name,
+        source,
+        benchTime
+      });
+    };
+
+    pushDetail(row.value_num, "valueNum");
+    pushDetail(row.value_num2, "valueNum2");
+  });
+
+  return appendBenchmarkScaleValueDetails(baseIssue, valueDetails);
+}
+
 export async function detectBenchmarkScaleConsistencyIssues(): Promise<BenchmarkScaleConsistencyCheckResult> {
-  type RawRow = {
-    benchmark_id: number | string;
-    benchmark_name: string;
-    benchmark_type: string;
-    value_count: number | string;
-    small_count: number | string;
-    large_count: number | string;
-    zero_to_hundred_count: number | string;
-    over_hundred_count: number | string;
-    min_value: number | string;
-    max_value: number | string;
-  };
-
-  type RawValueDetailRow = {
-    benchmark_id: number | string;
-    value_num: number | string | null;
-    value_num2: number | string | null;
-    model_name: string;
-    source: string | null;
-    bench_time: string | Date;
-  };
-
   const result = await db.execute(sql`
     WITH expanded_values AS (
       SELECT benchmark_id, value_num::numeric AS numeric_value
@@ -4434,93 +4622,9 @@ export async function detectBenchmarkScaleConsistencyIssues(): Promise<Benchmark
     ORDER BY grouped.large_count DESC, grouped.small_count DESC, benchmarks.benchmark_name ASC, benchmarks.benchmark_type ASC
   `);
 
-  const baseIssues = resultRows<RawRow>(result)
-    .map((row) => {
-      const benchmarkId = Number(row.benchmark_id);
-      const minValue = toFiniteNumber(row.min_value);
-      const maxValue = toFiniteNumber(row.max_value);
-      const smallValueCount = Number(row.small_count ?? 0);
-      const largeValueCount = Number(row.large_count ?? 0);
-      const zeroToHundredCount = Number(row.zero_to_hundred_count ?? 0);
-      const overHundredCount = Number(row.over_hundred_count ?? 0);
-
-      if (
-        !Number.isFinite(benchmarkId)
-        || minValue === null
-        || maxValue === null
-      ) {
-        return null;
-      }
-
-      const hasMixedZeroOneAndHundred = smallValueCount > 0 && largeValueCount > 0;
-      const hasMixedHundredAndElo = zeroToHundredCount > 0 && overHundredCount > 0;
-
-      if (!hasMixedZeroOneAndHundred && !hasMixedHundredAndElo) {
-        return null;
-      }
-
-      const issueType: BenchmarkConsistencyIssueType = hasMixedZeroOneAndHundred
-        ? "mixed-scale-0-1-vs-100"
-        : "mixed-scale-100-vs-elo";
-
-      const recommendedAction: BenchmarkConsistencyRecommendedAction = issueType === "mixed-scale-0-1-vs-100"
-        ? "normalize-scale"
-        : "split-benchmark";
-
-      const smallBounds = mergeNumericBounds([minValue, maxValue].filter((value) => value >= 0 && value < 1));
-      const largeBounds = mergeNumericBounds([minValue, maxValue].filter((value) => value > 10));
-      const baseBounds = mergeNumericBounds([minValue, maxValue].filter((value) => value >= 0 && value <= 100));
-      const eloBounds = mergeNumericBounds([minValue, maxValue].filter((value) => value > 100));
-
-      return {
-        issueType,
-        recommendedAction,
-        benchmarkId,
-        benchmarkName: row.benchmark_name,
-        benchmarkType: row.benchmark_type,
-        valueCount: Number(row.value_count ?? 0),
-        smallValueCount,
-        largeValueCount,
-        zeroToHundredCount,
-        overHundredCount,
-        minValue,
-        maxValue,
-        segments: issueType === "mixed-scale-0-1-vs-100"
-          ? [
-              {
-                key: "small",
-                label: "0-1",
-                count: smallValueCount,
-                minValue: smallBounds.minValue,
-                maxValue: smallBounds.maxValue
-              },
-              {
-                key: "large",
-                label: ">10",
-                count: largeValueCount,
-                minValue: largeBounds.minValue,
-                maxValue: largeBounds.maxValue
-              }
-            ]
-          : [
-              {
-                key: "base",
-                label: "0-100",
-                count: zeroToHundredCount,
-                minValue: baseBounds.minValue,
-                maxValue: baseBounds.maxValue
-              },
-              {
-                key: "elo",
-                label: ">100 (Elo)",
-                count: overHundredCount,
-                minValue: eloBounds.minValue,
-                maxValue: eloBounds.maxValue
-              }
-            ]
-      };
-    })
-    .filter((item): item is Omit<BenchmarkScaleConsistencyIssue, "valueDetails"> => item !== null);
+  const baseIssues = resultRows<RawBenchmarkScaleConsistencyAggregateRow>(result)
+    .map((row) => buildBenchmarkScaleConsistencyIssueBase(row))
+    .filter((item): item is Omit<BenchmarkScaleConsistencyIssue, "segments" | "valueDetails"> => item !== null);
 
   if (baseIssues.length === 0) {
     return {
@@ -4548,7 +4652,7 @@ export async function detectBenchmarkScaleConsistencyIssues(): Promise<Benchmark
 
   const valueDetailMap = new Map<number, BenchmarkScaleValueDetail[]>();
 
-  resultRows<RawValueDetailRow>(valueDetailsResult).forEach((row) => {
+  resultRows<RawBenchmarkScaleValueDetailRow>(valueDetailsResult).forEach((row) => {
     const benchmarkId = Number(row.benchmark_id);
     if (!Number.isFinite(benchmarkId)) {
       return;
@@ -4580,47 +4684,9 @@ export async function detectBenchmarkScaleConsistencyIssues(): Promise<Benchmark
     pushDetail(row.value_num2, "valueNum2");
   });
 
-  const issues: BenchmarkScaleConsistencyIssue[] = baseIssues.map((item) => {
-    const valueDetails = valueDetailMap.get(item.benchmarkId) ?? [];
-    const smallValues = collectDetailValuesByPredicate(valueDetails, (value) => value >= 0 && value < 1);
-    const largeValues = collectDetailValuesByPredicate(valueDetails, (value) => value > 10);
-    const baseValues = collectDetailValuesByPredicate(valueDetails, (value) => value >= 0 && value <= 100);
-    const eloValues = collectDetailValuesByPredicate(valueDetails, (value) => value > 100);
-
-    return {
-      ...item,
-      segments: item.issueType === "mixed-scale-0-1-vs-100"
-        ? [
-            {
-              key: "small",
-              label: "0-1",
-              count: item.smallValueCount,
-              ...mergeNumericBounds(smallValues)
-            },
-            {
-              key: "large",
-              label: ">10",
-              count: item.largeValueCount,
-              ...mergeNumericBounds(largeValues)
-            }
-          ]
-        : [
-            {
-              key: "base",
-              label: "0-100",
-              count: item.zeroToHundredCount,
-              ...mergeNumericBounds(baseValues)
-            },
-            {
-              key: "elo",
-              label: ">100 (Elo)",
-              count: item.overHundredCount,
-              ...mergeNumericBounds(eloValues)
-            }
-          ],
-      valueDetails
-    };
-  });
+  const issues: BenchmarkScaleConsistencyIssue[] = baseIssues.map((item) =>
+    appendBenchmarkScaleValueDetails(item, valueDetailMap.get(item.benchmarkId) ?? [])
+  );
 
   return {
     generatedAt: new Date().toISOString(),
@@ -4773,12 +4839,9 @@ export async function splitBenchmarkScaleByMode(input: {
     throw new Error("原 benchmark 与 Elo benchmark 名称/type 不能指向同一实体");
   }
 
-  const consistency = await detectBenchmarkScaleConsistencyIssues();
-  const issue = consistency.issues.find(
-    (item) => item.benchmarkId === input.benchmarkId && item.issueType === "mixed-scale-100-vs-elo"
-  );
+  const issue = await getBenchmarkScaleConsistencyIssueById(input.benchmarkId);
 
-  if (!issue) {
+  if (!issue || issue.issueType !== "mixed-scale-100-vs-elo") {
     throw new Error("该 benchmark 未检测到 0-100 与 >100 的混合分值，无需拆分");
   }
 
