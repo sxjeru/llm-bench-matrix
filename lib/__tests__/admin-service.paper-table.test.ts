@@ -447,6 +447,22 @@ describe("paper-table 文本解析", () => {
     expect(starRow?.valueRaw).toBe("65.4*");
   });
 
+  test("HTML 表格中的 LaTeX 希腊字母会转换为正式字符", () => {
+    const htmlInput = [
+      "<html><body><table>",
+      "<thead><tr><th>Benchmark</th><th>M1</th></tr></thead>",
+      "<tbody><tr><td>$\\tau$3-bench</td><td>72.9</td></tr></tbody>",
+      "</table></body></html>"
+    ].join("");
+
+    const parsed = parseBenchmarkTextRowsForTest("Benchmark\tX\nFallback\t1", "text:unit-test", htmlInput);
+    const tauRow = parsed.rows.find((row) => row.modelName === "M1");
+
+    expect(parsed.parseSource).toBe("html");
+    expect(tauRow).toBeDefined();
+    expect(tauRow?.benchmarkName).toBe("τ3-bench");
+  });
+
   test("多行堆叠模型表头可重建并正确对齐数值列", () => {
     const inputText = [
       "Evaluation Claude family",

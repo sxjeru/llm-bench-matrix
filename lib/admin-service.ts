@@ -221,6 +221,43 @@ const SUPERSCRIPT_SUBSCRIPT_DIGIT_MAP: Record<string, string> = {
 const SUPERSCRIPT_SUBSCRIPT_DIGIT_REGEX = /[⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉]/g;
 const SCALE_NORMALIZED_NOTE_TO_ONE = "normalized-scale-to-1";
 const SCALE_NORMALIZED_NOTE_TO_HUNDRED = "normalized-scale-to-100";
+const LATEX_INLINE_GREEK_MAP: Record<string, string> = {
+  alpha: "α",
+  beta: "β",
+  gamma: "γ",
+  delta: "δ",
+  epsilon: "ε",
+  zeta: "ζ",
+  eta: "η",
+  theta: "θ",
+  iota: "ι",
+  kappa: "κ",
+  lambda: "λ",
+  mu: "μ",
+  nu: "ν",
+  xi: "ξ",
+  omicron: "ο",
+  pi: "π",
+  rho: "ρ",
+  sigma: "σ",
+  tau: "τ",
+  upsilon: "υ",
+  phi: "φ",
+  chi: "χ",
+  psi: "ψ",
+  omega: "ω",
+  Gamma: "Γ",
+  Delta: "Δ",
+  Theta: "Θ",
+  Lambda: "Λ",
+  Xi: "Ξ",
+  Pi: "Π",
+  Sigma: "Σ",
+  Upsilon: "Υ",
+  Phi: "Φ",
+  Psi: "Ψ",
+  Omega: "Ω"
+};
 
 function isFleursZhTranslationBenchmark(benchmarkName: string): boolean {
   if (!/fleurs/i.test(benchmarkName)) return false;
@@ -563,10 +600,17 @@ function getHtmlTableInput(input: string | null | undefined): string | null {
   return HTML_TABLE_TAG_REGEX.test(trimmed) ? trimmed : null;
 }
 
+function convertInlineLatexGreekLetters(input: string): string {
+  return input.replace(/\$\\([A-Za-z]+)\$/g, (raw, command: string) => {
+    const mapped = LATEX_INLINE_GREEK_MAP[command];
+    return mapped ?? raw;
+  });
+}
+
 function normalizeHtmlImportCellText(value: unknown): string {
   const normalized = value === null || value === undefined
     ? ""
-    : String(value)
+    : convertInlineLatexGreekLetters(String(value))
       .replace(/\u00A0/g, " ")
       .replace(/\r?\n+/g, " ")
       .replace(/\s+/g, " ")
