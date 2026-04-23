@@ -1,3 +1,5 @@
+import { IMPORT_VALUE_PAIR_REGEX, IMPORT_VALUE_SINGLE_REGEX } from "@/lib/import/value-patterns";
+
 export type ParsedBenchmarkValue = {
   valueRaw: string;
   valueNum: number | null;
@@ -43,9 +45,7 @@ export function parseBenchmarkValue(rawInput: string): ParsedBenchmarkValue {
     };
   }
 
-  const pairMatch = raw.match(
-    /^((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/
-  );
+  const pairMatch = raw.match(IMPORT_VALUE_PAIR_REGEX);
   if (pairMatch) {
     const [, first, second, tail] = pairMatch;
     const note = tail.trim();
@@ -58,7 +58,7 @@ export function parseBenchmarkValue(rawInput: string): ParsedBenchmarkValue {
     };
   }
 
-  const singleMatch = raw.match(/^((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/);
+  const singleMatch = raw.match(IMPORT_VALUE_SINGLE_REGEX);
   if (singleMatch) {
     const [, value, tail] = singleMatch;
     const note = normalizeSingleTailToNote(tail);
