@@ -66,7 +66,7 @@ describe("parseWorkbookBuffer", () => {
     expect(parsed.warnings).toHaveLength(0);
   });
 
-  test("支持 #3.4 这类名次值", () => {
+  test("支持 #3.4 这类名次值，且自动标记 higherIsBetter 为 false", () => {
     const buffer = buildWorkbookBuffer([
       ["Category", "Benchmark", "Model A"],
       ["Business", "Rank Bench", "#3.4"]
@@ -81,6 +81,7 @@ describe("parseWorkbookBuffer", () => {
     expect(row?.valueNum).toBeCloseTo(3.4);
     expect(row?.valueNum2).toBeNull();
     expect(row?.valueNote).toBeNull();
+    expect(row?.higherIsBetter).toBe(false);
     expect(parsed.warnings).toHaveLength(0);
   });
 

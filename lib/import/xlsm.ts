@@ -27,6 +27,7 @@ export type ParsedImportRecord = {
   valueNum2: number | null;
   valueNote: string | null;
   valid: boolean;
+  higherIsBetter?: boolean;
 };
 
 export type WorkbookParseResult = {
@@ -272,6 +273,8 @@ export function parseWorkbookBuffer(buffer: Buffer, sheetName?: string): Workboo
         const parsedValueNote = parsed.valueNote === "non-numeric" ? null : parsed.valueNote;
         const mergedValueNote = mergeValueNotes(cell.valueNote, parsedValueNote);
 
+        const higherIsBetter = /^[#＃]/.test(cell.rawValue.trim()) ? false : undefined;
+
         records.push({
           rowNumber: rowIndex + 1,
           category,
@@ -281,7 +284,8 @@ export function parseWorkbookBuffer(buffer: Buffer, sheetName?: string): Workboo
           valueNum: parsed.valueNum,
           valueNum2: parsed.valueNum2,
           valueNote: mergedValueNote ?? (parsed.valueNote === "non-numeric" ? "non-numeric" : null),
-          valid
+          valid,
+          higherIsBetter
         });
       });
     }

@@ -2419,10 +2419,12 @@ export async function importParsedRecords(
       valueNote: null,
       benchTime: options?.benchTime ?? new Date(),
       unit: "score",
-      higherIsBetter: !isLowerBetterBenchmark(
-        normalizeNameParenthesisSpacing(record.benchmarkName),
-        (record.category || "general").trim() || "general"
-      ),
+      higherIsBetter: record.higherIsBetter === false
+        ? false
+        : !isLowerBetterBenchmark(
+          normalizeNameParenthesisSpacing(record.benchmarkName),
+          (record.category || "general").trim() || "general"
+        ),
       modalities: inferModalitiesFromCategory(record.category),
       source: options?.source ?? "xlsm-import",
       modelAlias: null,
@@ -2680,7 +2682,10 @@ function parseStructuredCsvRows(inputText: string, defaultSource: string | null)
     const benchmarkType = benchmarkTypeInput || "general";
     const inferredHigherIsBetter = benchmarkDirection.hadDirectionMarker
       ? benchmarkDirection.higherIsBetter
-      : parseBoolean(row.higher_is_better, !isLowerBetterBenchmark(benchmarkName, benchmarkType));
+      : parseBoolean(
+        row.higher_is_better,
+        /^[#＃]/.test(valueRaw) ? false : !isLowerBetterBenchmark(benchmarkName, benchmarkType)
+      );
     const modalitiesInput = (row.modalities || "").trim();
     const benchTimeRaw = row.bench_time || row.time || row.date || new Date().toISOString();
     const benchTime = new Date(benchTimeRaw);
@@ -3040,9 +3045,11 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
         valueNote: normalizedValue.valueNote,
         benchTime: new Date(),
         unit: "score",
-        higherIsBetter: benchmarkDirection.hadDirectionMarker
-          ? benchmarkDirection.higherIsBetter
-          : !isLowerBetterBenchmark(benchmarkName, currentBenchmarkType),
+        higherIsBetter: /^[#＃]/.test(normalizedValue.valueRaw)
+          ? false
+          : benchmarkDirection.hadDirectionMarker
+            ? benchmarkDirection.higherIsBetter
+            : !isLowerBetterBenchmark(benchmarkName, currentBenchmarkType),
         modalities: currentModalities,
         source: defaultSource,
         modelAlias: null,
@@ -3259,9 +3266,11 @@ function parsePaperCopiedTableRows(inputText: string, defaultSource: string | nu
         valueNote: normalizedValue.valueNote,
         benchTime: new Date(),
         unit: "score",
-        higherIsBetter: benchmarkDirection.hadDirectionMarker
-          ? benchmarkDirection.higherIsBetter
-          : !isLowerBetterBenchmark(benchmarkName, currentBenchmarkType),
+        higherIsBetter: /^[#＃]/.test(normalizedValue.valueRaw)
+          ? false
+          : benchmarkDirection.hadDirectionMarker
+            ? benchmarkDirection.higherIsBetter
+            : !isLowerBetterBenchmark(benchmarkName, currentBenchmarkType),
         modalities: currentModalities,
         source: defaultSource,
         modelAlias: null,
