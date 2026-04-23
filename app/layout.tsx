@@ -6,7 +6,12 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "LLM Bench Matrix",
-  description: "Lightweight benchmark dashboard with admin gate and Drizzle-backed storage"
+  description: "Lightweight benchmark dashboard with admin gate and Drizzle-backed storage",
+  icons: {
+    icon: "/icon.svg",
+    shortcut: "/icon.svg",
+    apple: "/icon.svg"
+  }
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
