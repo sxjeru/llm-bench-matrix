@@ -1137,14 +1137,34 @@ describe("AdminConsole data maintenance", () => {
       generatedAt: "2026-04-18T10:00:00.000Z",
       issues: [
         {
+          issueType: "mixed-scale-0-1-vs-100",
+          recommendedAction: "normalize-scale",
           benchmarkId: 11,
           benchmarkName: "Bench-1",
           benchmarkType: "Type-A",
           valueCount: 12,
           smallValueCount: 4,
           largeValueCount: 8,
+          zeroToHundredCount: 12,
+          overHundredCount: 0,
           minValue: 0.12,
           maxValue: 87.4,
+          segments: [
+            {
+              key: "small",
+              label: "0-1",
+              count: 4,
+              minValue: 0.12,
+              maxValue: 0.12
+            },
+            {
+              key: "large",
+              label: ">10",
+              count: 8,
+              minValue: 87.4,
+              maxValue: 87.4
+            }
+          ],
           valueDetails: [
             {
               value: 0.12,

@@ -4408,9 +4408,9 @@ function buildBenchmarkScaleConsistencyIssueBase(
     return null;
   }
 
-  const issueType: BenchmarkConsistencyIssueType = hasMixedZeroOneAndHundred
-    ? "mixed-scale-0-1-vs-100"
-    : "mixed-scale-100-vs-elo";
+  const issueType: BenchmarkConsistencyIssueType = hasMixedHundredAndElo
+    ? "mixed-scale-100-vs-elo"
+    : "mixed-scale-0-1-vs-100";
 
   const recommendedAction: BenchmarkConsistencyRecommendedAction = issueType === "mixed-scale-0-1-vs-100"
     ? "normalize-scale"

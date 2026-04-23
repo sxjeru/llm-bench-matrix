@@ -268,6 +268,78 @@ describe("benchmark scale consistency", () => {
     ]);
   });
 
+  test("detectBenchmarkScaleConsistencyIssues 在双命中场景优先返回 Elo 拆分告警", async () => {
+    vi.spyOn(dbForTest, "execute")
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            benchmark_id: 31,
+            benchmark_name: "Arena Blend",
+            benchmark_type: "arena",
+            value_count: "9",
+            small_count: "2",
+            large_count: "7",
+            zero_to_hundred_count: "5",
+            over_hundred_count: "2",
+            min_value: "0.12",
+            max_value: "1320"
+          }
+        ]
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            benchmark_id: 31,
+            value_num: "0.12",
+            value_num2: null,
+            model_name: "Model A",
+            source: "text:seed",
+            bench_time: "2026-04-18T09:00:00.000Z"
+          },
+          {
+            benchmark_id: 31,
+            value_num: "88",
+            value_num2: "1320",
+            model_name: "Model B",
+            source: "text:seed",
+            bench_time: "2026-04-18T09:05:00.000Z"
+          }
+        ]
+      });
+
+    const result = await detectScaleIssuesForTest();
+
+    expect(result.issues).toEqual([
+      expect.objectContaining({
+        issueType: "mixed-scale-100-vs-elo",
+        recommendedAction: "split-benchmark",
+        benchmarkId: 31,
+        benchmarkName: "Arena Blend",
+        benchmarkType: "arena",
+        smallValueCount: 2,
+        largeValueCount: 7,
+        zeroToHundredCount: 5,
+        overHundredCount: 2,
+        segments: [
+          {
+            key: "base",
+            label: "0-100",
+            count: 5,
+            minValue: 0.12,
+            maxValue: 88
+          },
+          {
+            key: "elo",
+            label: ">100 (Elo)",
+            count: 2,
+            minValue: 1320,
+            maxValue: 1320
+          }
+        ]
+      })
+    ]);
+  });
+
   test("normalizeBenchmarkScaleByTarget 会把 >10 同化为 1 量纲并追加标记", async () => {
     const dbSelectWhere = createSelectWhereMock([
       [
