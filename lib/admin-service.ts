@@ -1543,6 +1543,71 @@ function appendScaleNormalizationNote(valueNote: string | null | undefined, targ
   return `${current}; ${marker}`;
 }
 
+const BENCHMARK_SPLIT_NOTE_BASE = "split-benchmark-base";
+const BENCHMARK_SPLIT_NOTE_ELO = "split-benchmark-elo";
+
+function appendBenchmarkSplitNote(
+  valueNote: string | null | undefined,
+  segment: "base" | "elo"
+): string {
+  const marker = segment === "base" ? BENCHMARK_SPLIT_NOTE_BASE : BENCHMARK_SPLIT_NOTE_ELO;
+  const current = valueNote?.trim() ?? "";
+
+  if (!current) {
+    return marker;
+  }
+
+  if (current.includes(marker)) {
+    return current;
+  }
+
+  return `${current}; ${marker}`;
+}
+
+function isZeroToHundredScaleValue(value: number | null): boolean {
+  return value !== null && Number.isFinite(value) && value >= 0 && value <= 100;
+}
+
+function isEloScaleValue(value: number | null): boolean {
+  return value !== null && Number.isFinite(value) && value > 100;
+}
+
+function mergeNumericBounds(values: number[]): { minValue: number | null; maxValue: number | null } {
+  if (values.length === 0) {
+    return { minValue: null, maxValue: null };
+  }
+
+  return {
+    minValue: Math.min(...values),
+    maxValue: Math.max(...values)
+  };
+}
+
+function collectDetailValuesByPredicate(
+  valueDetails: BenchmarkScaleValueDetail[],
+  predicate: (value: number) => boolean
+): number[] {
+  return valueDetails
+    .map((detail) => detail.value)
+    .filter((value) => predicate(value));
+}
+
+function buildSplitBenchmarkValueRaw(valueNum: number | null, valueNum2: number | null): string {
+  if (valueNum !== null && valueNum2 !== null) {
+    return `${formatScaledNumericValue(valueNum)} / ${formatScaledNumericValue(valueNum2)}`;
+  }
+
+  if (valueNum !== null) {
+    return formatScaledNumericValue(valueNum);
+  }
+
+  if (valueNum2 !== null) {
+    return formatScaledNumericValue(valueNum2);
+  }
+
+  throw new Error("split benchmark value row must retain at least one numeric value");
+}
+
 async function getModelDedupeRule() {
   const [setting] = await db
     .select({ valueJson: settings.valueJson })
@@ -3662,15 +3727,32 @@ export type BenchmarkScaleValueDetail = {
   benchTime: string;
 };
 
+export type BenchmarkConsistencyIssueType = "mixed-scale-0-1-vs-100" | "mixed-scale-100-vs-elo";
+
+export type BenchmarkConsistencyRecommendedAction = "normalize-scale" | "split-benchmark";
+
+export type BenchmarkConsistencyValueSegment = {
+  key: "small" | "large" | "base" | "elo";
+  label: string;
+  count: number;
+  minValue: number | null;
+  maxValue: number | null;
+};
+
 export type BenchmarkScaleConsistencyIssue = {
+  issueType: BenchmarkConsistencyIssueType;
+  recommendedAction: BenchmarkConsistencyRecommendedAction;
   benchmarkId: number;
   benchmarkName: string;
   benchmarkType: string;
   valueCount: number;
   smallValueCount: number;
   largeValueCount: number;
+  zeroToHundredCount: number;
+  overHundredCount: number;
   minValue: number;
   maxValue: number;
+  segments: BenchmarkConsistencyValueSegment[];
   valueDetails: BenchmarkScaleValueDetail[];
 };
 
@@ -3689,6 +3771,25 @@ export type BenchmarkScaleNormalizationResult = {
   targetScale: BenchmarkScaleNormalizationTarget;
   updatedRows: number;
   updatedCells: number;
+};
+
+export type BenchmarkSplitScaleMode = "hundred-vs-elo";
+
+export type BenchmarkSplitScaleResult = {
+  ok: true;
+  benchmarkId: number;
+  benchmarkName: string;
+  benchmarkType: string;
+  splitMode: BenchmarkSplitScaleMode;
+  baseBenchmarkId: number;
+  baseBenchmarkName: string;
+  baseBenchmarkType: string;
+  eloBenchmarkId: number;
+  eloBenchmarkName: string;
+  eloBenchmarkType: string;
+  movedRows: number;
+  splitRows: number;
+  createdRows: number;
 };
 
 type DuplicateConfidence = "high" | "medium" | "low";
@@ -4271,6 +4372,8 @@ export async function detectBenchmarkScaleConsistencyIssues(): Promise<Benchmark
     value_count: number | string;
     small_count: number | string;
     large_count: number | string;
+    zero_to_hundred_count: number | string;
+    over_hundred_count: number | string;
     min_value: number | string;
     max_value: number | string;
   };
@@ -4300,12 +4403,19 @@ export async function detectBenchmarkScaleConsistencyIssues(): Promise<Benchmark
         COUNT(*)::int AS value_count,
         COUNT(*) FILTER (WHERE numeric_value >= 0 AND numeric_value < 1)::int AS small_count,
         COUNT(*) FILTER (WHERE numeric_value > 10)::int AS large_count,
+        COUNT(*) FILTER (WHERE numeric_value >= 0 AND numeric_value <= 100)::int AS zero_to_hundred_count,
+        COUNT(*) FILTER (WHERE numeric_value > 100)::int AS over_hundred_count,
         MIN(numeric_value)::numeric AS min_value,
         MAX(numeric_value)::numeric AS max_value
       FROM expanded_values
       GROUP BY benchmark_id
-      HAVING COUNT(*) FILTER (WHERE numeric_value >= 0 AND numeric_value < 1) > 0
-         AND COUNT(*) FILTER (WHERE numeric_value > 10) > 0
+      HAVING (
+        COUNT(*) FILTER (WHERE numeric_value >= 0 AND numeric_value < 1) > 0
+        AND COUNT(*) FILTER (WHERE numeric_value > 10) > 0
+      ) OR (
+        COUNT(*) FILTER (WHERE numeric_value >= 0 AND numeric_value <= 100) > 0
+        AND COUNT(*) FILTER (WHERE numeric_value > 100) > 0
+      )
     )
     SELECT
       grouped.benchmark_id,
@@ -4314,6 +4424,8 @@ export async function detectBenchmarkScaleConsistencyIssues(): Promise<Benchmark
       grouped.value_count,
       grouped.small_count,
       grouped.large_count,
+      grouped.zero_to_hundred_count,
+      grouped.over_hundred_count,
       grouped.min_value,
       grouped.max_value
     FROM grouped
@@ -4329,26 +4441,83 @@ export async function detectBenchmarkScaleConsistencyIssues(): Promise<Benchmark
       const maxValue = toFiniteNumber(row.max_value);
       const smallValueCount = Number(row.small_count ?? 0);
       const largeValueCount = Number(row.large_count ?? 0);
+      const zeroToHundredCount = Number(row.zero_to_hundred_count ?? 0);
+      const overHundredCount = Number(row.over_hundred_count ?? 0);
 
       if (
         !Number.isFinite(benchmarkId)
         || minValue === null
         || maxValue === null
-        || smallValueCount <= 0
-        || largeValueCount <= 0
       ) {
         return null;
       }
 
+      const hasMixedZeroOneAndHundred = smallValueCount > 0 && largeValueCount > 0;
+      const hasMixedHundredAndElo = zeroToHundredCount > 0 && overHundredCount > 0;
+
+      if (!hasMixedZeroOneAndHundred && !hasMixedHundredAndElo) {
+        return null;
+      }
+
+      const issueType: BenchmarkConsistencyIssueType = hasMixedZeroOneAndHundred
+        ? "mixed-scale-0-1-vs-100"
+        : "mixed-scale-100-vs-elo";
+
+      const recommendedAction: BenchmarkConsistencyRecommendedAction = issueType === "mixed-scale-0-1-vs-100"
+        ? "normalize-scale"
+        : "split-benchmark";
+
+      const smallBounds = mergeNumericBounds([minValue, maxValue].filter((value) => value >= 0 && value < 1));
+      const largeBounds = mergeNumericBounds([minValue, maxValue].filter((value) => value > 10));
+      const baseBounds = mergeNumericBounds([minValue, maxValue].filter((value) => value >= 0 && value <= 100));
+      const eloBounds = mergeNumericBounds([minValue, maxValue].filter((value) => value > 100));
+
       return {
+        issueType,
+        recommendedAction,
         benchmarkId,
         benchmarkName: row.benchmark_name,
         benchmarkType: row.benchmark_type,
         valueCount: Number(row.value_count ?? 0),
         smallValueCount,
         largeValueCount,
+        zeroToHundredCount,
+        overHundredCount,
         minValue,
-        maxValue
+        maxValue,
+        segments: issueType === "mixed-scale-0-1-vs-100"
+          ? [
+              {
+                key: "small",
+                label: "0-1",
+                count: smallValueCount,
+                minValue: smallBounds.minValue,
+                maxValue: smallBounds.maxValue
+              },
+              {
+                key: "large",
+                label: ">10",
+                count: largeValueCount,
+                minValue: largeBounds.minValue,
+                maxValue: largeBounds.maxValue
+              }
+            ]
+          : [
+              {
+                key: "base",
+                label: "0-100",
+                count: zeroToHundredCount,
+                minValue: baseBounds.minValue,
+                maxValue: baseBounds.maxValue
+              },
+              {
+                key: "elo",
+                label: ">100 (Elo)",
+                count: overHundredCount,
+                minValue: eloBounds.minValue,
+                maxValue: eloBounds.maxValue
+              }
+            ]
       };
     })
     .filter((item): item is Omit<BenchmarkScaleConsistencyIssue, "valueDetails"> => item !== null);
@@ -4411,10 +4580,47 @@ export async function detectBenchmarkScaleConsistencyIssues(): Promise<Benchmark
     pushDetail(row.value_num2, "valueNum2");
   });
 
-  const issues: BenchmarkScaleConsistencyIssue[] = baseIssues.map((item) => ({
-    ...item,
-    valueDetails: valueDetailMap.get(item.benchmarkId) ?? []
-  }));
+  const issues: BenchmarkScaleConsistencyIssue[] = baseIssues.map((item) => {
+    const valueDetails = valueDetailMap.get(item.benchmarkId) ?? [];
+    const smallValues = collectDetailValuesByPredicate(valueDetails, (value) => value >= 0 && value < 1);
+    const largeValues = collectDetailValuesByPredicate(valueDetails, (value) => value > 10);
+    const baseValues = collectDetailValuesByPredicate(valueDetails, (value) => value >= 0 && value <= 100);
+    const eloValues = collectDetailValuesByPredicate(valueDetails, (value) => value > 100);
+
+    return {
+      ...item,
+      segments: item.issueType === "mixed-scale-0-1-vs-100"
+        ? [
+            {
+              key: "small",
+              label: "0-1",
+              count: item.smallValueCount,
+              ...mergeNumericBounds(smallValues)
+            },
+            {
+              key: "large",
+              label: ">10",
+              count: item.largeValueCount,
+              ...mergeNumericBounds(largeValues)
+            }
+          ]
+        : [
+            {
+              key: "base",
+              label: "0-100",
+              count: item.zeroToHundredCount,
+              ...mergeNumericBounds(baseValues)
+            },
+            {
+              key: "elo",
+              label: ">100 (Elo)",
+              count: item.overHundredCount,
+              ...mergeNumericBounds(eloValues)
+            }
+          ],
+      valueDetails
+    };
+  });
 
   return {
     generatedAt: new Date().toISOString(),
@@ -4521,6 +4727,257 @@ export async function normalizeBenchmarkScaleByTarget(input: {
     targetScale: input.targetScale,
     updatedRows,
     updatedCells
+  };
+}
+
+export async function splitBenchmarkScaleByMode(input: {
+  benchmarkId: number;
+  splitMode: BenchmarkSplitScaleMode;
+  baseBenchmarkName: string;
+  eloBenchmarkName: string;
+}): Promise<BenchmarkSplitScaleResult> {
+  if (input.splitMode !== "hundred-vs-elo") {
+    throw new Error(`unsupported split mode: ${input.splitMode}`);
+  }
+
+  const [benchmark] = await db
+    .select({
+      id: benchmarks.id,
+      benchmarkName: benchmarks.benchmarkName,
+      benchmarkType: benchmarks.benchmarkType,
+      unit: benchmarks.unit,
+      higherIsBetter: benchmarks.higherIsBetter,
+      modalities: benchmarks.modalities,
+      sourceBenchmarkId: benchmarks.sourceBenchmarkId
+    })
+    .from(benchmarks)
+    .where(and(eq(benchmarks.id, input.benchmarkId), isNull(benchmarks.mergedIntoBenchmarkId)))
+    .limit(1);
+
+  if (!benchmark) {
+    throw new Error(`benchmark not found or merged: ${input.benchmarkId}`);
+  }
+
+  const baseBenchmarkName = normalizeNameParenthesisSpacing(input.baseBenchmarkName).trim();
+  const eloBenchmarkName = normalizeNameParenthesisSpacing(input.eloBenchmarkName).trim();
+
+  if (!baseBenchmarkName || !eloBenchmarkName) {
+    throw new Error("拆分后的 benchmark 名称不能为空");
+  }
+
+  const dedupeRule = await getModelDedupeRule();
+  const baseCanonicalKey = buildBenchmarkCanonicalKey(baseBenchmarkName, benchmark.benchmarkType, dedupeRule);
+  const eloCanonicalKey = buildBenchmarkCanonicalKey(eloBenchmarkName, benchmark.benchmarkType, dedupeRule);
+
+  if (baseCanonicalKey === eloCanonicalKey) {
+    throw new Error("原 benchmark 与 Elo benchmark 名称/type 不能指向同一实体");
+  }
+
+  const consistency = await detectBenchmarkScaleConsistencyIssues();
+  const issue = consistency.issues.find(
+    (item) => item.benchmarkId === input.benchmarkId && item.issueType === "mixed-scale-100-vs-elo"
+  );
+
+  if (!issue) {
+    throw new Error("该 benchmark 未检测到 0-100 与 >100 的混合分值，无需拆分");
+  }
+
+  if (issue.overHundredCount <= 0) {
+    throw new Error("该 benchmark 当前没有可迁移到 Elo 的 >100 分值");
+  }
+
+  const result = await db.transaction(async (tx: DbTransactionClient) => {
+    let baseBenchmarkId = benchmark.id;
+
+    if (benchmark.benchmarkName !== baseBenchmarkName) {
+      const updatedResult = await tx
+        .update(benchmarks)
+        .set({
+          benchmarkName: baseBenchmarkName,
+          canonicalKey: baseCanonicalKey
+        })
+        .where(eq(benchmarks.id, benchmark.id))
+        .returning({ id: benchmarks.id });
+
+      const updated = firstResultRow<{ id: number }>(updatedResult);
+      baseBenchmarkId = updated?.id ?? benchmark.id;
+    }
+
+    const eloBenchmark = await ensureBenchmark(
+      {
+        benchmarkName: eloBenchmarkName,
+        benchmarkType: benchmark.benchmarkType,
+        unit: benchmark.unit,
+        higherIsBetter: benchmark.higherIsBetter,
+        modalities: benchmark.modalities,
+        sourceBenchmarkId: benchmark.sourceBenchmarkId
+      },
+      { dedupeRule, db: tx }
+    );
+
+    const rows = await tx
+      .select({
+        id: benchmarkValues.id,
+        modelId: benchmarkValues.modelId,
+        benchmarkId: benchmarkValues.benchmarkId,
+        benchTime: benchmarkValues.benchTime,
+        valueRaw: benchmarkValues.valueRaw,
+        valueNum: benchmarkValues.valueNum,
+        valueNum2: benchmarkValues.valueNum2,
+        valueNote: benchmarkValues.valueNote,
+        source: benchmarkValues.source
+      })
+      .from(benchmarkValues)
+      .where(eq(benchmarkValues.benchmarkId, benchmark.id));
+
+    const sourceMetaRows = await tx
+      .select({
+        source: benchmarkSourceMeta.source,
+        benchmarkType: benchmarkSourceMeta.benchmarkType,
+        modalities: benchmarkSourceMeta.modalities
+      })
+      .from(benchmarkSourceMeta)
+      .where(eq(benchmarkSourceMeta.benchmarkId, benchmark.id));
+
+    const sourceMetaBySource = new Map<string, { benchmarkType: string; modalities: string[] | null }>();
+    sourceMetaRows.forEach((row: { source: string; benchmarkType: string; modalities: string[] | null }) => {
+      const normalizedSource = row.source.trim();
+      if (!normalizedSource) return;
+
+      if (!sourceMetaBySource.has(normalizedSource)) {
+        sourceMetaBySource.set(normalizedSource, {
+          benchmarkType: row.benchmarkType,
+          modalities: row.modalities
+        });
+      }
+    });
+
+    const fallbackBenchmarkType = benchmark.benchmarkType;
+    const fallbackModalities = benchmark.modalities?.length ? benchmark.modalities : ["Text"];
+    const eloSourceMetaUpsertMap = new Map<string, {
+      benchmarkId: number;
+      source: string;
+      benchmarkType: string;
+      modalities: string[];
+    }>();
+
+    let movedRows = 0;
+    let splitRows = 0;
+    let createdRows = 0;
+
+    for (const row of rows) {
+      const valueNum = toFiniteNumber(row.valueNum);
+      const valueNum2 = toFiniteNumber(row.valueNum2);
+      const valueNumIsBase = isZeroToHundredScaleValue(valueNum);
+      const valueNumIsElo = isEloScaleValue(valueNum);
+      const valueNum2IsBase = isZeroToHundredScaleValue(valueNum2);
+      const valueNum2IsElo = isEloScaleValue(valueNum2);
+
+      const hasBaseValue = valueNumIsBase || valueNum2IsBase;
+      const hasEloValue = valueNumIsElo || valueNum2IsElo;
+
+      if (!hasEloValue) {
+        continue;
+      }
+
+      if (!hasBaseValue) {
+        const normalizedSource = row.source?.trim() ?? "";
+        if (normalizedSource.length > 0 && !eloSourceMetaUpsertMap.has(normalizedSource)) {
+          const sourceMeta = sourceMetaBySource.get(normalizedSource);
+          eloSourceMetaUpsertMap.set(normalizedSource, {
+            benchmarkId: eloBenchmark.id,
+            source: normalizedSource,
+            benchmarkType: sourceMeta?.benchmarkType ?? fallbackBenchmarkType,
+            modalities: sourceMeta?.modalities ?? fallbackModalities
+          });
+        }
+
+        await tx
+          .update(benchmarkValues)
+          .set({
+            benchmarkId: eloBenchmark.id,
+            valueNote: appendBenchmarkSplitNote(row.valueNote, "elo")
+          })
+          .where(eq(benchmarkValues.id, row.id));
+
+        movedRows += 1;
+        continue;
+      }
+
+      const baseValueNum = valueNumIsBase ? valueNum : null;
+      const baseValueNum2 = valueNum2IsBase ? valueNum2 : null;
+      const eloValueNum = valueNumIsElo ? valueNum : null;
+      const eloValueNum2 = valueNum2IsElo ? valueNum2 : null;
+
+      await tx
+        .update(benchmarkValues)
+        .set({
+          benchmarkId: baseBenchmarkId,
+          valueRaw: buildSplitBenchmarkValueRaw(baseValueNum, baseValueNum2),
+          valueNum: baseValueNum === null ? null : formatScaledNumericValue(baseValueNum),
+          valueNum2: baseValueNum2 === null ? null : formatScaledNumericValue(baseValueNum2),
+          valueNote: appendBenchmarkSplitNote(row.valueNote, "base")
+        })
+        .where(eq(benchmarkValues.id, row.id));
+
+      await tx.insert(benchmarkValues).values({
+        modelId: row.modelId,
+        benchmarkId: eloBenchmark.id,
+        benchTime: row.benchTime,
+        valueRaw: buildSplitBenchmarkValueRaw(eloValueNum, eloValueNum2),
+        valueNum: eloValueNum === null ? null : formatScaledNumericValue(eloValueNum),
+        valueNum2: eloValueNum2 === null ? null : formatScaledNumericValue(eloValueNum2),
+        valueNote: appendBenchmarkSplitNote(row.valueNote, "elo"),
+        source: row.source
+      });
+
+      const normalizedSource = row.source?.trim() ?? "";
+      if (normalizedSource.length > 0 && !eloSourceMetaUpsertMap.has(normalizedSource)) {
+        const sourceMeta = sourceMetaBySource.get(normalizedSource);
+        eloSourceMetaUpsertMap.set(normalizedSource, {
+          benchmarkId: eloBenchmark.id,
+          source: normalizedSource,
+          benchmarkType: sourceMeta?.benchmarkType ?? fallbackBenchmarkType,
+          modalities: sourceMeta?.modalities ?? fallbackModalities
+        });
+      }
+
+      splitRows += 1;
+      createdRows += 1;
+    }
+
+    const eloSourceMetaRows = Array.from(eloSourceMetaUpsertMap.values());
+    if (eloSourceMetaRows.length > 0) {
+      await tx
+        .insert(benchmarkSourceMeta)
+        .values(eloSourceMetaRows)
+        .onConflictDoNothing({
+          target: [benchmarkSourceMeta.benchmarkId, benchmarkSourceMeta.source]
+        });
+    }
+
+    return {
+      baseBenchmarkId,
+      baseBenchmarkName,
+      baseBenchmarkType: benchmark.benchmarkType,
+      eloBenchmarkId: eloBenchmark.id,
+      eloBenchmarkName: eloBenchmark.benchmarkName,
+      eloBenchmarkType: eloBenchmark.benchmarkType,
+      movedRows,
+      splitRows,
+      createdRows
+    };
+  });
+
+  invalidateAllCaches();
+
+  return {
+    ok: true,
+    benchmarkId: benchmark.id,
+    benchmarkName: benchmark.benchmarkName,
+    benchmarkType: benchmark.benchmarkType,
+    splitMode: input.splitMode,
+    ...result
   };
 }
 

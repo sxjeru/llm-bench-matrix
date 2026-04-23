@@ -204,6 +204,15 @@ type DuplicateDetectionResult = {
 };
 
 type ScaleConsistencyIssue = {
+  issueType: "mixed-scale-0-1-vs-100" | "mixed-scale-100-vs-elo";
+  recommendedAction: "normalize-scale" | "split-benchmark";
+  segments: Array<{
+    key: "small" | "large" | "base" | "elo";
+    label: string;
+    count: number;
+    minValue: number | null;
+    maxValue: number | null;
+  }>;
   valueDetails: Array<{
     value: number;
     field: "valueNum" | "valueNum2";
@@ -217,6 +226,8 @@ type ScaleConsistencyIssue = {
   valueCount: number;
   smallValueCount: number;
   largeValueCount: number;
+  zeroToHundredCount: number;
+  overHundredCount: number;
   minValue: number;
   maxValue: number;
 };
@@ -816,6 +827,8 @@ export function AdminConsole({
   const [scaleConsistencyIssues, setScaleConsistencyIssues] = useState<ScaleConsistencyIssue[]>([]);
   const [scaleConsistencyCheckedAt, setScaleConsistencyCheckedAt] = useState<string | null>(null);
   const [normalizingScaleBenchmarkId, setNormalizingScaleBenchmarkId] = useState<number | null>(null);
+  const [splittingScaleBenchmarkId, setSplittingScaleBenchmarkId] = useState<number | null>(null);
+  const [scaleSplitNameDrafts, setScaleSplitNameDrafts] = useState<Record<number, { baseName: string; eloName: string }>>({});
 
   const [renameEntityType, setRenameEntityType] = useState<"model" | "benchmark">("model");
   const [renameSearchKeyword, setRenameSearchKeyword] = useState("");
@@ -3025,6 +3038,22 @@ export function AdminConsole({
       }));
 
       setScaleConsistencyIssues(issues);
+      setScaleSplitNameDrafts((prev) => {
+        const next = { ...prev };
+
+        issues.forEach((item) => {
+          if (item.issueType !== "mixed-scale-100-vs-elo") {
+            return;
+          }
+
+          next[item.benchmarkId] = next[item.benchmarkId] ?? {
+            baseName: item.benchmarkName,
+            eloName: `${item.benchmarkName} (Elo)`
+          };
+        });
+
+        return next;
+      });
       setScaleConsistencyCheckedAt(
         typeof typedResult.generatedAt === "string"
           ? typedResult.generatedAt
@@ -3058,6 +3087,45 @@ export function AdminConsole({
       notifyError(error instanceof Error ? error.message : "量纲同化失败");
     } finally {
       setNormalizingScaleBenchmarkId(null);
+    }
+  }
+
+  async function onSplitBenchmarkScale(issue: ScaleConsistencyIssue) {
+    if (splittingScaleBenchmarkId !== null) {
+      return;
+    }
+
+    const draft = scaleSplitNameDrafts[issue.benchmarkId] ?? {
+      baseName: issue.benchmarkName,
+      eloName: `${issue.benchmarkName} (Elo)`
+    };
+
+    const baseBenchmarkName = draft.baseName.trim();
+    const eloBenchmarkName = draft.eloName.trim();
+
+    if (!baseBenchmarkName || !eloBenchmarkName) {
+      notifyError("拆分后的 benchmark 名称不能为空");
+      return;
+    }
+
+    setSplittingScaleBenchmarkId(issue.benchmarkId);
+    try {
+      const result = await postJson("/api/admin/data-maintenance/split-benchmark-scale", {
+        benchmarkId: issue.benchmarkId,
+        splitMode: "hundred-vs-elo",
+        baseBenchmarkName,
+        eloBenchmarkName
+      });
+
+      notifySuccess(
+        `已拆分 ${baseBenchmarkName} / ${eloBenchmarkName}（整行迁移 ${result.movedRows ?? 0}，跨组拆分 ${result.splitRows ?? 0}，新增 ${result.createdRows ?? 0} 行）`
+      );
+
+      await onCheckScaleConsistency();
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "benchmark 拆分失败");
+    } finally {
+      setSplittingScaleBenchmarkId(null);
     }
   }
 
@@ -5329,14 +5397,14 @@ export function AdminConsole({
                     数据一致性检测
                   </h3>
                   <p className="mt-1 text-sm opacity-80">
-                    检测同一 benchmark 是否同时出现 <code>&lt;1</code> 与 <code>&gt;10</code> 的混合量纲，并可一键同化到 1 或 100。
+                    检测同一 benchmark 是否同时出现 <code>&lt;1</code> 与 <code>&gt;10</code> 的混合量纲，或同时出现 <code>0-100</code> 与 <code>&gt;100</code> 的 Elo 风格分值，并提供修复动作。
                   </p>
                 </div>
                 <button
                   type="button"
                   className="btn btn-warning shadow-md"
                   onClick={() => onCheckScaleConsistency()}
-                  disabled={isCheckingScaleConsistency || normalizingScaleBenchmarkId !== null}
+                  disabled={isCheckingScaleConsistency || normalizingScaleBenchmarkId !== null || splittingScaleBenchmarkId !== null}
                 >
                   {isCheckingScaleConsistency ? "检测中..." : "开始一致性检测"}
                 </button>
@@ -5372,6 +5440,7 @@ export function AdminConsole({
               ) : (
                 scaleConsistencyIssues.map((issue) => {
                   const isNormalizingCurrent = normalizingScaleBenchmarkId === issue.benchmarkId;
+                  const isSplittingCurrent = splittingScaleBenchmarkId === issue.benchmarkId;
                   const issueValueDetails = issue.valueDetails ?? [];
                   const hasTtsSource = issueValueDetails.some((detail) =>
                     (detail.source ?? "").toLowerCase().includes("tts")
@@ -5381,6 +5450,11 @@ export function AdminConsole({
                     belowOneDetails.length > 0
                     && belowOneDetails.every((detail) => Math.abs(detail.value) < 1e-12);
                   const shouldDefaultCollapse = hasTtsSource || hasOnlyZeroInSmallValues;
+
+                  const splitDraft = scaleSplitNameDrafts[issue.benchmarkId] ?? {
+                    baseName: issue.benchmarkName,
+                    eloName: `${issue.benchmarkName} (Elo)`
+                  };
 
                   return (
                     <details
@@ -5406,7 +5480,9 @@ export function AdminConsole({
                         <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                           <div>
                             <p className="text-sm opacity-80">
-                              该 benchmark 同时出现 <code>&lt;1</code> 与 <code>&gt;10</code> 的值，请选择目标量纲进行同化。
+                              {issue.issueType === "mixed-scale-0-1-vs-100"
+                                ? <>该 benchmark 同时出现 <code>&lt;1</code> 与 <code>&gt;10</code> 的值，请选择目标量纲进行同化。</>
+                                : <>该 benchmark 同时出现 <code>0-100</code> 与 <code>&gt;100</code> 的值，建议拆分为原 benchmark 与 Elo benchmark。</>}
                             </p>
                             <div className="mt-2 flex flex-wrap gap-2 text-xs">
                               <div className="group relative inline-flex items-center">
@@ -5444,12 +5520,25 @@ export function AdminConsole({
                                   </div>
                                 ) : null}
                               </div>
-                              <span className="rounded-full border border-info/35 bg-info/10 px-2 py-1">
-                                &lt;1：{issue.smallValueCount}
-                              </span>
-                              <span className="rounded-full border border-warning/35 bg-warning/10 px-2 py-1">
-                                &gt;10：{issue.largeValueCount}
-                              </span>
+                              {issue.issueType === "mixed-scale-0-1-vs-100" ? (
+                                <>
+                                  <span className="rounded-full border border-info/35 bg-info/10 px-2 py-1">
+                                    &lt;1：{issue.smallValueCount}
+                                  </span>
+                                  <span className="rounded-full border border-warning/35 bg-warning/10 px-2 py-1">
+                                    &gt;10：{issue.largeValueCount}
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="rounded-full border border-info/35 bg-info/10 px-2 py-1">
+                                    0-100：{issue.zeroToHundredCount}
+                                  </span>
+                                  <span className="rounded-full border border-warning/35 bg-warning/10 px-2 py-1">
+                                    &gt;100：{issue.overHundredCount}
+                                  </span>
+                                </>
+                              )}
                               <span className="rounded-full border border-base-300 bg-base-200/60 px-2 py-1">
                                 min={Number(issue.minValue.toFixed(6)).toString()}
                               </span>
@@ -5460,22 +5549,74 @@ export function AdminConsole({
                           </div>
 
                           <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-outline btn-primary"
-                              onClick={() => onNormalizeBenchmarkScale(issue, 1)}
-                              disabled={isCheckingScaleConsistency || normalizingScaleBenchmarkId !== null}
-                            >
-                              {isNormalizingCurrent ? "处理中..." : "同化为 1 量纲"}
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-outline btn-secondary"
-                              onClick={() => onNormalizeBenchmarkScale(issue, 100)}
-                              disabled={isCheckingScaleConsistency || normalizingScaleBenchmarkId !== null}
-                            >
-                              {isNormalizingCurrent ? "处理中..." : "同化为 100 量纲"}
-                            </button>
+                            {issue.issueType === "mixed-scale-0-1-vs-100" ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline btn-primary"
+                                  onClick={() => onNormalizeBenchmarkScale(issue, 1)}
+                                  disabled={isCheckingScaleConsistency || normalizingScaleBenchmarkId !== null || splittingScaleBenchmarkId !== null}
+                                >
+                                  {isNormalizingCurrent ? "处理中..." : "同化为 1 量纲"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline btn-secondary"
+                                  onClick={() => onNormalizeBenchmarkScale(issue, 100)}
+                                  disabled={isCheckingScaleConsistency || normalizingScaleBenchmarkId !== null || splittingScaleBenchmarkId !== null}
+                                >
+                                  {isNormalizingCurrent ? "处理中..." : "同化为 100 量纲"}
+                                </button>
+                              </>
+                            ) : (
+                              <div className="w-full space-y-2 xl:w-[420px]">
+                                <input
+                                  className="input input-bordered input-sm w-full"
+                                  value={splitDraft.baseName}
+                                  onChange={(event) =>
+                                    setScaleSplitNameDrafts((prev) => ({
+                                      ...prev,
+                                      [issue.benchmarkId]: {
+                                        ...(prev[issue.benchmarkId] ?? {
+                                          baseName: issue.benchmarkName,
+                                          eloName: `${issue.benchmarkName} (Elo)`
+                                        }),
+                                        baseName: event.target.value
+                                      }
+                                    }))
+                                  }
+                                  placeholder="原 benchmark 名称"
+                                />
+                                <input
+                                  className="input input-bordered input-sm w-full"
+                                  value={splitDraft.eloName}
+                                  onChange={(event) =>
+                                    setScaleSplitNameDrafts((prev) => ({
+                                      ...prev,
+                                      [issue.benchmarkId]: {
+                                        ...(prev[issue.benchmarkId] ?? {
+                                          baseName: issue.benchmarkName,
+                                          eloName: `${issue.benchmarkName} (Elo)`
+                                        }),
+                                        eloName: event.target.value
+                                      }
+                                    }))
+                                  }
+                                  placeholder="Elo benchmark 名称"
+                                />
+                                <div className="text-[11px] opacity-70">
+                                  type / modality / unit / higherIsBetter 将继承原 benchmark。
+                                </div>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-warning"
+                                  onClick={() => onSplitBenchmarkScale(issue)}
+                                  disabled={isCheckingScaleConsistency || normalizingScaleBenchmarkId !== null || splittingScaleBenchmarkId !== null}
+                                >
+                                  {isSplittingCurrent ? "处理中..." : "拆分为原 benchmark + Elo"}
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
