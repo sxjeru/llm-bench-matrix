@@ -4,6 +4,7 @@ import { IMPORT_VALUE_PAIR_REGEX, IMPORT_VALUE_RANK_PREFIX_REGEX, IMPORT_VALUE_S
 
 const EMPTY_MARKERS = new Set(["", "-", "--", "—", "–", "n/a", "na", "null"]);
 const CATEGORY_HEADERS = new Set(["category", "类别", "分类", "type", "group"]);
+const HYPHEN_VARIANT_REGEX = /[\-\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g;
 
 const pipeSeparatorRegex = /[|｜]/;
 
@@ -52,6 +53,7 @@ function normalizeNameParenthesisSpacing(rawName: string): string {
   if (!trimmed) return "";
 
   return trimmed
+    .replace(HYPHEN_VARIANT_REGEX, "-")
     .replace(/([^\s（(])([（(])/g, "$1 $2")
     .replace(/\s+([（(])/g, " $1");
 }

@@ -513,6 +513,7 @@ function normalizeNameParenthesisSpacing(rawName: string): string {
   if (!trimmed) return "";
 
   return trimmed
+    .replace(HYPHEN_VARIANT_REGEX, "-")
     .replace(/([^\s（(])([（(])/g, "$1 $2")
     .replace(/\s+([（(])/g, " $1");
 }
@@ -655,6 +656,25 @@ function ensureHtmlRowCell(rows: string[][], rowIndex: number, columnIndex: numb
   }
 }
 
+function extractHtmlTableLeadingTypeHints(inputHtml: string): string[] {
+  const normalizedHtml = inputHtml.replace(/\r?\n+/g, " ");
+  const tableStartIndex = normalizedHtml.search(/<table[\s>]/i);
+  if (tableStartIndex <= 0) {
+    return [];
+  }
+
+  const beforeTableHtml = normalizedHtml.slice(0, tableStartIndex);
+  const textChunks = Array.from(
+    beforeTableHtml.matchAll(/<(h[1-6]|p|div|span)\b[^>]*>([^<]*)/gi)
+  );
+
+  const hints = textChunks
+    .map((match) => normalizeHtmlImportCellText(match[2] ?? ""))
+    .filter((text) => isMatrixTypeMarker(text));
+
+  return Array.from(new Set(hints));
+}
+
 function parseHtmlTableToText(inputHtml: string): string | null {
   try {
     const workbook = XLSX.read(inputHtml, { type: "string", raw: true });
@@ -732,7 +752,10 @@ function parseHtmlTableToText(inputHtml: string): string | null {
       })
       .filter((line) => line.trim().length > 0);
 
-    return textLines.length > 0 ? textLines.join("\n") : null;
+    const leadingTypeHints = extractHtmlTableLeadingTypeHints(inputHtml);
+    const mergedTextLines = [...leadingTypeHints, ...textLines];
+
+    return mergedTextLines.length > 0 ? mergedTextLines.join("\n") : null;
   } catch {
     return null;
   }
@@ -3031,9 +3054,15 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
 
   let preambleTypeHint: string | null = null;
   for (let index = 0; index < headerLineIndex; index += 1) {
-    const hint = inferTypeFromPreambleLine(rawLines[index]);
+    const rawPreambleLine = normalizeNameParenthesisSpacing(rawLines[index] || "").trim();
+    const hint = inferTypeFromPreambleLine(rawPreambleLine);
     if (hint) {
       preambleTypeHint = hint;
+      continue;
+    }
+
+    if (isMatrixTypeMarker(rawPreambleLine)) {
+      preambleTypeHint = rawPreambleLine;
     }
   }
 
@@ -3271,9 +3300,15 @@ function parsePaperCopiedTableRows(inputText: string, defaultSource: string | nu
 
   let preambleTypeHint: string | null = null;
   headerLines.forEach((line) => {
-    const hint = inferTypeFromPreambleLine(line);
+    const normalizedPreambleLine = normalizeNameParenthesisSpacing(line).trim();
+    const hint = inferTypeFromPreambleLine(normalizedPreambleLine);
     if (hint) {
       preambleTypeHint = hint;
+      return;
+    }
+
+    if (isMatrixTypeMarker(normalizedPreambleLine)) {
+      preambleTypeHint = normalizedPreambleLine;
     }
   });
 

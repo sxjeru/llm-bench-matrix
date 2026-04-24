@@ -186,6 +186,20 @@ describe("paper-table 文本解析", () => {
     expect(getDuplicateNameSimilarityForTest("GPT‑5.4 Pro", "GPT-5.4 Pro")).toBe(1);
   });
 
+  test("导入文本解析时会把 U+2011 归一化为普通连字符", () => {
+    const inputText = [
+      "Benchmark\tGPT‑5.4\tGPT-5.4 Pro",
+      "SWE-bench\t57.7\t60.1"
+    ].join("\n");
+
+    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const modelNames = new Set(parsed.rows.map((row) => row.modelName));
+
+    expect(modelNames.has("GPT‑5.4")).toBe(false);
+    expect(modelNames.has("GPT-5.4")).toBe(true);
+    expect(modelNames.has("GPT-5.4 Pro")).toBe(true);
+  });
+
   test("benchmark 数字片段差异会被识别为不一致", () => {
     expect(
       hasBenchmarkNumericTokenMismatchForTest(
@@ -366,6 +380,40 @@ describe("paper-table 文本解析", () => {
     expect(Number(valueByModel.get("Kimi K2.6"))).toBeCloseTo(54.0);
     expect(Array.from(valueByModel.entries()).some(([modelName, value]) => modelName.includes("GPT-5.4") && value === "52.1")).toBe(true);
     expect(valueByModel.get("Kimi K2.5")).toBe("50.2");
+  });
+
+  test("HTML 表格外部标题可作为 type 前导行", () => {
+    const fallbackText = [
+      "Benchmark\tM1",
+      "Fallback\t1.0"
+    ].join("\n");
+
+    const htmlInput = [
+      '<html><body><h5>Coding</h5><div><table>',
+      "<thead>",
+      "<tr><th>Eval</th><th>GPT-5.5</th><th>GPT‑5.4</th></tr>",
+      "</thead>",
+      "<tbody>",
+      "<tr><td>SWE-Bench Pro (Public)</td><td>58.6%</td><td>57.7%</td></tr>",
+      "<tr><td>Terminal-Bench 2.0</td><td>82.7%</td><td>75.1%</td></tr>",
+      "</tbody>",
+      "</table></div></body></html>"
+    ].join("");
+
+    const parsed = parseBenchmarkTextRowsForTest(fallbackText, "text:unit-test", htmlInput);
+
+    expect(parsed.format).toBe("matrix-table");
+    expect(parsed.parseSource).toBe("html");
+
+    const sweRows = parsed.rows.filter((row) => row.benchmarkName === "SWE-Bench Pro (Public)");
+    expect(sweRows).toHaveLength(2);
+    expect(new Set(sweRows.map((row) => row.benchmarkType))).toEqual(new Set(["Coding"]));
+    expect(sweRows.every((row) => row.benchmarkTypeProvided)).toBe(true);
+
+    const terminalRows = parsed.rows.filter((row) => row.benchmarkName === "Terminal-Bench 2.0");
+    expect(terminalRows).toHaveLength(2);
+    expect(new Set(terminalRows.map((row) => row.benchmarkType))).toEqual(new Set(["Coding"]));
+    expect(terminalRows.every((row) => row.benchmarkTypeProvided)).toBe(true);
   });
 
   test("提供 htmlText 时可识别中英混合 Category/Benchmark 表头并继承空白分类", () => {
