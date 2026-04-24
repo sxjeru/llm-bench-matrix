@@ -2706,7 +2706,10 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
 
         const benchmarkType = row.benchmarkType.trim() || "general";
         const hasImportedBenchmarkType = row.benchmarkTypeProvided;
-        const benchmarkTypeForSelection = hasImportedBenchmarkType ? benchmarkType : "general";
+        const hasNonGeneralParsedBenchmarkType = benchmarkType.toLowerCase() !== "general";
+        const benchmarkTypeForSelection = (hasImportedBenchmarkType || hasNonGeneralParsedBenchmarkType)
+          ? benchmarkType
+          : "general";
         let benchmark = pickSharedBenchmark(row.benchmarkName, benchmarkTypeForSelection);
 
         if (!benchmark) {
