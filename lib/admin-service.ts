@@ -1656,14 +1656,36 @@ function normalizeSplitBenchmarkPair(
   };
 }
 
-async function getModelDedupeRule() {
-  const [setting] = await db
-    .select({ valueJson: settings.valueJson })
-    .from(settings)
-    .where(eq(settings.key, "model_dedupe_rule"))
-    .limit(1);
+function shouldFallbackToDefaultModelDedupeRule(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
 
-  return normalizeModelDedupeRule(setting?.valueJson);
+  const fallbackHints = [
+    "ECONNREFUSED",
+    "connect ECONNREFUSED",
+    "Failed query: select \"value_json\" from \"settings\""
+  ];
+
+  return fallbackHints.some((hint) => error.message.includes(hint));
+}
+
+async function getModelDedupeRule() {
+  try {
+    const [setting] = await db
+      .select({ valueJson: settings.valueJson })
+      .from(settings)
+      .where(eq(settings.key, "model_dedupe_rule"))
+      .limit(1);
+
+    return normalizeModelDedupeRule(setting?.valueJson);
+  } catch (error) {
+    if (shouldFallbackToDefaultModelDedupeRule(error)) {
+      return normalizeModelDedupeRule(null);
+    }
+
+    throw error;
+  }
 }
 
 export async function rebuildModelCanonicalKeysByRule(rawRule: unknown) {
@@ -3103,12 +3125,27 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
     !firstHeaderCell
     || /benchmark|metric|dimension|type|category|指标|评测|维度|类别|分类/i.test(firstHeaderCell);
 
-  const modelHeaderStartIndex = inferredModelHeaderStartIndex !== null
-    ? inferredModelHeaderStartIndex
+  const explicitModelHeaderStartIndex = (() => {
+    if (hasExplicitBenchmarkColumn) {
+      const maxLabelColumnIndex = Math.max(benchmarkColumnIndex, categoryColumnIndex);
+      return maxLabelColumnIndex + 1;
+    }
+
+    if (categoryColumnIndex >= 0) {
+      return categoryColumnIndex + 1;
+    }
+
+    return null;
+  })();
+
+  const modelHeaderStartIndex = explicitModelHeaderStartIndex !== null
+    ? explicitModelHeaderStartIndex
+    : inferredModelHeaderStartIndex !== null
+      ? inferredModelHeaderStartIndex
     : (hasExplicitBenchmarkColumn
       ? benchmarkColumnIndex + 1
       : (startsWithBenchmarkLabel ? 1 : 0));
-  const modelValueStartIndex = benchmarkColumnIndex + 1;
+  const modelValueStartIndex = modelHeaderStartIndex;
 
   const modelNames = headerCells
     .slice(modelHeaderStartIndex)

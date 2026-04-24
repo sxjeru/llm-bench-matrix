@@ -428,4 +428,80 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     transactionSpy.mockRestore();
   });
+
+  test("测试环境下 settings 查询不可用时会回退默认 dedupe 规则继续导入", async () => {
+    const inputText = [
+      "Category\tBenchmark\tGPT-5.4",
+      "Professional\tOfficeQA Pro\t68.1"
+    ].join("\n");
+
+    const dbSelectSpy = vi.spyOn(dbForTest, "select").mockImplementation(() => {
+      throw new Error("connect ECONNREFUSED 127.0.0.1:5432");
+    });
+
+    const createdProvider = { id: 1, name: "OpenAI", slug: "openai", createdAt: new Date("2026-04-01T00:00:00.000Z") };
+    const createdModel = {
+      id: 2,
+      providerId: 1,
+      modelName: "GPT-5.4",
+      modelAlias: null,
+      canonicalKey: "gpt54",
+      sourceModelId: null,
+      mergedIntoModelId: null,
+      createdAt: new Date("2026-04-01T00:00:00.000Z")
+    };
+    const createdBenchmark = {
+      id: 22,
+      benchmarkName: "OfficeQA Pro",
+      benchmarkType: "Professional",
+      unit: "score",
+      higherIsBetter: true,
+      modalities: ["Professional"],
+      canonicalKey: "officeqapro:professional",
+      sourceBenchmarkId: null,
+      mergedIntoBenchmarkId: null,
+      createdAt: new Date("2026-04-24T00:00:00.000Z")
+    };
+
+    const txSelect = vi.fn()
+      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }) })
+      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([createdProvider]) }) }) })
+      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }) }) })
+      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }) }) })
+      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }) }) });
+
+    const providerReturning = vi.fn().mockResolvedValue([createdProvider]);
+    const providerOnConflictDoUpdate = vi.fn(() => ({ returning: providerReturning }));
+    const modelReturning = vi.fn().mockResolvedValue([createdModel]);
+    const benchmarkReturning = vi.fn().mockResolvedValue([createdBenchmark]);
+    const valueRowsInsert = vi.fn().mockResolvedValue(undefined);
+    const sourceMetaOnConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
+
+    const txInsert = vi.fn()
+      .mockReturnValueOnce({ values: vi.fn(() => ({ onConflictDoUpdate: providerOnConflictDoUpdate })) })
+      .mockReturnValueOnce({ values: vi.fn(() => ({ returning: modelReturning })) })
+      .mockReturnValueOnce({ values: vi.fn(() => ({ returning: benchmarkReturning })) })
+      .mockReturnValueOnce({ values: vi.fn(() => valueRowsInsert) })
+      .mockReturnValueOnce({ values: vi.fn(() => ({ onConflictDoUpdate: sourceMetaOnConflictDoUpdate })) });
+
+    const tx = {
+      select: txSelect,
+      insert: txInsert,
+      update: vi.fn(() => ({ set: vi.fn() })),
+      delete: vi.fn()
+    };
+
+    const transactionSpy = vi
+      .spyOn(dbForTest, "transaction")
+      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+
+    try {
+      const result = await importBenchmarkCsvForTest(inputText, "text:unit-test");
+      expect(result.inserted).toBe(1);
+      expect(txInsert).toHaveBeenCalled();
+    } finally {
+      transactionSpy.mockRestore();
+      dbSelectSpy.mockRestore();
+    }
+  });
 });
