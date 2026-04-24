@@ -113,4 +113,20 @@ describe("BenchmarkMatrix 模型筛选按页签记忆", () => {
     fireEvent.click(screen.getByRole("tab", { name: "S1" }));
     expect(screen.getByText(/已选模型/)).toHaveTextContent("已选模型 1/3");
   });
+
+  test("shift 点击表头可取消该模型筛选", () => {
+    renderMatrix();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开模型筛选" }));
+    expect(screen.getByText(/已选模型/)).toHaveTextContent("已选模型 3/3");
+
+    const modelACheckbox = screen.getByLabelText("Model A");
+    const modelAHeader = screen.getAllByRole("columnheader").find((header) => header.textContent?.includes("Model A"));
+
+    expect(modelAHeader).toBeTruthy();
+
+    fireEvent.click(modelAHeader!, { shiftKey: true });
+    expect(screen.getByText(/已选模型/)).toHaveTextContent("已选模型 2/3");
+    expect(modelACheckbox).not.toBeChecked();
+  });
 });

@@ -1000,6 +1000,10 @@ function isCompareModifierClick(event: Pick<ReactMouseEvent<HTMLElement>, "ctrlK
   return Boolean(event.ctrlKey || event.metaKey);
 }
 
+function isSelectionModifierClick(event: Pick<ReactMouseEvent<HTMLElement>, "shiftKey">): boolean {
+  return Boolean(event.shiftKey);
+}
+
 function formatComparisonDeltaValue(value: number): string {
   const absValue = Math.abs(value);
   if (!Number.isFinite(absValue)) return "0";
@@ -4604,6 +4608,13 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     onDragEnd={resetModelColumnDragState}
                     onClick={(event) => {
                       if (draggingModelName || shouldSuppressHeaderInteractions()) return;
+
+                      if (isSelectionModifierClick(event)) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        toggleModel(model.modelName, !selectedModelSet.has(model.modelName));
+                        return;
+                      }
 
                       if (isCompareModifierClick(event)) {
                         event.preventDefault();
