@@ -955,6 +955,84 @@ describe("AdminConsole text import", () => {
     expect(optionButton).toBeInTheDocument();
   });
 
+  test("预览内 benchmark 快捷合并后仍优先保留导入 type", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "Bench 1",
+          benchmarkType: "Professional",
+          rawValue: "70.1",
+          valueNum: 70.1,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    const importResponse = {
+      format: "structured-csv",
+      total: 1,
+      skipped: 0,
+      inserted: 1,
+      warningCount: 0,
+      warnings: []
+    };
+
+    const fetchMock = mockFetchSequence(previewResponse, importResponse);
+    render(
+      <AdminConsole
+        {...{
+          ...buildProps(),
+          benchmarks: [
+            { id: 11, benchmarkName: "Bench-1", benchmarkType: "Type-A", modalities: ["Text"] },
+            { id: 12, benchmarkName: "Bench-2", benchmarkType: "Type-B", modalities: ["Vision"] }
+          ]
+        }}
+      />
+    );
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const matrixTable = await findMatrixPreviewTable();
+    const benchmarkInput = within(matrixTable).getByDisplayValue("Bench 1") as HTMLInputElement;
+    const benchmarkRow = benchmarkInput.closest("tr");
+    if (!benchmarkRow) {
+      throw new Error("Benchmark row not found");
+    }
+
+    await user.click(benchmarkInput);
+
+    const optionButton = within(benchmarkRow).getByRole("option", {
+      name: /Bench-1 \[Type-A\] \[11\]/
+    });
+    await user.click(optionButton);
+
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const secondCall = fetchMock.mock.calls[1];
+    const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
+      csvText?: string;
+    };
+
+    expect(secondPayload.csvText).toContain("Bench-1,Professional");
+  });
+
   test("重复嫌疑与快捷合并按原始文本顺序展示", async () => {
     const user = userEvent.setup();
 

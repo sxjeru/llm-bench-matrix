@@ -1406,7 +1406,6 @@ export function AdminConsole({
           const target = benchmarkById.get(mergeTargetId);
           if (target) {
             benchmarkName = target.benchmarkName;
-            benchmarkType = target.benchmarkType;
           }
         }
 
