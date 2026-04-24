@@ -1973,6 +1973,7 @@ export function AdminConsole({
       const generatedCsvText = buildStructuredCsvText(finalizedTextImportRows);
       const result = await postJson("/api/admin/import-csv", {
         csvText: generatedCsvText,
+        rows: finalizedTextImportRows,
         source: csvSource || undefined
       });
 
@@ -2742,6 +2743,7 @@ export function AdminConsole({
         const generatedCsvText = buildStructuredCsvText(finalizedTextImportRows);
         const result = await postJson("/api/admin/import-csv", {
           csvText: generatedCsvText,
+          rows: finalizedTextImportRows,
           source: csvSource || undefined
         });
 

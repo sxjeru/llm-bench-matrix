@@ -43,6 +43,25 @@ type NormalizedTextImportRow = {
   sourceBenchmarkId?: string | null;
 };
 
+export type StructuredImportRowInput = {
+  rowNumber?: number;
+  providerName?: string;
+  modelName: string;
+  benchmarkName: string;
+  benchmarkType?: string;
+  benchmarkTypeProvided?: boolean;
+  higherIsBetter?: boolean;
+  modalities?: string[];
+  rawValue: string;
+  valueNote?: string | null;
+  source?: string | null;
+  unit?: string;
+  benchTime?: string | Date;
+  modelAlias?: string | null;
+  sourceModelId?: string | null;
+  sourceBenchmarkId?: string | null;
+};
+
 type ParsedTextImportFormat = "structured-csv" | "matrix-table" | "paper-table";
 
 type ParsedTextImportResult = {
@@ -2844,6 +2863,59 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
   invalidateAllCaches();
 
   return result;
+}
+
+export async function importStructuredRows(
+  rows: StructuredImportRowInput[],
+  options?: {
+    source?: string | null;
+    benchTime?: Date;
+  }
+) {
+  const normalizedRows = rows
+    .map((row, index) => {
+      const modelName = normalizeNameParenthesisSpacing(row.modelName || "");
+      const benchmarkName = normalizeNameParenthesisSpacing(row.benchmarkName || "");
+      const benchmarkType = (row.benchmarkType || "general").trim() || "general";
+      const providerName = (row.providerName?.trim() || inferProviderNameFromModel(modelName) || "Unknown").trim();
+      const rawBenchTime = row.benchTime ?? options?.benchTime ?? new Date();
+      const benchTime = rawBenchTime instanceof Date ? rawBenchTime : new Date(rawBenchTime);
+
+      if (!modelName || !benchmarkName || isEmptyImportValue(row.rawValue) || Number.isNaN(benchTime.getTime())) {
+        return null;
+      }
+
+      return {
+        rowNumber: row.rowNumber ?? index + 1,
+        providerName,
+        modelName,
+        benchmarkName,
+        benchmarkType,
+        benchmarkTypeProvided: row.benchmarkTypeProvided ?? Boolean(row.benchmarkType?.trim()),
+        valueRaw: row.rawValue,
+        valueNote: row.valueNote?.trim() || null,
+        benchTime,
+        unit: (row.unit || "score").trim() || "score",
+        higherIsBetter: row.higherIsBetter
+          ?? !isLowerBetterBenchmark(benchmarkName, benchmarkType),
+        modalities: normalizeModalities(row.modalities?.length ? row.modalities : [benchmarkType]),
+        source: normalizeTextImportSource(row.source) ?? normalizeTextImportSource(options?.source) ?? null,
+        modelAlias: row.modelAlias ?? null,
+        sourceModelId: row.sourceModelId ?? null,
+        sourceBenchmarkId: row.sourceBenchmarkId ?? null
+      } as NormalizedTextImportRow;
+    })
+    .filter((row): row is NormalizedTextImportRow => row !== null);
+
+  const expandedRows = expandMetricLabeledImportRows(normalizedRows);
+  const { inserted } = await importNormalizedRows(expandedRows);
+
+  return {
+    total: expandedRows.length,
+    inserted,
+    skipped: Math.max(0, rows.length - normalizedRows.length),
+    format: "structured-preview"
+  };
 }
 
 function parseStructuredCsvRows(inputText: string, defaultSource: string | null): ParsedTextImportResult {

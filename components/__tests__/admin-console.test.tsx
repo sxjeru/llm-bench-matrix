@@ -1205,6 +1205,73 @@ describe("AdminConsole text import", () => {
     expect(secondPayload.csvText).toContain("FinanceAgent v1.1");
     expect(secondPayload.csvText).toContain("xlsm:Sheet1");
   });
+
+  test("编辑预览模型名后导入会按新模型名更新 provider 划分", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse = {
+      format: "structured-csv",
+      total: 1,
+      skipped: 0,
+      previewRows: [
+        {
+          rowNumber: 2,
+          providerName: "OpenAI",
+          modelName: "GPT-5-mini",
+          benchmarkName: "SWE-bench",
+          benchmarkType: "Agent",
+          benchmarkTypeProvided: true,
+          higherIsBetter: true,
+          modalities: ["Text"],
+          rawValue: "71.2",
+          valueNum: 71.2,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:paste",
+          valid: true
+        }
+      ]
+    };
+
+    const importResponse = {
+      format: "structured-preview",
+      total: 1,
+      skipped: 0,
+      inserted: 1,
+      warningCount: 0,
+      warnings: []
+    };
+
+    const fetchMock = mockFetchSequence(previewResponse, importResponse);
+    render(<AdminConsole {...buildProps()} />);
+
+    await user.type(screen.getByLabelText("粘贴 CSV / 文本"), "model,benchmark,value\nGPT-5-mini,SWE-bench,71.2");
+    await user.click(screen.getByRole("button", { name: "预览文本导入" }));
+
+    const modelInput = await screen.findByDisplayValue("GPT-5-mini");
+    await user.clear(modelInput);
+    await user.type(modelInput, "Claude 3.7 Sonnet");
+
+    await user.click(screen.getByRole("button", { name: "导入预览结果" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const secondCall = fetchMock.mock.calls[1];
+    expect(secondCall[0]).toBe("/api/admin/import-csv");
+
+    const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
+      rows?: Array<{ modelName: string; providerName: string }>;
+    };
+
+    expect(secondPayload.rows).toEqual([
+      expect.objectContaining({
+        modelName: "Claude 3.7 Sonnet",
+        providerName: "Claude"
+      })
+    ]);
+  });
 });
 
 describe("AdminConsole data maintenance", () => {
