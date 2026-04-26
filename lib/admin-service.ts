@@ -13,6 +13,7 @@ import { parseBenchmarkValue, type ParsedBenchmarkValue } from "@/lib/db/parse-v
 import { IMPORT_VALUE_PAIR_REGEX, IMPORT_VALUE_RANK_PREFIX_REGEX, IMPORT_VALUE_SINGLE_REGEX } from "@/lib/import/value-patterns";
 import type { ParsedImportRecord } from "@/lib/import/xlsm";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
+import type { ProviderConfig, ProviderConfigPrefixRule } from "@/lib/db/schema";
 import { invalidateAllCaches } from "@/lib/db/queries";
 
 type EnsureBenchmarkInput = {
@@ -1460,6 +1461,207 @@ function inferProviderNameFromModel(modelName: string): string {
   return "Unknown";
 }
 
+function normalizeProviderConfigPrefix(prefix: string): string {
+  return prefix.trim().toLowerCase();
+}
+
+function isValidHexColor(value: string): boolean {
+  return /^#[0-9a-f]{6}$/i.test(value.trim());
+}
+
+export function normalizeProviderConfig(raw: unknown): ProviderConfig {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {};
+  }
+
+  const input = raw as ProviderConfig;
+  const displayName = typeof input.displayName === "string" ? input.displayName.trim() : "";
+  const prefixRules = Array.isArray(input.prefixRules)
+    ? input.prefixRules
+        .filter((item): item is ProviderConfigPrefixRule => Boolean(item && typeof item === "object"))
+        .map((item) => {
+          const normalizedPrefix = typeof item.prefix === "string" ? item.prefix.trim() : "";
+          return {
+            prefix: normalizedPrefix,
+            enabled: item.enabled !== false,
+            ...(typeof item.priority === "number" && Number.isFinite(item.priority)
+              ? { priority: Math.trunc(item.priority) }
+              : {}),
+            ...(typeof item.note === "string" && item.note.trim().length > 0
+              ? { note: item.note.trim() }
+              : {})
+          };
+        })
+        .filter((item) => item.prefix.length > 0)
+    : [];
+
+  const color =
+    typeof input.branding?.color === "string" && isValidHexColor(input.branding.color)
+      ? input.branding.color.trim().toLowerCase()
+      : undefined;
+
+  return {
+    ...(displayName ? { displayName } : {}),
+    ...(prefixRules.length > 0 ? { prefixRules } : { prefixRules: [] }),
+    ...(color ? { branding: { color } } : {})
+  };
+}
+
+function validateProviderConfig(providerId: number, config: ProviderConfig, allProviders: Array<typeof providers.$inferSelect>) {
+  if (config.displayName !== undefined && config.displayName.trim().length === 0) {
+    throw new Error("displayName 不能为空字符串");
+  }
+
+  const seenPrefixes = new Set<string>();
+  for (const rule of config.prefixRules ?? []) {
+    const prefix = rule.prefix.trim();
+    if (!prefix) {
+      throw new Error("prefix 不能为空");
+    }
+
+    const normalizedPrefix = normalizeProviderConfigPrefix(prefix);
+    if (seenPrefixes.has(normalizedPrefix)) {
+      throw new Error(`当前 provider 存在重复 prefix: ${prefix}`);
+    }
+    seenPrefixes.add(normalizedPrefix);
+  }
+
+  if (config.branding?.color && !isValidHexColor(config.branding.color)) {
+    throw new Error("branding.color 必须是合法的 #RRGGBB");
+  }
+
+  const enabledPrefixes = new Map<string, number>();
+
+  allProviders.forEach((provider) => {
+    const providerConfig = normalizeProviderConfig(provider.config);
+    for (const rule of providerConfig.prefixRules ?? []) {
+      if (!rule.enabled) continue;
+      enabledPrefixes.set(normalizeProviderConfigPrefix(rule.prefix), provider.id);
+    }
+  });
+
+  for (const rule of config.prefixRules ?? []) {
+    if (!rule.enabled) continue;
+    const normalizedPrefix = normalizeProviderConfigPrefix(rule.prefix);
+    const existingProviderId = enabledPrefixes.get(normalizedPrefix);
+    if (existingProviderId !== undefined && existingProviderId !== providerId) {
+      throw new Error(`prefix 已被其他 provider 使用: ${rule.prefix}`);
+    }
+  }
+}
+
+function resolveProviderByConfig(
+  modelName: string,
+  providerRows: Array<typeof providers.$inferSelect>
+): typeof providers.$inferSelect | null {
+  const normalizedModelName = modelName.trim().toLowerCase();
+  if (!normalizedModelName) return null;
+
+  let matched: { provider: typeof providers.$inferSelect; prefix: string } | null = null;
+
+  for (const provider of providerRows) {
+    const config = normalizeProviderConfig(provider.config);
+    for (const rule of config.prefixRules ?? []) {
+      if (!rule.enabled) continue;
+      const normalizedPrefix = normalizeProviderConfigPrefix(rule.prefix);
+      if (!normalizedPrefix) continue;
+      if (!normalizedModelName.startsWith(normalizedPrefix)) continue;
+
+      if (!matched || normalizedPrefix.length > matched.prefix.length) {
+        matched = {
+          provider,
+          prefix: normalizedPrefix
+        };
+      }
+    }
+  }
+
+  return matched?.provider ?? null;
+}
+
+export async function getProviderNameForModel(modelName: string, options?: { db?: DbExecutor }) {
+  const executor = options?.db ?? db;
+  const cleanName = normalizeNameParenthesisSpacing(modelName);
+  if (!cleanName) return "Unknown";
+
+  const canonicalKey = buildModelCanonicalKey(cleanName, await getModelDedupeRule());
+  const [exactModel] = await executor.select().from(models).where(eq(models.canonicalKey, canonicalKey)).limit(1);
+
+  if (exactModel) {
+    const [provider] = await executor.select().from(providers).where(eq(providers.id, exactModel.providerId)).limit(1);
+    if (provider) {
+      const config = normalizeProviderConfig(provider.config);
+      return config.displayName?.trim() || provider.name;
+    }
+
+    return inferProviderNameFromModel(cleanName);
+  }
+
+  const providerRows = await executor.select().from(providers);
+  const configMatchedProvider = resolveProviderByConfig(cleanName, providerRows);
+  if (configMatchedProvider) {
+    const config = normalizeProviderConfig(configMatchedProvider.config);
+    return config.displayName?.trim() || configMatchedProvider.name;
+  }
+
+  return inferProviderNameFromModel(cleanName);
+}
+
+async function resolveProviderCanonicalNameForModel(modelName: string, options?: { db?: DbExecutor }) {
+  const executor = options?.db ?? db;
+  const cleanName = normalizeNameParenthesisSpacing(modelName);
+  if (!cleanName) return "Unknown";
+
+  const canonicalKey = buildModelCanonicalKey(cleanName, await getModelDedupeRule());
+  const [exactModel] = await executor.select().from(models).where(eq(models.canonicalKey, canonicalKey)).limit(1);
+
+  if (exactModel) {
+    const [provider] = await executor.select().from(providers).where(eq(providers.id, exactModel.providerId)).limit(1);
+    if (provider) {
+      return provider.name;
+    }
+
+    return inferProviderNameFromModel(cleanName);
+  }
+
+  const providerRows = await executor.select().from(providers);
+  const configMatchedProvider = resolveProviderByConfig(cleanName, providerRows);
+  if (configMatchedProvider) {
+    return configMatchedProvider.name;
+  }
+
+  return inferProviderNameFromModel(cleanName);
+}
+
+export async function updateProviderConfig(input: { providerId: number; config: unknown }, options?: { db?: DbExecutor }) {
+  const executor = options?.db ?? db;
+  const [provider] = await executor.select().from(providers).where(eq(providers.id, input.providerId)).limit(1);
+  if (!provider) {
+    throw new Error(`provider not found: ${input.providerId}`);
+  }
+
+  const normalizedConfig = normalizeProviderConfig(input.config);
+  const allProviders = await executor.select().from(providers);
+  validateProviderConfig(input.providerId, normalizedConfig, allProviders);
+
+  const updatedResult = await executor
+    .update(providers)
+    .set({
+      config: normalizedConfig,
+      updatedAt: new Date()
+    })
+    .where(eq(providers.id, input.providerId))
+    .returning();
+
+  const updatedProvider = firstResultRow<typeof providers.$inferSelect>(updatedResult);
+  if (!updatedProvider) {
+    throw new Error("failed to update provider config");
+  }
+
+  invalidateAllCaches();
+  return updatedProvider;
+}
+
 function inferModalitiesFromCategory(category: string | null): string[] {
   if (!category) return ["Text"];
   const normalized = category.toLowerCase();
@@ -1895,12 +2097,14 @@ export async function ensureProvider(name: string, options?: { db?: DbExecutor }
     .insert(providers)
     .values({
       name: cleanName,
-      slug
+      slug,
+      updatedAt: new Date()
     })
     .onConflictDoUpdate({
       target: providers.slug,
       set: {
-        name: cleanName
+        name: cleanName,
+        updatedAt: new Date()
       }
     })
     .returning();
@@ -2872,12 +3076,16 @@ export async function importStructuredRows(
     benchTime?: Date;
   }
 ) {
-  const normalizedRows = rows
-    .map((row, index) => {
+  const normalizedRows = (await Promise.all(rows
+    .map(async (row, index) => {
       const modelName = normalizeNameParenthesisSpacing(row.modelName || "");
       const benchmarkName = normalizeNameParenthesisSpacing(row.benchmarkName || "");
       const benchmarkType = (row.benchmarkType || "general").trim() || "general";
-      const providerName = (row.providerName?.trim() || inferProviderNameFromModel(modelName) || "Unknown").trim();
+      const providerName = (
+        row.providerName?.trim()
+        || await resolveProviderCanonicalNameForModel(modelName)
+        || "Unknown"
+      ).trim();
       const rawBenchTime = row.benchTime ?? options?.benchTime ?? new Date();
       const benchTime = rawBenchTime instanceof Date ? rawBenchTime : new Date(rawBenchTime);
 
@@ -2904,7 +3112,7 @@ export async function importStructuredRows(
         sourceModelId: row.sourceModelId ?? null,
         sourceBenchmarkId: row.sourceBenchmarkId ?? null
       } as NormalizedTextImportRow;
-    })
+    })))
     .filter((row): row is NormalizedTextImportRow => row !== null);
 
   const expandedRows = expandMetricLabeledImportRows(normalizedRows);
@@ -5240,4 +5448,21 @@ export async function clearNonSettingsData() {
   return {
     ok: true
   };
+}
+
+// Test exports for provider config
+export function __normalizeProviderConfigForTest(raw: unknown): ProviderConfig {
+  return normalizeProviderConfig(raw);
+}
+
+export function __validateProviderConfigForTest(providerId: number, config: ProviderConfig, allProviders: Array<typeof providers.$inferSelect>) {
+  validateProviderConfig(providerId, config, allProviders);
+}
+
+export async function __updateProviderConfigForTest(input: { providerId: number; config: unknown }, options?: { db?: DbExecutor }) {
+  return updateProviderConfig(input, options);
+}
+
+export async function __getProviderNameForModelForTest(modelName: string, options?: { db?: DbExecutor }) {
+  return getProviderNameForModel(modelName, options);
 }

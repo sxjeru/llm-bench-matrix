@@ -24,6 +24,18 @@ type ProviderOption = {
   id: number;
   name: string;
   slug: string;
+  config?: {
+    displayName?: string;
+    prefixRules?: Array<{
+      prefix: string;
+      enabled: boolean;
+      priority?: number;
+      note?: string;
+    }>;
+    branding?: {
+      color?: string;
+    };
+  };
 };
 
 type ModelOption = {
@@ -101,7 +113,16 @@ type ModelDedupeRule = {
   removeDot: boolean;
 };
 
-type TabKey = "import" | "entry" | "rename" | "merge" | "maintenance" | "settings";
+type TabKey = "import" | "entry" | "providers" | "rename" | "merge" | "maintenance" | "settings";
+
+type ProviderConfigDraft = {
+  displayName: string;
+  prefixRules: Array<{
+    prefix: string;
+    enabled: boolean;
+  }>;
+  brandingColor: string;
+};
 
 type BenchmarkWarningLevel = "info" | "warn" | "danger";
 
@@ -260,6 +281,21 @@ const MODALITY_OPTIONS = ["Text", "Vision", "Audio", "Video", "Multimodal"] as c
 const RENAME_LIST_ROW_HEIGHT = 38;
 const RENAME_LIST_VIEWPORT_HEIGHT = 320;
 const RENAME_LIST_OVERSCAN = 8;
+
+function isValidHexColor(value: string): boolean {
+  return /^#[0-9a-f]{6}$/i.test(value.trim());
+}
+
+function toProviderConfigDraft(provider: ProviderOption): ProviderConfigDraft {
+  return {
+    displayName: provider.config?.displayName ?? "",
+    prefixRules: (provider.config?.prefixRules ?? []).map((rule) => ({
+      prefix: rule.prefix,
+      enabled: rule.enabled !== false
+    })),
+    brandingColor: provider.config?.branding?.color ?? ""
+  };
+}
 
 function normalizeModelDedupeRule(raw: unknown): ModelDedupeRule {
   if (!raw || typeof raw !== "object") {
@@ -538,6 +574,30 @@ function inferProviderNameFromModelName(modelName: string): string {
   return "Unknown";
 }
 
+function resolveProviderNameFromConfig(modelName: string, providers: ProviderOption[]): string | null {
+  const normalizedModelName = modelName.trim().toLowerCase();
+  if (!normalizedModelName) return null;
+
+  let matched: { providerName: string; prefixLength: number } | null = null;
+
+  for (const provider of providers) {
+    for (const rule of provider.config?.prefixRules ?? []) {
+      const normalizedPrefix = rule.prefix.trim().toLowerCase();
+      if (!rule.enabled || !normalizedPrefix) continue;
+      if (!normalizedModelName.startsWith(normalizedPrefix)) continue;
+
+      if (!matched || normalizedPrefix.length > matched.prefixLength) {
+        matched = {
+          providerName: provider.config?.displayName?.trim() || provider.name,
+          prefixLength: normalizedPrefix.length
+        };
+      }
+    }
+  }
+
+  return matched?.providerName ?? null;
+}
+
 function resolveHardcodedBenchmarkAliasTarget(input: string): string | null {
   for (const rule of HARDCODED_BENCHMARK_ALIAS_RULES) {
     if (rule.pattern.test(input)) {
@@ -724,6 +784,13 @@ export function AdminConsole({
 
   const [providerName, setProviderName] = useState("");
   const [providerId, setProviderId] = useState<number | "">(providers[0]?.id ?? "");
+  const [providerConfigDrafts, setProviderConfigDrafts] = useState<Record<number, ProviderConfigDraft>>(() =>
+    providers.reduce<Record<number, ProviderConfigDraft>>((acc, provider) => {
+      acc[provider.id] = toProviderConfigDraft(provider);
+      return acc;
+    }, {})
+  );
+  const [savingProviderConfigId, setSavingProviderConfigId] = useState<number | null>(null);
   const [modelName, setModelName] = useState("");
   const [modelAlias, setModelAlias] = useState("");
   const [sourceModelId, setSourceModelId] = useState("");
@@ -863,6 +930,78 @@ export function AdminConsole({
   const providerById = useMemo(() => {
     return new Map(providers.map((item) => [item.id, item]));
   }, [providers]);
+
+  function updateProviderDraft(providerId: number, updater: (draft: ProviderConfigDraft) => ProviderConfigDraft) {
+    setProviderConfigDrafts((prev) => ({
+      ...prev,
+      [providerId]: updater(prev[providerId] ?? { displayName: "", prefixRules: [], brandingColor: "" })
+    }));
+  }
+
+  function validateProviderDraft(providerId: number, draft: ProviderConfigDraft) {
+    const normalizedPrefixes = draft.prefixRules
+      .map((rule) => rule.prefix.trim().toLowerCase())
+      .filter(Boolean);
+
+    if (normalizedPrefixes.length !== new Set(normalizedPrefixes).size) {
+      throw new Error("当前 provider 存在重复 prefix");
+    }
+
+    if (draft.brandingColor.trim() && !isValidHexColor(draft.brandingColor)) {
+      throw new Error("颜色必须是合法的 #RRGGBB");
+    }
+
+    const duplicatePrefixOwner = new Map<string, number>();
+    providers.forEach((provider) => {
+      const sourceDraft = provider.id === providerId ? draft : (providerConfigDrafts[provider.id] ?? toProviderConfigDraft(provider));
+      sourceDraft.prefixRules.forEach((rule) => {
+        const normalized = rule.prefix.trim().toLowerCase();
+        if (!normalized || !rule.enabled) return;
+
+        const existingOwner = duplicatePrefixOwner.get(normalized);
+        if (existingOwner !== undefined && existingOwner !== provider.id) {
+          throw new Error(`prefix 已被其他 provider 使用: ${rule.prefix}`);
+        }
+
+        duplicatePrefixOwner.set(normalized, provider.id);
+      });
+    });
+  }
+
+  async function onSaveProviderConfig(providerId: number) {
+    const draft = providerConfigDrafts[providerId] ?? { displayName: "", prefixRules: [], brandingColor: "" };
+
+    try {
+      validateProviderDraft(providerId, draft);
+      setSavingProviderConfigId(providerId);
+
+      await postJson(
+        "/api/admin/providers",
+        {
+          providerId,
+          config: {
+            ...(draft.displayName.trim() ? { displayName: draft.displayName.trim() } : {}),
+            prefixRules: draft.prefixRules
+              .map((rule) => ({
+                prefix: rule.prefix.trim(),
+                enabled: rule.enabled
+              }))
+              .filter((rule) => rule.prefix.length > 0),
+            ...(draft.brandingColor.trim()
+              ? { branding: { color: draft.brandingColor.trim().toLowerCase() } }
+              : {})
+          }
+        },
+        "PATCH"
+      );
+
+      notifySuccess("Provider 配置已保存，刷新页面后生效。", ["展示名、前缀规则、配色均已提交。"]); 
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "保存 provider 配置失败");
+    } finally {
+      setSavingProviderConfigId(null);
+    }
+  }
 
   const existingBenchmarkExactMap = useMemo(() => {
     const map = new Map<string, BenchmarkOption>();
@@ -1354,19 +1493,19 @@ export function AdminConsole({
         const exactModel = existingModelExactMap.get(modelName.toLowerCase());
         if (exactModel) {
           modelName = exactModel.modelName;
-          providerName = providerById.get(exactModel.providerId)?.name ?? providerName;
+          providerName = providerById.get(exactModel.providerId)?.config?.displayName?.trim() || providerById.get(exactModel.providerId)?.name || providerName;
         } else {
           const canonicalKey = normalizeModelNameByDedupeRule(modelName, modelDedupeRule);
           const canonicalMatchedModel = existingModelByCanonicalKey.get(canonicalKey);
 
           if (canonicalMatchedModel) {
             modelName = canonicalMatchedModel.modelName;
-            providerName = providerById.get(canonicalMatchedModel.providerId)?.name ?? providerName;
+            providerName = providerById.get(canonicalMatchedModel.providerId)?.config?.displayName?.trim() || providerById.get(canonicalMatchedModel.providerId)?.name || providerName;
           } else {
             const sameNameModels = existingModelByNameMap.get(modelName.toLowerCase()) ?? [];
             if (sameNameModels.length > 0) {
               modelName = sameNameModels[0].modelName;
-              providerName = providerById.get(sameNameModels[0].providerId)?.name ?? providerName;
+              providerName = providerById.get(sameNameModels[0].providerId)?.config?.displayName?.trim() || providerById.get(sameNameModels[0].providerId)?.name || providerName;
             }
           }
         }
@@ -1842,8 +1981,8 @@ export function AdminConsole({
       const normalizedModelName = row.modelName.trim();
       const existingModel = existingModelExactMap.get(normalizedModelName.toLowerCase());
       const providerName = existingModel
-        ? (providerById.get(existingModel.providerId)?.name ?? inferProviderNameFromModelName(normalizedModelName))
-        : inferProviderNameFromModelName(normalizedModelName);
+        ? (providerById.get(existingModel.providerId)?.config?.displayName?.trim() || providerById.get(existingModel.providerId)?.name || inferProviderNameFromModelName(normalizedModelName))
+        : (resolveProviderNameFromConfig(normalizedModelName, providers) ?? inferProviderNameFromModelName(normalizedModelName));
       const inferredHigherIsBetter = !isLowerBetterPreviewBenchmark(row.benchmarkName, benchmarkType);
 
       return {
@@ -3774,6 +3913,15 @@ export function AdminConsole({
           <button
             type="button"
             role="tab"
+            aria-selected={activeTab === "providers"}
+            className={tabClass("providers")}
+            onClick={() => setActiveTab("providers")}
+          >
+            Provider 配置
+          </button>
+          <button
+            type="button"
+            role="tab"
             aria-selected={activeTab === "rename"}
             className={tabClass("rename")}
             onClick={() => setActiveTab("rename")}
@@ -4905,6 +5053,142 @@ export function AdminConsole({
           </div>
         ) : null}
 
+        {activeTab === "providers" ? (
+          <div className="grid grid-cols-1 gap-4">
+            {providers.map((provider) => {
+              const draft = providerConfigDrafts[provider.id] ?? toProviderConfigDraft(provider);
+
+              return (
+                <section key={provider.id} className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
+                  <div className="mb-4 flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-lg font-semibold">{provider.name}</h3>
+                      <p className="text-sm opacity-70">slug: {provider.slug}</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => onSaveProviderConfig(provider.id)}
+                      disabled={savingProviderConfigId === provider.id}
+                    >
+                      {savingProviderConfigId === provider.id ? "保存中..." : "保存配置"}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                    <label className="form-control">
+                      <span className="label-text">展示名</span>
+                      <input
+                        className="input input-bordered"
+                        value={draft.displayName}
+                        onChange={(e) =>
+                          updateProviderDraft(provider.id, (current) => ({
+                            ...current,
+                            displayName: e.target.value
+                          }))
+                        }
+                        placeholder={provider.name}
+                      />
+                    </label>
+
+                    <label className="form-control">
+                      <span className="label-text">品牌色</span>
+                      <input
+                        className="input input-bordered"
+                        value={draft.brandingColor}
+                        onChange={(e) =>
+                          updateProviderDraft(provider.id, (current) => ({
+                            ...current,
+                            brandingColor: e.target.value
+                          }))
+                        }
+                        placeholder="#34d399"
+                      />
+                    </label>
+
+                    <div className="rounded-lg border border-base-300 bg-base-200/40 p-3 text-sm">
+                      <div className="mb-1 font-medium">当前展示预览</div>
+                      <div style={{ color: draft.brandingColor.trim() || undefined }}>
+                        {draft.displayName.trim() || provider.name}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-medium">前缀规则</h4>
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-sm"
+                        onClick={() =>
+                          updateProviderDraft(provider.id, (current) => ({
+                            ...current,
+                            prefixRules: [...current.prefixRules, { prefix: "", enabled: true }]
+                          }))
+                        }
+                      >
+                        新增一条
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {draft.prefixRules.length === 0 ? (
+                        <div className="text-sm opacity-60">暂无前缀规则</div>
+                      ) : (
+                        draft.prefixRules.map((rule, index) => (
+                          <div key={`${provider.id}-${index}`} className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_auto_auto]">
+                            <input
+                              className="input input-bordered"
+                              value={rule.prefix}
+                              onChange={(e) =>
+                                updateProviderDraft(provider.id, (current) => ({
+                                  ...current,
+                                  prefixRules: current.prefixRules.map((item, itemIndex) =>
+                                    itemIndex === index ? { ...item, prefix: e.target.value } : item
+                                  )
+                                }))
+                              }
+                              placeholder="例如 gpt-"
+                            />
+                            <label className="label cursor-pointer gap-2 justify-start">
+                              <input
+                                type="checkbox"
+                                className="checkbox checkbox-sm"
+                                checked={rule.enabled}
+                                onChange={(e) =>
+                                  updateProviderDraft(provider.id, (current) => ({
+                                    ...current,
+                                    prefixRules: current.prefixRules.map((item, itemIndex) =>
+                                      itemIndex === index ? { ...item, enabled: e.target.checked } : item
+                                    )
+                                  }))
+                                }
+                              />
+                              <span className="label-text">启用</span>
+                            </label>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() =>
+                                updateProviderDraft(provider.id, (current) => ({
+                                  ...current,
+                                  prefixRules: current.prefixRules.filter((_, itemIndex) => itemIndex !== index)
+                                }))
+                              }
+                            >
+                              删除
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        ) : null}
+
         {activeTab === "rename" ? (
           <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
             <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold">
@@ -4961,7 +5245,7 @@ export function AdminConsole({
                         ? (() => {
                             const model = modelById.get(item.id);
                             if (!model) return "-";
-                            return providerById.get(model.providerId)?.name ?? "-";
+                            return providerById.get(model.providerId)?.config?.displayName?.trim() || providerById.get(model.providerId)?.name || "-";
                           })()
                         : (benchmarkById.get(item.id)?.benchmarkType ?? "-");
 

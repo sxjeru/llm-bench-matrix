@@ -30,6 +30,8 @@ import {
 type MatrixInputRow = {
   recordId?: number | null;
   providerName: string;
+  providerDisplayName?: string | null;
+  providerBrandColor?: string | null;
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
@@ -906,7 +908,11 @@ function compareModelNameByColumnOrder(left: string, right: string, collator: In
   return collator.compare(right, left);
 }
 
-function getProviderBrandColor(providerName: string | null | undefined): string {
+function getProviderBrandColor(providerName: string | null | undefined, configuredColor?: string | null): string {
+  if (configuredColor && isValidHexColor(configuredColor)) {
+    return configuredColor.trim().toLowerCase();
+  }
+
   const normalized = (providerName ?? "").trim().toLowerCase();
 
   if (normalized.includes("openai") || normalized.includes("gpt")) return "#34d399";
@@ -2179,12 +2185,14 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
   const allRowsIndex = useMemo(() => {
     const modelProviderMap = new Map<string, string>();
+    const modelProviderBrandColorMap = new Map<string, string | null>();
     const rowsByModel = new Map<string, IndexedMatrixInputRow[]>();
     const rowsByGroupingKey = new Map<string, IndexedMatrixInputRow[]>();
 
     allRows.forEach((row) => {
       if (!modelProviderMap.has(row.modelName)) {
-        modelProviderMap.set(row.modelName, row.providerName);
+        modelProviderMap.set(row.modelName, row.providerDisplayName?.trim() || row.providerName);
+        modelProviderBrandColorMap.set(row.modelName, row.providerBrandColor ?? null);
       }
 
       const indexed: IndexedMatrixInputRow = {
@@ -2205,6 +2213,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
     return {
       modelProviderMap,
+      modelProviderBrandColorMap,
       rowsByModel,
       rowsByGroupingKey
     };
@@ -2514,6 +2523,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const selectedModalitySet = useMemo(() => new Set(selectedModalities), [selectedModalities]);
 
   const modelProviderMap = allRowsIndex.modelProviderMap;
+  const modelProviderBrandColorMap = allRowsIndex.modelProviderBrandColorMap;
 
   const filteredRows = useMemo(() => {
     if (selectedModelSet.size === 0 || baseBenchmarkKeySet.size === 0) {
@@ -2636,7 +2646,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
     coveragePrunedRows.forEach((row) => {
       const current = modelStats.get(row.modelName) ?? {
-        providerName: row.providerName || "Unknown",
+        providerName: row.providerDisplayName?.trim() || row.providerName || "Unknown",
         numericCount: 0,
         totalCount: 0
       };
@@ -2647,7 +2657,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       }
 
       if (!current.providerName) {
-        current.providerName = row.providerName || "Unknown";
+        current.providerName = row.providerDisplayName?.trim() || row.providerName || "Unknown";
       }
 
       modelStats.set(row.modelName, current);
@@ -3044,7 +3054,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         modelName,
         columnWidthKey,
         providerName,
-        color: getProviderBrandColor(providerName),
+        color: getProviderBrandColor(providerName, modelProviderBrandColorMap.get(modelName) ?? null),
         columnWidth,
         isSourceMatched: sourceMatchedModelSet.has(modelName),
         isSourceMatchedFirst: sourceMatchedGroupBoundaryByModel.firstSet.has(modelName),
@@ -3054,6 +3064,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   }, [
     modelColumns,
     modelProviderMap,
+    modelProviderBrandColorMap,
     sourceMatchedModelSet,
     sourceMatchedGroupBoundaryByModel,
     autoModelWidthMap,

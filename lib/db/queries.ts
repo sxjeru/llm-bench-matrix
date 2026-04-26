@@ -1,6 +1,7 @@
 import { and, count, countDistinct, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
+import { normalizeProviderConfig } from "@/lib/admin-service";
 
 function toNullableNumber(value: unknown): number | null {
   if (value === null || value === undefined) return null;
@@ -15,6 +16,8 @@ function toNullableNumber(value: unknown): number | null {
 export type DashboardRow = {
   id: number;
   providerName: string;
+  providerDisplayName: string;
+  providerBrandColor: string | null;
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
@@ -138,6 +141,7 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
         .select({
           id: benchmarkValues.id,
           providerName: providers.name,
+          providerConfig: providers.config,
           modelName: models.modelName,
           benchmarkName: benchmarks.benchmarkName,
           benchmarkType: benchmarks.benchmarkType,
@@ -174,9 +178,14 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
         normalizedSourceFilter && normalizedSourceFilter !== SOURCE_EMPTY_KEY
       );
 
-      return rows.map((row) => ({
+      return rows.map((row) => {
+        const providerConfig = normalizeProviderConfig(row.providerConfig);
+
+        return {
         id: row.id,
         providerName: row.providerName,
+        providerDisplayName: providerConfig.displayName?.trim() || row.providerName,
+        providerBrandColor: providerConfig.branding?.color ?? null,
         modelName: row.modelName,
         benchmarkName: row.benchmarkName,
         benchmarkType: shouldUseSourceMeta
@@ -193,7 +202,8 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
         valueNum2: toNullableNumber(row.valueNum2),
         valueNote: row.valueNote,
         source: row.source
-      }));
+        };
+      });
     }
   );
 }
