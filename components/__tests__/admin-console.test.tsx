@@ -1700,6 +1700,63 @@ describe("AdminConsole provider config", () => {
 
     expect(getPrefixInputs().map((input) => input.value)).toEqual(["o1-", "o3-"]);
   });
+
+  test("保存 provider 配置时保留 prefix rule 的 priority 与 note", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetchSequence({ provider: { id: 1 } });
+
+    render(
+      <AdminConsole
+        {...buildProps()}
+        providers={[
+          {
+            id: 1,
+            name: "OpenAI",
+            slug: "openai",
+            config: {
+              prefixRules: [
+                { prefix: "gpt-", enabled: true, priority: 1, note: "Primary" },
+                { prefix: "o1-", enabled: false, note: "Legacy" }
+              ]
+            }
+          },
+          { id: 2, name: "Google", slug: "google" }
+        ]}
+      />
+    );
+
+    await user.click(screen.getByRole("tab", { name: "Provider 配置" }));
+
+    const openAiSection = screen.getByRole("heading", { name: "OpenAI" }).closest("section");
+    if (!openAiSection) {
+      throw new Error("OpenAI provider section not found");
+    }
+
+    await user.click(within(openAiSection).getByRole("button", { name: "保存配置" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const [url, requestInit] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe("/api/admin/providers");
+
+    const payload = JSON.parse(((requestInit as RequestInit).body ?? "{}") as string) as {
+      config?: {
+        prefixRules?: Array<{
+          prefix: string;
+          enabled: boolean;
+          priority?: number;
+          note?: string;
+        }>;
+      };
+    };
+
+    expect(payload.config?.prefixRules).toEqual([
+      { prefix: "gpt-", enabled: true, priority: 1, note: "Primary" },
+      { prefix: "o1-", enabled: false, note: "Legacy" }
+    ]);
+  });
 });
 
 describe("AdminConsole merge interactions", () => {

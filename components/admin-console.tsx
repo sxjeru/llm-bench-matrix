@@ -123,6 +123,8 @@ type ProviderConfigDraft = {
     id: string;
     prefix: string;
     enabled: boolean;
+    priority?: number;
+    note?: string;
   }>;
   brandingColor: string;
 };
@@ -290,13 +292,24 @@ function isValidHexColor(value: string): boolean {
   return /^#[0-9a-f]{6}$/i.test(value.trim());
 }
 
-function createProviderPrefixRuleDraft(rule?: { prefix?: string; enabled?: boolean }): ProviderConfigDraft["prefixRules"][number] {
+function createProviderPrefixRuleDraft(rule?: {
+  prefix?: string;
+  enabled?: boolean;
+  priority?: number;
+  note?: string;
+}): ProviderConfigDraft["prefixRules"][number] {
   return {
     id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
       : `prefix-rule-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     prefix: rule?.prefix ?? "",
-    enabled: rule?.enabled !== false
+    enabled: rule?.enabled !== false,
+    ...(typeof rule?.priority === "number" && Number.isFinite(rule.priority)
+      ? { priority: Math.trunc(rule.priority) }
+      : {}),
+    ...(typeof rule?.note === "string" && rule.note.trim().length > 0
+      ? { note: rule.note.trim() }
+      : {})
   };
 }
 
@@ -1011,7 +1024,13 @@ export function AdminConsole({
             prefixRules: draft.prefixRules
               .map((rule) => ({
                 prefix: rule.prefix.trim(),
-                enabled: rule.enabled
+                enabled: rule.enabled,
+                ...(typeof rule.priority === "number" && Number.isFinite(rule.priority)
+                  ? { priority: Math.trunc(rule.priority) }
+                  : {}),
+                ...(typeof rule.note === "string" && rule.note.trim().length > 0
+                  ? { note: rule.note.trim() }
+                  : {})
               }))
               .filter((rule) => rule.prefix.length > 0),
             ...(draft.brandingColor.trim()
