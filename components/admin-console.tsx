@@ -84,6 +84,7 @@ type ImportWarning = {
 type TextImportPreviewRow = {
   rowNumber: number;
   providerName: string;
+  providerDisplayName?: string;
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
@@ -160,6 +161,7 @@ type MatrixPreviewRow = {
 
 type StructuredCsvImportRow = {
   providerName: string;
+  providerDisplayName?: string;
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
@@ -583,11 +585,14 @@ function inferProviderNameFromModelName(modelName: string): string {
   return "Unknown";
 }
 
-function resolveProviderNameFromConfig(modelName: string, providers: ProviderOption[]): string | null {
+function resolveProviderFromConfig(
+  modelName: string,
+  providers: ProviderOption[]
+): { providerName: string; providerDisplayName: string } | null {
   const normalizedModelName = modelName.trim().toLowerCase();
   if (!normalizedModelName) return null;
 
-  let matched: { providerName: string; prefixLength: number } | null = null;
+  let matched: { providerName: string; providerDisplayName: string; prefixLength: number } | null = null;
 
   for (const provider of providers) {
     for (const rule of provider.config?.prefixRules ?? []) {
@@ -597,14 +602,26 @@ function resolveProviderNameFromConfig(modelName: string, providers: ProviderOpt
 
       if (!matched || normalizedPrefix.length > matched.prefixLength) {
         matched = {
-          providerName: provider.config?.displayName?.trim() || provider.name,
+          providerName: provider.name,
+          providerDisplayName: provider.config?.displayName?.trim() || provider.name,
           prefixLength: normalizedPrefix.length
         };
       }
     }
   }
 
-  return matched?.providerName ?? null;
+  return matched
+    ? {
+        providerName: matched.providerName,
+        providerDisplayName: matched.providerDisplayName
+      }
+    : null;
+}
+
+function getProviderDisplayNameById(providerId: number, providerById: Map<number, ProviderOption>): string | null {
+  const provider = providerById.get(providerId);
+  if (!provider) return null;
+  return provider.config?.displayName?.trim() || provider.name;
 }
 
 function resolveHardcodedBenchmarkAliasTarget(input: string): string | null {
@@ -1477,6 +1494,7 @@ export function AdminConsole({
         let benchmarkType = row.benchmarkType;
         let modelName = row.modelName;
         let providerName = row.providerName.trim() || "Unknown";
+        let providerDisplayName = row.providerDisplayName?.trim() || providerName;
 
         const modelParenthesesMode = modelParenthesesModes[originalModelKey] ?? "keep";
         if (modelParenthesesMode === "remove") {
@@ -1504,19 +1522,22 @@ export function AdminConsole({
         const exactModel = existingModelExactMap.get(modelName.toLowerCase());
         if (exactModel) {
           modelName = exactModel.modelName;
-          providerName = providerById.get(exactModel.providerId)?.config?.displayName?.trim() || providerById.get(exactModel.providerId)?.name || providerName;
+          providerName = providerById.get(exactModel.providerId)?.name || providerName;
+          providerDisplayName = getProviderDisplayNameById(exactModel.providerId, providerById) || providerName;
         } else {
           const canonicalKey = normalizeModelNameByDedupeRule(modelName, modelDedupeRule);
           const canonicalMatchedModel = existingModelByCanonicalKey.get(canonicalKey);
 
           if (canonicalMatchedModel) {
             modelName = canonicalMatchedModel.modelName;
-            providerName = providerById.get(canonicalMatchedModel.providerId)?.config?.displayName?.trim() || providerById.get(canonicalMatchedModel.providerId)?.name || providerName;
+            providerName = providerById.get(canonicalMatchedModel.providerId)?.name || providerName;
+            providerDisplayName = getProviderDisplayNameById(canonicalMatchedModel.providerId, providerById) || providerName;
           } else {
             const sameNameModels = existingModelByNameMap.get(modelName.toLowerCase()) ?? [];
             if (sameNameModels.length > 0) {
               modelName = sameNameModels[0].modelName;
-              providerName = providerById.get(sameNameModels[0].providerId)?.config?.displayName?.trim() || providerById.get(sameNameModels[0].providerId)?.name || providerName;
+              providerName = providerById.get(sameNameModels[0].providerId)?.name || providerName;
+              providerDisplayName = getProviderDisplayNameById(sameNameModels[0].providerId, providerById) || providerName;
             }
           }
         }
@@ -1568,6 +1589,7 @@ export function AdminConsole({
 
         return {
           providerName,
+          providerDisplayName,
           modelName,
           benchmarkName,
           benchmarkType,
@@ -1612,7 +1634,7 @@ export function AdminConsole({
 
     return finalizedTextImportRows.map((row, index) => ({
       rowNumber: index + 1,
-      providerName: row.providerName,
+      providerName: row.providerDisplayName || row.providerName,
       modelName: row.modelName,
       benchmarkName: row.benchmarkName,
       benchmarkType: row.benchmarkType,
@@ -1991,14 +2013,19 @@ export function AdminConsole({
       const benchmarkType = currentBenchmarkType || "General";
       const normalizedModelName = row.modelName.trim();
       const existingModel = existingModelExactMap.get(normalizedModelName.toLowerCase());
+      const resolvedProvider = existingModel ? null : resolveProviderFromConfig(normalizedModelName, providers);
       const providerName = existingModel
-        ? (providerById.get(existingModel.providerId)?.config?.displayName?.trim() || providerById.get(existingModel.providerId)?.name || inferProviderNameFromModelName(normalizedModelName))
-        : (resolveProviderNameFromConfig(normalizedModelName, providers) ?? inferProviderNameFromModelName(normalizedModelName));
+        ? (providerById.get(existingModel.providerId)?.name || inferProviderNameFromModelName(normalizedModelName))
+        : (resolvedProvider?.providerName ?? inferProviderNameFromModelName(normalizedModelName));
+      const providerDisplayName = existingModel
+        ? (getProviderDisplayNameById(existingModel.providerId, providerById) || providerName)
+        : (resolvedProvider?.providerDisplayName ?? providerName);
       const inferredHigherIsBetter = !isLowerBetterPreviewBenchmark(row.benchmarkName, benchmarkType);
 
       return {
         rowNumber: row.rowNumber,
         providerName,
+        providerDisplayName,
         modelName: normalizedModelName,
         benchmarkName: row.benchmarkName,
         benchmarkType,
@@ -2597,12 +2624,17 @@ export function AdminConsole({
     setTextImportDraftRows((prev) =>
       prev.map((row) =>
         row.modelName === modelName
-          ? {
-              ...row,
-              modelName: nextModelName,
-              providerName:
-                resolveProviderNameFromConfig(nextModelName, providers) ?? inferProviderNameFromModelName(nextModelName)
-            }
+          ? (() => {
+              const resolvedProvider = resolveProviderFromConfig(nextModelName, providers);
+              const inferredProviderName = inferProviderNameFromModelName(nextModelName);
+
+              return {
+                ...row,
+                modelName: nextModelName,
+                providerName: resolvedProvider?.providerName ?? inferredProviderName,
+                providerDisplayName: resolvedProvider?.providerDisplayName ?? inferredProviderName
+              };
+            })()
           : row
       )
     );

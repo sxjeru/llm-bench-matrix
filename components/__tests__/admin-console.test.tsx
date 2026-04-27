@@ -73,6 +73,38 @@ function buildProps(): AdminConsoleProps {
   };
 }
 
+function buildPropsWithDisplayName(): AdminConsoleProps {
+  return {
+    ...buildProps(),
+    providers: [
+      { id: 1, name: "OpenAI", slug: "openai", config: { displayName: "OpenAI Official" } },
+      { id: 2, name: "Google", slug: "google" }
+    ],
+    models: [
+      { id: 1, providerId: 1, modelName: "GPT-4.1", canonicalKey: "gpt-41" },
+      { id: 2, providerId: 1, modelName: "Model B", canonicalKey: "model-b" }
+    ]
+  };
+}
+
+function buildPropsWithDisplayNameAndPrefixRule(): AdminConsoleProps {
+  return {
+    ...buildPropsWithDisplayName(),
+    providers: [
+      {
+        id: 1,
+        name: "OpenAI",
+        slug: "openai",
+        config: {
+          displayName: "OpenAI Official",
+          prefixRules: [{ prefix: "gpt", enabled: true }]
+        }
+      },
+      { id: 2, name: "Google", slug: "google" }
+    ]
+  };
+}
+
 async function fillCsvText(user: ReturnType<typeof userEvent.setup>, value: string) {
   const textarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
   if (!textarea) {
@@ -1276,6 +1308,137 @@ describe("AdminConsole text import", () => {
       expect.objectContaining({
         modelName: "Claude 3.7 Sonnet",
         providerName: "Claude"
+      })
+    ]);
+  });
+
+  test("已有模型命中 displayName 时导入仍提交规范 provider 名", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse = {
+      format: "structured-csv",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI Official",
+          providerDisplayName: "OpenAI Official",
+          modelName: "GPT-4.1",
+          benchmarkName: "SWE-bench",
+          benchmarkType: "Agent",
+          benchmarkTypeProvided: true,
+          higherIsBetter: true,
+          modalities: ["Text"],
+          rawValue: "75.1",
+          valueNum: 75.1,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:paste",
+          valid: true
+        }
+      ]
+    };
+
+    const importResponse = {
+      format: "structured-preview",
+      total: 1,
+      skipped: 0,
+      inserted: 1,
+      warningCount: 0,
+      warnings: []
+    };
+
+    const fetchMock = mockFetchSequence(previewResponse, importResponse);
+    render(<AdminConsole {...buildPropsWithDisplayName()} />);
+
+    await user.type(screen.getByLabelText("粘贴 CSV / 文本"), "model,benchmark,value\nGPT-4.1,SWE-bench,75.1");
+    await user.click(screen.getByRole("button", { name: "预览导入结果" }));
+
+    await screen.findByDisplayValue("GPT-4.1");
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const secondCall = fetchMock.mock.calls[1];
+    const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
+      rows?: Array<{ modelName: string; providerName: string; providerDisplayName?: string }>;
+    };
+
+    expect(secondPayload.rows).toEqual([
+      expect.objectContaining({
+        modelName: "GPT-4.1",
+        providerName: "OpenAI",
+        providerDisplayName: "OpenAI Official"
+      })
+    ]);
+  });
+
+  test("编辑预览模型名命中前缀规则时导入仍提交规范 provider 名", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse = {
+      format: "structured-csv",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "Other",
+          modelName: "OtherModel",
+          benchmarkName: "SWE-bench",
+          benchmarkType: "Agent",
+          benchmarkTypeProvided: true,
+          higherIsBetter: true,
+          modalities: ["Text"],
+          rawValue: "72.3",
+          valueNum: 72.3,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:paste",
+          valid: true
+        }
+      ]
+    };
+
+    const importResponse = {
+      format: "structured-preview",
+      total: 1,
+      skipped: 0,
+      inserted: 1,
+      warningCount: 0,
+      warnings: []
+    };
+
+    const fetchMock = mockFetchSequence(previewResponse, importResponse);
+    render(<AdminConsole {...buildPropsWithDisplayNameAndPrefixRule()} />);
+
+    await user.type(screen.getByLabelText("粘贴 CSV / 文本"), "model,benchmark,value\nOtherModel,SWE-bench,72.3");
+    await user.click(screen.getByRole("button", { name: "预览导入结果" }));
+
+    const modelInput = await screen.findByDisplayValue("OtherModel");
+    await user.clear(modelInput);
+    await user.type(modelInput, "GPT-4.1-mini");
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const secondCall = fetchMock.mock.calls[1];
+    const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
+      rows?: Array<{ modelName: string; providerName: string; providerDisplayName?: string }>;
+    };
+
+    expect(secondPayload.rows).toEqual([
+      expect.objectContaining({
+        modelName: "GPT-4.1-mini",
+        providerName: "OpenAI",
+        providerDisplayName: "OpenAI Official"
       })
     ]);
   });
