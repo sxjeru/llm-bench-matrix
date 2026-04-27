@@ -13,7 +13,7 @@ import { parseBenchmarkValue, type ParsedBenchmarkValue } from "@/lib/db/parse-v
 import { IMPORT_VALUE_PAIR_REGEX, IMPORT_VALUE_RANK_PREFIX_REGEX, IMPORT_VALUE_SINGLE_REGEX } from "@/lib/import/value-patterns";
 import type { ParsedImportRecord } from "@/lib/import/xlsm";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
-import type { ProviderConfig, ProviderConfigPrefixRule } from "@/lib/db/schema";
+import type { ProviderConfig } from "@/lib/db/schema";
 import { invalidateAllCaches } from "@/lib/db/queries";
 import { normalizeProviderConfig, normalizeProviderConfigPrefix } from "@/lib/provider-config";
 
