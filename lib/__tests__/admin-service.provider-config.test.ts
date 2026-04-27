@@ -409,9 +409,9 @@ describe("deleteProviderAndTransferModels", () => {
     const providerConfigWhere = vi.fn().mockResolvedValue(undefined);
     const providerConfigSet = vi.fn().mockReturnValue({ where: providerConfigWhere });
 
-    const deleteProviderWhere = vi.fn().mockResolvedValue([{ id: 7, name: "OpenAI" }]);
-    const deleteProviderReturning = vi.fn().mockReturnValue({ where: deleteProviderWhere });
-    const deleteFn = vi.fn().mockReturnValue({ returning: deleteProviderReturning });
+    const deleteProviderReturning = vi.fn().mockResolvedValue([{ id: 7, name: "OpenAI" }]);
+    const deleteProviderWhere = vi.fn().mockReturnValue({ returning: deleteProviderReturning });
+    const deleteFn = vi.fn().mockReturnValue({ where: deleteProviderWhere });
 
     const update = vi.fn().mockImplementation((table) => {
       if (table === providers) {
@@ -444,10 +444,14 @@ describe("deleteProviderAndTransferModels", () => {
     );
 
     expect(providerConfigSet).toHaveBeenCalledWith({
-      config: {},
+      config: {
+        displayTargetProviderId: undefined,
+        prefixRules: []
+      },
       updatedAt: expect.any(Date)
     });
     expect(providerConfigWhere).toHaveBeenCalled();
+    expect(deleteProviderWhere).toHaveBeenCalled();
   });
 });
 
@@ -711,11 +715,14 @@ describe("deleteProviderAndTransferModels", () => {
     const whereTargetModels = vi.fn().mockResolvedValue(targetModels);
     const fromTargetModels = vi.fn().mockReturnValue({ where: whereTargetModels });
 
+    const fromProviderRows = vi.fn().mockResolvedValue([sourceProvider, targetProvider]);
+
     const select = vi.fn()
       .mockReturnValueOnce({ from: fromSource })
       .mockReturnValueOnce({ from: fromTarget })
       .mockReturnValueOnce({ from: fromSourceModels })
-      .mockReturnValueOnce({ from: fromTargetModels });
+      .mockReturnValueOnce({ from: fromTargetModels })
+      .mockReturnValueOnce({ from: fromProviderRows });
 
     const tx = { execute, select, update, delete: deleteFn };
     const transactionExecutor = {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type ClipboardEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ClipboardEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -1042,7 +1042,12 @@ export function AdminConsole({
   function updateProviderDraft(providerId: number, updater: (draft: ProviderConfigDraft) => ProviderConfigDraft) {
     setProviderConfigDrafts((prev) => ({
       ...prev,
-      [providerId]: updater(prev[providerId] ?? { displayName: "", prefixRules: [], brandingColor: "" })
+      [providerId]: updater(prev[providerId] ?? {
+        displayName: "",
+        displayTargetProviderId: null,
+        prefixRules: [],
+        brandingColor: ""
+      })
     }));
   }
 
