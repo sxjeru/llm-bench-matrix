@@ -1660,6 +1660,35 @@ describe("AdminConsole data maintenance", () => {
 });
 
 describe("AdminConsole provider config", () => {
+  async function openProviderConfigPanel(user: ReturnType<typeof userEvent.setup>, providerName: string) {
+    await user.click(screen.getByRole("tab", { name: "Provider 配置" }));
+    await user.click(screen.getByPlaceholderText("搜索或输入新 Provider 名称…"));
+
+    const option = await screen.findByText(providerName);
+    const optionButton = option.closest('[role="button"]') as HTMLElement | null;
+    if (!optionButton) {
+      throw new Error(`${providerName} provider option not found`);
+    }
+
+    await user.click(optionButton);
+
+    const providerSlug = providerName.toLowerCase();
+    const panel = await waitFor(() => {
+      const slugBadge = screen.getByText(providerSlug);
+      const matchedPanel = slugBadge.closest("section");
+      if (!matchedPanel) {
+        throw new Error(`${providerName} provider section not found`);
+      }
+      return matchedPanel;
+    });
+
+    if (!panel) {
+      throw new Error(`${providerName} provider section not found`);
+    }
+
+    return panel;
+  }
+
   test("删除前缀规则后其余输入值保持对应行", async () => {
     const user = userEvent.setup();
 
@@ -1684,15 +1713,13 @@ describe("AdminConsole provider config", () => {
       />
     );
 
-    await user.click(screen.getByRole("tab", { name: "Provider 配置" }));
-
-    const openAiSection = screen.getByRole("heading", { name: "OpenAI" }).closest("section");
-    if (!openAiSection) {
-      throw new Error("OpenAI provider section not found");
-    }
+    const openAiSection = await openProviderConfigPanel(user, "OpenAI");
 
     const getPrefixInputs = () => within(openAiSection).getAllByPlaceholderText("例如 gpt-") as HTMLInputElement[];
-    const getDeleteButtons = () => within(openAiSection).getAllByRole("button", { name: "删除" });
+    const getDeleteButtons = () =>
+      within(openAiSection)
+        .getAllByRole("button")
+        .filter((button) => button.className.includes("btn-square"));
 
     expect(getPrefixInputs().map((input) => input.value)).toEqual(["gpt-", "o1-", "o3-"]);
 
@@ -1723,27 +1750,18 @@ describe("AdminConsole provider config", () => {
       />
     );
 
-    await user.click(screen.getByRole("tab", { name: "Provider 配置" }));
-
-    const openAiSection = screen.getByRole("heading", { name: "OpenAI" }).closest("section");
-    if (!openAiSection) {
-      throw new Error("OpenAI provider section not found");
-    }
+    const openAiSection = await openProviderConfigPanel(user, "OpenAI");
 
     const displayNameInput = within(openAiSection).getByDisplayValue("OpenAI Official");
-    const brandingColorInput = within(openAiSection).getByDisplayValue("#00d084");
+    const brandingColorInput = within(openAiSection).getAllByDisplayValue("#00d084")[1] as HTMLInputElement;
 
     await user.clear(displayNameInput);
     await user.clear(brandingColorInput);
 
-    const previewTitle = within(openAiSection).getByText("当前展示预览");
-    const previewValue = previewTitle.nextElementSibling as HTMLDivElement | null;
-    if (!previewValue) {
-      throw new Error("Provider preview value not found");
-    }
+    const previewValue = within(openAiSection).getAllByText("OpenAI")[1] as HTMLElement;
 
     expect(previewValue).toHaveTextContent("OpenAI");
-    expect(previewValue.style.color).not.toBe("");
+    expect(previewValue.getAttribute("style")).toContain("color:");
 
     await user.click(within(openAiSection).getByRole("button", { name: "保存配置" }));
 
@@ -1793,12 +1811,7 @@ describe("AdminConsole provider config", () => {
       />
     );
 
-    await user.click(screen.getByRole("tab", { name: "Provider 配置" }));
-
-    const openAiSection = screen.getByRole("heading", { name: "OpenAI" }).closest("section");
-    if (!openAiSection) {
-      throw new Error("OpenAI provider section not found");
-    }
+    const openAiSection = await openProviderConfigPanel(user, "OpenAI");
 
     await user.click(within(openAiSection).getByRole("button", { name: "保存配置" }));
 
@@ -1824,6 +1837,32 @@ describe("AdminConsole provider config", () => {
       { prefix: "gpt-", enabled: true, priority: 1, note: "Primary" },
       { prefix: "o1-", enabled: false, note: "Legacy" }
     ]);
+  });
+
+  test("Provider 搜索支持按 displayName 过滤并展示模型列表", async () => {
+    const user = userEvent.setup();
+
+    render(<AdminConsole {...buildPropsWithDisplayName()} />);
+
+    await user.click(screen.getByRole("tab", { name: "Provider 配置" }));
+
+    const searchInput = screen.getByPlaceholderText("搜索或输入新 Provider 名称…");
+    await user.type(searchInput, "official");
+
+    const option = await screen.findByText("OpenAI");
+    const optionButton = option.closest('[role="button"]') as HTMLElement | null;
+    expect(optionButton).toBeInTheDocument();
+    expect(screen.queryByText("Google")).not.toBeInTheDocument();
+
+    if (!optionButton) {
+      throw new Error("OpenAI provider option not found");
+    }
+
+    await user.click(optionButton);
+
+    expect(await screen.findByText("包含模型 (2)")).toBeInTheDocument();
+    expect(screen.getByText("GPT-4.1")).toBeInTheDocument();
+    expect(screen.getByText("model-b")).toBeInTheDocument();
   });
 });
 
