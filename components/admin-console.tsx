@@ -1125,7 +1125,7 @@ export function AdminConsole({
       }
 
       router.refresh();
-      notifySuccess("Provider 配置已保存。", ["展示名、展示归并、前缀规则、配色均已提交，页面已自动刷新。"]); 
+      notifySuccess("Provider 配置已保存", ["展示名、展示归并、前缀规则、配色均已提交，页面已自动刷新。"]); 
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "保存 provider 配置失败");
     } finally {
@@ -1176,7 +1176,7 @@ export function AdminConsole({
       setSelectedProviderConfigId(null);
 
       router.refresh();
-      notifySuccess("Provider 已删除。", ["该 provider 旗下 models 已迁移到新 provider，原 provider 已删除，页面已自动刷新。"]);
+      notifySuccess("Provider 已删除", ["该 provider 旗下 models 已迁移到新 provider，原 provider 已删除，页面已自动刷新。"]);
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "删除 provider 失败");
     } finally {
@@ -3680,7 +3680,7 @@ export function AdminConsole({
       }, 1200);
 
       if (action === "unchanged") {
-        notifySuccess("名称未变化，无需更新。", ["实体当前名称与目标名称一致"]);
+        notifySuccess("名称未变化，无需更新", ["实体当前名称与目标名称一致"]);
         return;
       }
 
@@ -3702,18 +3702,18 @@ export function AdminConsole({
             renameEntityType === "benchmark" ? persistedNextName : undefined
           );
 
-          notifySuccess("改名完成，并已自动合并重名实体。", [
+          notifySuccess("改名完成，并已自动合并重名实体", [
             `合并来源：${mergedSourceName ?? fallbackSourceName} [${mergedSourceId}]`,
             "建议刷新页面以同步最新实体下拉数据"
           ]);
           return;
         }
 
-        notifySuccess("改名完成，并已处理重名冲突。", ["建议刷新页面以同步最新实体下拉数据"]);
+        notifySuccess("改名完成，并已处理重名冲突", ["建议刷新页面以同步最新实体下拉数据"]);
         return;
       }
 
-      notifySuccess("名称已更新并写入数据库。", ["建议刷新页面以同步最新实体下拉数据"]);
+      notifySuccess("名称已更新并写入数据库", ["建议刷新页面以同步最新实体下拉数据"]);
     } catch (error) {
       setRenameSubmitState("idle");
       notifyError(error instanceof Error ? error.message : "实体改名失败");
@@ -3876,43 +3876,39 @@ export function AdminConsole({
   return (
     <>
       {noticeList.length > 0 ? (
-        <div className="pointer-events-none fixed right-6 top-20 z-[120] flex max-w-[min(92vw,720px)] flex-col items-end gap-2">
+        <div className="pointer-events-none fixed right-6 top-20 z-[120] flex flex-col items-end gap-3">
           {noticeList.map((notice) => (
             <div
               key={notice.id}
-              className={`pointer-events-auto flex min-w-[260px] max-w-[640px] gap-3 rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-md transition-all duration-300 ease-out ${
-                notice.details && notice.details.length > 0 ? "items-start" : "items-center"
+              className={`pointer-events-auto flex w-[360px] max-w-[90vw] items-start gap-3.5 rounded-2xl border p-4 shadow-[0_8px_30px_rgb(0,0,0,0.12)] backdrop-blur-2xl transition-all duration-400 ease-out ${
+                notice.visible ? "translate-y-0 opacity-100 scale-100" : "-translate-y-4 opacity-0 scale-95"
               } ${
-                notice.visible ? "translate-y-0 opacity-100" : "-translate-y-2 opacity-0"
-              } ${
-                notice.type === "success"
-                  ? "border-emerald-500/45 bg-emerald-900/80 text-emerald-100"
-                  : "border-rose-500/45 bg-rose-900/80 text-rose-100"
+                notice.type === "success" 
+                  ? "border-emerald-500/30 bg-emerald-900/95 text-emerald-50 shadow-emerald-950/30" 
+                  : "border-rose-500/30 bg-rose-900/95 text-rose-50 shadow-rose-950/30"
               }`}
             >
-              <span
-                className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                  notice.type === "success" ? "bg-emerald-500/25 text-emerald-200" : "bg-rose-500/25 text-rose-200"
+              <div
+                className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
+                  notice.type === "success" 
+                    ? "bg-emerald-500/30 text-emerald-100" 
+                    : "bg-rose-500/30 text-rose-100"
                 }`}
               >
-                {notice.type === "success" ? <Check size={18} /> : <TriangleAlert size={18} />}
-              </span>
+                {notice.type === "success" ? <Check size={14} strokeWidth={3} /> : <TriangleAlert size={14} strokeWidth={3} />}
+              </div>
               <div className="min-w-0 flex-1">
-                <div className="break-words text-sm font-semibold tracking-wide">{notice.message}</div>
+                <div className="text-[14px] font-semibold tracking-wide">{notice.message}</div>
                 {notice.details && notice.details.length > 0 ? (
-                  <ul
-                    className={`mt-2 max-h-56 list-disc space-y-1 overflow-auto rounded-lg border px-3 py-2 text-xs leading-5 ${
-                      notice.type === "success"
-                        ? "border-emerald-300/35 bg-emerald-950/25"
-                        : "border-rose-300/35 bg-rose-950/25"
-                    }`}
-                  >
+                  <div className={`mt-1.5 flex flex-col gap-1.5 text-[13px] leading-relaxed ${
+                    notice.type === "success" ? "text-emerald-100/80" : "text-rose-100/80"
+                  }`}>
                     {notice.details.map((detail, index) => (
-                      <li key={`notice-detail-${notice.id}-${index}`} className="break-words">
+                      <p key={`notice-detail-${notice.id}-${index}`} className="break-words">
                         {detail}
-                      </li>
+                      </p>
                     ))}
-                  </ul>
+                  </div>
                 ) : null}
               </div>
             </div>
