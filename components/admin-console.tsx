@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { type ClipboardEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
@@ -779,6 +780,7 @@ export function AdminConsole({
   mergedRecords,
   initialSettings
 }: Props) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabKey>("import");
   const [noticeList, setNoticeList] = useState<NoticeItem[]>([]);
 
@@ -995,7 +997,8 @@ export function AdminConsole({
         "PATCH"
       );
 
-      notifySuccess("Provider 配置已保存，刷新页面后生效。", ["展示名、前缀规则、配色均已提交。"]); 
+      router.refresh();
+      notifySuccess("Provider 配置已保存。", ["展示名、前缀规则、配色均已提交，页面已自动刷新。"]); 
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "保存 provider 配置失败");
     } finally {

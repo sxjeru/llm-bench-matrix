@@ -1,7 +1,7 @@
 import { and, count, countDistinct, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
-import { normalizeProviderConfig } from "@/lib/admin-service";
+import { normalizeProviderConfig } from "@/lib/provider-config";
 
 function toNullableNumber(value: unknown): number | null {
   if (value === null || value === undefined) return null;
