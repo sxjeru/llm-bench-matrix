@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test, vi } from "vitest";
 import type { ProviderConfig } from "@/lib/db/schema";
 
 type ProviderRow = {
@@ -12,12 +12,17 @@ type ProviderRow = {
 
 let normalizeProviderConfigForTest: (raw: unknown) => ProviderConfig;
 let validateProviderConfigForTest: (providerId: number, config: ProviderConfig, allProviders: ProviderRow[]) => void;
+let buildProviderCanonicalNameResolverForTest: (
+  rows: Array<{ modelName: string; providerName?: string }>,
+  options?: { db?: { select: () => unknown } }
+) => Promise<(modelName: string) => string>;
 
 beforeAll(async () => {
   process.env.DATABASE_URL ??= "postgres://test:test@127.0.0.1:5432/test";
   const adminServiceModule = await import("@/lib/admin-service");
   normalizeProviderConfigForTest = adminServiceModule.__normalizeProviderConfigForTest as typeof normalizeProviderConfigForTest;
   validateProviderConfigForTest = adminServiceModule.__validateProviderConfigForTest as typeof validateProviderConfigForTest;
+  buildProviderCanonicalNameResolverForTest = adminServiceModule.__buildProviderCanonicalNameResolverForTest as typeof buildProviderCanonicalNameResolverForTest;
 });
 
 describe("数据导入场景 - Provider 配置", () => {
@@ -507,6 +512,77 @@ describe("数据导入场景 - Provider 配置", () => {
       expect(() => {
         validateProviderConfigForTest(2, conflictingConfig, providers);
       }).toThrow("prefix 已被其他 provider 使用");
+    });
+  });
+
+  describe("结构化导入时的 provider 解析", () => {
+    test("应该批量预取 provider 信息并复用结果", async () => {
+      const providerRows: ProviderRow[] = [
+        {
+          id: 1,
+          name: "OpenAI",
+          slug: "openai",
+          config: {
+            prefixRules: [{ prefix: "gpt", enabled: true }]
+          },
+          createdAt: new Date(),
+          updatedAt: new Date()
+        },
+        {
+          id: 2,
+          name: "Anthropic",
+          slug: "anthropic",
+          config: {
+            prefixRules: [{ prefix: "claude", enabled: true }]
+          },
+          createdAt: new Date(),
+          updatedAt: new Date()
+        }
+      ];
+
+      const matchedModels = [
+        {
+          canonicalKey: "gpt 4o",
+          providerId: 1
+        }
+      ];
+
+      const settingsChain = {
+        from: vi.fn().mockReturnThis(),
+        where: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockResolvedValue([{ valueJson: null }])
+      };
+      const providersChain = {
+        from: vi.fn().mockResolvedValue(providerRows)
+      };
+      const modelsChain = {
+        from: vi.fn().mockReturnThis(),
+        where: vi.fn().mockResolvedValue(matchedModels)
+      };
+
+      const select = vi
+        .fn()
+        .mockReturnValueOnce(settingsChain)
+        .mockReturnValueOnce(providersChain)
+        .mockReturnValueOnce(modelsChain);
+
+      const resolver = await buildProviderCanonicalNameResolverForTest(
+        [
+          { modelName: "GPT-4o" },
+          { modelName: "GPT-4o" },
+          { modelName: "claude-3.7-sonnet" },
+          { modelName: "Unknown Model" },
+          { modelName: "Already Set", providerName: "Manual" }
+        ],
+        { db: { select } }
+      );
+
+      expect(resolver("GPT-4o")).toBe("OpenAI");
+      expect(resolver("claude-3.7-sonnet")).toBe("Anthropic");
+      expect(resolver("Unknown Model")).toBe("Unknown");
+      expect(select).toHaveBeenCalledTimes(3);
+      expect(modelsChain.where).toHaveBeenCalledTimes(1);
+      expect(providersChain.from).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -1633,6 +1633,101 @@ async function resolveProviderCanonicalNameForModel(modelName: string, options?:
   return inferProviderNameFromModel(cleanName);
 }
 
+async function buildProviderCanonicalNameResolver(
+  rows: Array<Pick<StructuredImportRowInput, "modelName" | "providerName">>,
+  options?: { db?: DbExecutor }
+) {
+  const executor = options?.db ?? db;
+  const pendingModelNames = new Map<string, string>();
+
+  rows.forEach((row) => {
+    if (row.providerName?.trim()) return;
+    const cleanName = normalizeNameParenthesisSpacing(row.modelName || "");
+    if (!cleanName) return;
+
+    const canonicalSource = cleanName.toLowerCase();
+    if (!pendingModelNames.has(canonicalSource)) {
+      pendingModelNames.set(canonicalSource, cleanName);
+    }
+  });
+
+  if (pendingModelNames.size === 0) {
+    return (modelName: string) => inferProviderNameFromModel(modelName);
+  }
+
+  const dedupeRule = await (async () => {
+    try {
+      const [setting] = await executor
+        .select({ valueJson: settings.valueJson })
+        .from(settings)
+        .where(eq(settings.key, "model_dedupe_rule"))
+        .limit(1);
+
+      return normalizeModelDedupeRule(setting?.valueJson);
+    } catch (error) {
+      if (shouldFallbackToDefaultModelDedupeRule(error)) {
+        return normalizeModelDedupeRule(null);
+      }
+
+      throw error;
+    }
+  })();
+  const providerRows = await executor.select().from(providers);
+
+  const uniqueCanonicalKeys = Array.from(new Set(
+    Array.from(pendingModelNames.values()).map((modelName) => buildModelCanonicalKey(modelName, dedupeRule))
+  ));
+
+  const matchedModels = uniqueCanonicalKeys.length > 0
+    ? await executor
+        .select({
+          canonicalKey: models.canonicalKey,
+          providerId: models.providerId
+        })
+        .from(models)
+        .where(inArray(models.canonicalKey, uniqueCanonicalKeys))
+    : [];
+
+  const providerNameById = new Map<number, string>();
+  providerRows.forEach((provider) => {
+    providerNameById.set(provider.id, provider.name);
+  });
+
+  const providerByCanonicalKey = new Map<string, string>();
+  matchedModels.forEach((model) => {
+    if (providerByCanonicalKey.has(model.canonicalKey)) return;
+    const providerName = providerNameById.get(model.providerId);
+    if (providerName) {
+      providerByCanonicalKey.set(model.canonicalKey, providerName);
+    }
+  });
+
+  const resolvedByModelName = new Map<string, string>();
+  pendingModelNames.forEach((cleanName, canonicalSource) => {
+    const canonicalKey = buildModelCanonicalKey(cleanName, dedupeRule);
+    const exactProviderName = providerByCanonicalKey.get(canonicalKey);
+    if (exactProviderName) {
+      resolvedByModelName.set(canonicalSource, exactProviderName);
+      return;
+    }
+
+    const configMatchedProvider = resolveProviderByConfig(cleanName, providerRows);
+    if (configMatchedProvider) {
+      resolvedByModelName.set(canonicalSource, configMatchedProvider.name);
+      return;
+    }
+
+    resolvedByModelName.set(canonicalSource, inferProviderNameFromModel(cleanName));
+  });
+
+  return (modelName: string) => {
+    const cleanName = normalizeNameParenthesisSpacing(modelName || "");
+    if (!cleanName) return "Unknown";
+
+    return resolvedByModelName.get(cleanName.toLowerCase()) ?? inferProviderNameFromModel(cleanName);
+  };
+}
+
 export async function updateProviderConfig(input: { providerId: number; config: unknown }, options?: { db?: DbExecutor }) {
   const executor = options?.db ?? db;
   const [provider] = await executor.select().from(providers).where(eq(providers.id, input.providerId)).limit(1);
@@ -3077,6 +3172,7 @@ export async function importStructuredRows(
   }
 ) {
   const normalizedRows: NormalizedTextImportRow[] = [];
+  const resolveProviderName = await buildProviderCanonicalNameResolver(rows);
 
   for (const [index, row] of rows.entries()) {
       const modelName = normalizeNameParenthesisSpacing(row.modelName || "");
@@ -3092,7 +3188,7 @@ export async function importStructuredRows(
       let providerName = row.providerName?.trim() || "";
       if (!providerName) {
         try {
-          providerName = (await resolveProviderCanonicalNameForModel(modelName)).trim();
+          providerName = resolveProviderName(modelName).trim();
         } catch {
           providerName = "";
         }
@@ -5498,4 +5594,11 @@ export async function __updateProviderConfigForTest(input: { providerId: number;
 
 export async function __getProviderNameForModelForTest(modelName: string, options?: { db?: DbExecutor }) {
   return getProviderNameForModel(modelName, options);
+}
+
+export async function __buildProviderCanonicalNameResolverForTest(
+  rows: Array<Pick<StructuredImportRowInput, "modelName" | "providerName">>,
+  options?: { db?: DbExecutor }
+) {
+  return buildProviderCanonicalNameResolver(rows, options);
 }
