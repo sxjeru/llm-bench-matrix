@@ -33,6 +33,8 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   const toMatrixRow = (row: (typeof rows)[number]) => ({
     recordId: row.id,
     providerName: row.providerName,
+    providerDisplayName: row.providerDisplayName,
+    providerBrandColor: row.providerBrandColor,
     modelName: row.modelName,
     benchmarkName: row.benchmarkName,
     benchmarkType: row.benchmarkType,

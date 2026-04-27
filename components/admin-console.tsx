@@ -1,29 +1,48 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { type ClipboardEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
+  ChevronDown,
   Database,
   Eye,
   FileSpreadsheet,
   Headphones,
   Layers,
   Merge as MergeIcon,
+  Palette,
   PlusCircle,
   Search,
   Settings2,
   Sparkles,
   ShieldAlert,
   Table2,
+  Trash2,
   TriangleAlert,
   Upload,
-  Video
+  Video,
+  X
 } from "lucide-react";
+import { isValidHexColor, resolveProviderBrandColor } from "@/lib/provider-config";
 
 type ProviderOption = {
   id: number;
   name: string;
   slug: string;
+  config?: {
+    displayName?: string;
+    displayTargetProviderId?: number;
+    prefixRules?: Array<{
+      prefix: string;
+      enabled: boolean;
+      priority?: number;
+      note?: string;
+    }>;
+    branding?: {
+      color?: string;
+    };
+  };
 };
 
 type ModelOption = {
@@ -71,6 +90,7 @@ type ImportWarning = {
 type TextImportPreviewRow = {
   rowNumber: number;
   providerName: string;
+  providerDisplayName?: string;
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
@@ -101,7 +121,20 @@ type ModelDedupeRule = {
   removeDot: boolean;
 };
 
-type TabKey = "import" | "entry" | "rename" | "merge" | "maintenance" | "settings";
+type TabKey = "import" | "entry" | "providers" | "rename" | "merge" | "maintenance" | "settings";
+
+type ProviderConfigDraft = {
+  displayName: string;
+  displayTargetProviderId: number | null;
+  prefixRules: Array<{
+    id: string;
+    prefix: string;
+    enabled: boolean;
+    priority?: number;
+    note?: string;
+  }>;
+  brandingColor: string;
+};
 
 type BenchmarkWarningLevel = "info" | "warn" | "danger";
 
@@ -137,6 +170,7 @@ type MatrixPreviewRow = {
 
 type StructuredCsvImportRow = {
   providerName: string;
+  providerDisplayName?: string;
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
@@ -261,6 +295,36 @@ const RENAME_LIST_ROW_HEIGHT = 38;
 const RENAME_LIST_VIEWPORT_HEIGHT = 320;
 const RENAME_LIST_OVERSCAN = 8;
 
+function createProviderPrefixRuleDraft(rule?: {
+  prefix?: string;
+  enabled?: boolean;
+  priority?: number;
+  note?: string;
+}): ProviderConfigDraft["prefixRules"][number] {
+  return {
+    id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `prefix-rule-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    prefix: rule?.prefix ?? "",
+    enabled: rule?.enabled !== false,
+    ...(typeof rule?.priority === "number" && Number.isFinite(rule.priority)
+      ? { priority: Math.trunc(rule.priority) }
+      : {}),
+    ...(typeof rule?.note === "string" && rule.note.trim().length > 0
+      ? { note: rule.note.trim() }
+      : {})
+  };
+}
+
+function toProviderConfigDraft(provider: ProviderOption): ProviderConfigDraft {
+  return {
+    displayName: provider.config?.displayName ?? "",
+    displayTargetProviderId: provider.config?.displayTargetProviderId ?? null,
+    prefixRules: (provider.config?.prefixRules ?? []).map((rule) => createProviderPrefixRuleDraft(rule)),
+    brandingColor: provider.config?.branding?.color ?? ""
+  };
+}
+
 function normalizeModelDedupeRule(raw: unknown): ModelDedupeRule {
   if (!raw || typeof raw !== "object") {
     return { ...DEFAULT_MODEL_DEDUPE_RULE };
@@ -366,6 +430,16 @@ async function postFormData(url: string, formData: FormData) {
   }
 
   return data;
+}
+
+function isProviderOption(value: unknown): value is ProviderOption {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && typeof (value as { id?: unknown }).id === "number"
+    && typeof (value as { name?: unknown }).name === "string"
+    && typeof (value as { slug?: unknown }).slug === "string"
+  );
 }
 
 function getTextImportBenchmarkKey(benchmarkName: string, benchmarkType: string): string {
@@ -536,6 +610,61 @@ function inferProviderNameFromModelName(modelName: string): string {
   }
 
   return "Unknown";
+}
+
+function resolveProviderFromConfig(
+  modelName: string,
+  providers: ProviderOption[]
+): { providerName: string; providerDisplayName: string } | null {
+  const normalizedModelName = modelName.trim().toLowerCase();
+  if (!normalizedModelName) return null;
+
+  const providerById = new Map(providers.map((provider) => [provider.id, provider]));
+  let matched: { providerName: string; providerDisplayName: string; prefixLength: number } | null = null;
+
+  for (const provider of providers) {
+    for (const rule of provider.config?.prefixRules ?? []) {
+      const normalizedPrefix = rule.prefix.trim().toLowerCase();
+      if (!rule.enabled || !normalizedPrefix) continue;
+      if (!normalizedModelName.startsWith(normalizedPrefix)) continue;
+
+      if (!matched || normalizedPrefix.length > matched.prefixLength) {
+        const displayTargetProvider = typeof provider.config?.displayTargetProviderId === "number"
+          ? providerById.get(provider.config.displayTargetProviderId) ?? null
+          : null;
+
+        matched = {
+          providerName: displayTargetProvider?.name || provider.name,
+          providerDisplayName: displayTargetProvider?.config?.displayName?.trim()
+            || provider.config?.displayName?.trim()
+            || displayTargetProvider?.name
+            || provider.name,
+          prefixLength: normalizedPrefix.length
+        };
+      }
+    }
+  }
+
+  return matched
+    ? {
+        providerName: matched.providerName,
+        providerDisplayName: matched.providerDisplayName
+      }
+    : null;
+}
+
+function getProviderDisplayNameById(providerId: number, providerById: Map<number, ProviderOption>): string | null {
+  const provider = providerById.get(providerId);
+  if (!provider) return null;
+
+  const displayTargetProvider = typeof provider.config?.displayTargetProviderId === "number"
+    ? providerById.get(provider.config.displayTargetProviderId) ?? null
+    : null;
+
+  return displayTargetProvider?.config?.displayName?.trim()
+    || provider.config?.displayName?.trim()
+    || displayTargetProvider?.name
+    || provider.name;
 }
 
 function resolveHardcodedBenchmarkAliasTarget(input: string): string | null {
@@ -719,11 +848,57 @@ export function AdminConsole({
   mergedRecords,
   initialSettings
 }: Props) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabKey>("import");
   const [noticeList, setNoticeList] = useState<NoticeItem[]>([]);
 
   const [providerName, setProviderName] = useState("");
   const [providerId, setProviderId] = useState<number | "">(providers[0]?.id ?? "");
+  const [providerConfigDrafts, setProviderConfigDrafts] = useState<Record<number, ProviderConfigDraft>>(() =>
+    providers.reduce<Record<number, ProviderConfigDraft>>((acc, provider) => {
+      acc[provider.id] = toProviderConfigDraft(provider);
+      return acc;
+    }, {})
+  );
+  const [savingProviderConfigId, setSavingProviderConfigId] = useState<number | null>(null);
+  const [deletingProviderId, setDeletingProviderId] = useState<number | null>(null);
+  const [providerDeleteConfirmOpen, setProviderDeleteConfirmOpen] = useState(false);
+  const [providerDeleteTargetId, setProviderDeleteTargetId] = useState<number | null>(null);
+  const [providerDeleteTransferTargetId, setProviderDeleteTransferTargetId] = useState<number | null>(null);
+  const [selectedProviderConfigId, setSelectedProviderConfigId] = useState<number | null>(null);
+  const [providerSearchQuery, setProviderSearchQuery] = useState("");
+  const [providerSearchOpen, setProviderSearchOpen] = useState(false);
+  const providerSearchRef = useRef<HTMLDivElement>(null);
+
+  const filteredProviderOptions = useMemo(() => {
+    const query = providerSearchQuery.trim().toLowerCase();
+    if (!query) return providers;
+    return providers.filter((p) => {
+      const displayName = p.config?.displayName?.toLowerCase() ?? "";
+      return p.name.toLowerCase().includes(query) || p.slug.toLowerCase().includes(query) || displayName.includes(query);
+    });
+  }, [providers, providerSearchQuery]);
+
+  const selectedProviderForConfig = useMemo(
+    () => (selectedProviderConfigId !== null ? providers.find((p) => p.id === selectedProviderConfigId) ?? null : null),
+    [providers, selectedProviderConfigId]
+  );
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (providerSearchRef.current && !providerSearchRef.current.contains(event.target as Node)) {
+        setProviderSearchOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const availableDisplayTargetProviders = useMemo(() => {
+    if (!selectedProviderForConfig) return [];
+    return providers.filter((provider) => provider.id !== selectedProviderForConfig.id);
+  }, [providers, selectedProviderForConfig]);
+
   const [modelName, setModelName] = useState("");
   const [modelAlias, setModelAlias] = useState("");
   const [sourceModelId, setSourceModelId] = useState("");
@@ -863,6 +1038,151 @@ export function AdminConsole({
   const providerById = useMemo(() => {
     return new Map(providers.map((item) => [item.id, item]));
   }, [providers]);
+
+  function updateProviderDraft(providerId: number, updater: (draft: ProviderConfigDraft) => ProviderConfigDraft) {
+    setProviderConfigDrafts((prev) => ({
+      ...prev,
+      [providerId]: updater(prev[providerId] ?? {
+        displayName: "",
+        displayTargetProviderId: null,
+        prefixRules: [],
+        brandingColor: ""
+      })
+    }));
+  }
+
+  function validateProviderDraft(providerId: number, draft: ProviderConfigDraft) {
+    const normalizedPrefixes = draft.prefixRules
+      .map((rule) => rule.prefix.trim().toLowerCase())
+      .filter(Boolean);
+
+    if (normalizedPrefixes.length !== new Set(normalizedPrefixes).size) {
+      throw new Error("当前 provider 存在重复 prefix");
+    }
+
+    if (draft.brandingColor.trim() && !isValidHexColor(draft.brandingColor)) {
+      throw new Error("颜色必须是合法的 #RRGGBB");
+    }
+
+    const duplicatePrefixOwner = new Map<string, number>();
+    providers.forEach((provider) => {
+      const sourceDraft = provider.id === providerId ? draft : (providerConfigDrafts[provider.id] ?? toProviderConfigDraft(provider));
+      sourceDraft.prefixRules.forEach((rule) => {
+        const normalized = rule.prefix.trim().toLowerCase();
+        if (!normalized || !rule.enabled) return;
+
+        const existingOwner = duplicatePrefixOwner.get(normalized);
+        if (existingOwner !== undefined && existingOwner !== provider.id) {
+          throw new Error(`prefix 已被其他 provider 使用: ${rule.prefix}`);
+        }
+
+        duplicatePrefixOwner.set(normalized, provider.id);
+      });
+    });
+  }
+
+  async function onSaveProviderConfig(providerId: number) {
+    const draft = providerConfigDrafts[providerId] ?? { displayName: "", displayTargetProviderId: null, prefixRules: [], brandingColor: "" };
+    const normalizedDisplayName = draft.displayName.trim();
+    const normalizedBrandingColor = draft.brandingColor.trim().toLowerCase();
+
+    try {
+      validateProviderDraft(providerId, draft);
+      setSavingProviderConfigId(providerId);
+
+      const result = await postJson(
+        "/api/admin/providers",
+        {
+          providerId,
+          config: {
+            displayName: normalizedDisplayName.length > 0 ? normalizedDisplayName : null,
+            displayTargetProviderId: draft.displayTargetProviderId,
+            prefixRules: draft.prefixRules
+              .map((rule) => ({
+                prefix: rule.prefix.trim(),
+                enabled: rule.enabled,
+                ...(typeof rule.priority === "number" && Number.isFinite(rule.priority)
+                  ? { priority: Math.trunc(rule.priority) }
+                  : {}),
+                ...(typeof rule.note === "string" && rule.note.trim().length > 0
+                  ? { note: rule.note.trim() }
+                  : {})
+              }))
+              .filter((rule) => rule.prefix.length > 0),
+            branding: {
+              color: normalizedBrandingColor.length > 0 ? normalizedBrandingColor : null
+            }
+          }
+        },
+        "PATCH"
+      );
+
+      if (isProviderOption(result?.provider) && result.provider.id === providerId) {
+        setProviderConfigDrafts((prev) => ({
+          ...prev,
+          [providerId]: toProviderConfigDraft(result.provider)
+        }));
+      }
+
+      router.refresh();
+      notifySuccess("Provider 配置已保存", ["展示名、展示归并、前缀规则、配色均已提交，页面已自动刷新。"]); 
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "保存 provider 配置失败");
+    } finally {
+      setSavingProviderConfigId(null);
+    }
+  }
+
+  function openDeleteProviderConfirm(providerId: number) {
+    const candidateProviders = providers.filter((provider) => provider.id !== providerId);
+    setProviderDeleteTargetId(providerId);
+    setProviderDeleteTransferTargetId(candidateProviders[0]?.id ?? null);
+    setProviderDeleteConfirmOpen(true);
+  }
+
+  function closeDeleteProviderConfirm() {
+    if (deletingProviderId !== null) return;
+    setProviderDeleteConfirmOpen(false);
+    setProviderDeleteTargetId(null);
+    setProviderDeleteTransferTargetId(null);
+  }
+
+  async function onConfirmDeleteProvider() {
+    if (providerDeleteTargetId === null) {
+      notifyError("未选择待删除 provider");
+      return;
+    }
+
+    if (providerDeleteTransferTargetId === null) {
+      notifyError("请先选择模型迁移目标 provider");
+      return;
+    }
+
+    try {
+      setDeletingProviderId(providerDeleteTargetId);
+
+      await postJson(
+        "/api/admin/providers",
+        {
+          providerId: providerDeleteTargetId,
+          transferTargetProviderId: providerDeleteTransferTargetId
+        },
+        "DELETE"
+      );
+
+      setProviderDeleteConfirmOpen(false);
+      setProviderDeleteTargetId(null);
+      setProviderDeleteTransferTargetId(null);
+      setSelectedProviderConfigId(null);
+
+      router.refresh();
+      notifySuccess("Provider 已删除", ["该 provider 旗下 models 已迁移到新 provider，原 provider 已删除，页面已自动刷新。"]);
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "删除 provider 失败");
+    } finally {
+      setDeletingProviderId(null);
+    }
+  }
 
   const existingBenchmarkExactMap = useMemo(() => {
     const map = new Map<string, BenchmarkOption>();
@@ -1327,6 +1647,7 @@ export function AdminConsole({
         let benchmarkType = row.benchmarkType;
         let modelName = row.modelName;
         let providerName = row.providerName.trim() || "Unknown";
+        let providerDisplayName = row.providerDisplayName?.trim() || providerName;
 
         const modelParenthesesMode = modelParenthesesModes[originalModelKey] ?? "keep";
         if (modelParenthesesMode === "remove") {
@@ -1354,19 +1675,22 @@ export function AdminConsole({
         const exactModel = existingModelExactMap.get(modelName.toLowerCase());
         if (exactModel) {
           modelName = exactModel.modelName;
-          providerName = providerById.get(exactModel.providerId)?.name ?? providerName;
+          providerName = providerById.get(exactModel.providerId)?.name || providerName;
+          providerDisplayName = getProviderDisplayNameById(exactModel.providerId, providerById) || providerName;
         } else {
           const canonicalKey = normalizeModelNameByDedupeRule(modelName, modelDedupeRule);
           const canonicalMatchedModel = existingModelByCanonicalKey.get(canonicalKey);
 
           if (canonicalMatchedModel) {
             modelName = canonicalMatchedModel.modelName;
-            providerName = providerById.get(canonicalMatchedModel.providerId)?.name ?? providerName;
+            providerName = providerById.get(canonicalMatchedModel.providerId)?.name || providerName;
+            providerDisplayName = getProviderDisplayNameById(canonicalMatchedModel.providerId, providerById) || providerName;
           } else {
             const sameNameModels = existingModelByNameMap.get(modelName.toLowerCase()) ?? [];
             if (sameNameModels.length > 0) {
               modelName = sameNameModels[0].modelName;
-              providerName = providerById.get(sameNameModels[0].providerId)?.name ?? providerName;
+              providerName = providerById.get(sameNameModels[0].providerId)?.name || providerName;
+              providerDisplayName = getProviderDisplayNameById(sameNameModels[0].providerId, providerById) || providerName;
             }
           }
         }
@@ -1418,6 +1742,7 @@ export function AdminConsole({
 
         return {
           providerName,
+          providerDisplayName,
           modelName,
           benchmarkName,
           benchmarkType,
@@ -1462,7 +1787,7 @@ export function AdminConsole({
 
     return finalizedTextImportRows.map((row, index) => ({
       rowNumber: index + 1,
-      providerName: row.providerName,
+      providerName: row.providerDisplayName || row.providerName,
       modelName: row.modelName,
       benchmarkName: row.benchmarkName,
       benchmarkType: row.benchmarkType,
@@ -1841,14 +2166,19 @@ export function AdminConsole({
       const benchmarkType = currentBenchmarkType || "General";
       const normalizedModelName = row.modelName.trim();
       const existingModel = existingModelExactMap.get(normalizedModelName.toLowerCase());
+      const resolvedProvider = existingModel ? null : resolveProviderFromConfig(normalizedModelName, providers);
       const providerName = existingModel
-        ? (providerById.get(existingModel.providerId)?.name ?? inferProviderNameFromModelName(normalizedModelName))
-        : inferProviderNameFromModelName(normalizedModelName);
+        ? (providerById.get(existingModel.providerId)?.name || inferProviderNameFromModelName(normalizedModelName))
+        : (resolvedProvider?.providerName ?? inferProviderNameFromModelName(normalizedModelName));
+      const providerDisplayName = existingModel
+        ? (getProviderDisplayNameById(existingModel.providerId, providerById) || providerName)
+        : (resolvedProvider?.providerDisplayName ?? providerName);
       const inferredHigherIsBetter = !isLowerBetterPreviewBenchmark(row.benchmarkName, benchmarkType);
 
       return {
         rowNumber: row.rowNumber,
         providerName,
+        providerDisplayName,
         modelName: normalizedModelName,
         benchmarkName: row.benchmarkName,
         benchmarkType,
@@ -2447,10 +2777,17 @@ export function AdminConsole({
     setTextImportDraftRows((prev) =>
       prev.map((row) =>
         row.modelName === modelName
-          ? {
-              ...row,
-              modelName: nextModelName
-            }
+          ? (() => {
+              const resolvedProvider = resolveProviderFromConfig(nextModelName, providers);
+              const inferredProviderName = inferProviderNameFromModelName(nextModelName);
+
+              return {
+                ...row,
+                modelName: nextModelName,
+                providerName: resolvedProvider?.providerName ?? inferredProviderName,
+                providerDisplayName: resolvedProvider?.providerDisplayName ?? inferredProviderName
+              };
+            })()
           : row
       )
     );
@@ -3343,7 +3680,7 @@ export function AdminConsole({
       }, 1200);
 
       if (action === "unchanged") {
-        notifySuccess("名称未变化，无需更新。", ["实体当前名称与目标名称一致"]);
+        notifySuccess("名称未变化，无需更新", ["实体当前名称与目标名称一致"]);
         return;
       }
 
@@ -3365,18 +3702,18 @@ export function AdminConsole({
             renameEntityType === "benchmark" ? persistedNextName : undefined
           );
 
-          notifySuccess("改名完成，并已自动合并重名实体。", [
+          notifySuccess("改名完成，并已自动合并重名实体", [
             `合并来源：${mergedSourceName ?? fallbackSourceName} [${mergedSourceId}]`,
             "建议刷新页面以同步最新实体下拉数据"
           ]);
           return;
         }
 
-        notifySuccess("改名完成，并已处理重名冲突。", ["建议刷新页面以同步最新实体下拉数据"]);
+        notifySuccess("改名完成，并已处理重名冲突", ["建议刷新页面以同步最新实体下拉数据"]);
         return;
       }
 
-      notifySuccess("名称已更新并写入数据库。", ["建议刷新页面以同步最新实体下拉数据"]);
+      notifySuccess("名称已更新并写入数据库", ["建议刷新页面以同步最新实体下拉数据"]);
     } catch (error) {
       setRenameSubmitState("idle");
       notifyError(error instanceof Error ? error.message : "实体改名失败");
@@ -3539,43 +3876,39 @@ export function AdminConsole({
   return (
     <>
       {noticeList.length > 0 ? (
-        <div className="pointer-events-none fixed right-6 top-20 z-[120] flex max-w-[min(92vw,720px)] flex-col items-end gap-2">
+        <div className="pointer-events-none fixed right-6 top-20 z-[120] flex flex-col items-end gap-3">
           {noticeList.map((notice) => (
             <div
               key={notice.id}
-              className={`pointer-events-auto flex min-w-[260px] max-w-[640px] gap-3 rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-md transition-all duration-300 ease-out ${
-                notice.details && notice.details.length > 0 ? "items-start" : "items-center"
+              className={`pointer-events-auto flex w-[360px] max-w-[90vw] items-start gap-3.5 rounded-2xl border p-4 shadow-[0_8px_30px_rgb(0,0,0,0.12)] backdrop-blur-2xl transition-all duration-400 ease-out ${
+                notice.visible ? "translate-y-0 opacity-100 scale-100" : "-translate-y-4 opacity-0 scale-95"
               } ${
-                notice.visible ? "translate-y-0 opacity-100" : "-translate-y-2 opacity-0"
-              } ${
-                notice.type === "success"
-                  ? "border-emerald-500/45 bg-emerald-900/80 text-emerald-100"
-                  : "border-rose-500/45 bg-rose-900/80 text-rose-100"
+                notice.type === "success" 
+                  ? "border-emerald-500/30 bg-emerald-900/95 text-emerald-50 shadow-emerald-950/30" 
+                  : "border-rose-500/30 bg-rose-900/95 text-rose-50 shadow-rose-950/30"
               }`}
             >
-              <span
-                className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                  notice.type === "success" ? "bg-emerald-500/25 text-emerald-200" : "bg-rose-500/25 text-rose-200"
+              <div
+                className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
+                  notice.type === "success" 
+                    ? "bg-emerald-500/30 text-emerald-100" 
+                    : "bg-rose-500/30 text-rose-100"
                 }`}
               >
-                {notice.type === "success" ? <Check size={18} /> : <TriangleAlert size={18} />}
-              </span>
+                {notice.type === "success" ? <Check size={14} strokeWidth={3} /> : <TriangleAlert size={14} strokeWidth={3} />}
+              </div>
               <div className="min-w-0 flex-1">
-                <div className="break-words text-sm font-semibold tracking-wide">{notice.message}</div>
+                <div className="text-[14px] font-semibold tracking-wide">{notice.message}</div>
                 {notice.details && notice.details.length > 0 ? (
-                  <ul
-                    className={`mt-2 max-h-56 list-disc space-y-1 overflow-auto rounded-lg border px-3 py-2 text-xs leading-5 ${
-                      notice.type === "success"
-                        ? "border-emerald-300/35 bg-emerald-950/25"
-                        : "border-rose-300/35 bg-rose-950/25"
-                    }`}
-                  >
+                  <div className={`mt-1.5 flex flex-col gap-1.5 text-[13px] leading-relaxed ${
+                    notice.type === "success" ? "text-emerald-100/80" : "text-rose-100/80"
+                  }`}>
                     {notice.details.map((detail, index) => (
-                      <li key={`notice-detail-${notice.id}-${index}`} className="break-words">
+                      <p key={`notice-detail-${notice.id}-${index}`} className="break-words">
                         {detail}
-                      </li>
+                      </p>
                     ))}
-                  </ul>
+                  </div>
                 ) : null}
               </div>
             </div>
@@ -3748,6 +4081,88 @@ export function AdminConsole({
         </div>
       ) : null}
 
+      {providerDeleteConfirmOpen ? (() => {
+        const providerToDelete = providerDeleteTargetId !== null
+          ? providers.find((provider) => provider.id === providerDeleteTargetId) ?? null
+          : null;
+        const transferCandidates = providers.filter((provider) => provider.id !== providerDeleteTargetId);
+        const transferTarget = providerDeleteTransferTargetId !== null
+          ? providers.find((provider) => provider.id === providerDeleteTransferTargetId) ?? null
+          : null;
+        const providerModels = providerToDelete ? models.filter((model) => model.providerId === providerToDelete.id) : [];
+
+        return (
+          <div
+            className="fixed inset-0 z-[170] flex items-center justify-center bg-black/45 p-4"
+            onClick={(event) => {
+              if (event.target === event.currentTarget && deletingProviderId === null) {
+                closeDeleteProviderConfirm();
+              }
+            }}
+          >
+            <div className="w-full max-w-xl rounded-2xl border border-error/35 bg-base-100/95 p-6 shadow-2xl backdrop-blur">
+              <h3 className="text-lg font-bold text-error">确认删除 Provider？</h3>
+              <p className="mt-2 text-sm opacity-85">
+                将删除 <code>{providerToDelete?.name ?? "当前 provider"}</code>。为避免级联删除模型与分数数据，需先把其下 models 迁移到其他 provider。
+              </p>
+
+              <div className="mt-4 space-y-4">
+                <div className="rounded-xl border border-base-300/70 bg-base-200/30 px-4 py-3 text-sm">
+                  <div className="font-medium">待迁移模型数：{providerModels.length}</div>
+                  <div className="mt-1 text-xs opacity-70">
+                    {providerModels.length > 0
+                      ? `删除前会把这 ${providerModels.length} 个 model 的 provider 归属整体迁移。`
+                      : "当前 provider 下暂无 model，删除时不会触发模型迁移。"}
+                  </div>
+                </div>
+
+                <label className="form-control w-full">
+                  <span className="label-text mb-1.5 text-xs font-medium opacity-70">迁移 models 到</span>
+                  <select
+                    className="select select-bordered w-full rounded-xl bg-base-200/40 transition-colors focus:bg-base-100 focus:border-primary focus:outline-none"
+                    value={providerDeleteTransferTargetId ?? ""}
+                    onChange={(e) => setProviderDeleteTransferTargetId(e.target.value ? Number(e.target.value) : null)}
+                    disabled={deletingProviderId !== null || transferCandidates.length === 0}
+                  >
+                    <option value="">请选择目标 Provider</option>
+                    {transferCandidates.map((provider) => (
+                      <option key={`provider-delete-transfer-${provider.id}`} value={provider.id}>
+                        {provider.config?.displayName?.trim() || provider.name} ({provider.slug})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {transferTarget ? (
+                  <div className="rounded-xl border border-base-300/70 bg-base-200/20 px-4 py-3 text-xs opacity-75">
+                    确认后会先把 models 迁移到 <span className="font-medium">{transferTarget.config?.displayName?.trim() || transferTarget.name}</span>，再删除当前 provider。
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={closeDeleteProviderConfirm}
+                  disabled={deletingProviderId !== null}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-error"
+                  onClick={onConfirmDeleteProvider}
+                  disabled={deletingProviderId !== null || transferCandidates.length === 0 || providerDeleteTransferTargetId === null}
+                >
+                  {deletingProviderId !== null ? "删除中..." : "确认迁移并删除"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })() : null}
+
       <div className="space-y-4">
         <div
           role="tablist"
@@ -3770,6 +4185,15 @@ export function AdminConsole({
             onClick={() => setActiveTab("entry")}
           >
             数据录入
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "providers"}
+            className={tabClass("providers")}
+            onClick={() => setActiveTab("providers")}
+          >
+            Provider 配置
           </button>
           <button
             type="button"
@@ -3999,6 +4423,8 @@ export function AdminConsole({
                   />
                 </div>
                 <textarea
+                  id="csv-text-import-input"
+                  aria-label="粘贴 CSV / 文本"
                   className="textarea textarea-bordered min-h-[180px] w-full"
                   value={csvText}
                   onChange={(e) => {
@@ -4905,6 +5331,429 @@ export function AdminConsole({
           </div>
         ) : null}
 
+        {activeTab === "providers" ? (
+          <div className="space-y-5">
+            {/* Provider search selector */}
+            <section className="relative z-20 rounded-2xl border border-base-300/80 bg-base-100/95 p-5 shadow-md backdrop-blur">
+              <div className="mb-3 flex items-center gap-2 text-base font-semibold">
+                <Settings2 size={18} className="opacity-70" />
+                Provider
+              </div>
+              <div ref={providerSearchRef} className="relative w-full max-w-md">
+                <div
+                  className={`flex items-center gap-2 rounded-xl border bg-base-200/60 px-3 py-2.5 transition-all duration-200 ${
+                    providerSearchOpen ? "border-primary/60 ring-2 ring-primary/20" : "border-base-300/80 hover:border-base-content/30"
+                  }`}
+                  onClick={() => setProviderSearchOpen(true)}
+                >
+                  <Search size={15} className="shrink-0 opacity-50" />
+                  <input
+                    className="min-w-0 flex-1 border-none bg-transparent p-0 text-sm shadow-none outline-none focus:border-none focus:outline-none focus:ring-0 placeholder:text-base-content/40"
+                    style={{ border: 'none' }}
+                    value={providerSearchQuery}
+                    onChange={(e) => {
+                      setProviderSearchQuery(e.target.value);
+                      setProviderSearchOpen(true);
+                    }}
+                    onFocus={() => setProviderSearchOpen(true)}
+                    placeholder={selectedProviderForConfig ? `${selectedProviderForConfig.name} (${selectedProviderForConfig.slug})` : "搜索或输入新 Provider 名称\u2026"}
+                  />
+                  {selectedProviderConfigId !== null && !providerSearchQuery ? (
+                    <div
+                      role="button"
+                      className="shrink-0 cursor-pointer rounded-md p-0.5 opacity-50 transition-opacity hover:opacity-100"
+                      onClick={(e) => { e.stopPropagation(); setSelectedProviderConfigId(null); setProviderSearchQuery(""); }}
+                    >
+                      <X size={14} />
+                    </div>
+                  ) : null}
+                  <ChevronDown size={15} className={`shrink-0 opacity-40 transition-transform duration-200 ${providerSearchOpen ? "rotate-180" : ""}`} />
+                </div>
+
+                {providerSearchOpen ? (() => {
+                  const trimmedQuery = providerSearchQuery.trim();
+                  const hasExactMatch = trimmedQuery.length > 0 && providers.some(
+                    (p) => p.name.toLowerCase() === trimmedQuery.toLowerCase() || p.slug.toLowerCase() === trimmedQuery.toLowerCase()
+                  );
+                  const showCreateOption = trimmedQuery.length > 0 && !hasExactMatch;
+
+                  return (
+                    <div className="absolute left-0 right-0 top-full z-50 mt-1.5 max-h-72 overflow-auto rounded-xl border border-base-300/80 bg-base-100 py-1 shadow-xl">
+                      {showCreateOption ? (
+                        <div
+                          role="button"
+                          className="flex w-full cursor-pointer items-center gap-3 border-b border-base-300/50 px-4 py-2.5 text-left text-sm font-normal text-primary transition-colors hover:bg-primary/10"
+                          onClick={async () => {
+                            try {
+                              await postJson("/api/admin/providers", { name: trimmedQuery });
+                              setProviderSearchQuery("");
+                              setProviderSearchOpen(false);
+                              router.refresh();
+                              notifySuccess(`Provider "${trimmedQuery}" 已创建，页面刷新后可在列表中选择。`);
+                            } catch (error) {
+                              notifyError(error instanceof Error ? error.message : "创建 Provider 失败");
+                            }
+                          }}
+                        >
+                          <PlusCircle size={15} className="shrink-0" />
+                          <span className="flex-1 truncate">
+                            {"创建新 Provider："}
+                            <span className="font-semibold">{trimmedQuery}</span>
+                          </span>
+                        </div>
+                      ) : null}
+                      {filteredProviderOptions.length === 0 && !showCreateOption ? (
+                        <div className="px-4 py-6 text-center text-sm opacity-50">无匹配结果</div>
+                      ) : (
+                        filteredProviderOptions.map((p) => {
+                          const isActive = p.id === selectedProviderConfigId;
+                          const pColor = resolveProviderBrandColor(p.name, p.config?.branding?.color);
+                          return (
+                            <div
+                              key={`provider-search-${p.id}`}
+                              role="button"
+                              className={`flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left text-sm font-normal transition-colors ${
+                                isActive
+                                  ? "bg-primary/10 font-medium text-primary"
+                                  : "hover:bg-base-200/70"
+                              }`}
+                              onClick={() => {
+                                setSelectedProviderConfigId(p.id);
+                                setProviderSearchQuery("");
+                                setProviderSearchOpen(false);
+                              }}
+                            >
+                              <span
+                                className="inline-block h-3 w-3 shrink-0 rounded-full ring-1 ring-black/10"
+                                style={{ backgroundColor: pColor }}
+                              />
+                              <span className="flex-1 truncate">{p.name}</span>
+                              <span className="shrink-0 rounded-md bg-base-200/80 px-1.5 py-0.5 text-[11px] opacity-60">{p.slug}</span>
+                              {isActive ? <Check size={14} className="shrink-0 text-primary" /> : null}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  );
+                })() : null}
+              </div>
+            </section>
+
+            {/* Provider edit panel */}
+            {selectedProviderForConfig ? (() => {
+              const provider = selectedProviderForConfig;
+              const draft = providerConfigDrafts[provider.id] ?? toProviderConfigDraft(provider);
+              const previewDisplayName = draft.displayName.trim() || provider.name;
+              const previewBrandColor = resolveProviderBrandColor(provider.name, draft.brandingColor);
+              const isSaving = savingProviderConfigId === provider.id;
+              const isDeleting = deletingProviderId === provider.id;
+              const providerModels = models.filter((m) => m.providerId === provider.id);
+
+              return (
+                <section className="rounded-2xl border border-base-300/80 bg-base-100/95 shadow-md backdrop-blur">
+                  {/* Header */}
+                  <div className="flex items-center justify-between gap-4 px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      <span
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-white text-sm font-bold shadow-md transition-colors duration-300"
+                        style={{ backgroundColor: previewBrandColor }}
+                      >
+                        {previewDisplayName.charAt(0).toUpperCase()}
+                      </span>
+                      <div className="flex flex-col justify-center">
+                        <div className="text-lg font-semibold leading-tight">{provider.name}</div>
+                        <span className="mt-1 inline-block rounded-md bg-base-200/80 px-1.5 py-0.5 text-[11px] font-mono opacity-60 w-fit">{provider.slug}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 self-start sm:self-auto">
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm gap-1.5 rounded-xl border border-error/20 text-error shadow-sm hover:border-error/40 hover:bg-error/10 disabled:border-base-300 disabled:text-base-content/40"
+                        onClick={() => openDeleteProviderConfirm(provider.id)}
+                        disabled={isSaving || isDeleting}
+                      >
+                        {isDeleting ? (
+                          <><span className="loading loading-spinner loading-xs" /> 删除中…</>
+                        ) : (
+                          <><Trash2 size={14} /> 删除 Provider</>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm gap-1.5 rounded-xl shadow-sm"
+                        onClick={() => onSaveProviderConfig(provider.id)}
+                        disabled={isSaving || isDeleting}
+                      >
+                        {isSaving ? (
+                          <><span className="loading loading-spinner loading-xs" /> 保存中…</>
+                        ) : (
+                          <><Check size={14} /> 保存配置</>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-base-300/50" />
+
+                  {/* Form fields — three-column row */}
+                  <div className="grid grid-cols-1 gap-x-6 gap-y-5 px-6 py-5 lg:grid-cols-[1fr_1fr_280px] lg:items-end">
+                    {/* Display name */}
+                    <label className="form-control w-full">
+                      <span className="label-text mb-1.5 text-xs font-medium opacity-70">展示名</span>
+                      <input
+                        className="input input-bordered w-full rounded-xl bg-base-200/40 transition-colors focus:bg-base-100 focus:border-primary focus:outline-none"
+                        value={draft.displayName}
+                        onChange={(e) =>
+                          updateProviderDraft(provider.id, (current) => ({
+                            ...current,
+                            displayName: e.target.value
+                          }))
+                        }
+                        placeholder={provider.name}
+                      />
+                    </label>
+
+                    {/* Brand color: picker + text */}
+                    <div className="form-control w-full">
+                      <span className="label-text mb-1.5 text-xs font-medium opacity-70">品牌色</span>
+                      <div className="flex items-center gap-2">
+                        <div className="relative shrink-0">
+                          <input
+                            type="color"
+                            className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+                            value={isValidHexColor(draft.brandingColor) ? draft.brandingColor : previewBrandColor}
+                            onChange={(e) =>
+                              updateProviderDraft(provider.id, (current) => ({
+                                ...current,
+                                brandingColor: e.target.value
+                              }))
+                            }
+                          />
+                          <div
+                            className="flex h-[2.75rem] w-[2.75rem] cursor-pointer items-center justify-center rounded-xl border border-base-300 shadow-sm transition-transform hover:scale-105 active:scale-95"
+                            style={{ backgroundColor: previewBrandColor }}
+                          >
+                            <Palette size={16} className="text-white/80 drop-shadow-sm" />
+                          </div>
+                        </div>
+                        <input
+                          className="input input-bordered min-w-0 flex-1 rounded-xl font-mono text-sm uppercase bg-base-200/40 transition-colors focus:bg-base-100 focus:border-primary focus:outline-none"
+                          value={draft.brandingColor}
+                          onChange={(e) =>
+                            updateProviderDraft(provider.id, (current) => ({
+                              ...current,
+                              brandingColor: e.target.value
+                            }))
+                          }
+                          placeholder="#34D399"
+                          maxLength={7}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Live preview */}
+                    <div className="form-control w-full">
+                      <span className="label-text mb-1.5 text-xs font-medium opacity-70">实时预览</span>
+                      <div
+                        className="relative flex h-[2.75rem] items-center overflow-hidden rounded-xl border border-base-300/50 px-4"
+                        style={{ background: `linear-gradient(135deg, ${previewBrandColor}14, ${previewBrandColor}06)` }}
+                      >
+                        <div
+                          className="absolute right-2 top-1/2 h-10 w-10 -translate-y-1/2 rounded-full opacity-10 blur-lg transition-colors duration-500"
+                          style={{ backgroundColor: previewBrandColor }}
+                        />
+                        <span className="relative z-10 truncate text-base font-bold tracking-tight transition-colors duration-200" style={{ color: previewBrandColor }}>
+                          {previewDisplayName}
+                        </span>
+                        <span className="relative z-10 ml-auto flex shrink-0 items-center gap-1.5 pl-3 font-mono text-[11px] opacity-50">
+                          <span
+                            className="inline-block h-2 w-2 rounded-full transition-colors duration-200"
+                            style={{ backgroundColor: previewBrandColor }}
+                          />
+                          {isValidHexColor(draft.brandingColor) ? draft.brandingColor.toLowerCase() : previewBrandColor.toLowerCase()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-x-6 gap-y-5 px-6 pb-5 lg:grid-cols-[minmax(280px,1fr)_1fr] lg:items-end">
+                    <label className="form-control w-full">
+                      <span className="label-text mb-1.5 text-xs font-medium opacity-70">展示归并到</span>
+                      <select
+                        className="select select-bordered w-full rounded-xl bg-base-200/40 transition-colors focus:bg-base-100 focus:border-primary focus:outline-none"
+                        value={draft.displayTargetProviderId ?? ""}
+                        onChange={(e) =>
+                          updateProviderDraft(provider.id, (current) => ({
+                            ...current,
+                            displayTargetProviderId: e.target.value ? Number(e.target.value) : null
+                          }))
+                        }
+                      >
+                        <option value="">不归并，独立展示</option>
+                        {availableDisplayTargetProviders.map((targetProvider) => (
+                          <option key={`provider-display-target-${targetProvider.id}`} value={targetProvider.id}>
+                            {targetProvider.config?.displayName?.trim() || targetProvider.name} ({targetProvider.slug})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="rounded-xl border border-base-300/50 bg-base-200/25 px-4 py-3 text-sm leading-6 opacity-80">
+                      {draft.displayTargetProviderId
+                        ? (() => {
+                            const targetProvider = providers.find((item) => item.id === draft.displayTargetProviderId) ?? null;
+                            const targetDisplayName = targetProvider?.config?.displayName?.trim() || targetProvider?.name;
+                            return (
+                              <>
+                                <div className="font-medium">当前将归并展示到：{targetDisplayName}</div>
+                                <div className="mt-1 text-xs opacity-70">仅影响前台展示分组、名称和品牌色，不修改已有模型所属 provider。</div>
+                              </>
+                            );
+                          })()
+                        : (
+                          <>
+                            <div className="font-medium">当前独立展示</div>
+                            <div className="mt-1 text-xs opacity-70">适合保留该 provider 自己的名称、品牌色和分组。</div>
+                          </>
+                        )}
+                    </div>
+                  </div>
+
+                  <div className="border-t border-base-300/50" />
+
+                  {/* Prefix rules */}
+                  <div className="px-6 py-5">
+                    <div className="mb-3 flex items-center justify-between">
+                      <h4 className="flex items-center gap-1.5 text-sm font-semibold">
+                        <Layers size={14} className="opacity-60" />
+                        前缀规则
+                      </h4>
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-sm gap-1 rounded-lg"
+                        onClick={() =>
+                          updateProviderDraft(provider.id, (current) => ({
+                            ...current,
+                            prefixRules: [...current.prefixRules, createProviderPrefixRuleDraft()]
+                          }))
+                        }
+                      >
+                        <PlusCircle size={13} />
+                        新增一条
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {draft.prefixRules.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-base-300/60 px-4 py-6 text-center text-sm opacity-50">
+                          暂无前缀规则，点击上方「新增一条」添加
+                        </div>
+                      ) : (
+                        draft.prefixRules.map((rule, index) => (
+                          <div key={rule.id} className="flex items-center gap-2 rounded-xl border border-base-300/50 bg-base-200/30 px-3 py-2 transition-colors hover:border-base-300">
+                            <input
+                              className="input input-bordered input-sm min-w-0 flex-1 rounded-lg bg-base-200/40 transition-colors focus:bg-base-100 focus:border-primary focus:outline-none"
+                              value={rule.prefix}
+                              onChange={(e) =>
+                                updateProviderDraft(provider.id, (current) => ({
+                                  ...current,
+                                  prefixRules: current.prefixRules.map((item, itemIndex) =>
+                                    itemIndex === index ? { ...item, prefix: e.target.value } : item
+                                  )
+                                }))
+                              }
+                              placeholder="例如 gpt-"
+                            />
+                            <label className="label cursor-pointer gap-1.5">
+                              <input
+                                type="checkbox"
+                                className="checkbox checkbox-sm checkbox-primary"
+                                checked={rule.enabled}
+                                onChange={(e) =>
+                                  updateProviderDraft(provider.id, (current) => ({
+                                    ...current,
+                                    prefixRules: current.prefixRules.map((item, itemIndex) =>
+                                      itemIndex === index ? { ...item, enabled: e.target.checked } : item
+                                    )
+                                  }))
+                                }
+                              />
+                              <span className="label-text text-xs">启用</span>
+                            </label>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm btn-square rounded-lg text-error/70 hover:bg-error/10 hover:text-error"
+                              onClick={() =>
+                                updateProviderDraft(provider.id, (current) => ({
+                                  ...current,
+                                  prefixRules: current.prefixRules.filter((_, itemIndex) => itemIndex !== index)
+                                }))
+                              }
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="border-t border-base-300/50" />
+
+                  {/* Provider Models */}
+                  <div className="px-6 py-5">
+                    <div className="mb-3 flex items-center justify-between">
+                      <h4 className="flex items-center gap-1.5 text-sm font-semibold">
+                        <Database size={14} className="opacity-60" />
+                        包含模型 ({providerModels.length})
+                      </h4>
+                    </div>
+
+                    {providerModels.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-base-300/60 px-4 py-6 text-center text-sm opacity-50">
+                        该 Provider 下暂无模型
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto rounded-xl border border-base-300/50">
+                        <table className="table table-sm table-zebra w-full">
+                          <thead>
+                            <tr className="bg-base-200/50 text-base-content/70">
+                              <th className="font-medium">ID</th>
+                              <th className="font-medium">模型名称</th>
+                              <th className="font-medium">Canonical Key</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {providerModels.map(m => (
+                              <tr key={m.id} className="border-base-300/50">
+                                <td className="font-mono text-xs opacity-60 w-16">{m.id}</td>
+                                <td className="font-medium">{m.modelName}</td>
+                                <td className="font-mono text-xs opacity-70 break-all">{m.canonicalKey}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </section>
+              );
+            })() : (
+              /* Empty state */
+              <section className="rounded-2xl border border-dashed border-base-300/60 bg-base-100/60 p-10 text-center">
+                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
+                  <Palette size={28} className="text-primary/60" />
+                </div>
+                <h3 className="text-lg font-semibold opacity-80">{"选择一个 Provider 开始配置"}</h3>
+                <p className="mx-auto mt-2 max-w-sm text-sm opacity-50">
+                  {"在上方搜索框中输入 Provider 名称或 slug，选择后即可编辑展示名、品牌色和前缀规则。"}
+                </p>
+              </section>
+            )}
+          </div>
+        ) : null}
+
         {activeTab === "rename" ? (
           <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
             <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold">
@@ -4961,7 +5810,7 @@ export function AdminConsole({
                         ? (() => {
                             const model = modelById.get(item.id);
                             if (!model) return "-";
-                            return providerById.get(model.providerId)?.name ?? "-";
+                            return providerById.get(model.providerId)?.config?.displayName?.trim() || providerById.get(model.providerId)?.name || "-";
                           })()
                         : (benchmarkById.get(item.id)?.benchmarkType ?? "-");
 

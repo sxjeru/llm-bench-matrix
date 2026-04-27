@@ -1,13 +1,31 @@
 import { index, integer, jsonb, numeric, pgTable, serial, text, timestamp, uniqueIndex, boolean } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
+export type ProviderConfigPrefixRule = {
+  prefix: string;
+  enabled: boolean;
+  priority?: number;
+  note?: string;
+};
+
+export type ProviderConfig = {
+  displayName?: string;
+  displayTargetProviderId?: number;
+  prefixRules?: ProviderConfigPrefixRule[];
+  branding?: {
+    color?: string;
+  };
+};
+
 export const providers = pgTable(
   "providers",
   {
     id: serial("id").primaryKey(),
     name: text("name").notNull(),
     slug: text("slug").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
+    config: jsonb("config").$type<ProviderConfig>().notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
   },
   (table) => ({
     slugUnique: uniqueIndex("providers_slug_unique").on(table.slug)

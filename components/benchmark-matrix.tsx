@@ -26,10 +26,13 @@ import {
   TriangleAlert,
   Video
 } from "lucide-react";
+import { isValidHexColor, resolveProviderBrandColor } from "@/lib/provider-config";
 
 type MatrixInputRow = {
   recordId?: number | null;
   providerName: string;
+  providerDisplayName?: string | null;
+  providerBrandColor?: string | null;
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
@@ -93,6 +96,11 @@ type MatrixRow = {
   maxNum: number | null;
   minNum2: number | null;
   maxNum2: number | null;
+};
+
+type ProviderIdentity = {
+  canonicalName: string;
+  displayName: string;
 };
 
 type OverallModelSummary = {
@@ -906,37 +914,12 @@ function compareModelNameByColumnOrder(left: string, right: string, collator: In
   return collator.compare(right, left);
 }
 
-function getProviderBrandColor(providerName: string | null | undefined): string {
-  const normalized = (providerName ?? "").trim().toLowerCase();
-
-  if (normalized.includes("openai") || normalized.includes("gpt")) return "#34d399";
-  if (normalized.includes("anthropic") || normalized.includes("claude")) return "#e09a0e";
-  if (normalized.includes("google") || normalized.includes("gemini") || normalized.includes("gemma")) return "#4285f4";
-  if (normalized.includes("meta") || normalized.includes("llama")) return "#3b82f6";
-  if (normalized.includes("qwen") || normalized.includes("alibaba")) return "#a16dfa";
-  if (normalized.includes("deepseek")) return "#14b8a6";
-  if (normalized.includes("xai") || normalized.includes("grok")) return "#cecece";
-  if (normalized.includes("minimax")) return "#ff604a";
-
-  const fallbackPalette = [
-    "#f180b9",
-    "#ffa98f",
-    "#6cc9de",
-  ];
-  const hash = normalized.split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-  return fallbackPalette[hash % fallbackPalette.length];
-}
-
 function lerp(start: number, end: number, t: number): number {
   return Math.round(start + (end - start) * t);
 }
 
 function blendColor(from: readonly [number, number, number], to: readonly [number, number, number], t: number) {
   return [lerp(from[0], to[0], t), lerp(from[1], to[1], t), lerp(from[2], to[2], t)] as const;
-}
-
-function isValidHexColor(value: string): boolean {
-  return /^#[0-9a-f]{6}$/i.test(value.trim());
 }
 
 function normalizeHexColor(value: string, fallback: string): string {
@@ -2178,13 +2161,18 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   }, [allRows]);
 
   const allRowsIndex = useMemo(() => {
-    const modelProviderMap = new Map<string, string>();
+    const modelProviderMap = new Map<string, ProviderIdentity>();
+    const modelProviderBrandColorMap = new Map<string, string | null>();
     const rowsByModel = new Map<string, IndexedMatrixInputRow[]>();
     const rowsByGroupingKey = new Map<string, IndexedMatrixInputRow[]>();
 
     allRows.forEach((row) => {
       if (!modelProviderMap.has(row.modelName)) {
-        modelProviderMap.set(row.modelName, row.providerName);
+        modelProviderMap.set(row.modelName, {
+          canonicalName: row.providerName || "Unknown",
+          displayName: row.providerDisplayName?.trim() || row.providerName || "Unknown"
+        });
+        modelProviderBrandColorMap.set(row.modelName, row.providerBrandColor ?? null);
       }
 
       const indexed: IndexedMatrixInputRow = {
@@ -2205,6 +2193,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
     return {
       modelProviderMap,
+      modelProviderBrandColorMap,
       rowsByModel,
       rowsByGroupingKey
     };
@@ -2296,11 +2285,11 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       { providerName: string; coveredCount: number; coverageRate: number; isBaseModel: boolean }
     >();
 
-    for (const [modelName, providerNameRaw] of allRowsIndex.modelProviderMap.entries()) {
+    for (const [modelName, providerIdentity] of allRowsIndex.modelProviderMap.entries()) {
       const coveredCount = modelCoveredBenchmarkKeys.get(modelName)?.size ?? 0;
       if (coveredCount <= 0) continue;
 
-      const providerName = providerNameRaw || "Unknown";
+      const providerName = providerIdentity.displayName || "Unknown";
 
       metaMap.set(modelName, {
         providerName,
@@ -2514,6 +2503,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const selectedModalitySet = useMemo(() => new Set(selectedModalities), [selectedModalities]);
 
   const modelProviderMap = allRowsIndex.modelProviderMap;
+  const modelProviderBrandColorMap = allRowsIndex.modelProviderBrandColorMap;
 
   const filteredRows = useMemo(() => {
     if (selectedModelSet.size === 0 || baseBenchmarkKeySet.size === 0) {
@@ -2636,7 +2626,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
     coveragePrunedRows.forEach((row) => {
       const current = modelStats.get(row.modelName) ?? {
-        providerName: row.providerName || "Unknown",
+        providerName: row.providerDisplayName?.trim() || row.providerName || "Unknown",
         numericCount: 0,
         totalCount: 0
       };
@@ -2647,7 +2637,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       }
 
       if (!current.providerName) {
-        current.providerName = row.providerName || "Unknown";
+        current.providerName = row.providerDisplayName?.trim() || row.providerName || "Unknown";
       }
 
       modelStats.set(row.modelName, current);
@@ -3018,7 +3008,9 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
   const modelColumnMeta = useMemo(() => {
     return modelColumns.map((modelName) => {
-      const providerName = modelProviderMap.get(modelName) ?? "Unknown";
+      const providerIdentity = modelProviderMap.get(modelName);
+      const providerName = providerIdentity?.displayName ?? "Unknown";
+      const canonicalProviderName = providerIdentity?.canonicalName ?? providerName;
       const columnWidthKey = getModelColumnWidthKey(modelName);
       const autoWidth = autoModelWidthMap.get(columnWidthKey) ?? DEFAULT_MODEL_COLUMN_BASELINE_WIDTH;
       const storedWidth = activeColumnWidthMap[columnWidthKey];
@@ -3044,7 +3036,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         modelName,
         columnWidthKey,
         providerName,
-        color: getProviderBrandColor(providerName),
+        color: resolveProviderBrandColor(canonicalProviderName, modelProviderBrandColorMap.get(modelName) ?? null),
         columnWidth,
         isSourceMatched: sourceMatchedModelSet.has(modelName),
         isSourceMatchedFirst: sourceMatchedGroupBoundaryByModel.firstSet.has(modelName),
@@ -3054,6 +3046,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   }, [
     modelColumns,
     modelProviderMap,
+    modelProviderBrandColorMap,
     sourceMatchedModelSet,
     sourceMatchedGroupBoundaryByModel,
     autoModelWidthMap,
@@ -4276,7 +4269,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                         }}
                         onChange={(e) => toggleProvider(group.providerName, e.target.checked)}
                       />
-                      <span className="text-sm font-medium" style={{ color: getProviderBrandColor(group.providerName) }}>
+                      <span className="text-sm font-medium" style={{ color: resolveProviderBrandColor(group.providerName) }}>
                         {group.providerName}
                         {providerHasBaseModel ? null : <span className="ml-1 text-[10px] opacity-70">(跨页签)</span>}
                       </span>

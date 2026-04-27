@@ -4,6 +4,13 @@ import { describe, expect, test, vi } from "vitest";
 
 import { AdminConsole } from "@/components/admin-console";
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: vi.fn(),
+    refresh: vi.fn()
+  })
+}));
+
 type AdminConsoleProps = Parameters<typeof AdminConsole>[0];
 
 type PreviewResponse = {
@@ -63,6 +70,38 @@ function buildProps(): AdminConsoleProps {
     sourceOptions: ["text:sample"],
     mergedRecords: [],
     initialSettings: {}
+  };
+}
+
+function buildPropsWithDisplayName(): AdminConsoleProps {
+  return {
+    ...buildProps(),
+    providers: [
+      { id: 1, name: "OpenAI", slug: "openai", config: { displayName: "OpenAI Official" } },
+      { id: 2, name: "Google", slug: "google" }
+    ],
+    models: [
+      { id: 1, providerId: 1, modelName: "GPT-4.1", canonicalKey: "gpt-41" },
+      { id: 2, providerId: 1, modelName: "Model B", canonicalKey: "model-b" }
+    ]
+  };
+}
+
+function buildPropsWithDisplayNameAndPrefixRule(): AdminConsoleProps {
+  return {
+    ...buildPropsWithDisplayName(),
+    providers: [
+      {
+        id: 1,
+        name: "OpenAI",
+        slug: "openai",
+        config: {
+          displayName: "OpenAI Official",
+          prefixRules: [{ prefix: "gpt", enabled: true }]
+        }
+      },
+      { id: 2, name: "Google", slug: "google" }
+    ]
   };
 }
 
@@ -1246,13 +1285,13 @@ describe("AdminConsole text import", () => {
     render(<AdminConsole {...buildProps()} />);
 
     await user.type(screen.getByLabelText("粘贴 CSV / 文本"), "model,benchmark,value\nGPT-5-mini,SWE-bench,71.2");
-    await user.click(screen.getByRole("button", { name: "预览文本导入" }));
+    await user.click(screen.getByRole("button", { name: "预览导入结果" }));
 
     const modelInput = await screen.findByDisplayValue("GPT-5-mini");
     await user.clear(modelInput);
     await user.type(modelInput, "Claude 3.7 Sonnet");
 
-    await user.click(screen.getByRole("button", { name: "导入预览结果" }));
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -1269,6 +1308,137 @@ describe("AdminConsole text import", () => {
       expect.objectContaining({
         modelName: "Claude 3.7 Sonnet",
         providerName: "Claude"
+      })
+    ]);
+  });
+
+  test("已有模型命中 displayName 时导入仍提交规范 provider 名", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse = {
+      format: "structured-csv",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI Official",
+          providerDisplayName: "OpenAI Official",
+          modelName: "GPT-4.1",
+          benchmarkName: "SWE-bench",
+          benchmarkType: "Agent",
+          benchmarkTypeProvided: true,
+          higherIsBetter: true,
+          modalities: ["Text"],
+          rawValue: "75.1",
+          valueNum: 75.1,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:paste",
+          valid: true
+        }
+      ]
+    };
+
+    const importResponse = {
+      format: "structured-preview",
+      total: 1,
+      skipped: 0,
+      inserted: 1,
+      warningCount: 0,
+      warnings: []
+    };
+
+    const fetchMock = mockFetchSequence(previewResponse, importResponse);
+    render(<AdminConsole {...buildPropsWithDisplayName()} />);
+
+    await user.type(screen.getByLabelText("粘贴 CSV / 文本"), "model,benchmark,value\nGPT-4.1,SWE-bench,75.1");
+    await user.click(screen.getByRole("button", { name: "预览导入结果" }));
+
+    await screen.findByDisplayValue("GPT-4.1");
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const secondCall = fetchMock.mock.calls[1];
+    const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
+      rows?: Array<{ modelName: string; providerName: string; providerDisplayName?: string }>;
+    };
+
+    expect(secondPayload.rows).toEqual([
+      expect.objectContaining({
+        modelName: "GPT-4.1",
+        providerName: "OpenAI",
+        providerDisplayName: "OpenAI Official"
+      })
+    ]);
+  });
+
+  test("编辑预览模型名命中前缀规则时导入仍提交规范 provider 名", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse = {
+      format: "structured-csv",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "Other",
+          modelName: "OtherModel",
+          benchmarkName: "SWE-bench",
+          benchmarkType: "Agent",
+          benchmarkTypeProvided: true,
+          higherIsBetter: true,
+          modalities: ["Text"],
+          rawValue: "72.3",
+          valueNum: 72.3,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:paste",
+          valid: true
+        }
+      ]
+    };
+
+    const importResponse = {
+      format: "structured-preview",
+      total: 1,
+      skipped: 0,
+      inserted: 1,
+      warningCount: 0,
+      warnings: []
+    };
+
+    const fetchMock = mockFetchSequence(previewResponse, importResponse);
+    render(<AdminConsole {...buildPropsWithDisplayNameAndPrefixRule()} />);
+
+    await user.type(screen.getByLabelText("粘贴 CSV / 文本"), "model,benchmark,value\nOtherModel,SWE-bench,72.3");
+    await user.click(screen.getByRole("button", { name: "预览导入结果" }));
+
+    const modelInput = await screen.findByDisplayValue("OtherModel");
+    await user.clear(modelInput);
+    await user.type(modelInput, "GPT-4.1-mini");
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const secondCall = fetchMock.mock.calls[1];
+    const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
+      rows?: Array<{ modelName: string; providerName: string; providerDisplayName?: string }>;
+    };
+
+    expect(secondPayload.rows).toEqual([
+      expect.objectContaining({
+        modelName: "GPT-4.1-mini",
+        providerName: "OpenAI",
+        providerDisplayName: "OpenAI Official"
       })
     ]);
   });
@@ -1486,6 +1656,318 @@ describe("AdminConsole data maintenance", () => {
     });
 
     expect(await screen.findByText("最近一次检测未发现混合量纲问题。")).toBeInTheDocument();
+  });
+});
+
+describe("AdminConsole provider config", () => {
+  async function openProviderConfigPanel(user: ReturnType<typeof userEvent.setup>, providerName: string) {
+    await user.click(screen.getByRole("tab", { name: "Provider 配置" }));
+    await user.click(screen.getByPlaceholderText("搜索或输入新 Provider 名称…"));
+
+    const option = await screen.findByText(providerName);
+    const optionButton = option.closest('[role="button"]') as HTMLElement | null;
+    if (!optionButton) {
+      throw new Error(`${providerName} provider option not found`);
+    }
+
+    await user.click(optionButton);
+
+    const providerSlug = providerName.toLowerCase();
+    const panel = await waitFor(() => {
+      const slugBadge = screen.getByText(providerSlug);
+      const matchedPanel = slugBadge.closest("section");
+      if (!matchedPanel) {
+        throw new Error(`${providerName} provider section not found`);
+      }
+      return matchedPanel;
+    });
+
+    if (!panel) {
+      throw new Error(`${providerName} provider section not found`);
+    }
+
+    return panel;
+  }
+
+  test("删除前缀规则后其余输入值保持对应行", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <AdminConsole
+        {...buildProps()}
+        providers={[
+          {
+            id: 1,
+            name: "OpenAI",
+            slug: "openai",
+            config: {
+              prefixRules: [
+                { prefix: "gpt-", enabled: true },
+                { prefix: "o1-", enabled: true },
+                { prefix: "o3-", enabled: true }
+              ]
+            }
+          },
+          { id: 2, name: "Google", slug: "google" }
+        ]}
+      />
+    );
+
+    const openAiSection = await openProviderConfigPanel(user, "OpenAI");
+
+    const getPrefixInputs = () => within(openAiSection).getAllByPlaceholderText("例如 gpt-") as HTMLInputElement[];
+    const getDeleteButtons = () =>
+      within(openAiSection)
+        .getAllByRole("button")
+        .filter((button) => button.className.includes("btn-square"));
+
+    expect(getPrefixInputs().map((input) => input.value)).toEqual(["gpt-", "o1-", "o3-"]);
+
+    await user.click(getDeleteButtons()[0]!);
+
+    expect(getPrefixInputs().map((input) => input.value)).toEqual(["o1-", "o3-"]);
+  });
+
+  test("清空展示名与品牌色时会发送 null，并在预览中回退默认值", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetchSequence({ provider: { id: 1 } });
+
+    render(
+      <AdminConsole
+        {...buildProps()}
+        providers={[
+          {
+            id: 1,
+            name: "OpenAI",
+            slug: "openai",
+            config: {
+              displayName: "OpenAI Official",
+              branding: { color: "#00d084" }
+            }
+          },
+          { id: 2, name: "Google", slug: "google" }
+        ]}
+      />
+    );
+
+    const openAiSection = await openProviderConfigPanel(user, "OpenAI");
+
+    const displayNameInput = within(openAiSection).getByDisplayValue("OpenAI Official");
+    const brandingColorInput = within(openAiSection).getAllByDisplayValue("#00d084")[1] as HTMLInputElement;
+
+    await user.clear(displayNameInput);
+    await user.clear(brandingColorInput);
+
+    const previewValue = within(openAiSection).getAllByText("OpenAI")[1] as HTMLElement;
+
+    expect(previewValue).toHaveTextContent("OpenAI");
+    expect(previewValue.getAttribute("style")).toContain("color:");
+
+    await user.click(within(openAiSection).getByRole("button", { name: "保存配置" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const [url, requestInit] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe("/api/admin/providers");
+
+    const payload = JSON.parse(((requestInit as RequestInit).body ?? "{}") as string) as {
+      providerId?: number;
+      config?: {
+        displayName?: string | null;
+        branding?: {
+          color?: string | null;
+        };
+      };
+    };
+
+    expect(payload.providerId).toBe(1);
+    expect(payload.config?.displayName).toBeNull();
+    expect(payload.config?.branding?.color).toBeNull();
+  });
+
+  test("删除 provider 需二次确认，并携带迁移目标执行删除", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetchSequence({ ok: true, providerId: 1, transferTargetProviderId: 2, transferredModelCount: 1 });
+
+    render(
+      <AdminConsole
+        {...buildProps()}
+        providers={[
+          {
+            id: 1,
+            name: "OpenAI",
+            slug: "openai",
+            config: {
+              displayName: "OpenAI Official",
+              prefixRules: [{ prefix: "gpt-", enabled: true }],
+              branding: { color: "#00d084" }
+            }
+          },
+          { id: 2, name: "Google", slug: "google" }
+        ]}
+      />
+    );
+
+    const openAiSection = await openProviderConfigPanel(user, "OpenAI");
+    const deleteButton = within(openAiSection).getByRole("button", { name: "删除 Provider" });
+    const saveButton = within(openAiSection).getByRole("button", { name: "保存配置" });
+
+    expect(deleteButton).toBeInTheDocument();
+    expect(saveButton).toBeInTheDocument();
+
+    await user.click(deleteButton);
+
+    const confirmTitle = await screen.findByText("确认删除 Provider？");
+    const confirmDialog = confirmTitle.closest("div.w-full.max-w-xl") as HTMLElement | null;
+    if (!confirmDialog) {
+      throw new Error("Provider delete confirm dialog not found");
+    }
+
+    const transferSelect = within(confirmDialog).getByRole("combobox") as HTMLSelectElement;
+    await user.selectOptions(transferSelect, "2");
+
+    await user.click(within(confirmDialog).getByRole("button", { name: "确认迁移并删除" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const [url, requestInit] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe("/api/admin/providers");
+
+    const payload = JSON.parse(((requestInit as RequestInit).body ?? "{}") as string) as {
+      providerId?: number;
+      config?: {
+        displayName?: string | null;
+        displayTargetProviderId?: number | null;
+        prefixRules?: Array<{ prefix: string; enabled: boolean }>;
+        branding?: {
+          color?: string | null;
+        };
+      };
+    };
+
+    expect(payload).toEqual({
+      providerId: 1,
+      transferTargetProviderId: 2
+    });
+  });
+
+  test("保存 provider 配置时保留 prefix rule 的 priority 与 note", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetchSequence({ provider: { id: 1 } });
+
+    render(
+      <AdminConsole
+        {...buildProps()}
+        providers={[
+          {
+            id: 1,
+            name: "OpenAI",
+            slug: "openai",
+            config: {
+              prefixRules: [
+                { prefix: "gpt-", enabled: true, priority: 1, note: "Primary" },
+                { prefix: "o1-", enabled: false, note: "Legacy" }
+              ]
+            }
+          },
+          { id: 2, name: "Google", slug: "google" }
+        ]}
+      />
+    );
+
+    const openAiSection = await openProviderConfigPanel(user, "OpenAI");
+
+    await user.click(within(openAiSection).getByRole("button", { name: "保存配置" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const [url, requestInit] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe("/api/admin/providers");
+
+    const payload = JSON.parse(((requestInit as RequestInit).body ?? "{}") as string) as {
+      config?: {
+        prefixRules?: Array<{
+          prefix: string;
+          enabled: boolean;
+          priority?: number;
+          note?: string;
+        }>;
+      };
+    };
+
+    expect(payload.config?.prefixRules).toEqual([
+      { prefix: "gpt-", enabled: true, priority: 1, note: "Primary" },
+      { prefix: "o1-", enabled: false, note: "Legacy" }
+    ]);
+  });
+
+  test("可设置展示归并目标并正确提交 payload", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetchSequence({ provider: { id: 1 } });
+
+    render(
+      <AdminConsole
+        {...buildPropsWithDisplayName()}
+        providers={[
+          { id: 1, name: "OpenAI", slug: "openai", config: { displayName: "OpenAI Official" } },
+          { id: 2, name: "Google", slug: "google", config: { displayName: "Google Labs" } }
+        ]}
+      />
+    );
+
+    const openAiSection = await openProviderConfigPanel(user, "OpenAI");
+    const mergeSelect = within(openAiSection).getByRole("combobox") as HTMLSelectElement;
+
+    await user.selectOptions(mergeSelect, "2");
+
+    expect(within(openAiSection).getByText("当前将归并展示到：Google Labs")).toBeInTheDocument();
+
+    await user.click(within(openAiSection).getByRole("button", { name: "保存配置" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const [, requestInit] = fetchMock.mock.calls[0] ?? [];
+    const payload = JSON.parse(((requestInit as RequestInit).body ?? "{}") as string) as {
+      config?: {
+        displayTargetProviderId?: number | null;
+      };
+    };
+
+    expect(payload.config?.displayTargetProviderId).toBe(2);
+  });
+
+  test("Provider 搜索支持按 displayName 过滤并展示模型列表", async () => {
+    const user = userEvent.setup();
+
+    render(<AdminConsole {...buildPropsWithDisplayName()} />);
+
+    await user.click(screen.getByRole("tab", { name: "Provider 配置" }));
+
+    const searchInput = screen.getByPlaceholderText("搜索或输入新 Provider 名称…");
+    await user.type(searchInput, "official");
+
+    const option = await screen.findByText("OpenAI");
+    const optionButton = option.closest('[role="button"]') as HTMLElement | null;
+    expect(optionButton).toBeInTheDocument();
+    expect(screen.queryByText("Google")).not.toBeInTheDocument();
+
+    if (!optionButton) {
+      throw new Error("OpenAI provider option not found");
+    }
+
+    await user.click(optionButton);
+
+    expect(await screen.findByText("包含模型 (2)")).toBeInTheDocument();
+    expect(screen.getByText("GPT-4.1")).toBeInTheDocument();
+    expect(screen.getByText("model-b")).toBeInTheDocument();
   });
 });
 

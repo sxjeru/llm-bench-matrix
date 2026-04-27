@@ -28,7 +28,8 @@ export default async function AdminPage() {
       providers={providers.map((item) => ({
         id: item.id,
         name: item.name,
-        slug: item.slug
+        slug: item.slug,
+        config: item.config
       }))}
       models={models.map((item) => ({
         id: item.id,
