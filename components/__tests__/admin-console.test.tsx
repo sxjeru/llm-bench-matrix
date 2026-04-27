@@ -1246,13 +1246,13 @@ describe("AdminConsole text import", () => {
     render(<AdminConsole {...buildProps()} />);
 
     await user.type(screen.getByLabelText("粘贴 CSV / 文本"), "model,benchmark,value\nGPT-5-mini,SWE-bench,71.2");
-    await user.click(screen.getByRole("button", { name: "预览文本导入" }));
+    await user.click(screen.getByRole("button", { name: "预览导入结果" }));
 
     const modelInput = await screen.findByDisplayValue("GPT-5-mini");
     await user.clear(modelInput);
     await user.type(modelInput, "Claude 3.7 Sonnet");
 
-    await user.click(screen.getByRole("button", { name: "导入预览结果" }));
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(2);

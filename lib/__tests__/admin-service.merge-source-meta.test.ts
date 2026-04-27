@@ -297,6 +297,10 @@ describe("mergeEntity benchmark source meta migration", () => {
       "Professional\tOfficeQA Pro\t68.1"
     ].join("\n");
 
+    const dbSelectSpy = vi.spyOn(dbForTest, "select").mockImplementation(() => {
+      throw new Error("connect ECONNREFUSED 127.0.0.1:5432");
+    });
+
     const activeBenchmarks = [
       {
         id: 11,
@@ -337,7 +341,7 @@ describe("mergeEntity benchmark source meta migration", () => {
       createdAt: new Date("2026-04-01T00:00:00.000Z")
     };
 
-    const providerSelectLimit = vi.fn().mockResolvedValue([]);
+    const providerSelectLimit = vi.fn().mockResolvedValue([createdProvider]);
     const providerSelectWhere = vi.fn().mockReturnValue({ limit: providerSelectLimit });
     const providerSelectFrom = vi.fn().mockReturnValue({ where: providerSelectWhere });
 
@@ -365,7 +369,9 @@ describe("mergeEntity benchmark source meta migration", () => {
     const providerReturning = vi.fn().mockResolvedValue([createdProvider]);
     const providerValues = vi.fn((payload: unknown) => {
       insertCalls.push({ target: "providers", payload });
-      return { returning: providerReturning };
+      return {
+        onConflictDoUpdate: vi.fn(() => ({ returning: providerReturning }))
+      };
     });
 
     const modelReturning = vi.fn().mockResolvedValue([createdModel]);
@@ -409,24 +415,27 @@ describe("mergeEntity benchmark source meta migration", () => {
       .spyOn(dbForTest, "transaction")
       .mockImplementation(async (callback: TransactionCallback) => callback(tx));
 
-    const result = await importBenchmarkCsvForTest(inputText, "text:unit-test");
+    try {
+      const result = await importBenchmarkCsvForTest(inputText, "text:unit-test");
 
-    expect(result.inserted).toBe(1);
-    expect(benchmarkValuesInsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        benchmarkName: "OfficeQA Pro",
-        benchmarkType: "Professional"
-      })
-    );
-    expect(sourceMetaValues).toHaveBeenCalledWith([
-      expect.objectContaining({
-        benchmarkId: 22,
-        source: "text:unit-test",
-        benchmarkType: "Professional"
-      })
-    ]);
-
-    transactionSpy.mockRestore();
+      expect(result.inserted).toBe(1);
+      expect(benchmarkValuesInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          benchmarkName: "OfficeQA Pro",
+          benchmarkType: "Professional"
+        })
+      );
+      expect(sourceMetaValues).toHaveBeenCalledWith([
+        expect.objectContaining({
+          benchmarkId: 22,
+          source: "text:unit-test",
+          benchmarkType: "Professional"
+        })
+      ]);
+    } finally {
+      transactionSpy.mockRestore();
+      dbSelectSpy.mockRestore();
+    }
   });
 
   test("测试环境下 settings 查询不可用时会回退默认 dedupe 规则继续导入", async () => {

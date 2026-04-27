@@ -2588,7 +2588,9 @@ export function AdminConsole({
         row.modelName === modelName
           ? {
               ...row,
-              modelName: nextModelName
+              modelName: nextModelName,
+              providerName:
+                resolveProviderNameFromConfig(nextModelName, providers) ?? inferProviderNameFromModelName(nextModelName)
             }
           : row
       )
