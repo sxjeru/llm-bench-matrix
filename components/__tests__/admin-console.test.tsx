@@ -4,6 +4,13 @@ import { describe, expect, test, vi } from "vitest";
 
 import { AdminConsole } from "@/components/admin-console";
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: vi.fn(),
+    refresh: vi.fn()
+  })
+}));
+
 type AdminConsoleProps = Parameters<typeof AdminConsole>[0];
 
 type PreviewResponse = {
@@ -1486,6 +1493,49 @@ describe("AdminConsole data maintenance", () => {
     });
 
     expect(await screen.findByText("最近一次检测未发现混合量纲问题。")).toBeInTheDocument();
+  });
+});
+
+describe("AdminConsole provider config", () => {
+  test("删除前缀规则后其余输入值保持对应行", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <AdminConsole
+        {...buildProps()}
+        providers={[
+          {
+            id: 1,
+            name: "OpenAI",
+            slug: "openai",
+            config: {
+              prefixRules: [
+                { prefix: "gpt-", enabled: true },
+                { prefix: "o1-", enabled: true },
+                { prefix: "o3-", enabled: true }
+              ]
+            }
+          },
+          { id: 2, name: "Google", slug: "google" }
+        ]}
+      />
+    );
+
+    await user.click(screen.getByRole("tab", { name: "Provider 配置" }));
+
+    const openAiSection = screen.getByRole("heading", { name: "OpenAI" }).closest("section");
+    if (!openAiSection) {
+      throw new Error("OpenAI provider section not found");
+    }
+
+    const getPrefixInputs = () => within(openAiSection).getAllByPlaceholderText("例如 gpt-") as HTMLInputElement[];
+    const getDeleteButtons = () => within(openAiSection).getAllByRole("button", { name: "删除" });
+
+    expect(getPrefixInputs().map((input) => input.value)).toEqual(["gpt-", "o1-", "o3-"]);
+
+    await user.click(getDeleteButtons()[0]!);
+
+    expect(getPrefixInputs().map((input) => input.value)).toEqual(["o1-", "o3-"]);
   });
 });
 

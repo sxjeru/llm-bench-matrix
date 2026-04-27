@@ -119,6 +119,7 @@ type TabKey = "import" | "entry" | "providers" | "rename" | "merge" | "maintenan
 type ProviderConfigDraft = {
   displayName: string;
   prefixRules: Array<{
+    id: string;
     prefix: string;
     enabled: boolean;
   }>;
@@ -287,13 +288,20 @@ function isValidHexColor(value: string): boolean {
   return /^#[0-9a-f]{6}$/i.test(value.trim());
 }
 
+function createProviderPrefixRuleDraft(rule?: { prefix?: string; enabled?: boolean }): ProviderConfigDraft["prefixRules"][number] {
+  return {
+    id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `prefix-rule-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    prefix: rule?.prefix ?? "",
+    enabled: rule?.enabled !== false
+  };
+}
+
 function toProviderConfigDraft(provider: ProviderOption): ProviderConfigDraft {
   return {
     displayName: provider.config?.displayName ?? "",
-    prefixRules: (provider.config?.prefixRules ?? []).map((rule) => ({
-      prefix: rule.prefix,
-      enabled: rule.enabled !== false
-    })),
+    prefixRules: (provider.config?.prefixRules ?? []).map((rule) => createProviderPrefixRuleDraft(rule)),
     brandingColor: provider.config?.branding?.color ?? ""
   };
 }
@@ -5130,7 +5138,7 @@ export function AdminConsole({
                         onClick={() =>
                           updateProviderDraft(provider.id, (current) => ({
                             ...current,
-                            prefixRules: [...current.prefixRules, { prefix: "", enabled: true }]
+                            prefixRules: [...current.prefixRules, createProviderPrefixRuleDraft()]
                           }))
                         }
                       >
@@ -5143,7 +5151,7 @@ export function AdminConsole({
                         <div className="text-sm opacity-60">暂无前缀规则</div>
                       ) : (
                         draft.prefixRules.map((rule, index) => (
-                          <div key={`${provider.id}-${index}`} className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_auto_auto]">
+                          <div key={rule.id} className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_auto_auto]">
                             <input
                               className="input input-bordered"
                               value={rule.prefix}
