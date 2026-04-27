@@ -18,7 +18,7 @@ const providerConfigSchema = z.object({
     })
   ).optional(),
   branding: z.object({
-    color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional()
+    color: z.string().trim().regex(/^#[0-9a-fA-F]{6}$/).optional()
   }).optional()
 });
 

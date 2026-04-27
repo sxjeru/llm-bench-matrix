@@ -234,6 +234,42 @@ describe("PATCH /api/admin/providers", () => {
     expect(data.provider.config.branding.color).toBe("#00d084");
   });
 
+  test("应该接受带空白的十六进制颜色", async () => {
+    const mockProvider = {
+      id: 1,
+      name: "OpenAI",
+      slug: "openai",
+      config: {
+        branding: { color: "#00d084" }
+      },
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    vi.mocked(updateProviderConfig).mockResolvedValue(mockProvider);
+
+    const response = await PATCH(
+      new Request("https://example.com/api/admin/providers", {
+        method: "PATCH",
+        body: JSON.stringify({
+          providerId: 1,
+          config: {
+            branding: { color: "  #00D084  " }
+          }
+        }),
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(updateProviderConfig).toHaveBeenCalledWith({
+      providerId: 1,
+      config: {
+        branding: { color: "#00D084" }
+      }
+    });
+  });
+
   test("应该处理 updateProviderConfig 抛出的错误 - 前缀冲突", async () => {
     vi.mocked(updateProviderConfig).mockRejectedValue(
       new Error("prefix 已被其他 provider 使用: gpt")

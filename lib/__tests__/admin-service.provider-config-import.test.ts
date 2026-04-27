@@ -119,7 +119,7 @@ describe("数据导入场景 - Provider 配置", () => {
       }).toThrow("prefix 已被其他 provider 使用");
     });
 
-    test("导入包含重复前缀的 CSV 应该规范化", () => {
+    test("CSV 导入会规范化空白，重复前缀仍由校验阶段拒绝", () => {
       const csvConfig = {
         prefixRules: [
           { prefix: "  gpt-4  ", enabled: true },
