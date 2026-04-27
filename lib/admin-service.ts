@@ -1694,7 +1694,23 @@ export async function updateProviderConfig(input: { providerId: number; config: 
     throw new Error(`provider not found: ${input.providerId}`);
   }
 
-  const normalizedConfig = normalizeProviderConfig(input.config);
+  const currentConfig = normalizeProviderConfig(provider.config);
+  const incomingConfig = input.config && typeof input.config === "object" && !Array.isArray(input.config)
+    ? input.config as ProviderConfig
+    : {};
+  const mergedConfig = {
+    ...currentConfig,
+    ...incomingConfig,
+    ...(incomingConfig.branding !== undefined
+      ? {
+          branding: {
+            ...currentConfig.branding,
+            ...incomingConfig.branding
+          }
+        }
+      : {})
+  };
+  const normalizedConfig = normalizeProviderConfig(mergedConfig);
   const allProviders = await executor.select().from(providers);
   validateProviderConfig(input.providerId, normalizedConfig, allProviders);
 
@@ -5545,6 +5561,25 @@ export function __normalizeProviderConfigForTest(raw: unknown): ProviderConfig {
 
 export function __validateProviderConfigForTest(providerId: number, config: ProviderConfig, allProviders: Array<typeof providers.$inferSelect>) {
   validateProviderConfig(providerId, config, allProviders);
+}
+
+export function __mergeProviderConfigForTest(current: ProviderConfig, incoming: unknown): ProviderConfig {
+  const incomingConfig = incoming && typeof incoming === "object" && !Array.isArray(incoming)
+    ? incoming as ProviderConfig
+    : {};
+
+  return normalizeProviderConfig({
+    ...normalizeProviderConfig(current),
+    ...incomingConfig,
+    ...(incomingConfig.branding !== undefined
+      ? {
+          branding: {
+            ...normalizeProviderConfig(current).branding,
+            ...incomingConfig.branding
+          }
+        }
+      : {})
+  });
 }
 
 export async function __updateProviderConfigForTest(input: { providerId: number; config: unknown }, options?: { db?: DbExecutor }) {

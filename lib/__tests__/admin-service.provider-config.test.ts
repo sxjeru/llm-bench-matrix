@@ -8,6 +8,7 @@ let validateProviderConfigForTest: (
   config: ProviderConfig,
   allProviders: Array<typeof providers.$inferSelect>
 ) => void;
+let mergeProviderConfigForTest: (current: ProviderConfig, incoming: unknown) => ProviderConfig;
 
 // Helper to create mock provider objects
 function mockProvider(
@@ -30,6 +31,7 @@ beforeAll(async () => {
   const adminServiceModule = await import("@/lib/admin-service");
   normalizeProviderConfigForTest = adminServiceModule.__normalizeProviderConfigForTest;
   validateProviderConfigForTest = adminServiceModule.__validateProviderConfigForTest;
+  mergeProviderConfigForTest = adminServiceModule.__mergeProviderConfigForTest;
 });
 
 describe("normalizeProviderConfig", () => {
@@ -352,5 +354,52 @@ describe("color validation edge cases", () => {
       branding: { color: "#FF00000" }
     });
     expect(config.branding?.color).toBeUndefined();
+  });
+});
+
+describe("provider config patch merge", () => {
+  test("应该在只更新 branding 时保留已有 displayName 和 prefixRules", () => {
+    const merged = mergeProviderConfigForTest(
+      {
+        displayName: "OpenAI",
+        prefixRules: [{ prefix: "gpt-", enabled: true }],
+        branding: { color: "#00d084" }
+      },
+      {
+        branding: { color: "#ff0000" }
+      }
+    );
+
+    expect(merged.displayName).toBe("OpenAI");
+    expect(merged.prefixRules).toEqual([{ prefix: "gpt-", enabled: true }]);
+    expect(merged.branding?.color).toBe("#ff0000");
+  });
+
+  test("应该在只更新 displayName 时保留已有 branding", () => {
+    const merged = mergeProviderConfigForTest(
+      {
+        displayName: "OpenAI",
+        branding: { color: "#00d084" }
+      },
+      {
+        displayName: "OpenAI Official"
+      }
+    );
+
+    expect(merged.displayName).toBe("OpenAI Official");
+    expect(merged.branding?.color).toBe("#00d084");
+  });
+
+  test("应该在显式传入 prefixRules 时替换原有 prefixRules", () => {
+    const merged = mergeProviderConfigForTest(
+      {
+        prefixRules: [{ prefix: "gpt-", enabled: true }]
+      },
+      {
+        prefixRules: [{ prefix: "o1-", enabled: true }]
+      }
+    );
+
+    expect(merged.prefixRules).toEqual([{ prefix: "o1-", enabled: true }]);
   });
 });
