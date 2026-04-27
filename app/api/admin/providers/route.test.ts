@@ -139,6 +139,36 @@ describe("PATCH /api/admin/providers", () => {
     expect(data.provider.config.displayName).toBe("GPT Provider");
   });
 
+  test("应该接受 displayName=null 用于清空覆盖值", async () => {
+    const mockProvider = {
+      id: 1,
+      name: "OpenAI",
+      slug: "openai",
+      config: {},
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    vi.mocked(updateProviderConfig).mockResolvedValue(mockProvider);
+
+    const response = await PATCH(
+      new Request("https://example.com/api/admin/providers", {
+        method: "PATCH",
+        body: JSON.stringify({
+          providerId: 1,
+          config: { displayName: null }
+        }),
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(updateProviderConfig).toHaveBeenCalledWith({
+      providerId: 1,
+      config: { displayName: null }
+    });
+  });
+
   test("应该成功更新 provider 前缀规则", async () => {
     const mockProvider = {
       id: 1,
@@ -232,6 +262,44 @@ describe("PATCH /api/admin/providers", () => {
     const data = await response.json();
     expect(data.provider).toBeDefined();
     expect(data.provider.config.branding.color).toBe("#00d084");
+  });
+
+  test("应该接受 branding.color=null 用于清空覆盖值", async () => {
+    const mockProvider = {
+      id: 1,
+      name: "OpenAI",
+      slug: "openai",
+      config: {},
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    vi.mocked(updateProviderConfig).mockResolvedValue(mockProvider);
+
+    const response = await PATCH(
+      new Request("https://example.com/api/admin/providers", {
+        method: "PATCH",
+        body: JSON.stringify({
+          providerId: 1,
+          config: {
+            branding: {
+              color: null
+            }
+          }
+        }),
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(updateProviderConfig).toHaveBeenCalledWith({
+      providerId: 1,
+      config: {
+        branding: {
+          color: null
+        }
+      }
+    });
   });
 
   test("应该接受带空白的十六进制颜色", async () => {

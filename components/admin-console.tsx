@@ -20,6 +20,7 @@ import {
   Upload,
   Video
 } from "lucide-react";
+import { isValidHexColor, resolveProviderBrandColor } from "@/lib/provider-config";
 
 type ProviderOption = {
   id: number;
@@ -287,10 +288,6 @@ const MODALITY_OPTIONS = ["Text", "Vision", "Audio", "Video", "Multimodal"] as c
 const RENAME_LIST_ROW_HEIGHT = 38;
 const RENAME_LIST_VIEWPORT_HEIGHT = 320;
 const RENAME_LIST_OVERSCAN = 8;
-
-function isValidHexColor(value: string): boolean {
-  return /^#[0-9a-f]{6}$/i.test(value.trim());
-}
 
 function createProviderPrefixRuleDraft(rule?: {
   prefix?: string;
@@ -1010,6 +1007,8 @@ export function AdminConsole({
 
   async function onSaveProviderConfig(providerId: number) {
     const draft = providerConfigDrafts[providerId] ?? { displayName: "", prefixRules: [], brandingColor: "" };
+    const normalizedDisplayName = draft.displayName.trim();
+    const normalizedBrandingColor = draft.brandingColor.trim().toLowerCase();
 
     try {
       validateProviderDraft(providerId, draft);
@@ -1020,7 +1019,7 @@ export function AdminConsole({
         {
           providerId,
           config: {
-            ...(draft.displayName.trim() ? { displayName: draft.displayName.trim() } : {}),
+            displayName: normalizedDisplayName.length > 0 ? normalizedDisplayName : null,
             prefixRules: draft.prefixRules
               .map((rule) => ({
                 prefix: rule.prefix.trim(),
@@ -1033,9 +1032,9 @@ export function AdminConsole({
                   : {})
               }))
               .filter((rule) => rule.prefix.length > 0),
-            ...(draft.brandingColor.trim()
-              ? { branding: { color: draft.brandingColor.trim().toLowerCase() } }
-              : {})
+            branding: {
+              color: normalizedBrandingColor.length > 0 ? normalizedBrandingColor : null
+            }
           }
         },
         "PATCH"
@@ -5123,6 +5122,8 @@ export function AdminConsole({
           <div className="grid grid-cols-1 gap-4">
             {providers.map((provider) => {
               const draft = providerConfigDrafts[provider.id] ?? toProviderConfigDraft(provider);
+              const previewDisplayName = draft.displayName.trim() || provider.name;
+              const previewBrandColor = resolveProviderBrandColor(provider.name, draft.brandingColor);
 
               return (
                 <section key={provider.id} className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
@@ -5174,8 +5175,8 @@ export function AdminConsole({
 
                     <div className="rounded-lg border border-base-300 bg-base-200/40 p-3 text-sm">
                       <div className="mb-1 font-medium">当前展示预览</div>
-                      <div style={{ color: draft.brandingColor.trim() || undefined }}>
-                        {draft.displayName.trim() || provider.name}
+                      <div style={{ color: previewBrandColor }}>
+                        {previewDisplayName}
                       </div>
                     </div>
                   </div>

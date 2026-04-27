@@ -8,6 +8,35 @@ function isValidHexColor(value: string): boolean {
   return /^#[0-9a-f]{6}$/i.test(value.trim());
 }
 
+export function getProviderFallbackBrandColor(providerName: string): string {
+  const normalized = providerName.trim().toLowerCase();
+
+  if (normalized.includes("openai") || normalized.includes("gpt")) return "#34d399";
+  if (normalized.includes("anthropic") || normalized.includes("claude")) return "#e09a0e";
+  if (normalized.includes("google") || normalized.includes("gemini") || normalized.includes("gemma")) return "#4285f4";
+  if (normalized.includes("meta") || normalized.includes("llama")) return "#3b82f6";
+  if (normalized.includes("qwen") || normalized.includes("alibaba")) return "#a16dfa";
+  if (normalized.includes("deepseek")) return "#14b8a6";
+  if (normalized.includes("xai") || normalized.includes("grok")) return "#cecece";
+  if (normalized.includes("minimax")) return "#ff604a";
+
+  const fallbackPalette = [
+    "#f180b9",
+    "#ffa98f",
+    "#6cc9de"
+  ];
+  const hash = normalized.split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+  return fallbackPalette[hash % fallbackPalette.length];
+}
+
+export function resolveProviderBrandColor(providerName: string | null | undefined, configuredColor?: string | null): string {
+  if (configuredColor && isValidHexColor(configuredColor)) {
+    return configuredColor.trim().toLowerCase();
+  }
+
+  return getProviderFallbackBrandColor(providerName ?? "");
+}
+
 export function normalizeProviderConfig(raw: unknown): ProviderConfig {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return {};
@@ -46,4 +75,4 @@ export function normalizeProviderConfig(raw: unknown): ProviderConfig {
   };
 }
 
-export { normalizeProviderConfigPrefix };
+export { normalizeProviderConfigPrefix, isValidHexColor };

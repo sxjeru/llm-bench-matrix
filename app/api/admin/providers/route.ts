@@ -7,8 +7,11 @@ const schema = z.object({
   name: z.string().min(1)
 });
 
+const nullableNonEmptyString = z.string().trim().min(1).nullable();
+const nullableHexColor = z.string().trim().regex(/^#[0-9a-fA-F]{6}$/).nullable();
+
 const providerConfigSchema = z.object({
-  displayName: z.string().trim().min(1).optional(),
+  displayName: nullableNonEmptyString.optional(),
   prefixRules: z.array(
     z.object({
       prefix: z.string().trim().min(1),
@@ -18,7 +21,7 @@ const providerConfigSchema = z.object({
     })
   ).optional(),
   branding: z.object({
-    color: z.string().trim().regex(/^#[0-9a-fA-F]{6}$/).optional()
+    color: nullableHexColor.optional()
   }).optional()
 });
 

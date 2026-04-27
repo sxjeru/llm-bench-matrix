@@ -9,6 +9,7 @@ let validateProviderConfigForTest: (
   allProviders: Array<typeof providers.$inferSelect>
 ) => void;
 let mergeProviderConfigForTest: (current: ProviderConfig, incoming: unknown) => ProviderConfig;
+let resolveProviderBrandColorForTest: (providerName: string | null | undefined, configuredColor?: string | null) => string;
 
 // Helper to create mock provider objects
 function mockProvider(
@@ -29,9 +30,11 @@ function mockProvider(
 beforeAll(async () => {
   process.env.DATABASE_URL ??= "postgres://test:test@127.0.0.1:5432/test";
   const adminServiceModule = await import("@/lib/admin-service");
+  const providerConfigModule = await import("@/lib/provider-config");
   normalizeProviderConfigForTest = adminServiceModule.__normalizeProviderConfigForTest;
   validateProviderConfigForTest = adminServiceModule.__validateProviderConfigForTest;
   mergeProviderConfigForTest = adminServiceModule.__mergeProviderConfigForTest;
+  resolveProviderBrandColorForTest = providerConfigModule.resolveProviderBrandColor;
 });
 
 describe("normalizeProviderConfig", () => {
@@ -355,6 +358,16 @@ describe("color validation edge cases", () => {
     });
     expect(config.branding?.color).toBeUndefined();
   });
+
+  test("品牌色未配置时应按 provider 名回退到稳定颜色", () => {
+    expect(resolveProviderBrandColorForTest("OpenAI")).toBe("#34d399");
+    expect(resolveProviderBrandColorForTest("Google")).toBe("#4285f4");
+    expect(resolveProviderBrandColorForTest("Some New Provider")).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
+  test("品牌色已配置时应优先使用配置色", () => {
+    expect(resolveProviderBrandColorForTest("OpenAI", "#ABCDEF")).toBe("#abcdef");
+  });
 });
 
 describe("provider config patch merge", () => {
@@ -401,5 +414,39 @@ describe("provider config patch merge", () => {
     );
 
     expect(merged.prefixRules).toEqual([{ prefix: "o1-", enabled: true }]);
+  });
+
+  test("应该在 displayName=null 时清空 displayName 覆盖值", () => {
+    const merged = mergeProviderConfigForTest(
+      {
+        displayName: "OpenAI",
+        prefixRules: [{ prefix: "gpt-", enabled: true }],
+        branding: { color: "#00d084" }
+      },
+      {
+        displayName: null
+      }
+    );
+
+    expect(merged.displayName).toBeUndefined();
+    expect(merged.prefixRules).toEqual([{ prefix: "gpt-", enabled: true }]);
+    expect(merged.branding?.color).toBe("#00d084");
+  });
+
+  test("应该在 branding.color=null 时清空品牌色覆盖值", () => {
+    const merged = mergeProviderConfigForTest(
+      {
+        displayName: "OpenAI",
+        prefixRules: [{ prefix: "gpt-", enabled: true }],
+        branding: { color: "#00d084" }
+      },
+      {
+        branding: { color: null }
+      }
+    );
+
+    expect(merged.displayName).toBe("OpenAI");
+    expect(merged.prefixRules).toEqual([{ prefix: "gpt-", enabled: true }]);
+    expect(merged.branding).toBeUndefined();
   });
 });

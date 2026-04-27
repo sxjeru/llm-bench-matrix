@@ -1701,6 +1701,74 @@ describe("AdminConsole provider config", () => {
     expect(getPrefixInputs().map((input) => input.value)).toEqual(["o1-", "o3-"]);
   });
 
+  test("清空展示名与品牌色时会发送 null，并在预览中回退默认值", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetchSequence({ provider: { id: 1 } });
+
+    render(
+      <AdminConsole
+        {...buildProps()}
+        providers={[
+          {
+            id: 1,
+            name: "OpenAI",
+            slug: "openai",
+            config: {
+              displayName: "OpenAI Official",
+              branding: { color: "#00d084" }
+            }
+          },
+          { id: 2, name: "Google", slug: "google" }
+        ]}
+      />
+    );
+
+    await user.click(screen.getByRole("tab", { name: "Provider 配置" }));
+
+    const openAiSection = screen.getByRole("heading", { name: "OpenAI" }).closest("section");
+    if (!openAiSection) {
+      throw new Error("OpenAI provider section not found");
+    }
+
+    const displayNameInput = within(openAiSection).getByDisplayValue("OpenAI Official");
+    const brandingColorInput = within(openAiSection).getByDisplayValue("#00d084");
+
+    await user.clear(displayNameInput);
+    await user.clear(brandingColorInput);
+
+    const previewTitle = within(openAiSection).getByText("当前展示预览");
+    const previewValue = previewTitle.nextElementSibling as HTMLDivElement | null;
+    if (!previewValue) {
+      throw new Error("Provider preview value not found");
+    }
+
+    expect(previewValue).toHaveTextContent("OpenAI");
+    expect(previewValue.style.color).not.toBe("");
+
+    await user.click(within(openAiSection).getByRole("button", { name: "保存配置" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const [url, requestInit] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe("/api/admin/providers");
+
+    const payload = JSON.parse(((requestInit as RequestInit).body ?? "{}") as string) as {
+      providerId?: number;
+      config?: {
+        displayName?: string | null;
+        branding?: {
+          color?: string | null;
+        };
+      };
+    };
+
+    expect(payload.providerId).toBe(1);
+    expect(payload.config?.displayName).toBeNull();
+    expect(payload.config?.branding?.color).toBeNull();
+  });
+
   test("保存 provider 配置时保留 prefix rule 的 priority 与 note", async () => {
     const user = userEvent.setup();
     const fetchMock = mockFetchSequence({ provider: { id: 1 } });

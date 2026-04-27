@@ -26,6 +26,7 @@ import {
   TriangleAlert,
   Video
 } from "lucide-react";
+import { isValidHexColor, resolveProviderBrandColor } from "@/lib/provider-config";
 
 type MatrixInputRow = {
   recordId?: number | null;
@@ -908,41 +909,12 @@ function compareModelNameByColumnOrder(left: string, right: string, collator: In
   return collator.compare(right, left);
 }
 
-function getProviderBrandColor(providerName: string | null | undefined, configuredColor?: string | null): string {
-  if (configuredColor && isValidHexColor(configuredColor)) {
-    return configuredColor.trim().toLowerCase();
-  }
-
-  const normalized = (providerName ?? "").trim().toLowerCase();
-
-  if (normalized.includes("openai") || normalized.includes("gpt")) return "#34d399";
-  if (normalized.includes("anthropic") || normalized.includes("claude")) return "#e09a0e";
-  if (normalized.includes("google") || normalized.includes("gemini") || normalized.includes("gemma")) return "#4285f4";
-  if (normalized.includes("meta") || normalized.includes("llama")) return "#3b82f6";
-  if (normalized.includes("qwen") || normalized.includes("alibaba")) return "#a16dfa";
-  if (normalized.includes("deepseek")) return "#14b8a6";
-  if (normalized.includes("xai") || normalized.includes("grok")) return "#cecece";
-  if (normalized.includes("minimax")) return "#ff604a";
-
-  const fallbackPalette = [
-    "#f180b9",
-    "#ffa98f",
-    "#6cc9de",
-  ];
-  const hash = normalized.split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-  return fallbackPalette[hash % fallbackPalette.length];
-}
-
 function lerp(start: number, end: number, t: number): number {
   return Math.round(start + (end - start) * t);
 }
 
 function blendColor(from: readonly [number, number, number], to: readonly [number, number, number], t: number) {
   return [lerp(from[0], to[0], t), lerp(from[1], to[1], t), lerp(from[2], to[2], t)] as const;
-}
-
-function isValidHexColor(value: string): boolean {
-  return /^#[0-9a-f]{6}$/i.test(value.trim());
 }
 
 function normalizeHexColor(value: string, fallback: string): string {
@@ -3054,7 +3026,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         modelName,
         columnWidthKey,
         providerName,
-        color: getProviderBrandColor(providerName, modelProviderBrandColorMap.get(modelName) ?? null),
+        color: resolveProviderBrandColor(providerName, modelProviderBrandColorMap.get(modelName) ?? null),
         columnWidth,
         isSourceMatched: sourceMatchedModelSet.has(modelName),
         isSourceMatchedFirst: sourceMatchedGroupBoundaryByModel.firstSet.has(modelName),
@@ -4287,7 +4259,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                         }}
                         onChange={(e) => toggleProvider(group.providerName, e.target.checked)}
                       />
-                      <span className="text-sm font-medium" style={{ color: getProviderBrandColor(group.providerName) }}>
+                      <span className="text-sm font-medium" style={{ color: resolveProviderBrandColor(group.providerName) }}>
                         {group.providerName}
                         {providerHasBaseModel ? null : <span className="ml-1 text-[10px] opacity-70">(跨页签)</span>}
                       </span>
