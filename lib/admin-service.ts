@@ -15,7 +15,7 @@ import type { ParsedImportRecord } from "@/lib/import/xlsm";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 import type { ProviderConfig } from "@/lib/db/schema";
 import { invalidateAllCaches } from "@/lib/db/queries";
-import { normalizeProviderConfig, normalizeProviderConfigPrefix } from "@/lib/provider-config";
+import { isValidHexColor, normalizeProviderConfig, normalizeProviderConfigPrefix } from "@/lib/provider-config";
 
 type EnsureBenchmarkInput = {
   benchmarkName: string;
@@ -1466,10 +1466,6 @@ function inferProviderNameFromModel(modelName: string): string {
   return "Unknown";
 }
 
-function isValidHexColor(value: string): boolean {
-  return /^#[0-9a-f]{6}$/i.test(value.trim());
-}
-
 function validateProviderConfig(providerId: number, config: ProviderConfig, allProviders: Array<typeof providers.$inferSelect>) {
   if (config.displayName !== undefined && config.displayName.trim().length === 0) {
     throw new Error("displayName 不能为空字符串");
@@ -1702,6 +1698,7 @@ export async function updateProviderConfig(
 ) {
   const transactionExecutor = options?.transactionExecutor ?? db;
   const updatedResult = await transactionExecutor.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${sql.raw("2147483001")})`);
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${input.providerId})`);
 
     const [provider] = await tx.select().from(providers).where(eq(providers.id, input.providerId)).limit(1);
@@ -3571,7 +3568,7 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
     const allModelValuesEmpty = !hasAnyMatrixValue(modelValues);
 
     const knownTypeMarker = inferTypeFromPreambleLine(rawBenchmarkInput);
-    
+
     if (allModelValuesEmpty && !categoryInput && rawBenchmarkInput && !knownTypeMarker) {
       const nextRawLine = rawLines[lineIndex + 1];
       if (nextRawLine) {

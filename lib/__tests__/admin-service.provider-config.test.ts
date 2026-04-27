@@ -512,7 +512,9 @@ describe("updateProviderConfig", () => {
       }
     );
 
-    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute.mock.calls[0]?.[0]).toBeDefined();
+    expect(execute.mock.calls[1]?.[0]).toBeDefined();
     expect(select).toHaveBeenCalledTimes(2);
     expect(set).toHaveBeenCalledWith({
       config: { prefixRules: [{ prefix: "gpt-", enabled: true }] },

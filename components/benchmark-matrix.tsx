@@ -98,6 +98,11 @@ type MatrixRow = {
   maxNum2: number | null;
 };
 
+type ProviderIdentity = {
+  canonicalName: string;
+  displayName: string;
+};
+
 type OverallModelSummary = {
   rawScore: number | null;
   rawRank: number | null;
@@ -2156,14 +2161,17 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   }, [allRows]);
 
   const allRowsIndex = useMemo(() => {
-    const modelProviderMap = new Map<string, string>();
+    const modelProviderMap = new Map<string, ProviderIdentity>();
     const modelProviderBrandColorMap = new Map<string, string | null>();
     const rowsByModel = new Map<string, IndexedMatrixInputRow[]>();
     const rowsByGroupingKey = new Map<string, IndexedMatrixInputRow[]>();
 
     allRows.forEach((row) => {
       if (!modelProviderMap.has(row.modelName)) {
-        modelProviderMap.set(row.modelName, row.providerDisplayName?.trim() || row.providerName);
+        modelProviderMap.set(row.modelName, {
+          canonicalName: row.providerName || "Unknown",
+          displayName: row.providerDisplayName?.trim() || row.providerName || "Unknown"
+        });
         modelProviderBrandColorMap.set(row.modelName, row.providerBrandColor ?? null);
       }
 
@@ -2277,11 +2285,11 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       { providerName: string; coveredCount: number; coverageRate: number; isBaseModel: boolean }
     >();
 
-    for (const [modelName, providerNameRaw] of allRowsIndex.modelProviderMap.entries()) {
+    for (const [modelName, providerIdentity] of allRowsIndex.modelProviderMap.entries()) {
       const coveredCount = modelCoveredBenchmarkKeys.get(modelName)?.size ?? 0;
       if (coveredCount <= 0) continue;
 
-      const providerName = providerNameRaw || "Unknown";
+      const providerName = providerIdentity.displayName || "Unknown";
 
       metaMap.set(modelName, {
         providerName,
@@ -3000,7 +3008,9 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
   const modelColumnMeta = useMemo(() => {
     return modelColumns.map((modelName) => {
-      const providerName = modelProviderMap.get(modelName) ?? "Unknown";
+      const providerIdentity = modelProviderMap.get(modelName);
+      const providerName = providerIdentity?.displayName ?? "Unknown";
+      const canonicalProviderName = providerIdentity?.canonicalName ?? providerName;
       const columnWidthKey = getModelColumnWidthKey(modelName);
       const autoWidth = autoModelWidthMap.get(columnWidthKey) ?? DEFAULT_MODEL_COLUMN_BASELINE_WIDTH;
       const storedWidth = activeColumnWidthMap[columnWidthKey];
@@ -3026,7 +3036,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         modelName,
         columnWidthKey,
         providerName,
-        color: resolveProviderBrandColor(providerName, modelProviderBrandColorMap.get(modelName) ?? null),
+        color: resolveProviderBrandColor(canonicalProviderName, modelProviderBrandColorMap.get(modelName) ?? null),
         columnWidth,
         isSourceMatched: sourceMatchedModelSet.has(modelName),
         isSourceMatchedFirst: sourceMatchedGroupBoundaryByModel.firstSet.has(modelName),
