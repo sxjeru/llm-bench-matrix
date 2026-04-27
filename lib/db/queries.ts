@@ -18,6 +18,7 @@ export type DashboardRow = {
   providerName: string;
   providerDisplayName: string;
   providerBrandColor: string | null;
+  providerEntityId: number;
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
@@ -140,6 +141,7 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
       const baseQuery = db
         .select({
           id: benchmarkValues.id,
+          providerId: providers.id,
           providerName: providers.name,
           providerConfig: providers.config,
           modelName: models.modelName,
@@ -174,18 +176,41 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
 
       const rows = await baseQuery;
 
+      const providerIds = Array.from(new Set(rows.map((row) => {
+        const config = normalizeProviderConfig(row.providerConfig);
+        return typeof config.displayTargetProviderId === "number" ? config.displayTargetProviderId : -1;
+      }).filter((id) => id > 0)));
+
+      const displayTargetProviders = providerIds.length > 0
+        ? await db.select().from(providers).where(inArray(providers.id, providerIds))
+        : [];
+      const displayTargetProviderById = new Map(displayTargetProviders.map((provider) => [provider.id, provider]));
+
       const shouldUseSourceMeta = Boolean(
         normalizedSourceFilter && normalizedSourceFilter !== SOURCE_EMPTY_KEY
       );
 
       return rows.map((row) => {
         const providerConfig = normalizeProviderConfig(row.providerConfig);
+        const displayTargetProvider = typeof providerConfig.displayTargetProviderId === "number"
+          ? displayTargetProviderById.get(providerConfig.displayTargetProviderId) ?? null
+          : null;
+        const displayTargetConfig = displayTargetProvider ? normalizeProviderConfig(displayTargetProvider.config) : null;
+        const resolvedProviderName = displayTargetProvider?.name ?? row.providerName;
+        const resolvedProviderDisplayName = displayTargetConfig?.displayName?.trim()
+          || providerConfig.displayName?.trim()
+          || displayTargetProvider?.name
+          || row.providerName;
+        const resolvedProviderBrandColor = displayTargetConfig?.branding?.color
+          ?? providerConfig.branding?.color
+          ?? null;
 
         return {
         id: row.id,
-        providerName: row.providerName,
-        providerDisplayName: providerConfig.displayName?.trim() || row.providerName,
-        providerBrandColor: providerConfig.branding?.color ?? null,
+        providerName: resolvedProviderName,
+        providerDisplayName: resolvedProviderDisplayName,
+        providerBrandColor: resolvedProviderBrandColor,
+        providerEntityId: displayTargetProvider?.id ?? row.providerId,
         modelName: row.modelName,
         benchmarkName: row.benchmarkName,
         benchmarkType: shouldUseSourceMeta

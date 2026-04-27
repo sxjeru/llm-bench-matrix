@@ -10,6 +10,7 @@ export type ProviderConfigPrefixRule = {
 
 export type ProviderConfig = {
   displayName?: string;
+  displayTargetProviderId?: number;
   prefixRules?: ProviderConfigPrefixRule[];
   branding?: {
     color?: string;

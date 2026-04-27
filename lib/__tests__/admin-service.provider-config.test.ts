@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import type { ProviderConfig } from "@/lib/db/schema";
-import { providers } from "@/lib/db/schema";
+import { benchmarkValues, models, providers } from "@/lib/db/schema";
 
 let normalizeProviderConfigForTest: (raw: unknown) => ProviderConfig;
 let validateProviderConfigForTest: (
@@ -11,6 +11,7 @@ let validateProviderConfigForTest: (
 let mergeProviderConfigForTest: (current: ProviderConfig, incoming: unknown) => ProviderConfig;
 let resolveProviderBrandColorForTest: (providerName: string | null | undefined, configuredColor?: string | null) => string;
 let updateProviderConfigForTest: typeof import("@/lib/admin-service").__updateProviderConfigForTest;
+let deleteProviderAndTransferModelsForTest: typeof import("@/lib/admin-service").__deleteProviderAndTransferModelsForTest;
 
 // Helper to create mock provider objects
 function mockProvider(
@@ -36,6 +37,7 @@ beforeAll(async () => {
   validateProviderConfigForTest = adminServiceModule.__validateProviderConfigForTest;
   mergeProviderConfigForTest = adminServiceModule.__mergeProviderConfigForTest;
   updateProviderConfigForTest = adminServiceModule.__updateProviderConfigForTest;
+  deleteProviderAndTransferModelsForTest = adminServiceModule.__deleteProviderAndTransferModelsForTest;
   resolveProviderBrandColorForTest = providerConfigModule.resolveProviderBrandColor;
 });
 
@@ -49,6 +51,13 @@ describe("normalizeProviderConfig", () => {
       displayName: "  OpenAI  "
     });
     expect(config.displayName).toBe("OpenAI");
+  });
+
+  test("应该保留有效的 displayTargetProviderId", () => {
+    const config = normalizeProviderConfigForTest({
+      displayTargetProviderId: 2
+    });
+    expect(config.displayTargetProviderId).toBe(2);
   });
 
   test("应该删除空 displayName", () => {
@@ -261,6 +270,7 @@ describe("validateProviderConfig", () => {
   test("应该接受有效的配置", () => {
     const config: ProviderConfig = {
       displayName: "OpenAI Official",
+      displayTargetProviderId: 2,
       prefixRules: [
         { prefix: "gpt-", enabled: true, priority: 1 },
         { prefix: "text-", enabled: false, note: "Legacy" }
@@ -278,6 +288,44 @@ describe("validateProviderConfig", () => {
     expect(() => {
       validateProviderConfigForTest(1, config, allProviders);
     }).not.toThrow();
+  });
+
+  test("应该拒绝将展示归并目标设置为自己", () => {
+    const config: ProviderConfig = {
+      displayTargetProviderId: 1
+    };
+    const allProviders = [mockProvider(1, "OpenAI"), mockProvider(2, "Google")];
+
+    expect(() => {
+      validateProviderConfigForTest(1, config, allProviders);
+    }).toThrow("展示归并目标不能是当前 provider 自己");
+  });
+
+  test("应该拒绝不存在的展示归并目标", () => {
+    const config: ProviderConfig = {
+      displayTargetProviderId: 9
+    };
+    const allProviders = [mockProvider(1, "OpenAI"), mockProvider(2, "Google")];
+
+    expect(() => {
+      validateProviderConfigForTest(1, config, allProviders);
+    }).toThrow("展示归并目标 provider 不存在: 9");
+  });
+
+  test("应该拒绝展示归并形成双向环", () => {
+    const config: ProviderConfig = {
+      displayTargetProviderId: 2
+    };
+    const allProviders = [
+      mockProvider(1, "OpenAI"),
+      mockProvider(2, "Google", {
+        displayTargetProviderId: 1
+      })
+    ];
+
+    expect(() => {
+      validateProviderConfigForTest(1, config, allProviders);
+    }).toThrow("展示归并目标不能形成环状配置");
   });
 });
 
@@ -333,6 +381,73 @@ describe("prefix rule edge cases", () => {
     expect(() => {
       validateProviderConfigForTest(3, config, allProviders);
     }).not.toThrow();
+  });
+});
+
+describe("deleteProviderAndTransferModels", () => {
+  test("应该在删除 provider 时清理其他 provider 对它的展示归并引用", async () => {
+    const deletedProvider = mockProvider(7, "OpenAI");
+    const targetProvider = mockProvider(8, "Anthropic");
+    const referringProvider = mockProvider(9, "Google", { displayTargetProviderId: 7 });
+    const sourceModels: Array<{ id: number; modelName: string }> = [];
+
+    const execute = vi.fn().mockResolvedValue(undefined);
+
+    const limitSource = vi.fn().mockResolvedValue([deletedProvider]);
+    const whereSource = vi.fn().mockReturnValue({ limit: limitSource });
+    const fromSource = vi.fn().mockReturnValue({ where: whereSource });
+
+    const limitTarget = vi.fn().mockResolvedValue([targetProvider]);
+    const whereTarget = vi.fn().mockReturnValue({ limit: limitTarget });
+    const fromTarget = vi.fn().mockReturnValue({ where: whereTarget });
+
+    const whereSourceModels = vi.fn().mockResolvedValue(sourceModels);
+    const fromSourceModels = vi.fn().mockReturnValue({ where: whereSourceModels });
+
+    const fromProviderRows = vi.fn().mockResolvedValue([deletedProvider, targetProvider, referringProvider]);
+
+    const providerConfigWhere = vi.fn().mockResolvedValue(undefined);
+    const providerConfigSet = vi.fn().mockReturnValue({ where: providerConfigWhere });
+
+    const deleteProviderWhere = vi.fn().mockResolvedValue([{ id: 7, name: "OpenAI" }]);
+    const deleteProviderReturning = vi.fn().mockReturnValue({ where: deleteProviderWhere });
+    const deleteFn = vi.fn().mockReturnValue({ returning: deleteProviderReturning });
+
+    const update = vi.fn().mockImplementation((table) => {
+      if (table === providers) {
+        return { set: providerConfigSet };
+      }
+      throw new Error("unexpected update table");
+    });
+
+    const select = vi.fn()
+      .mockReturnValueOnce({ from: fromSource })
+      .mockReturnValueOnce({ from: fromTarget })
+      .mockReturnValueOnce({ from: fromSourceModels })
+      .mockReturnValueOnce({ from: fromProviderRows });
+
+    const tx = { execute, select, update, delete: deleteFn };
+    const transactionExecutor = {
+      transaction<T>(callback: (value: typeof tx) => Promise<T>): Promise<T> {
+        return callback(tx);
+      }
+    };
+
+    await deleteProviderAndTransferModelsForTest(
+      {
+        providerId: 7,
+        transferTargetProviderId: 8
+      },
+      {
+        transactionExecutor
+      }
+    );
+
+    expect(providerConfigSet).toHaveBeenCalledWith({
+      config: {},
+      updatedAt: expect.any(Date)
+    });
+    expect(providerConfigWhere).toHaveBeenCalled();
   });
 });
 
@@ -439,6 +554,23 @@ describe("provider config patch merge", () => {
     expect(merged.branding?.color).toBe("#00d084");
   });
 
+  test("应该在 displayTargetProviderId=null 时清空展示归并目标", () => {
+    const merged = mergeProviderConfigForTest(
+      {
+        displayName: "OpenAI",
+        displayTargetProviderId: 2,
+        branding: { color: "#00d084" }
+      },
+      {
+        displayTargetProviderId: null
+      }
+    );
+
+    expect(merged.displayName).toBe("OpenAI");
+    expect(merged.displayTargetProviderId).toBeUndefined();
+    expect(merged.branding?.color).toBe("#00d084");
+  });
+
   test("应该在 branding.color=null 时清空品牌色覆盖值", () => {
     const merged = mergeProviderConfigForTest(
       {
@@ -521,5 +653,98 @@ describe("updateProviderConfig", () => {
       updatedAt: expect.any(Date)
     });
     expect(result.config).toEqual({ prefixRules: [{ prefix: "gpt-", enabled: true }] });
+  });
+});
+
+describe("deleteProviderAndTransferModels", () => {
+  test("应该在迁移 models 后删除 provider，并合并同名 model 的 values", async () => {
+    const sourceProvider = mockProvider(7, "OpenAI");
+    const targetProvider = mockProvider(8, "Google");
+    const sourceModels = [
+      { id: 71, modelName: "GPT-4.1" },
+      { id: 72, modelName: "Shared Model" }
+    ];
+    const targetModels = [{ id: 82, modelName: "Shared Model" }];
+
+    const execute = vi.fn().mockResolvedValue(undefined);
+    const deleteModelWhere = vi.fn().mockResolvedValue(undefined);
+    const deleteModel = vi.fn().mockReturnValue({ where: deleteModelWhere });
+    const deleteProviderReturning = vi.fn().mockResolvedValue([{ id: 7, name: "OpenAI" }]);
+    const deleteProviderWhere = vi.fn().mockReturnValue({ returning: deleteProviderReturning });
+    const deleteProvider = vi.fn().mockReturnValue({ where: deleteProviderWhere });
+    const deleteFn = vi.fn()
+      .mockImplementation((table) => (table === providers ? deleteProvider() : deleteModel()));
+
+    const benchmarkValuesWhere = vi.fn().mockResolvedValue(undefined);
+    const benchmarkValuesSet = vi.fn().mockReturnValue({ where: benchmarkValuesWhere });
+    const benchmarkValuesUpdate = vi.fn().mockReturnValue({ set: benchmarkValuesSet });
+
+    const mergedIntoWhere = vi.fn().mockResolvedValue(undefined);
+    const mergedIntoSet = vi.fn().mockReturnValue({ where: mergedIntoWhere });
+    const mergedIntoUpdate = vi.fn().mockReturnValue({ set: mergedIntoSet });
+
+    const providerIdWhere = vi.fn().mockResolvedValue(undefined);
+    const providerIdSet = vi.fn().mockReturnValue({ where: providerIdWhere });
+    const providerIdUpdate = vi.fn().mockReturnValue({ set: providerIdSet });
+
+    const update = vi.fn()
+      .mockImplementation((table) => {
+        if (table === benchmarkValues) return benchmarkValuesUpdate();
+        if (table === models) {
+          const callIndex = update.mock.calls.length;
+          return callIndex === 1 ? mergedIntoUpdate() : providerIdUpdate();
+        }
+        throw new Error("unexpected update table");
+      });
+
+    const limitSource = vi.fn().mockResolvedValue([sourceProvider]);
+    const whereSource = vi.fn().mockReturnValue({ limit: limitSource });
+    const fromSource = vi.fn().mockReturnValue({ where: whereSource });
+
+    const limitTarget = vi.fn().mockResolvedValue([targetProvider]);
+    const whereTarget = vi.fn().mockReturnValue({ limit: limitTarget });
+    const fromTarget = vi.fn().mockReturnValue({ where: whereTarget });
+
+    const whereSourceModels = vi.fn().mockResolvedValue(sourceModels);
+    const fromSourceModels = vi.fn().mockReturnValue({ where: whereSourceModels });
+
+    const whereTargetModels = vi.fn().mockResolvedValue(targetModels);
+    const fromTargetModels = vi.fn().mockReturnValue({ where: whereTargetModels });
+
+    const select = vi.fn()
+      .mockReturnValueOnce({ from: fromSource })
+      .mockReturnValueOnce({ from: fromTarget })
+      .mockReturnValueOnce({ from: fromSourceModels })
+      .mockReturnValueOnce({ from: fromTargetModels });
+
+    const tx = { execute, select, update, delete: deleteFn };
+    const transactionExecutor = {
+      transaction<T>(callback: (value: typeof tx) => Promise<T>): Promise<T> {
+        return callback(tx);
+      }
+    };
+
+    const result = await deleteProviderAndTransferModelsForTest(
+      {
+        providerId: 7,
+        transferTargetProviderId: 8
+      },
+      {
+        transactionExecutor
+      }
+    );
+
+    expect(execute).toHaveBeenCalledTimes(3);
+    expect(benchmarkValuesSet).toHaveBeenCalledWith({ modelId: 82 });
+    expect(deleteModelWhere).toHaveBeenCalled();
+    expect(providerIdSet).toHaveBeenCalledWith({ providerId: 8 });
+    expect(deleteProviderWhere).toHaveBeenCalled();
+    expect(result).toEqual({
+      ok: true,
+      providerId: 7,
+      providerName: "OpenAI",
+      transferTargetProviderId: 8,
+      transferredModelCount: 2
+    });
   });
 });

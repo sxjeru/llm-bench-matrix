@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "../../../../lib/admin-auth";
-import { ensureProvider, updateProviderConfig } from "../../../../lib/admin-service";
+import { deleteProviderAndTransferModels, ensureProvider, updateProviderConfig } from "../../../../lib/admin-service";
 
 const schema = z.object({
   name: z.string().min(1)
@@ -12,6 +12,7 @@ const nullableHexColor = z.string().trim().regex(/^#[0-9a-fA-F]{6}$/).nullable()
 
 const providerConfigSchema = z.object({
   displayName: nullableNonEmptyString.optional(),
+  displayTargetProviderId: z.number().int().positive().nullable().optional(),
   prefixRules: z.array(
     z.object({
       prefix: z.string().trim().min(1),
@@ -28,6 +29,11 @@ const providerConfigSchema = z.object({
 const patchSchema = z.object({
   providerId: z.number().int().positive(),
   config: providerConfigSchema
+});
+
+const deleteSchema = z.object({
+  providerId: z.number().int().positive(),
+  transferTargetProviderId: z.number().int().positive()
 });
 
 export async function POST(request: Request) {
@@ -60,6 +66,27 @@ export async function PATCH(request: Request) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "更新 provider 配置失败" },
+      { status: 400 }
+    );
+  }
+}
+
+export async function DELETE(request: Request) {
+  const denied = await requireAdmin(request);
+  if (denied) return denied;
+
+  const body = await request.json().catch(() => null);
+  const parsed = deleteSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  }
+
+  try {
+    const result = await deleteProviderAndTransferModels(parsed.data);
+    return NextResponse.json(result);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "删除 provider 失败" },
       { status: 400 }
     );
   }

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { PATCH, POST } from "@/app/api/admin/providers/route";
+import { DELETE, PATCH, POST } from "@/app/api/admin/providers/route";
 import { requireAdmin } from "@/lib/admin-auth";
-import { ensureProvider, updateProviderConfig } from "@/lib/admin-service";
+import { deleteProviderAndTransferModels, ensureProvider, updateProviderConfig } from "@/lib/admin-service";
 
 vi.mock("@/lib/admin-auth", () => ({
   requireAdmin: vi.fn()
@@ -9,7 +9,8 @@ vi.mock("@/lib/admin-auth", () => ({
 
 vi.mock("@/lib/admin-service", () => ({
   ensureProvider: vi.fn(),
-  updateProviderConfig: vi.fn()
+  updateProviderConfig: vi.fn(),
+  deleteProviderAndTransferModels: vi.fn()
 }));
 
 describe("POST /api/admin/providers", () => {
@@ -640,5 +641,56 @@ describe("PATCH /api/admin/providers", () => {
     const data = await response.json();
     expect(data.provider).toBeDefined();
     expect(data.provider.config.prefixRules[0].priority).toBe(1);
+  });
+});
+
+describe("DELETE /api/admin/providers", () => {
+  beforeEach(() => {
+    vi.mocked(requireAdmin).mockReset();
+    vi.mocked(deleteProviderAndTransferModels).mockReset();
+    vi.mocked(requireAdmin).mockResolvedValue(null);
+  });
+
+  test("应该成功迁移 models 后删除 provider", async () => {
+    vi.mocked(deleteProviderAndTransferModels).mockResolvedValue({
+      ok: true,
+      providerId: 1,
+      providerName: "OpenAI",
+      transferTargetProviderId: 2,
+      transferredModelCount: 3
+    });
+
+    const response = await DELETE(
+      new Request("https://example.com/api/admin/providers", {
+        method: "DELETE",
+        body: JSON.stringify({
+          providerId: 1,
+          transferTargetProviderId: 2
+        }),
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(deleteProviderAndTransferModels).toHaveBeenCalledWith({
+      providerId: 1,
+      transferTargetProviderId: 2
+    });
+  });
+
+  test("应该拒绝缺少迁移目标的删除请求", async () => {
+    const response = await DELETE(
+      new Request("https://example.com/api/admin/providers", {
+        method: "DELETE",
+        body: JSON.stringify({
+          providerId: 1
+        }),
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.error).toBeDefined();
   });
 });

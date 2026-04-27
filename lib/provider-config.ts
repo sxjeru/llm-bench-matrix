@@ -70,6 +70,9 @@ export function normalizeProviderConfig(raw: unknown): ProviderConfig {
 
   return {
     ...(displayName ? { displayName } : {}),
+    ...(typeof input.displayTargetProviderId === "number" && Number.isInteger(input.displayTargetProviderId) && input.displayTargetProviderId > 0
+      ? { displayTargetProviderId: input.displayTargetProviderId }
+      : {}),
     ...(prefixRules.length > 0 ? { prefixRules } : { prefixRules: [] }),
     ...(color ? { branding: { color } } : {})
   };

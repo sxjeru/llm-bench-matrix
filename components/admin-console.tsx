@@ -32,6 +32,7 @@ type ProviderOption = {
   slug: string;
   config?: {
     displayName?: string;
+    displayTargetProviderId?: number;
     prefixRules?: Array<{
       prefix: string;
       enabled: boolean;
@@ -124,6 +125,7 @@ type TabKey = "import" | "entry" | "providers" | "rename" | "merge" | "maintenan
 
 type ProviderConfigDraft = {
   displayName: string;
+  displayTargetProviderId: number | null;
   prefixRules: Array<{
     id: string;
     prefix: string;
@@ -317,6 +319,7 @@ function createProviderPrefixRuleDraft(rule?: {
 function toProviderConfigDraft(provider: ProviderOption): ProviderConfigDraft {
   return {
     displayName: provider.config?.displayName ?? "",
+    displayTargetProviderId: provider.config?.displayTargetProviderId ?? null,
     prefixRules: (provider.config?.prefixRules ?? []).map((rule) => createProviderPrefixRuleDraft(rule)),
     brandingColor: provider.config?.branding?.color ?? ""
   };
@@ -616,6 +619,7 @@ function resolveProviderFromConfig(
   const normalizedModelName = modelName.trim().toLowerCase();
   if (!normalizedModelName) return null;
 
+  const providerById = new Map(providers.map((provider) => [provider.id, provider]));
   let matched: { providerName: string; providerDisplayName: string; prefixLength: number } | null = null;
 
   for (const provider of providers) {
@@ -625,9 +629,16 @@ function resolveProviderFromConfig(
       if (!normalizedModelName.startsWith(normalizedPrefix)) continue;
 
       if (!matched || normalizedPrefix.length > matched.prefixLength) {
+        const displayTargetProvider = typeof provider.config?.displayTargetProviderId === "number"
+          ? providerById.get(provider.config.displayTargetProviderId) ?? null
+          : null;
+
         matched = {
-          providerName: provider.name,
-          providerDisplayName: provider.config?.displayName?.trim() || provider.name,
+          providerName: displayTargetProvider?.name || provider.name,
+          providerDisplayName: displayTargetProvider?.config?.displayName?.trim()
+            || provider.config?.displayName?.trim()
+            || displayTargetProvider?.name
+            || provider.name,
           prefixLength: normalizedPrefix.length
         };
       }
@@ -645,7 +656,15 @@ function resolveProviderFromConfig(
 function getProviderDisplayNameById(providerId: number, providerById: Map<number, ProviderOption>): string | null {
   const provider = providerById.get(providerId);
   if (!provider) return null;
-  return provider.config?.displayName?.trim() || provider.name;
+
+  const displayTargetProvider = typeof provider.config?.displayTargetProviderId === "number"
+    ? providerById.get(provider.config.displayTargetProviderId) ?? null
+    : null;
+
+  return displayTargetProvider?.config?.displayName?.trim()
+    || provider.config?.displayName?.trim()
+    || displayTargetProvider?.name
+    || provider.name;
 }
 
 function resolveHardcodedBenchmarkAliasTarget(input: string): string | null {
@@ -842,6 +861,10 @@ export function AdminConsole({
     }, {})
   );
   const [savingProviderConfigId, setSavingProviderConfigId] = useState<number | null>(null);
+  const [deletingProviderId, setDeletingProviderId] = useState<number | null>(null);
+  const [providerDeleteConfirmOpen, setProviderDeleteConfirmOpen] = useState(false);
+  const [providerDeleteTargetId, setProviderDeleteTargetId] = useState<number | null>(null);
+  const [providerDeleteTransferTargetId, setProviderDeleteTransferTargetId] = useState<number | null>(null);
   const [selectedProviderConfigId, setSelectedProviderConfigId] = useState<number | null>(null);
   const [providerSearchQuery, setProviderSearchQuery] = useState("");
   const [providerSearchOpen, setProviderSearchOpen] = useState(false);
@@ -870,6 +893,11 @@ export function AdminConsole({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  const availableDisplayTargetProviders = useMemo(() => {
+    if (!selectedProviderForConfig) return [];
+    return providers.filter((provider) => provider.id !== selectedProviderForConfig.id);
+  }, [providers, selectedProviderForConfig]);
 
   const [modelName, setModelName] = useState("");
   const [modelAlias, setModelAlias] = useState("");
@@ -1049,7 +1077,7 @@ export function AdminConsole({
   }
 
   async function onSaveProviderConfig(providerId: number) {
-    const draft = providerConfigDrafts[providerId] ?? { displayName: "", prefixRules: [], brandingColor: "" };
+    const draft = providerConfigDrafts[providerId] ?? { displayName: "", displayTargetProviderId: null, prefixRules: [], brandingColor: "" };
     const normalizedDisplayName = draft.displayName.trim();
     const normalizedBrandingColor = draft.brandingColor.trim().toLowerCase();
 
@@ -1063,6 +1091,7 @@ export function AdminConsole({
           providerId,
           config: {
             displayName: normalizedDisplayName.length > 0 ? normalizedDisplayName : null,
+            displayTargetProviderId: draft.displayTargetProviderId,
             prefixRules: draft.prefixRules
               .map((rule) => ({
                 prefix: rule.prefix.trim(),
@@ -1091,11 +1120,62 @@ export function AdminConsole({
       }
 
       router.refresh();
-      notifySuccess("Provider 配置已保存。", ["展示名、前缀规则、配色均已提交，页面已自动刷新。"]); 
+      notifySuccess("Provider 配置已保存。", ["展示名、展示归并、前缀规则、配色均已提交，页面已自动刷新。"]); 
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "保存 provider 配置失败");
     } finally {
       setSavingProviderConfigId(null);
+    }
+  }
+
+  function openDeleteProviderConfirm(providerId: number) {
+    const candidateProviders = providers.filter((provider) => provider.id !== providerId);
+    setProviderDeleteTargetId(providerId);
+    setProviderDeleteTransferTargetId(candidateProviders[0]?.id ?? null);
+    setProviderDeleteConfirmOpen(true);
+  }
+
+  function closeDeleteProviderConfirm() {
+    if (deletingProviderId !== null) return;
+    setProviderDeleteConfirmOpen(false);
+    setProviderDeleteTargetId(null);
+    setProviderDeleteTransferTargetId(null);
+  }
+
+  async function onConfirmDeleteProvider() {
+    if (providerDeleteTargetId === null) {
+      notifyError("未选择待删除 provider");
+      return;
+    }
+
+    if (providerDeleteTransferTargetId === null) {
+      notifyError("请先选择模型迁移目标 provider");
+      return;
+    }
+
+    try {
+      setDeletingProviderId(providerDeleteTargetId);
+
+      await postJson(
+        "/api/admin/providers",
+        {
+          providerId: providerDeleteTargetId,
+          transferTargetProviderId: providerDeleteTransferTargetId
+        },
+        "DELETE"
+      );
+
+      setProviderDeleteConfirmOpen(false);
+      setProviderDeleteTargetId(null);
+      setProviderDeleteTransferTargetId(null);
+      setSelectedProviderConfigId(null);
+
+      router.refresh();
+      notifySuccess("Provider 已删除。", ["该 provider 旗下 models 已迁移到新 provider，原 provider 已删除，页面已自动刷新。"]);
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "删除 provider 失败");
+    } finally {
+      setDeletingProviderId(null);
     }
   }
 
@@ -4000,6 +4080,88 @@ export function AdminConsole({
         </div>
       ) : null}
 
+      {providerDeleteConfirmOpen ? (() => {
+        const providerToDelete = providerDeleteTargetId !== null
+          ? providers.find((provider) => provider.id === providerDeleteTargetId) ?? null
+          : null;
+        const transferCandidates = providers.filter((provider) => provider.id !== providerDeleteTargetId);
+        const transferTarget = providerDeleteTransferTargetId !== null
+          ? providers.find((provider) => provider.id === providerDeleteTransferTargetId) ?? null
+          : null;
+        const providerModels = providerToDelete ? models.filter((model) => model.providerId === providerToDelete.id) : [];
+
+        return (
+          <div
+            className="fixed inset-0 z-[170] flex items-center justify-center bg-black/45 p-4"
+            onClick={(event) => {
+              if (event.target === event.currentTarget && deletingProviderId === null) {
+                closeDeleteProviderConfirm();
+              }
+            }}
+          >
+            <div className="w-full max-w-xl rounded-2xl border border-error/35 bg-base-100/95 p-6 shadow-2xl backdrop-blur">
+              <h3 className="text-lg font-bold text-error">确认删除 Provider？</h3>
+              <p className="mt-2 text-sm opacity-85">
+                将删除 <code>{providerToDelete?.name ?? "当前 provider"}</code>。为避免级联删除模型与分数数据，需先把其下 models 迁移到其他 provider。
+              </p>
+
+              <div className="mt-4 space-y-4">
+                <div className="rounded-xl border border-base-300/70 bg-base-200/30 px-4 py-3 text-sm">
+                  <div className="font-medium">待迁移模型数：{providerModels.length}</div>
+                  <div className="mt-1 text-xs opacity-70">
+                    {providerModels.length > 0
+                      ? `删除前会把这 ${providerModels.length} 个 model 的 provider 归属整体迁移。`
+                      : "当前 provider 下暂无 model，删除时不会触发模型迁移。"}
+                  </div>
+                </div>
+
+                <label className="form-control w-full">
+                  <span className="label-text mb-1.5 text-xs font-medium opacity-70">迁移 models 到</span>
+                  <select
+                    className="select select-bordered w-full rounded-xl bg-base-200/40 transition-colors focus:bg-base-100 focus:border-primary focus:outline-none"
+                    value={providerDeleteTransferTargetId ?? ""}
+                    onChange={(e) => setProviderDeleteTransferTargetId(e.target.value ? Number(e.target.value) : null)}
+                    disabled={deletingProviderId !== null || transferCandidates.length === 0}
+                  >
+                    <option value="">请选择目标 Provider</option>
+                    {transferCandidates.map((provider) => (
+                      <option key={`provider-delete-transfer-${provider.id}`} value={provider.id}>
+                        {provider.config?.displayName?.trim() || provider.name} ({provider.slug})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {transferTarget ? (
+                  <div className="rounded-xl border border-base-300/70 bg-base-200/20 px-4 py-3 text-xs opacity-75">
+                    确认后会先把 models 迁移到 <span className="font-medium">{transferTarget.config?.displayName?.trim() || transferTarget.name}</span>，再删除当前 provider。
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={closeDeleteProviderConfirm}
+                  disabled={deletingProviderId !== null}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-error"
+                  onClick={onConfirmDeleteProvider}
+                  disabled={deletingProviderId !== null || transferCandidates.length === 0 || providerDeleteTransferTargetId === null}
+                >
+                  {deletingProviderId !== null ? "删除中..." : "确认迁移并删除"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })() : null}
+
       <div className="space-y-4">
         <div
           role="tablist"
@@ -5284,6 +5446,7 @@ export function AdminConsole({
               const previewDisplayName = draft.displayName.trim() || provider.name;
               const previewBrandColor = resolveProviderBrandColor(provider.name, draft.brandingColor);
               const isSaving = savingProviderConfigId === provider.id;
+              const isDeleting = deletingProviderId === provider.id;
               const providerModels = models.filter((m) => m.providerId === provider.id);
 
               return (
@@ -5302,18 +5465,32 @@ export function AdminConsole({
                         <span className="mt-1 inline-block rounded-md bg-base-200/80 px-1.5 py-0.5 text-[11px] font-mono opacity-60 w-fit">{provider.slug}</span>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm gap-1.5 rounded-xl shadow-sm"
-                      onClick={() => onSaveProviderConfig(provider.id)}
-                      disabled={isSaving}
-                    >
-                      {isSaving ? (
-                        <><span className="loading loading-spinner loading-xs" /> 保存中…</>
-                      ) : (
-                        <><Check size={14} /> 保存配置</>
-                      )}
-                    </button>
+                    <div className="flex items-center gap-2 self-start sm:self-auto">
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm gap-1.5 rounded-xl border border-error/20 text-error shadow-sm hover:border-error/40 hover:bg-error/10 disabled:border-base-300 disabled:text-base-content/40"
+                        onClick={() => openDeleteProviderConfirm(provider.id)}
+                        disabled={isSaving || isDeleting}
+                      >
+                        {isDeleting ? (
+                          <><span className="loading loading-spinner loading-xs" /> 删除中…</>
+                        ) : (
+                          <><Trash2 size={14} /> 删除 Provider</>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm gap-1.5 rounded-xl shadow-sm"
+                        onClick={() => onSaveProviderConfig(provider.id)}
+                        disabled={isSaving || isDeleting}
+                      >
+                        {isSaving ? (
+                          <><span className="loading loading-spinner loading-xs" /> 保存中…</>
+                        ) : (
+                          <><Check size={14} /> 保存配置</>
+                        )}
+                      </button>
+                    </div>
                   </div>
 
                   <div className="border-t border-base-300/50" />
@@ -5396,6 +5573,49 @@ export function AdminConsole({
                           {isValidHexColor(draft.brandingColor) ? draft.brandingColor.toLowerCase() : previewBrandColor.toLowerCase()}
                         </span>
                       </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-x-6 gap-y-5 px-6 pb-5 lg:grid-cols-[minmax(280px,1fr)_1fr] lg:items-end">
+                    <label className="form-control w-full">
+                      <span className="label-text mb-1.5 text-xs font-medium opacity-70">展示归并到</span>
+                      <select
+                        className="select select-bordered w-full rounded-xl bg-base-200/40 transition-colors focus:bg-base-100 focus:border-primary focus:outline-none"
+                        value={draft.displayTargetProviderId ?? ""}
+                        onChange={(e) =>
+                          updateProviderDraft(provider.id, (current) => ({
+                            ...current,
+                            displayTargetProviderId: e.target.value ? Number(e.target.value) : null
+                          }))
+                        }
+                      >
+                        <option value="">不归并，独立展示</option>
+                        {availableDisplayTargetProviders.map((targetProvider) => (
+                          <option key={`provider-display-target-${targetProvider.id}`} value={targetProvider.id}>
+                            {targetProvider.config?.displayName?.trim() || targetProvider.name} ({targetProvider.slug})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="rounded-xl border border-base-300/50 bg-base-200/25 px-4 py-3 text-sm leading-6 opacity-80">
+                      {draft.displayTargetProviderId
+                        ? (() => {
+                            const targetProvider = providers.find((item) => item.id === draft.displayTargetProviderId) ?? null;
+                            const targetDisplayName = targetProvider?.config?.displayName?.trim() || targetProvider?.name;
+                            return (
+                              <>
+                                <div className="font-medium">当前将归并展示到：{targetDisplayName}</div>
+                                <div className="mt-1 text-xs opacity-70">仅影响前台展示分组、名称和品牌色，不修改已有模型所属 provider。</div>
+                              </>
+                            );
+                          })()
+                        : (
+                          <>
+                            <div className="font-medium">当前独立展示</div>
+                            <div className="mt-1 text-xs opacity-70">适合保留该 provider 自己的名称、品牌色和分组。</div>
+                          </>
+                        )}
                     </div>
                   </div>
 

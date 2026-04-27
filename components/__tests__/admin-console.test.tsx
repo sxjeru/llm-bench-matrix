@@ -1787,6 +1787,74 @@ describe("AdminConsole provider config", () => {
     expect(payload.config?.branding?.color).toBeNull();
   });
 
+  test("删除 provider 需二次确认，并携带迁移目标执行删除", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetchSequence({ ok: true, providerId: 1, transferTargetProviderId: 2, transferredModelCount: 1 });
+
+    render(
+      <AdminConsole
+        {...buildProps()}
+        providers={[
+          {
+            id: 1,
+            name: "OpenAI",
+            slug: "openai",
+            config: {
+              displayName: "OpenAI Official",
+              prefixRules: [{ prefix: "gpt-", enabled: true }],
+              branding: { color: "#00d084" }
+            }
+          },
+          { id: 2, name: "Google", slug: "google" }
+        ]}
+      />
+    );
+
+    const openAiSection = await openProviderConfigPanel(user, "OpenAI");
+    const deleteButton = within(openAiSection).getByRole("button", { name: "删除 Provider" });
+    const saveButton = within(openAiSection).getByRole("button", { name: "保存配置" });
+
+    expect(deleteButton).toBeInTheDocument();
+    expect(saveButton).toBeInTheDocument();
+
+    await user.click(deleteButton);
+
+    const confirmTitle = await screen.findByText("确认删除 Provider？");
+    const confirmDialog = confirmTitle.closest("div.w-full.max-w-xl") as HTMLElement | null;
+    if (!confirmDialog) {
+      throw new Error("Provider delete confirm dialog not found");
+    }
+
+    const transferSelect = within(confirmDialog).getByRole("combobox") as HTMLSelectElement;
+    await user.selectOptions(transferSelect, "2");
+
+    await user.click(within(confirmDialog).getByRole("button", { name: "确认迁移并删除" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const [url, requestInit] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe("/api/admin/providers");
+
+    const payload = JSON.parse(((requestInit as RequestInit).body ?? "{}") as string) as {
+      providerId?: number;
+      config?: {
+        displayName?: string | null;
+        displayTargetProviderId?: number | null;
+        prefixRules?: Array<{ prefix: string; enabled: boolean }>;
+        branding?: {
+          color?: string | null;
+        };
+      };
+    };
+
+    expect(payload).toEqual({
+      providerId: 1,
+      transferTargetProviderId: 2
+    });
+  });
+
   test("保存 provider 配置时保留 prefix rule 的 priority 与 note", async () => {
     const user = userEvent.setup();
     const fetchMock = mockFetchSequence({ provider: { id: 1 } });
@@ -1837,6 +1905,43 @@ describe("AdminConsole provider config", () => {
       { prefix: "gpt-", enabled: true, priority: 1, note: "Primary" },
       { prefix: "o1-", enabled: false, note: "Legacy" }
     ]);
+  });
+
+  test("可设置展示归并目标并正确提交 payload", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetchSequence({ provider: { id: 1 } });
+
+    render(
+      <AdminConsole
+        {...buildPropsWithDisplayName()}
+        providers={[
+          { id: 1, name: "OpenAI", slug: "openai", config: { displayName: "OpenAI Official" } },
+          { id: 2, name: "Google", slug: "google", config: { displayName: "Google Labs" } }
+        ]}
+      />
+    );
+
+    const openAiSection = await openProviderConfigPanel(user, "OpenAI");
+    const mergeSelect = within(openAiSection).getByRole("combobox") as HTMLSelectElement;
+
+    await user.selectOptions(mergeSelect, "2");
+
+    expect(within(openAiSection).getByText("当前将归并展示到：Google Labs")).toBeInTheDocument();
+
+    await user.click(within(openAiSection).getByRole("button", { name: "保存配置" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const [, requestInit] = fetchMock.mock.calls[0] ?? [];
+    const payload = JSON.parse(((requestInit as RequestInit).body ?? "{}") as string) as {
+      config?: {
+        displayTargetProviderId?: number | null;
+      };
+    };
+
+    expect(payload.config?.displayTargetProviderId).toBe(2);
   });
 
   test("Provider 搜索支持按 displayName 过滤并展示模型列表", async () => {

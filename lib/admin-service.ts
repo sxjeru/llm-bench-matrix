@@ -90,8 +90,12 @@ type TextParseWarning = {
 /** Structural type covering the Drizzle methods used by entity-ensure helpers. */
 type DbExecutor = Pick<typeof db, "select" | "insert" | "update" | "delete" | "execute">;
 type ProviderConfigTx = Pick<DbTransactionClient, "execute" | "select" | "update">;
+type ProviderDeleteTx = Pick<DbTransactionClient, "execute" | "select" | "update" | "delete">;
 type ProviderConfigTransactionExecutor = {
   transaction<T>(callback: (tx: ProviderConfigTx) => Promise<T>): Promise<T>;
+};
+type ProviderDeleteTransactionExecutor = {
+  transaction<T>(callback: (tx: ProviderDeleteTx) => Promise<T>): Promise<T>;
 };
 type DbTransactionClient = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -1489,6 +1493,26 @@ function validateProviderConfig(providerId: number, config: ProviderConfig, allP
     throw new Error("branding.color 必须是合法的 #RRGGBB");
   }
 
+  if (config.displayTargetProviderId !== undefined) {
+    if (!Number.isInteger(config.displayTargetProviderId) || config.displayTargetProviderId <= 0) {
+      throw new Error("displayTargetProviderId 必须是合法 provider id");
+    }
+
+    if (config.displayTargetProviderId === providerId) {
+      throw new Error("展示归并目标不能是当前 provider 自己");
+    }
+
+    const displayTargetProvider = allProviders.find((provider) => provider.id === config.displayTargetProviderId);
+    if (!displayTargetProvider) {
+      throw new Error(`展示归并目标 provider 不存在: ${config.displayTargetProviderId}`);
+    }
+
+    const displayTargetConfig = normalizeProviderConfig(displayTargetProvider.config);
+    if (displayTargetConfig.displayTargetProviderId === providerId) {
+      throw new Error("展示归并目标不能形成环状配置");
+    }
+  }
+
   const enabledPrefixes = new Map<string, number>();
 
   allProviders.forEach((provider) => {
@@ -1521,6 +1545,11 @@ function mergeProviderConfig(current: unknown, incoming: unknown): ProviderConfi
       ? { displayName: undefined }
       : incomingConfig.displayName !== undefined
         ? { displayName: incomingConfig.displayName }
+        : {}),
+    ...(incomingConfig.displayTargetProviderId === null
+      ? { displayTargetProviderId: undefined }
+      : incomingConfig.displayTargetProviderId !== undefined
+        ? { displayTargetProviderId: incomingConfig.displayTargetProviderId }
         : {}),
     ...(incomingConfig.prefixRules !== undefined ? { prefixRules: incomingConfig.prefixRules } : {}),
     ...(incomingConfig.branding !== undefined
@@ -1727,6 +1756,114 @@ export async function updateProviderConfig(
 
   invalidateAllCaches();
   return updatedProvider;
+}
+
+export async function deleteProviderAndTransferModels(
+  input: { providerId: number; transferTargetProviderId: number },
+  options?: { transactionExecutor?: ProviderDeleteTransactionExecutor }
+) {
+  if (input.providerId === input.transferTargetProviderId) {
+    throw new Error("迁移目标 provider 不能与待删除 provider 相同");
+  }
+
+  const transactionExecutor = options?.transactionExecutor ?? db;
+  const deletedResult = await transactionExecutor.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${sql.raw("2147483001")})`);
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${input.providerId})`);
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${input.transferTargetProviderId})`);
+
+    const [provider] = await tx.select().from(providers).where(eq(providers.id, input.providerId)).limit(1);
+    if (!provider) {
+      throw new Error(`provider not found: ${input.providerId}`);
+    }
+
+    const [targetProvider] = await tx.select().from(providers).where(eq(providers.id, input.transferTargetProviderId)).limit(1);
+    if (!targetProvider) {
+      throw new Error(`transfer target provider not found: ${input.transferTargetProviderId}`);
+    }
+
+    const sourceModels = await tx
+      .select({ id: models.id, modelName: models.modelName })
+      .from(models)
+      .where(eq(models.providerId, input.providerId));
+
+    if (sourceModels.length > 0) {
+      const targetModels = await tx
+        .select({ id: models.id, modelName: models.modelName })
+        .from(models)
+        .where(eq(models.providerId, input.transferTargetProviderId));
+
+      const targetModelByName = new Map(targetModels.map((model) => [model.modelName, model.id]));
+
+      for (const sourceModel of sourceModels) {
+        const conflictTargetId = targetModelByName.get(sourceModel.modelName);
+        if (!conflictTargetId) continue;
+
+        await tx
+          .update(benchmarkValues)
+          .set({ modelId: conflictTargetId })
+          .where(eq(benchmarkValues.modelId, sourceModel.id));
+
+        await tx
+          .update(models)
+          .set({ mergedIntoModelId: conflictTargetId })
+          .where(eq(models.mergedIntoModelId, sourceModel.id));
+
+        await tx.delete(models).where(eq(models.id, sourceModel.id));
+      }
+
+      await tx
+        .update(models)
+        .set({ providerId: input.transferTargetProviderId })
+        .where(eq(models.providerId, input.providerId));
+    }
+
+    const providerRows = await tx.select().from(providers);
+    for (const providerRow of providerRows) {
+      if (providerRow.id === input.providerId) continue;
+      const normalizedConfig = normalizeProviderConfig(providerRow.config);
+      if (normalizedConfig.displayTargetProviderId !== input.providerId) continue;
+
+      const nextConfig = {
+        ...normalizedConfig,
+        displayTargetProviderId: undefined
+      };
+
+      validateProviderConfig(providerRow.id, nextConfig, providerRows.filter((item) => item.id !== input.providerId));
+
+      await tx
+        .update(providers)
+        .set({
+          config: nextConfig,
+          updatedAt: new Date()
+        })
+        .where(eq(providers.id, providerRow.id));
+    }
+
+    const deletedProviders = await tx
+      .delete(providers)
+      .where(eq(providers.id, input.providerId))
+      .returning({ id: providers.id, name: providers.name });
+
+    return {
+      deletedProvider: deletedProviders[0] ?? null,
+      transferredModelCount: sourceModels.length,
+      transferTargetProviderId: input.transferTargetProviderId
+    };
+  });
+
+  if (!deletedResult.deletedProvider) {
+    throw new Error("failed to delete provider");
+  }
+
+  invalidateAllCaches();
+  return {
+    ok: true,
+    providerId: deletedResult.deletedProvider.id,
+    providerName: deletedResult.deletedProvider.name,
+    transferTargetProviderId: deletedResult.transferTargetProviderId,
+    transferredModelCount: deletedResult.transferredModelCount
+  };
 }
 
 function inferModalitiesFromCategory(category: string | null): string[] {
@@ -5569,6 +5706,13 @@ export async function __updateProviderConfigForTest(
   options?: { db?: DbExecutor; transactionExecutor?: ProviderConfigTransactionExecutor }
 ) {
   return updateProviderConfig(input, options);
+}
+
+export async function __deleteProviderAndTransferModelsForTest(
+  input: { providerId: number; transferTargetProviderId: number },
+  options?: { transactionExecutor?: ProviderDeleteTransactionExecutor }
+) {
+  return deleteProviderAndTransferModels(input, options);
 }
 
 export async function __getProviderNameForModelForTest(modelName: string, options?: { db?: DbExecutor }) {
