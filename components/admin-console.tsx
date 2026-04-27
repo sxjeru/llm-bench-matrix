@@ -4147,6 +4147,8 @@ export function AdminConsole({
                   />
                 </div>
                 <textarea
+                  id="csv-text-import-input"
+                  aria-label="粘贴 CSV / 文本"
                   className="textarea textarea-bordered min-h-[180px] w-full"
                   value={csvText}
                   onChange={(e) => {

@@ -295,7 +295,7 @@ describe("paper-table 文本解析", () => {
 
   test("Tab 矩阵文本可正确识别 Vision/Audio 分类与模态", () => {
     const inputText = [
-      "Gemma 4 31B\tGemma 4 26B A4B",
+      "\tGemma 4 31B\tGemma 4 26B A4B",
       "MMLU Pro\t85.2%\t82.6%",
       "Vision\t\t",
       "MMMU Pro\t76.9%\t73.8%",
@@ -615,7 +615,7 @@ describe("paper-table 文本解析", () => {
     const modelNames = new Set(parsed.rows.map((row) => row.modelName));
     expect(modelNames.has("Benchmark")).toBe(false);
     expect(modelNames.has("Category")).toBe(false);
-    expect(modelNames.has("GPT‑5.3-Codex")).toBe(true);
+    expect(modelNames.has("GPT-5.3-Codex")).toBe(true);
 
     const gpqaRows = parsed.rows.filter((row) => row.benchmarkName === "GPQA Diamond");
     expect(gpqaRows.length).toBe(8);

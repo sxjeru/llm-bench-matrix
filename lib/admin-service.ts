@@ -3076,24 +3076,33 @@ export async function importStructuredRows(
     benchTime?: Date;
   }
 ) {
-  const normalizedRows = (await Promise.all(rows
-    .map(async (row, index) => {
+  const normalizedRows: NormalizedTextImportRow[] = [];
+
+  for (const [index, row] of rows.entries()) {
       const modelName = normalizeNameParenthesisSpacing(row.modelName || "");
       const benchmarkName = normalizeNameParenthesisSpacing(row.benchmarkName || "");
       const benchmarkType = (row.benchmarkType || "general").trim() || "general";
-      const providerName = (
-        row.providerName?.trim()
-        || await resolveProviderCanonicalNameForModel(modelName)
-        || "Unknown"
-      ).trim();
       const rawBenchTime = row.benchTime ?? options?.benchTime ?? new Date();
       const benchTime = rawBenchTime instanceof Date ? rawBenchTime : new Date(rawBenchTime);
 
       if (!modelName || !benchmarkName || isEmptyImportValue(row.rawValue) || Number.isNaN(benchTime.getTime())) {
-        return null;
+        continue;
       }
 
-      return {
+      let providerName = row.providerName?.trim() || "";
+      if (!providerName) {
+        try {
+          providerName = (await resolveProviderCanonicalNameForModel(modelName)).trim();
+        } catch {
+          providerName = "";
+        }
+      }
+
+      if (!providerName) {
+        providerName = inferProviderNameFromModel(modelName);
+      }
+
+      normalizedRows.push({
         rowNumber: row.rowNumber ?? index + 1,
         providerName,
         modelName,
@@ -3111,9 +3120,8 @@ export async function importStructuredRows(
         modelAlias: row.modelAlias ?? null,
         sourceModelId: row.sourceModelId ?? null,
         sourceBenchmarkId: row.sourceBenchmarkId ?? null
-      } as NormalizedTextImportRow;
-    })))
-    .filter((row): row is NormalizedTextImportRow => row !== null);
+      });
+  }
 
   const expandedRows = expandMetricLabeledImportRows(normalizedRows);
   const { inserted } = await importNormalizedRows(expandedRows);
@@ -3338,6 +3346,22 @@ function isMatrixCategoryHeaderCell(input: string): boolean {
   return /(评测大类|大类|类别|分类|领域|赛道)/.test(normalized);
 }
 
+function getMatrixRowValues(cells: string[], startIndex: number, count: number): string[] {
+  if (count <= 0) return [];
+
+  return Array.from({ length: count }, (_, offset) => (cells[startIndex + offset] || "").trim());
+}
+
+function hasAnyMatrixValue(values: string[]): boolean {
+  return values.some((value) => !isEmptyImportValue(value));
+}
+
+function isPureMatrixCategoryRow(categoryInput: string, benchmarkInput: string, modelValues: string[]): boolean {
+  if (!categoryInput || benchmarkInput) return false;
+
+  return !hasAnyMatrixValue(modelValues);
+}
+
 function parseMatrixTextRows(inputText: string, defaultSource: string | null): ParsedTextImportResult {
   const rawLines = inputText
     .split(/\r?\n/)
@@ -3445,7 +3469,9 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
   const defaultModalities = preambleTypeHint ? inferModalitiesFromCategory(preambleTypeHint) : ["Text"];
   let currentBenchmarkType = preambleTypeHint ?? "General";
   let currentBenchmarkTypeProvided = Boolean((preambleTypeHint ?? "").trim());
-  let currentModalities = defaultModalities;
+  let currentModalities = currentBenchmarkTypeProvided
+    ? inferModalitiesFromCategory(currentBenchmarkType)
+    : defaultModalities;
   let pendingBenchmarkPrefix: string | null = null;
 
   for (let lineIndex = headerLineIndex + 1; lineIndex < rawLines.length; lineIndex += 1) {
@@ -3453,22 +3479,29 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
     const categoryInput = categoryColumnIndex >= 0
       ? normalizeNameParenthesisSpacing(cells[categoryColumnIndex] || "")
       : "";
+    const rawBenchmarkInput = normalizeNameParenthesisSpacing(cells[benchmarkColumnIndex] || "");
+    const modelValues = getMatrixRowValues(cells, modelValueStartIndex, modelNames.length);
+
+    if (isPureMatrixCategoryRow(categoryInput, rawBenchmarkInput, modelValues)) {
+      currentBenchmarkType = categoryInput;
+      currentBenchmarkTypeProvided = true;
+      currentModalities = inferModalitiesFromCategory(categoryInput);
+      pendingBenchmarkPrefix = null;
+      continue;
+    }
 
     if (categoryInput) {
       currentBenchmarkType = categoryInput;
       currentBenchmarkTypeProvided = true;
-      const sectionTypeHint = inferTypeFromPreambleLine(categoryInput);
-      currentModalities = sectionTypeHint ? inferModalitiesFromCategory(sectionTypeHint) : defaultModalities;
+      currentModalities = inferModalitiesFromCategory(categoryInput);
       pendingBenchmarkPrefix = null;
     }
 
-    const rawBenchmarkInput = normalizeNameParenthesisSpacing(cells[benchmarkColumnIndex] || "");
+    const allModelValuesEmpty = !hasAnyMatrixValue(modelValues);
 
-    const allModelValuesEmpty = modelNames.every((_, modelIndex) =>
-      isEmptyImportValue((cells[modelValueStartIndex + modelIndex] || "").trim())
-    );
-
-    if (allModelValuesEmpty && !categoryInput && rawBenchmarkInput) {
+    const knownTypeMarker = inferTypeFromPreambleLine(rawBenchmarkInput);
+    
+    if (allModelValuesEmpty && !categoryInput && rawBenchmarkInput && !knownTypeMarker) {
       const nextRawLine = rawLines[lineIndex + 1];
       if (nextRawLine) {
         const nextCells = splitTableLine(nextRawLine);
