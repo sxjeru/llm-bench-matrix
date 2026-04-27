@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "vitest";
+import { beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import type { ProviderConfig } from "@/lib/db/schema";
 import { providers } from "@/lib/db/schema";
 
@@ -10,6 +10,7 @@ let validateProviderConfigForTest: (
 ) => void;
 let mergeProviderConfigForTest: (current: ProviderConfig, incoming: unknown) => ProviderConfig;
 let resolveProviderBrandColorForTest: (providerName: string | null | undefined, configuredColor?: string | null) => string;
+let updateProviderConfigForTest: typeof import("@/lib/admin-service").__updateProviderConfigForTest;
 
 // Helper to create mock provider objects
 function mockProvider(
@@ -34,7 +35,12 @@ beforeAll(async () => {
   normalizeProviderConfigForTest = adminServiceModule.__normalizeProviderConfigForTest;
   validateProviderConfigForTest = adminServiceModule.__validateProviderConfigForTest;
   mergeProviderConfigForTest = adminServiceModule.__mergeProviderConfigForTest;
+  updateProviderConfigForTest = adminServiceModule.__updateProviderConfigForTest;
   resolveProviderBrandColorForTest = providerConfigModule.resolveProviderBrandColor;
+});
+
+beforeEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("normalizeProviderConfig", () => {
@@ -448,5 +454,70 @@ describe("provider config patch merge", () => {
     expect(merged.displayName).toBe("OpenAI");
     expect(merged.prefixRules).toEqual([{ prefix: "gpt-", enabled: true }]);
     expect(merged.branding).toBeUndefined();
+  });
+
+  test("应该在 branding={} 时保留已有品牌色", () => {
+    const merged = mergeProviderConfigForTest(
+      {
+        displayName: "OpenAI",
+        branding: { color: "#00d084" }
+      },
+      {
+        branding: {}
+      }
+    );
+
+    expect(merged.displayName).toBe("OpenAI");
+    expect(merged.branding?.color).toBe("#00d084");
+  });
+});
+
+describe("updateProviderConfig", () => {
+  test("应该在事务中加 advisory lock 并更新清空后的配置", async () => {
+    const provider = mockProvider(7, "OpenAI", {
+      displayName: "OpenAI",
+      prefixRules: [{ prefix: "gpt-", enabled: true }],
+      branding: { color: "#00d084" }
+    });
+
+    const updateResult = [{ ...provider, config: { prefixRules: [{ prefix: "gpt-", enabled: true }] } }];
+    const execute = vi.fn().mockResolvedValue(undefined);
+    const limit = vi.fn().mockResolvedValue([provider]);
+    const whereSelect = vi.fn().mockReturnValue({ limit });
+    const fromSelect = vi.fn()
+      .mockReturnValueOnce({ where: whereSelect })
+      .mockReturnValueOnce([provider]);
+    const select = vi.fn().mockReturnValue({ from: fromSelect });
+    const returning = vi.fn().mockResolvedValue(updateResult);
+    const whereUpdate = vi.fn().mockReturnValue({ returning });
+    const set = vi.fn().mockReturnValue({ where: whereUpdate });
+    const update = vi.fn().mockReturnValue({ set });
+    const tx = { execute, select, update };
+    const transactionExecutor = {
+      transaction<T>(callback: (value: typeof tx) => Promise<T>): Promise<T> {
+        return callback(tx);
+      }
+    };
+
+    const result = await updateProviderConfigForTest(
+      {
+        providerId: 7,
+        config: {
+          displayName: null,
+          branding: { color: null }
+        }
+      },
+      {
+        transactionExecutor
+      }
+    );
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(select).toHaveBeenCalledTimes(2);
+    expect(set).toHaveBeenCalledWith({
+      config: { prefixRules: [{ prefix: "gpt-", enabled: true }] },
+      updatedAt: expect.any(Date)
+    });
+    expect(result.config).toEqual({ prefixRules: [{ prefix: "gpt-", enabled: true }] });
   });
 });

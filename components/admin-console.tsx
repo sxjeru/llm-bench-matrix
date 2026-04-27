@@ -425,6 +425,16 @@ async function postFormData(url: string, formData: FormData) {
   return data;
 }
 
+function isProviderOption(value: unknown): value is ProviderOption {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && typeof (value as { id?: unknown }).id === "number"
+    && typeof (value as { name?: unknown }).name === "string"
+    && typeof (value as { slug?: unknown }).slug === "string"
+  );
+}
+
 function getTextImportBenchmarkKey(benchmarkName: string, benchmarkType: string): string {
   return `${benchmarkName}@@${benchmarkType}`;
 }
@@ -1014,7 +1024,7 @@ export function AdminConsole({
       validateProviderDraft(providerId, draft);
       setSavingProviderConfigId(providerId);
 
-      await postJson(
+      const result = await postJson(
         "/api/admin/providers",
         {
           providerId,
@@ -1039,6 +1049,13 @@ export function AdminConsole({
         },
         "PATCH"
       );
+
+      if (isProviderOption(result?.provider) && result.provider.id === providerId) {
+        setProviderConfigDrafts((prev) => ({
+          ...prev,
+          [providerId]: toProviderConfigDraft(result.provider)
+        }));
+      }
 
       router.refresh();
       notifySuccess("Provider 配置已保存。", ["展示名、前缀规则、配色均已提交，页面已自动刷新。"]); 

@@ -89,6 +89,10 @@ type TextParseWarning = {
 
 /** Structural type covering the Drizzle methods used by entity-ensure helpers. */
 type DbExecutor = Pick<typeof db, "select" | "insert" | "update" | "delete" | "execute">;
+type ProviderConfigTx = Pick<DbTransactionClient, "execute" | "select" | "update">;
+type ProviderConfigTransactionExecutor = {
+  transaction<T>(callback: (tx: ProviderConfigTx) => Promise<T>): Promise<T>;
+};
 type DbTransactionClient = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 const EMPTY_VALUE_MARKERS = new Set(["", "-", "--", "—", "na", "n/a", "null", "none"]);
@@ -1509,6 +1513,37 @@ function validateProviderConfig(providerId: number, config: ProviderConfig, allP
   }
 }
 
+function mergeProviderConfig(current: unknown, incoming: unknown): ProviderConfig {
+  const currentConfig = normalizeProviderConfig(current);
+  const incomingConfig = incoming && typeof incoming === "object" && !Array.isArray(incoming)
+    ? incoming as ProviderConfig
+    : {};
+
+  const mergedConfig: ProviderConfig = {
+    ...currentConfig,
+    ...(incomingConfig.displayName === null
+      ? { displayName: undefined }
+      : incomingConfig.displayName !== undefined
+        ? { displayName: incomingConfig.displayName }
+        : {}),
+    ...(incomingConfig.prefixRules !== undefined ? { prefixRules: incomingConfig.prefixRules } : {}),
+    ...(incomingConfig.branding !== undefined
+      ? {
+          branding: {
+            ...currentConfig.branding,
+            ...(incomingConfig.branding.color === null
+              ? { color: undefined }
+              : incomingConfig.branding.color !== undefined
+                ? { color: incomingConfig.branding.color }
+                : {})
+          }
+        }
+      : {})
+  };
+
+  return normalizeProviderConfig(mergedConfig);
+}
+
 function resolveProviderByConfig(
   modelName: string,
   providerRows: Array<typeof providers.$inferSelect>
@@ -1687,41 +1722,32 @@ async function buildProviderCanonicalNameResolver(
   };
 }
 
-export async function updateProviderConfig(input: { providerId: number; config: unknown }, options?: { db?: DbExecutor }) {
-  const executor = options?.db ?? db;
-  const [provider] = await executor.select().from(providers).where(eq(providers.id, input.providerId)).limit(1);
-  if (!provider) {
-    throw new Error(`provider not found: ${input.providerId}`);
-  }
+export async function updateProviderConfig(
+  input: { providerId: number; config: unknown },
+  options?: { db?: DbExecutor; transactionExecutor?: ProviderConfigTransactionExecutor }
+) {
+  const transactionExecutor = options?.transactionExecutor ?? db;
+  const updatedResult = await transactionExecutor.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${input.providerId})`);
 
-  const currentConfig = normalizeProviderConfig(provider.config);
-  const incomingConfig = input.config && typeof input.config === "object" && !Array.isArray(input.config)
-    ? input.config as ProviderConfig
-    : {};
-  const mergedConfig = {
-    ...currentConfig,
-    ...incomingConfig,
-    ...(incomingConfig.branding !== undefined
-      ? {
-          branding: {
-            ...currentConfig.branding,
-            ...incomingConfig.branding
-          }
-        }
-      : {})
-  };
-  const normalizedConfig = normalizeProviderConfig(mergedConfig);
-  const allProviders = await executor.select().from(providers);
-  validateProviderConfig(input.providerId, normalizedConfig, allProviders);
+    const [provider] = await tx.select().from(providers).where(eq(providers.id, input.providerId)).limit(1);
+    if (!provider) {
+      throw new Error(`provider not found: ${input.providerId}`);
+    }
 
-  const updatedResult = await executor
-    .update(providers)
-    .set({
-      config: normalizedConfig,
-      updatedAt: new Date()
-    })
-    .where(eq(providers.id, input.providerId))
-    .returning();
+    const normalizedConfig = mergeProviderConfig(provider.config, input.config);
+    const allProviders = await tx.select().from(providers);
+    validateProviderConfig(input.providerId, normalizedConfig, allProviders);
+
+    return tx
+      .update(providers)
+      .set({
+        config: normalizedConfig,
+        updatedAt: new Date()
+      })
+      .where(eq(providers.id, input.providerId))
+      .returning();
+  });
 
   const updatedProvider = firstResultRow<typeof providers.$inferSelect>(updatedResult);
   if (!updatedProvider) {
@@ -5564,25 +5590,13 @@ export function __validateProviderConfigForTest(providerId: number, config: Prov
 }
 
 export function __mergeProviderConfigForTest(current: ProviderConfig, incoming: unknown): ProviderConfig {
-  const incomingConfig = incoming && typeof incoming === "object" && !Array.isArray(incoming)
-    ? incoming as ProviderConfig
-    : {};
-
-  return normalizeProviderConfig({
-    ...normalizeProviderConfig(current),
-    ...incomingConfig,
-    ...(incomingConfig.branding !== undefined
-      ? {
-          branding: {
-            ...normalizeProviderConfig(current).branding,
-            ...incomingConfig.branding
-          }
-        }
-      : {})
-  });
+  return mergeProviderConfig(current, incoming);
 }
 
-export async function __updateProviderConfigForTest(input: { providerId: number; config: unknown }, options?: { db?: DbExecutor }) {
+export async function __updateProviderConfigForTest(
+  input: { providerId: number; config: unknown },
+  options?: { db?: DbExecutor; transactionExecutor?: ProviderConfigTransactionExecutor }
+) {
   return updateProviderConfig(input, options);
 }
 
