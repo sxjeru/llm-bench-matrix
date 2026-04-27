@@ -1601,32 +1601,6 @@ export async function getProviderNameForModel(modelName: string, options?: { db?
   return inferProviderNameFromModel(cleanName);
 }
 
-async function resolveProviderCanonicalNameForModel(modelName: string, options?: { db?: DbExecutor }) {
-  const executor = options?.db ?? db;
-  const cleanName = normalizeNameParenthesisSpacing(modelName);
-  if (!cleanName) return "Unknown";
-
-  const canonicalKey = buildModelCanonicalKey(cleanName, await getModelDedupeRule());
-  const [exactModel] = await executor.select().from(models).where(eq(models.canonicalKey, canonicalKey)).limit(1);
-
-  if (exactModel) {
-    const [provider] = await executor.select().from(providers).where(eq(providers.id, exactModel.providerId)).limit(1);
-    if (provider) {
-      return provider.name;
-    }
-
-    return inferProviderNameFromModel(cleanName);
-  }
-
-  const providerRows = await executor.select().from(providers);
-  const configMatchedProvider = resolveProviderByConfig(cleanName, providerRows);
-  if (configMatchedProvider) {
-    return configMatchedProvider.name;
-  }
-
-  return inferProviderNameFromModel(cleanName);
-}
-
 async function buildProviderCanonicalNameResolver(
   rows: Array<Pick<StructuredImportRowInput, "modelName" | "providerName">>,
   options?: { db?: DbExecutor }
