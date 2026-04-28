@@ -869,6 +869,7 @@ export function AdminConsole({
   const [providerSearchQuery, setProviderSearchQuery] = useState("");
   const [providerSearchOpen, setProviderSearchOpen] = useState(false);
   const providerSearchRef = useRef<HTMLDivElement>(null);
+  const providerDropdownRef = useRef<HTMLDivElement>(null);
 
   const filteredProviderOptions = useMemo(() => {
     const query = providerSearchQuery.trim().toLowerCase();
@@ -878,6 +879,19 @@ export function AdminConsole({
       return p.name.toLowerCase().includes(query) || p.slug.toLowerCase().includes(query) || displayName.includes(query);
     });
   }, [providers, providerSearchQuery]);
+
+  // Auto-scroll dropdown to selected provider when opened
+  useEffect(() => {
+    if (!providerSearchOpen || selectedProviderConfigId === null) return;
+    requestAnimationFrame(() => {
+      const container = providerDropdownRef.current;
+      if (!container) return;
+      const activeElement = container.querySelector<HTMLElement>('[data-provider-active="true"]');
+      if (activeElement) {
+        activeElement.scrollIntoView({ block: "nearest" });
+      }
+    });
+  }, [providerSearchOpen, selectedProviderConfigId]);
 
   const selectedProviderForConfig = useMemo(
     () => (selectedProviderConfigId !== null ? providers.find((p) => p.id === selectedProviderConfigId) ?? null : null),
@@ -5378,7 +5392,7 @@ export function AdminConsole({
                   const showCreateOption = trimmedQuery.length > 0 && !hasExactMatch;
 
                   return (
-                    <div className="absolute left-0 right-0 top-full z-50 mt-1.5 max-h-72 overflow-auto rounded-xl border border-base-300/80 bg-base-100 py-1 shadow-xl">
+                    <div ref={providerDropdownRef} className="absolute left-0 right-0 top-full z-50 mt-1.5 max-h-72 overflow-auto rounded-xl border border-base-300/80 bg-base-100 py-1 shadow-xl">
                       {showCreateOption ? (
                         <div
                           role="button"
@@ -5408,10 +5422,15 @@ export function AdminConsole({
                         filteredProviderOptions.map((p) => {
                           const isActive = p.id === selectedProviderConfigId;
                           const pColor = resolveProviderBrandColor(p.name, p.config?.branding?.color);
+                          const mergeTargetId = p.config?.displayTargetProviderId;
+                          const mergeTargetProvider = typeof mergeTargetId === "number"
+                            ? providers.find((tp) => tp.id === mergeTargetId)
+                            : null;
                           return (
                             <div
                               key={`provider-search-${p.id}`}
                               role="button"
+                              data-provider-active={isActive ? "true" : undefined}
                               className={`flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left text-sm font-normal transition-colors ${
                                 isActive
                                   ? "bg-primary/10 font-medium text-primary"
@@ -5427,7 +5446,15 @@ export function AdminConsole({
                                 className="inline-block h-3 w-3 shrink-0 rounded-full ring-1 ring-black/10"
                                 style={{ backgroundColor: pColor }}
                               />
-                              <span className="flex-1 truncate">{p.name}</span>
+                              <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate">
+                                {p.name}
+                                {mergeTargetProvider ? (
+                                  <span className="inline-flex items-center gap-0.5 rounded bg-base-200/80 px-1 py-0.5 text-[10px] font-normal opacity-60">
+                                    <MergeIcon size={10} className="shrink-0" />
+                                    {mergeTargetProvider.config?.displayName?.trim() || mergeTargetProvider.name}
+                                  </span>
+                                ) : null}
+                              </span>
                               <span className="shrink-0 rounded-md bg-base-200/80 px-1.5 py-0.5 text-[11px] opacity-60">{p.slug}</span>
                               {isActive ? <Check size={14} className="shrink-0 text-primary" /> : null}
                             </div>
@@ -5518,11 +5545,19 @@ export function AdminConsole({
                     <div className="form-control w-full">
                       <span className="label-text mb-1.5 text-xs font-medium opacity-70">品牌色</span>
                       <div className="flex items-center gap-2">
-                        <div className="relative shrink-0">
+                        <label className="relative shrink-0 cursor-pointer">
                           <input
                             type="color"
                             className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
                             value={isValidHexColor(draft.brandingColor) ? draft.brandingColor : previewBrandColor}
+                            onClick={() => {
+                              if (!draft.brandingColor) {
+                                updateProviderDraft(provider.id, (current) => ({
+                                  ...current,
+                                  brandingColor: previewBrandColor
+                                }));
+                              }
+                            }}
                             onChange={(e) =>
                               updateProviderDraft(provider.id, (current) => ({
                                 ...current,
@@ -5536,16 +5571,37 @@ export function AdminConsole({
                           >
                             <Palette size={16} className="text-white/80 drop-shadow-sm" />
                           </div>
-                        </div>
+                        </label>
                         <input
                           className="input input-bordered min-w-0 flex-1 rounded-xl font-mono text-sm uppercase bg-base-200/40 transition-colors focus:bg-base-100 focus:border-primary focus:outline-none"
                           value={draft.brandingColor}
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            let value = e.target.value;
+                            // Auto-add # prefix: if user types/pastes a bare hex like "112233"
+                            if (/^[0-9a-fA-F]{6}$/.test(value)) {
+                              value = `#${value}`;
+                            }
                             updateProviderDraft(provider.id, (current) => ({
                               ...current,
-                              brandingColor: e.target.value
-                            }))
-                          }
+                              brandingColor: value
+                            }));
+                          }}
+                          onPaste={(e: ClipboardEvent<HTMLInputElement>) => {
+                            const pasted = e.clipboardData.getData("text").trim();
+                            if (/^[0-9a-fA-F]{6}$/.test(pasted)) {
+                              e.preventDefault();
+                              updateProviderDraft(provider.id, (current) => ({
+                                ...current,
+                                brandingColor: `#${pasted}`
+                              }));
+                            } else if (/^#[0-9a-fA-F]{6}$/.test(pasted)) {
+                              e.preventDefault();
+                              updateProviderDraft(provider.id, (current) => ({
+                                ...current,
+                                brandingColor: pasted
+                              }));
+                            }
+                          }}
                           placeholder="#34D399"
                           maxLength={7}
                         />

@@ -2163,16 +2163,22 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const allRowsIndex = useMemo(() => {
     const modelProviderMap = new Map<string, ProviderIdentity>();
     const modelProviderBrandColorMap = new Map<string, string | null>();
+    const providerDisplayNameBrandColorMap = new Map<string, string | null>();
     const rowsByModel = new Map<string, IndexedMatrixInputRow[]>();
     const rowsByGroupingKey = new Map<string, IndexedMatrixInputRow[]>();
 
     allRows.forEach((row) => {
       if (!modelProviderMap.has(row.modelName)) {
+        const displayName = row.providerDisplayName?.trim() || row.providerName || "Unknown";
         modelProviderMap.set(row.modelName, {
           canonicalName: row.providerName || "Unknown",
-          displayName: row.providerDisplayName?.trim() || row.providerName || "Unknown"
+          displayName
         });
         modelProviderBrandColorMap.set(row.modelName, row.providerBrandColor ?? null);
+
+        if (!providerDisplayNameBrandColorMap.has(displayName)) {
+          providerDisplayNameBrandColorMap.set(displayName, row.providerBrandColor ?? null);
+        }
       }
 
       const indexed: IndexedMatrixInputRow = {
@@ -2194,6 +2200,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     return {
       modelProviderMap,
       modelProviderBrandColorMap,
+      providerDisplayNameBrandColorMap,
       rowsByModel,
       rowsByGroupingKey
     };
@@ -4269,7 +4276,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                         }}
                         onChange={(e) => toggleProvider(group.providerName, e.target.checked)}
                       />
-                      <span className="text-sm font-medium" style={{ color: resolveProviderBrandColor(group.providerName) }}>
+                      <span className="text-sm font-medium" style={{ color: resolveProviderBrandColor(group.providerName, allRowsIndex.providerDisplayNameBrandColorMap.get(group.providerName) ?? null) }}>
                         {group.providerName}
                         {providerHasBaseModel ? null : <span className="ml-1 text-[10px] opacity-70">(跨页签)</span>}
                       </span>
