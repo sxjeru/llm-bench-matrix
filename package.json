@@ -17,7 +17,7 @@
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^1.0.2",
+    "@neondatabase/serverless": "^1.1.0",
     "@vercel/analytics": "^2.0.1",
     "csv-parse": "^6.1.0",
     "date-fns": "^4.1.0",
