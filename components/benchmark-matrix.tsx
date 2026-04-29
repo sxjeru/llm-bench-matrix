@@ -1,12 +1,13 @@
 "use client";
 
+/* eslint-disable react-hooks/preserve-manual-memoization -- This large matrix keeps hand-tuned memoization to preserve table behavior. */
+
 import {
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -19,1390 +20,118 @@ import {
   Eye,
   EyeOff,
   Filter,
-  Headphones,
   ImageDown,
   Layers,
   Minimize2,
-  TriangleAlert,
-  Video
+  TriangleAlert
 } from "lucide-react";
-import { isValidHexColor, resolveProviderBrandColor } from "@/lib/provider-config";
+import { resolveProviderBrandColor } from "@/lib/provider-config";
+import {
+  type MatrixInputRow,
+  type MatrixCellEntry,
+  type MatrixCell,
+  type IndexedMatrixInputRow,
+  type MatrixRow,
+  type ProviderIdentity,
+  type OverallModelSummary,
+  type RowSortColumn,
+  type RowSortMode,
+  type Props,
+  type HeatmapPresetKey,
+  type HeatmapPresetSelection,
+  type HeatmapPaletteHex,
+  type HeatmapPaletteRgb,
+  type CompareDirection,
+  type ExportPresetKey,
+  type OverallScoreDisplayItem,
+  SOURCE_ALL,
+  MODALITY_OPTIONS,
+  SHOW_CATEGORY_STORAGE_KEY,
+  SHOW_DUPLICATE_STORAGE_KEY,
+  MODEL_SELECTION_BY_SOURCE_STORAGE_KEY,
+  MODEL_ORDER_BY_SOURCE_STORAGE_KEY,
+  COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY,
+  HEATMAP_PALETTE_STORAGE_KEY,
+  EXPORT_PRESET_STORAGE_KEY,
+  CATEGORY_COLUMN_WIDTH_KEY,
+  BENCHMARK_COLUMN_WIDTH_KEY,
+  DEFAULT_CATEGORY_COLUMN_WIDTH,
+  DEFAULT_BENCHMARK_COLUMN_WIDTH,
+  MIN_CATEGORY_COLUMN_WIDTH,
+  MAX_CATEGORY_COLUMN_WIDTH,
+  MIN_BENCHMARK_COLUMN_WIDTH,
+  MAX_BENCHMARK_COLUMN_WIDTH,
+  DEFAULT_MODEL_COLUMN_BASELINE_WIDTH,
+  MIN_MODEL_COLUMN_RESIZE_WIDTH,
+  COMPARE_BASELINE_DEFAULT_EXPANDED_WIDTH,
+  COMPARE_BADGE_DEFAULT_EXPANDED_WIDTH,
+  MAX_MODEL_COLUMN_WIDTH,
+  COLUMN_WIDTH_STORAGE_DEBOUNCE_MS,
+  ALL_SOURCE_ROW_COVERAGE_THRESHOLD,
+  ALL_SOURCE_COLUMN_COVERAGE_THRESHOLD,
+  PROVIDER_MODEL_AUTO_COLLAPSE_LIMIT,
+  HEATMAP_PRESETS,
+  DEFAULT_HEATMAP_PRESET_KEY,
+  DEFAULT_HEATMAP_ALPHA,
+  MIN_HEATMAP_ALPHA,
+  MAX_HEATMAP_ALPHA,
+  EXPORT_PRESET_MAP,
+  DEFAULT_EXPORT_PRESET,
+  DEFAULT_HEATMAP_PALETTE_HEX,
+  isLowerBetterBenchmark,
+  getBenchmarkComparableScore,
+  getSortedQuantile,
+  buildDenseRankMap,
+  buildOverallScoreDisplayDecimalsMap,
+  getMatrixCellDisplayValue,
+  formatTooltipTime,
+  formatValueNumForDisplay,
+  formatComparisonDeltaValue,
+  normalizeHexColor,
+  clampHeatmapAlpha,
+  hexToRgbTuple,
+  rgbaFromHex,
+  getHeatCellStyle,
+  compareSourceTabKeysByVersion,
+  compareModelNameByColumnOrder,
+  isSourceHeaderPrefixMatch,
+  getModelColumnWidthKey,
+  getColumnWidthOverrideKey,
+  clampColumnWidth,
+  normalizeColumnWidthBySource,
+  areColumnWidthMapsEqual,
+  areStringArraysEqual,
+  getSourceKey,
+  getSourceLabel,
+  sourceTabDisplayLabel,
+  pickPreferredBenchmarkDisplayName,
+  getMatrixGroupingKey,
+  normalizeModalityList,
+  renderModalityBadge,
+  normalizeMatchToken,
+  hasMeaningfulMatrixRawValue,
+  getMatrixCellValueIdentity,
+  getMatrixCellSourceValueDedupKey,
+  isCompareModifierClick,
+  isSelectionModifierClick,
+  clampCompareIntensity,
+  getCompareDeltaBadgeStyle,
+  isExportPresetKey,
+  canEncodeCanvasMimeType,
+  mimeTypeToFormat,
+  buildSourceFrameShadows,
+  buildCompareBaselineShadows,
+  renderElementToImageBlob,
+  withTimeout
+} from "./benchmark-matrix/index";
 
-type MatrixInputRow = {
-  recordId?: number | null;
-  providerName: string;
-  providerDisplayName?: string | null;
-  providerBrandColor?: string | null;
-  modelName: string;
-  benchmarkName: string;
-  benchmarkType: string;
-  higherIsBetter?: boolean;
-  benchmarkCanonicalKey?: string | null;
-  modalities?: string[];
-  benchTime: string;
-  valueRaw: string;
-  valueNum: number | null;
-  valueNum2?: number | null;
-  valueNote: string | null;
-  source: string | null;
-};
-
-type MatrixCellEntry = {
-  valueRaw: string;
-  valueNum: number | null;
-  valueNum2: number | null;
-  valueNote: string | null;
-  source: string | null;
-  benchTime: string;
-};
-
-type MatrixCell = {
-  valueRaw: string;
-  valueNum: number | null;
-  valueNum2: number | null;
-  valueNote: string | null;
-  source: string | null;
-  benchTime: string;
-  allEntries: MatrixCellEntry[];
-  hasMultipleValues: boolean;
-  uniqueEntries: MatrixCellEntry[];
-  noteText: string;
-  displayValue: string;
-  hasMeaningfulMultipleValues: boolean;
-  shouldShowQuestionMark: boolean;
-};
-
-type IndexedMatrixInputRow = {
-  row: MatrixInputRow;
-  matrixKey: string;
-};
-
-type MatrixRow = {
-  rowKey: string;
-  category: string;
-  benchmark: string;
-  higherIsBetter: boolean;
-  modalities: string[];
-  cells: Map<string, MatrixCell>;
-  firstSeenIndex: number;
-  sourceOrderKey: number | null;
-  rowDataCount: number;
-  rowNumericCount: number;
-  minComparable: number | null;
-  maxComparable: number | null;
-  minComparable2: number | null;
-  maxComparable2: number | null;
-  minNum: number | null;
-  maxNum: number | null;
-  minNum2: number | null;
-  maxNum2: number | null;
-};
-
-type ProviderIdentity = {
-  canonicalName: string;
-  displayName: string;
-};
-
-type OverallModelSummary = {
-  rawScore: number | null;
-  rawRank: number | null;
-  correctedScore: number | null;
-  correctedRank: number | null;
-  coverage: number;
-  coveredRows: number;
-  totalRows: number;
-  correctionFactor: number;
-};
-
-type RowSortColumn = "category" | "benchmark";
-type RowSortMode = "source" | "alpha" | "data";
-
-const LOWER_IS_BETTER_RULES: RegExp[] = [
-  /omnidocbench\s*1\.5/i,
-  /\b(?:r?mse)\b/i
-];
-const LOWER_IS_BETTER_ASR_TYPE_REGEX = /\basr\b/i;
-
-function isFleursZhTranslationBenchmark(benchmarkName: string): boolean {
-  if (!/fleurs/i.test(benchmarkName)) return false;
-
-  const normalized = benchmarkName
-    .toLowerCase()
-    .replace(/\s+/g, "");
-
-  const hasBiDirectionalHint = /(?:⇄|↔|<->|<=>)/.test(normalized);
-
-  return hasBiDirectionalHint;
-}
-
-function isLowerBetterBenchmark(benchmarkName: string, benchmarkType?: string, higherIsBetter?: boolean): boolean {
-  if (typeof higherIsBetter === "boolean") {
-    return !higherIsBetter;
+function enqueueStateUpdate(callback: () => void) {
+  if (typeof queueMicrotask === "function") {
+    queueMicrotask(callback);
+    return;
   }
 
-  if (benchmarkType && LOWER_IS_BETTER_ASR_TYPE_REGEX.test(benchmarkType)) {
-    return true;
-  }
-
-  if (/fleurs/i.test(benchmarkName)) {
-    return !isFleursZhTranslationBenchmark(benchmarkName);
-  }
-
-  return LOWER_IS_BETTER_RULES.some((rule) => rule.test(benchmarkName));
-}
-
-function getBenchmarkComparableScore(
-  benchmarkName: string,
-  valueNum: number,
-  benchmarkType?: string,
-  higherIsBetter?: boolean
-): number {
-  if (isLowerBetterBenchmark(benchmarkName, benchmarkType, higherIsBetter)) {
-    return 100 - valueNum;
-  }
-
-  return valueNum;
-}
-
-type Props = {
-  rows: MatrixInputRow[];
-  allRows?: MatrixInputRow[];
-  sourceOptions?: string[];
-};
-
-const SOURCE_ALL = "__ALL__";
-const SOURCE_EMPTY = "__EMPTY__";
-const MODALITY_OPTIONS = ["Text", "Vision", "Audio", "Video", "Multimodal"] as const;
-const SHOW_CATEGORY_STORAGE_KEY = "benchmark-matrix:show-category";
-const SHOW_DUPLICATE_STORAGE_KEY = "benchmark-matrix:show-duplicate";
-const MODEL_SELECTION_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:model-selection-by-source";
-const MODEL_ORDER_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:model-order-by-source";
-const COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:column-width-by-source";
-const HEATMAP_PALETTE_STORAGE_KEY = "benchmark-matrix:heatmap-palette";
-const EXPORT_PRESET_STORAGE_KEY = "benchmark-matrix:export-preset";
-const CATEGORY_COLUMN_WIDTH_KEY = "__CATEGORY__";
-const BENCHMARK_COLUMN_WIDTH_KEY = "__BENCHMARK__";
-const DEFAULT_CATEGORY_COLUMN_WIDTH = 150;
-const DEFAULT_BENCHMARK_COLUMN_WIDTH = 180;
-const MIN_CATEGORY_COLUMN_WIDTH = 120;
-const MAX_CATEGORY_COLUMN_WIDTH = 420;
-const MIN_BENCHMARK_COLUMN_WIDTH = 140;
-const MAX_BENCHMARK_COLUMN_WIDTH = 560;
-const DEFAULT_MODEL_COLUMN_BASELINE_WIDTH = 88;
-const MIN_MODEL_COLUMN_RESIZE_WIDTH = 24;
-const COMPARE_BASELINE_DEFAULT_EXPANDED_WIDTH = 86;
-const COMPARE_BADGE_DEFAULT_EXPANDED_WIDTH = 100;
-const MAX_MODEL_COLUMN_WIDTH = 320;
-const COLUMN_WIDTH_STORAGE_DEBOUNCE_MS = 250;
-const ALL_SOURCE_ROW_COVERAGE_THRESHOLD = 0.4;
-const ALL_SOURCE_COLUMN_COVERAGE_THRESHOLD = 0.2;
-const PROVIDER_MODEL_AUTO_COLLAPSE_LIMIT = 8;
-const SOURCE_MATCH_FRAME_COLOR = "rgba(93, 167, 255, 0.42)";
-const COMPARE_BASELINE_FRAME_COLOR = "rgba(250, 211, 106, 0.74)";
-const COMPARE_BASELINE_FRAME_EXPORT_COLOR = "rgba(250, 211, 106, 0.92)";
-const WEBP_EXPORT_QUALITY = 0.94;
-const AVIF_EXPORT_QUALITY = 0.9;
-const HEATMAP_PRESETS = {
-  classic: {
-    label: "经典红黄绿",
-    low: "#ff9b80",
-    mid: "#ffee6f",
-    high: "#a1d48c"
-  },
-  coolwarm: {
-    label: "冷暖蓝橙",
-    low: "#7aa8ff",
-    mid: "#f0f5ff",
-    high: "#ffb07f"
-  },
-  mintsun: {
-    label: "薄荷暖阳",
-    low: "#8bc5ff",
-    mid: "#f9f2b1",
-    high: "#74d8b4"
-  },
-  colorblind: {
-    label: "色盲友好",
-    low: "#8ea4ff",
-    mid: "#d8d8d8",
-    high: "#ffb55e"
-  }
-} as const;
-const DEFAULT_HEATMAP_PRESET_KEY: HeatmapPresetKey = "classic";
-const DEFAULT_HEATMAP_ALPHA = 0.55;
-const MIN_HEATMAP_ALPHA = 0.24;
-const MAX_HEATMAP_ALPHA = 0.92;
-const EXPORT_PRESET_MAP = {
-  "1x-png": { label: "1x PNG", scale: 1, format: "png", mimeType: "image/png" },
-  "2x-png": { label: "2x PNG", scale: 2, format: "png", mimeType: "image/png" },
-  "3x-png": { label: "3x PNG", scale: 3, format: "png", mimeType: "image/png" },
-  "1x-webp": { label: "1x WEBP", scale: 1, format: "webp", mimeType: "image/webp" },
-  "2x-webp": { label: "2x WEBP", scale: 2, format: "webp", mimeType: "image/webp" },
-  "3x-webp": { label: "3x WEBP", scale: 3, format: "webp", mimeType: "image/webp" },
-  "1x-avif": { label: "1x AVIF", scale: 1, format: "avif", mimeType: "image/avif" },
-  "2x-avif": { label: "2x AVIF", scale: 2, format: "avif", mimeType: "image/avif" },
-  "3x-avif": { label: "3x AVIF", scale: 3, format: "avif", mimeType: "image/avif" }
-} as const;
-const DEFAULT_EXPORT_PRESET: ExportPresetKey = "2x-webp";
-
-type HeatmapPresetKey = keyof typeof HEATMAP_PRESETS;
-type HeatmapPresetSelection = HeatmapPresetKey | "custom";
-type HeatmapPaletteHex = {
-  low: string;
-  mid: string;
-  high: string;
-};
-type HeatmapPaletteRgb = {
-  low: [number, number, number];
-  mid: [number, number, number];
-  high: [number, number, number];
-};
-
-const DEFAULT_HEATMAP_PALETTE_HEX: HeatmapPaletteHex = {
-  low: HEATMAP_PRESETS[DEFAULT_HEATMAP_PRESET_KEY].low,
-  mid: HEATMAP_PRESETS[DEFAULT_HEATMAP_PRESET_KEY].mid,
-  high: HEATMAP_PRESETS[DEFAULT_HEATMAP_PRESET_KEY].high
-};
-
-function getModelColumnWidthKey(modelName: string): string {
-  return `model:${modelName}`;
-}
-
-function getColumnWidthOverrideKey(sourceKey: string, columnKey: string): string {
-  return `${sourceKey}::${columnKey}`;
-}
-
-function clampColumnWidth(width: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, Math.round(width)));
-}
-
-function normalizeColumnWidthBySource(input: unknown): Record<string, Record<string, number>> {
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    return {};
-  }
-
-  const normalizedBySource: Record<string, Record<string, number>> = {};
-
-  Object.entries(input as Record<string, unknown>).forEach(([sourceKey, widthMapRaw]) => {
-    if (!widthMapRaw || typeof widthMapRaw !== "object" || Array.isArray(widthMapRaw)) return;
-
-    const normalizedMap: Record<string, number> = {};
-
-    Object.entries(widthMapRaw as Record<string, unknown>).forEach(([columnKey, value]) => {
-      if (typeof value !== "number" || !Number.isFinite(value)) return;
-      normalizedMap[columnKey] = Math.max(1, Math.round(value));
-    });
-
-    normalizedBySource[sourceKey] = normalizedMap;
-  });
-
-  return normalizedBySource;
-}
-
-function areColumnWidthMapsEqual(left: Record<string, number>, right: Record<string, number>): boolean {
-  const leftEntries = Object.entries(left);
-  const rightEntries = Object.entries(right);
-
-  if (leftEntries.length !== rightEntries.length) return false;
-
-  for (const [key, value] of leftEntries) {
-    if (right[key] !== value) return false;
-  }
-
-  return true;
-}
-
-function areStringArraysEqual(left: string[], right: string[]): boolean {
-  if (left.length !== right.length) return false;
-
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-type SourceFrameShadowBuildInput = {
-  isMatched: boolean;
-  isFirst?: boolean;
-  isLast?: boolean;
-  includeTop?: boolean;
-  includeBottom?: boolean;
-  exportMode?: boolean;
-};
-
-type CompareDirection = "up" | "down" | "flat";
-
-type CompareBaselineShadowBuildInput = {
-  isBaseline: boolean;
-  includeTop?: boolean;
-  includeBottom?: boolean;
-  exportMode?: boolean;
-};
-
-function buildSourceFrameShadows(input: SourceFrameShadowBuildInput): string[] {
-  if (!input.isMatched) {
-    return [];
-  }
-
-  const edgeSize = 2;
-  const frameColor = input.exportMode ? "rgba(93, 167, 255, 0.72)" : SOURCE_MATCH_FRAME_COLOR;
-
-  const shadows: string[] = [];
-
-  if (input.includeTop) {
-    shadows.push(`inset 0 ${edgeSize}px 0 ${frameColor}`);
-  }
-  if (input.includeBottom) {
-    shadows.push(`inset 0 -${edgeSize}px 0 ${frameColor}`);
-  }
-  if (input.isFirst) {
-    shadows.push(`inset ${edgeSize}px 0 0 ${frameColor}`);
-  }
-  if (input.isLast) {
-    shadows.push(`inset -${edgeSize}px 0 0 ${frameColor}`);
-  }
-
-  return shadows;
-}
-
-export function __buildSourceFrameShadowsForTest(input: SourceFrameShadowBuildInput): string[] {
-  return buildSourceFrameShadows(input);
-}
-
-function buildCompareBaselineShadows(input: CompareBaselineShadowBuildInput): string[] {
-  if (!input.isBaseline) {
-    return [];
-  }
-
-  const edgeSize = 2;
-  const frameColor = input.exportMode ? COMPARE_BASELINE_FRAME_EXPORT_COLOR : COMPARE_BASELINE_FRAME_COLOR;
-  const shadows = [
-    `inset ${edgeSize}px 0 0 ${frameColor}`,
-    `inset -${edgeSize}px 0 0 ${frameColor}`
-  ];
-
-  if (input.includeTop) {
-    shadows.push(`inset 0 ${edgeSize}px 0 ${frameColor}`);
-  }
-  if (input.includeBottom) {
-    shadows.push(`inset 0 -${edgeSize}px 0 ${frameColor}`);
-  }
-
-  return shadows;
-}
-
-export function __buildCompareBaselineShadowsForTest(input: CompareBaselineShadowBuildInput): string[] {
-  return buildCompareBaselineShadows(input);
-}
-
-function applyExportSourceFrameFallback(root: HTMLElement, color: string, width: number): void {
-  const sourceMatchedCells = root.querySelectorAll<HTMLElement>("[data-source-match='1']");
-
-  sourceMatchedCells.forEach((cell) => {
-    cell.style.boxShadow = "none";
-
-    if (cell.dataset.sourceMatchFirst === "1") {
-      cell.style.borderLeft = `${width}px solid ${color}`;
-    }
-    if (cell.dataset.sourceMatchLast === "1") {
-      cell.style.borderRight = `${width}px solid ${color}`;
-    }
-    if (cell.tagName === "TH") {
-      cell.style.borderTop = `${width}px solid ${color}`;
-    }
-    if (cell.dataset.sourceMatchBottom === "1") {
-      cell.style.borderBottom = `${width}px solid ${color}`;
-    }
-  });
-}
-
-function applyExportCompareBaselineFallback(root: HTMLElement, color: string, width: number): void {
-  const baselineCells = root.querySelectorAll<HTMLElement>("[data-compare-baseline='1']");
-
-  baselineCells.forEach((cell) => {
-    cell.style.borderLeft = `${width}px solid ${color}`;
-    cell.style.borderRight = `${width}px solid ${color}`;
-
-    if (cell.tagName === "TH") {
-      cell.style.borderTop = `${width}px solid ${color}`;
-    }
-
-    if (cell.dataset.compareBaselineBottom === "1") {
-      cell.style.borderBottom = `${width}px solid ${color}`;
-    }
-  });
-}
-
-function applyExportOverallRowNudgeFallback(root: HTMLElement): void {
-  const overallRow = root.querySelector<HTMLTableRowElement>("tr[data-overall-row='1']");
-  if (!overallRow) return;
-
-  const overallBenchmarkLabel = overallRow.querySelector<HTMLElement>("[data-overall-benchmark-label='1']");
-  if (overallBenchmarkLabel) {
-    overallBenchmarkLabel.style.paddingTop = "8px";
-    overallBenchmarkLabel.style.paddingBottom = "4px";
-  }
-
-  const overallBenchmarkCnText = overallRow.querySelector<HTMLElement>("[data-overall-benchmark-cn-text='1']");
-  if (overallBenchmarkCnText) {
-    overallBenchmarkCnText.style.display = "inline-block";
-    overallBenchmarkCnText.style.transform = "translateY(2px)";
-  }
-
-  overallRow.querySelectorAll<HTMLElement>("[data-overall-tooltip-trigger]").forEach((trigger) => {
-    trigger.style.top = "56%";
-  });
-}
-
-export function __applyExportSourceFrameFallbackForTest(root: HTMLElement, color = "rgba(93, 167, 255, 0.65)", width = 2): void {
-  applyExportSourceFrameFallback(root, color, width);
-}
-
-export function __applyExportCompareBaselineFallbackForTest(root: HTMLElement, color = "rgba(250, 211, 106, 0.9)", width = 2): void {
-  applyExportCompareBaselineFallback(root, color, width);
-}
-
-type ExportPresetKey = keyof typeof EXPORT_PRESET_MAP;
-type ExportMimeType = (typeof EXPORT_PRESET_MAP)[ExportPresetKey]["mimeType"];
-type ExportFormat = (typeof EXPORT_PRESET_MAP)[ExportPresetKey]["format"];
-
-function isExportPresetKey(value: string): value is ExportPresetKey {
-  return value in EXPORT_PRESET_MAP;
-}
-
-function canEncodeCanvasMimeType(mimeType: ExportMimeType): boolean {
-  if (typeof document === "undefined") return false;
-
-  const probeCanvas = document.createElement("canvas");
-  probeCanvas.width = 2;
-  probeCanvas.height = 2;
-  const context = probeCanvas.getContext("2d");
-  if (!context) return false;
-
-  context.fillStyle = "#111827";
-  context.fillRect(0, 0, 2, 2);
-
-  try {
-    return probeCanvas.toDataURL(mimeType, 0.9).startsWith(`data:${mimeType}`);
-  } catch {
-    return false;
-  }
-}
-
-function dataUrlToBlob(dataUrl: string): Blob {
-  const [header, base64 = ""] = dataUrl.split(",");
-  const mimeMatch = header.match(/^data:(.*?);base64$/);
-  const mimeType = mimeMatch?.[1] ?? "application/octet-stream";
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-
-  return new Blob([bytes], { type: mimeType });
-}
-
-function getMimeTypeFallbackChain(mimeType: ExportMimeType): ExportMimeType[] {
-  if (mimeType === "image/avif") {
-    return ["image/avif", "image/webp", "image/png"];
-  }
-  if (mimeType === "image/webp") {
-    return ["image/webp", "image/png"];
-  }
-  return ["image/png"];
-}
-
-function getEncoderQuality(mimeType: ExportMimeType): number | undefined {
-  if (mimeType === "image/webp") return WEBP_EXPORT_QUALITY;
-  if (mimeType === "image/avif") return AVIF_EXPORT_QUALITY;
-  return undefined;
-}
-
-function mimeTypeToFormat(mimeType: string): ExportFormat {
-  const normalized = mimeType.toLowerCase();
-  if (normalized.includes("avif")) return "avif";
-  if (normalized.includes("webp")) return "webp";
-  return "png";
-}
-
-type Html2CanvasFn = (element: HTMLElement, options?: Record<string, unknown>) => Promise<HTMLCanvasElement>;
-
-let html2canvasLoaderPromise: Promise<Html2CanvasFn> | null = null;
-
-function getSourceKey(source: string | null): string {
-  const cleaned = source?.trim();
-  return cleaned ? cleaned : SOURCE_EMPTY;
-}
-
-function getSourceLabel(sourceKey: string): string {
-  if (sourceKey === SOURCE_EMPTY) {
-    return "未标注";
-  }
-  return sourceKey;
-}
-
-function sourceTabDisplayLabel(sourceKey: string): string {
-  const rawLabel = getSourceLabel(sourceKey);
-  const colonIndex = rawLabel.indexOf(":");
-  if (colonIndex < 0) return rawLabel;
-
-  const stripped = rawLabel.slice(colonIndex + 1).trim();
-  return stripped.length > 0 ? stripped : rawLabel;
-}
-
-function normalizeBenchmarkKeyFallback(input: string): string {
-  return input
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function normalizeBenchmarkDuplicateToken(input: string): string {
-  return input
-    .trim()
-    .toLowerCase()
-    .replace(/（/g, "(")
-    .replace(/）/g, ")")
-    .replace(/[\s\-_]+/g, "")
-    .replace(/[^a-z0-9().]+/g, "");
-}
-
-function pickPreferredBenchmarkDisplayName(current: string, candidate: string): string {
-  const currentTrimmed = current.trim();
-  const candidateTrimmed = candidate.trim();
-  if (!currentTrimmed) return candidateTrimmed;
-  if (!candidateTrimmed) return currentTrimmed;
-
-  const currentHasParentheses = /[（(][^()（）]+[)）]/.test(currentTrimmed);
-  const candidateHasParentheses = /[（(][^()（）]+[)）]/.test(candidateTrimmed);
-
-  if (currentHasParentheses !== candidateHasParentheses) {
-    return currentHasParentheses ? candidateTrimmed : currentTrimmed;
-  }
-
-  return currentTrimmed.length <= candidateTrimmed.length ? currentTrimmed : candidateTrimmed;
-}
-
-function getBenchmarkDuplicateKey(canonicalKey: string | null | undefined, benchmarkName: string): string {
-  const normalizedCanonical = canonicalKey?.trim().toLowerCase() ?? "";
-  if (normalizedCanonical.length > 0) {
-    const splitIndex = normalizedCanonical.indexOf(":");
-    if (splitIndex > 0) {
-      const token = normalizeBenchmarkDuplicateToken(normalizedCanonical.slice(0, splitIndex));
-      if (token.length > 0) return token;
-    }
-    if (splitIndex < 0) {
-      const token = normalizeBenchmarkDuplicateToken(normalizedCanonical);
-      if (token.length > 0) return token;
-    }
-  }
-
-  const fallbackToken = normalizeBenchmarkDuplicateToken(benchmarkName);
-  if (fallbackToken.length > 0) {
-    return fallbackToken;
-  }
-
-  const fallback = normalizeBenchmarkKeyFallback(benchmarkName);
-  return fallback.length > 0 ? fallback : benchmarkName.trim().toLowerCase();
-}
-
-function getMatrixGroupingKey(
-  row: Pick<MatrixInputRow, "benchmarkType" | "benchmarkName" | "benchmarkCanonicalKey">,
-  showDuplicateRows: boolean
-): string {
-  if (showDuplicateRows) {
-    const category = row.benchmarkType || "General";
-    return `raw::${category}::${row.benchmarkName}`;
-  }
-
-  const duplicateKey = getBenchmarkDuplicateKey(row.benchmarkCanonicalKey, row.benchmarkName);
-  return `merged::${duplicateKey}`;
-}
-
-function normalizeModalityName(input: string): string {
-  const normalized = input.trim().toLowerCase();
-  if (!normalized) return "Text";
-  if (normalized.includes("vision") || normalized.includes("vlm")) return "Vision";
-  if (normalized.includes("audio")) return "Audio";
-  if (normalized.includes("video")) return "Video";
-  if (normalized.includes("multimodal") || normalized.includes("multi-modal") || normalized.includes("多模态")) {
-    return "Multimodal";
-  }
-  return "Text";
-}
-
-function normalizeModalityList(input: string[] | undefined, benchmarkType: string): string[] {
-  const source = input && input.length > 0 ? input : [benchmarkType];
-
-  const normalized = source
-    .map((item) => normalizeModalityName(item))
-    .filter(Boolean);
-
-  const unique = normalized.length > 0 ? Array.from(new Set(normalized)) : ["Text"];
-  const withoutText = unique.some((item) => item !== "Text")
-    ? unique.filter((item) => item !== "Text")
-    : unique;
-
-  const withoutVision = withoutText.includes("Video")
-    ? withoutText.filter((item) => item !== "Vision")
-    : withoutText;
-
-  return withoutVision.length > 0 ? withoutVision : ["Text"];
-}
-
-function renderModalityBadge(modalityInput: string, key: string) {
-  const modality = normalizeModalityName(modalityInput);
-
-  if (modality === "Text") {
-    return (
-      <span key={key} className="inline-flex items-center rounded-md px-1 text-[10px] opacity-70" title="Text">
-        T
-      </span>
-    );
-  }
-
-  if (modality === "Vision") {
-    return (
-      <span key={key} className="inline-flex items-center rounded-md bg-cyan-500/15 px-1.5 py-0.5 text-cyan-300" title="Vision">
-        <Eye size={11} />
-      </span>
-    );
-  }
-
-  if (modality === "Audio") {
-    return (
-      <span key={key} className="inline-flex items-center rounded-md bg-purple-500/15 px-1.5 py-0.5 text-purple-300" title="Audio">
-        <Headphones size={11} />
-      </span>
-    );
-  }
-
-  if (modality === "Video") {
-    return (
-      <span key={key} className="inline-flex items-center rounded-md bg-pink-500/15 px-1.5 py-0.5 text-pink-300" title="Video">
-        <Video size={11} />
-      </span>
-    );
-  }
-
-  return (
-    <span
-      key={key}
-      className="inline-flex items-center rounded-md bg-amber-500/15 px-1.5 py-0.5 text-amber-300"
-      title="Multimodal"
-    >
-      <Layers size={11} />
-    </span>
-  );
-}
-
-function normalizeMatchToken(input: string): string {
-  return input.toLowerCase().replace(/[^a-z0-9]+/g, "");
-}
-
-function hasMeaningfulMatrixRawValue(rawValue: string): boolean {
-  const normalized = rawValue.trim().toLowerCase();
-  if (!normalized) return false;
-
-  return !new Set(["-", "--", "—", "na", "n/a", "null", "none"]).has(normalized);
-}
-
-const MATCH_HYPHEN_VARIANT_REGEX = /[\-\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g;
-
-function normalizeHeaderPrefixMatchToken(input: string): string {
-  return input
-    .toLowerCase()
-    .replace(MATCH_HYPHEN_VARIANT_REGEX, "")
-    .replace(/[^a-z0-9]+/g, "");
-}
-
-function isSourceHeaderPrefixMatch(modelName: string, sourceLabel: string): boolean {
-  const normalizedSourceLabel = normalizeHeaderPrefixMatchToken(sourceLabel);
-  if (!normalizedSourceLabel) return false;
-
-  const normalizedModelName = normalizeHeaderPrefixMatchToken(modelName);
-  if (!normalizedModelName) return false;
-
-  return normalizedModelName.startsWith(normalizedSourceLabel);
-}
-
-type ModelScaleToken = {
-  prefixKey: string;
-  sizeInBillions: number;
-  isEstimated: boolean;
-};
-
-type ModelVersionToken = {
-  familyKey: string;
-  version: number;
-};
-
-type ModelVariantToken = {
-  familyKey: string;
-  variant: "pro" | "base" | "flash" | "flash-lite" | "mini" | "nano";
-};
-
-const MODEL_SIZE_TOKEN_PATTERN = /\b(E?)(\d+(?:\.\d+)?)B\b/i;
-const MODEL_VERSION_TOKEN_PATTERN = /^([A-Za-z]+)[\s-_]*([0-9]+(?:\.\d+)?)/i;
-const MODEL_FLASH_LITE_PATTERN = /\bflash[\s-_]*lite\b/i;
-
-function extractModelVersionToken(modelName: string): ModelVersionToken | null {
-  const match = MODEL_VERSION_TOKEN_PATTERN.exec(modelName.trim());
-  if (!match) {
-    return null;
-  }
-
-  const [, family, versionText] = match;
-  const version = Number.parseFloat(versionText);
-  if (!Number.isFinite(version)) {
-    return null;
-  }
-
-  return {
-    familyKey: family.toLowerCase(),
-    version
-  };
-}
-
-function compareSourceTabKeysByVersion(leftKey: string, rightKey: string): number {
-  const leftLabel = sourceTabDisplayLabel(leftKey);
-  const rightLabel = sourceTabDisplayLabel(rightKey);
-
-  const leftVersionToken = extractModelVersionToken(leftLabel);
-  const rightVersionToken = extractModelVersionToken(rightLabel);
-
-  if (
-    leftVersionToken &&
-    rightVersionToken &&
-    leftVersionToken.familyKey === rightVersionToken.familyKey &&
-    rightVersionToken.version !== leftVersionToken.version
-  ) {
-    return rightVersionToken.version - leftVersionToken.version;
-  }
-
-  const labelCompare = leftLabel.localeCompare(rightLabel, "zh-Hans-CN", { numeric: true, sensitivity: "base" });
-  if (labelCompare !== 0) return labelCompare;
-
-  return leftKey.localeCompare(rightKey, "zh-Hans-CN", { numeric: true, sensitivity: "base" });
-}
-
-function extractModelScaleToken(modelName: string): ModelScaleToken | null {
-  const match = MODEL_SIZE_TOKEN_PATTERN.exec(modelName);
-  if (!match) {
-    return null;
-  }
-
-  const [, estimatePrefix, sizeText] = match;
-  const sizeInBillions = Number.parseFloat(sizeText);
-  if (!Number.isFinite(sizeInBillions)) {
-    return null;
-  }
-
-  const prefixKey = modelName
-    .slice(0, match.index)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-
-  return {
-    prefixKey,
-    sizeInBillions,
-    isEstimated: estimatePrefix.toLowerCase() === "e"
-  };
-}
-
-function extractModelVariantToken(modelName: string): ModelVariantToken | null {
-  const normalized = modelName
-    .toLowerCase()
-    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g, "-")
-    .replace(/[\-_]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (!normalized) return null;
-
-  const variant: ModelVariantToken["variant"] = (() => {
-    if (/\bpro\b/.test(normalized)) return "pro";
-    if (MODEL_FLASH_LITE_PATTERN.test(normalized)) return "flash-lite";
-    if (/\bflash\b/.test(normalized)) return "flash";
-    if (/\bmini\b/.test(normalized)) return "mini";
-    if (/\bnano\b/.test(normalized)) return "nano";
-    return "base";
-  })();
-
-  const familyKey = normalized
-    .replace(MODEL_FLASH_LITE_PATTERN, " ")
-    .replace(/\b(?:pro|flash|lite|mini|nano)\b/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (!familyKey) return null;
-
-  return {
-    familyKey,
-    variant
-  };
-}
-
-function compareModelVariantPriority(
-  leftVariant: ModelVariantToken["variant"],
-  rightVariant: ModelVariantToken["variant"]
-): number {
-  const priority: Record<ModelVariantToken["variant"], number> = {
-    pro: 6,
-    base: 5,
-    flash: 4,
-    mini: 3,
-    nano: 2,
-    "flash-lite": 1
-  };
-
-  return priority[rightVariant] - priority[leftVariant];
-}
-
-function compareModelNameByColumnOrder(left: string, right: string, collator: Intl.Collator): number {
-  const leftVersionToken = extractModelVersionToken(left);
-  const rightVersionToken = extractModelVersionToken(right);
-
-  if (
-    leftVersionToken &&
-    rightVersionToken &&
-    leftVersionToken.familyKey === rightVersionToken.familyKey &&
-    rightVersionToken.version !== leftVersionToken.version
-  ) {
-    return rightVersionToken.version - leftVersionToken.version;
-  }
-
-  const leftVariantToken = extractModelVariantToken(left);
-  const rightVariantToken = extractModelVariantToken(right);
-
-  if (
-    leftVariantToken &&
-    rightVariantToken &&
-    leftVariantToken.familyKey.length > 0 &&
-    leftVariantToken.familyKey === rightVariantToken.familyKey
-  ) {
-    const variantCompare = compareModelVariantPriority(leftVariantToken.variant, rightVariantToken.variant);
-    if (variantCompare !== 0) {
-      return variantCompare;
-    }
-  }
-
-  const leftScaleToken = extractModelScaleToken(left);
-  const rightScaleToken = extractModelScaleToken(right);
-
-  if (
-    leftScaleToken &&
-    rightScaleToken &&
-    leftScaleToken.prefixKey.length > 0 &&
-    leftScaleToken.prefixKey === rightScaleToken.prefixKey
-  ) {
-    if (rightScaleToken.sizeInBillions !== leftScaleToken.sizeInBillions) {
-      return rightScaleToken.sizeInBillions - leftScaleToken.sizeInBillions;
-    }
-
-    if (leftScaleToken.isEstimated !== rightScaleToken.isEstimated) {
-      return leftScaleToken.isEstimated ? 1 : -1;
-    }
-  }
-
-  return collator.compare(right, left);
-}
-
-function lerp(start: number, end: number, t: number): number {
-  return Math.round(start + (end - start) * t);
-}
-
-function blendColor(from: readonly [number, number, number], to: readonly [number, number, number], t: number) {
-  return [lerp(from[0], to[0], t), lerp(from[1], to[1], t), lerp(from[2], to[2], t)] as const;
-}
-
-function normalizeHexColor(value: string, fallback: string): string {
-  return isValidHexColor(value) ? value.trim().toLowerCase() : fallback;
-}
-
-function clampHeatmapAlpha(value: number): number {
-  if (!Number.isFinite(value)) return DEFAULT_HEATMAP_ALPHA;
-  return Math.min(MAX_HEATMAP_ALPHA, Math.max(MIN_HEATMAP_ALPHA, Number(value.toFixed(2))));
-}
-
-function hexToRgbTuple(value: string): [number, number, number] {
-  const normalized = value.replace("#", "");
-  const red = Number.parseInt(normalized.slice(0, 2), 16);
-  const green = Number.parseInt(normalized.slice(2, 4), 16);
-  const blue = Number.parseInt(normalized.slice(4, 6), 16);
-  return [red, green, blue];
-}
-
-function rgbaFromHex(value: string, alpha: number): string {
-  const [red, green, blue] = hexToRgbTuple(value);
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
-}
-
-function getHeatCellStyle(
-  valueNum: number | null,
-  minNum: number | null,
-  maxNum: number | null,
-  palette: HeatmapPaletteRgb,
-  alpha: number
-) {
-  if (valueNum === null || minNum === null || maxNum === null) {
-    return {} as const;
-  }
-
-  if (minNum === maxNum) {
-    const mid = palette.mid;
-    return {
-      backgroundColor: `rgba(${mid[0]}, ${mid[1]}, ${mid[2]}, ${alpha})`,
-      color: "#0f172a",
-      textShadow: "0 0 1px rgba(0, 0, 0, 0.28)",
-      WebkitTextStroke: "0.25px rgba(0, 0, 0, 0.25)"
-    } as const;
-  }
-
-  const ratio = Math.min(1, Math.max(0, (valueNum - minNum) / (maxNum - minNum)));
-
-  const color = ratio <= 0.5
-    ? blendColor(palette.low, palette.mid, ratio / 0.5)
-    : blendColor(palette.mid, palette.high, (ratio - 0.5) / 0.5);
-
-  return {
-    backgroundColor: `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${alpha})`,
-    color: "#0f172a",
-    textShadow: "0 0 1px rgba(0, 0, 0, 0.28)",
-    WebkitTextStroke: "0.25px rgba(0, 0, 0, 0.25)"
-  } as const;
-}
-
-function isCompareModifierClick(event: Pick<ReactMouseEvent<HTMLElement>, "ctrlKey" | "metaKey">): boolean {
-  return Boolean(event.ctrlKey || event.metaKey);
-}
-
-function isSelectionModifierClick(event: Pick<ReactMouseEvent<HTMLElement>, "shiftKey">): boolean {
-  return Boolean(event.shiftKey);
-}
-
-function formatComparisonDeltaValue(value: number): string {
-  const absValue = Math.abs(value);
-  if (!Number.isFinite(absValue)) return "0";
-
-  if (absValue >= 100) return Number(absValue.toFixed(1)).toString();
-  if (absValue >= 10) return Number(absValue.toFixed(2)).toString();
-  if (absValue >= 1) return Number(absValue.toFixed(2)).toString();
-  return Number(absValue.toFixed(3)).toString();
-}
-
-function clampCompareIntensity(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(1, Math.max(0, value));
-}
-
-function getCompareDeltaBadgeStyle(
-  direction: CompareDirection,
-  intensity: number,
-  exportMode: boolean
-): {
-  textColor: string;
-  borderColor: string;
-  backgroundColor: string;
-  separatorColor: string;
-  boxShadow: string;
-  textShadow: string;
-  textStroke: string;
-} {
-  const safeIntensity = clampCompareIntensity(intensity);
-
-  if (direction === "flat") {
-    const borderAlpha = exportMode ? 0.74 : 0.62;
-    const color = "rgba(236, 241, 249, 0.98)";
-    return {
-      textColor: color,
-      borderColor: `rgba(148, 163, 184, ${borderAlpha})`,
-      backgroundColor: "rgba(19, 28, 45, 0.9)",
-      separatorColor: "rgba(148, 163, 184, 0.58)",
-      boxShadow: exportMode
-        ? "0 0 0 1px rgba(148, 163, 184, 0.24), 0 1px 2px rgba(2, 6, 23, 0.64)"
-        : "0 1px 2px rgba(2, 6, 23, 0.62), 0 0 8px rgba(2, 6, 23, 0.24)",
-      textShadow: "0 1px 1px rgba(2, 6, 23, 0.9)",
-      textStroke: "0.2px rgba(2, 6, 23, 0.8)"
-    };
-  }
-
-  const bgStart = direction === "up" ? ([22, 76, 56] as const) : ([108, 26, 36] as const);
-  const bgEnd = direction === "up" ? ([7, 94, 69] as const) : ([126, 19, 31] as const);
-  const borderStart = direction === "up" ? ([45, 180, 132] as const) : ([241, 92, 113] as const);
-  const borderEnd = direction === "up" ? ([52, 211, 153] as const) : ([248, 113, 113] as const);
-  const textColor = direction === "up" ? "rgba(236, 253, 245, 0.98)" : "rgba(255, 241, 242, 0.98)";
-
-  const [bgR, bgG, bgB] = blendColor(bgStart, bgEnd, safeIntensity);
-  const [bdR, bdG, bdB] = blendColor(borderStart, borderEnd, safeIntensity);
-  const borderAlpha = exportMode ? 0.9 : 0.84;
-  const separatorAlpha = exportMode ? 0.78 : 0.65;
-  const glowAlpha = exportMode ? 0.12 : 0.22;
-
-  return {
-    textColor,
-    borderColor: `rgba(${bdR}, ${bdG}, ${bdB}, ${borderAlpha})`,
-    backgroundColor: `rgba(${bgR}, ${bgG}, ${bgB}, 0.93)`,
-    separatorColor: `rgba(${bdR}, ${bdG}, ${bdB}, ${separatorAlpha})`,
-    boxShadow: exportMode
-      ? `0 0 0 1px rgba(${bdR}, ${bdG}, ${bdB}, 0.22), 0 1px 2px rgba(2, 6, 23, 0.66)`
-      : `0 1px 2px rgba(2, 6, 23, 0.62), 0 0 8px rgba(${bdR}, ${bdG}, ${bdB}, ${glowAlpha})`,
-    textShadow: "0 1px 1px rgba(2, 6, 23, 0.88)",
-    textStroke: "0.2px rgba(2, 6, 23, 0.85)"
-  };
-}
-
-function formatTooltipTime(input: string): string {
-  const date = new Date(input);
-  if (Number.isNaN(date.getTime())) {
-    return input;
-  }
-  return date.toISOString().slice(0, 16).replace("T", " ");
-}
-
-function formatValueNumForDisplay(valueNum: number | null): string | null {
-  if (valueNum === null || !Number.isFinite(valueNum)) return null;
-  return Number(valueNum.toFixed(6)).toString();
-}
-
-function getSortedQuantile(sortedValues: number[], q: number): number {
-  if (sortedValues.length === 0) return 0;
-  if (sortedValues.length === 1) return sortedValues[0] ?? 0;
-
-  const clampedQ = Math.min(1, Math.max(0, q));
-  const position = (sortedValues.length - 1) * clampedQ;
-  const lowerIndex = Math.floor(position);
-  const upperIndex = Math.ceil(position);
-
-  const lower = sortedValues[lowerIndex] ?? 0;
-  const upper = sortedValues[upperIndex] ?? lower;
-  if (lowerIndex === upperIndex) return lower;
-
-  const weight = position - lowerIndex;
-  return lower + (upper - lower) * weight;
-}
-
-function buildDenseRankMap(
-  items: Array<{ modelName: string; score: number | null }>,
-  precision = 2
-): Map<string, number> {
-  const factor = 10 ** precision;
-
-  const validItems = items
-    .filter((item): item is { modelName: string; score: number } => item.score !== null && Number.isFinite(item.score))
-    .map((item) => ({
-      modelName: item.modelName,
-      normalizedScore: Math.round(item.score * factor) / factor
-    }))
-    .sort((a, b) => b.normalizedScore - a.normalizedScore);
-
-  const rankMap = new Map<string, number>();
-  let rank = 0;
-  let previousScore: number | null = null;
-
-  validItems.forEach((item) => {
-    if (previousScore === null || item.normalizedScore !== previousScore) {
-      rank += 1;
-      previousScore = item.normalizedScore;
-    }
-
-    rankMap.set(item.modelName, rank);
-  });
-
-  return rankMap;
-}
-
-type OverallScoreDisplayItem = {
-  modelName: string;
-  rawScore: number | null;
-  rawRank: number | null;
-};
-
-function buildOverallScoreDisplayDecimalsMap(items: OverallScoreDisplayItem[]): Map<string, 1 | 2> {
-  const decimalsMap = new Map<string, 1 | 2>();
-  const groupedByOneDecimal = new Map<string, OverallScoreDisplayItem[]>();
-
-  items.forEach((item) => {
-    decimalsMap.set(item.modelName, 1);
-
-    if (item.rawScore === null || item.rawRank === null || !Number.isFinite(item.rawScore)) return;
-
-    const oneDecimalKey = item.rawScore.toFixed(1);
-    if (!groupedByOneDecimal.has(oneDecimalKey)) {
-      groupedByOneDecimal.set(oneDecimalKey, []);
-    }
-    groupedByOneDecimal.get(oneDecimalKey)!.push(item);
-  });
-
-  groupedByOneDecimal.forEach((groupItems) => {
-    if (groupItems.length < 2) return;
-
-    const distinctRanks = new Set(groupItems.map((item) => item.rawRank));
-    if (distinctRanks.size > 1) {
-      groupItems.forEach((item) => {
-        decimalsMap.set(item.modelName, 2);
-      });
-    }
-  });
-
-  return decimalsMap;
-}
-
-export function __buildOverallScoreDisplayDecimalsMapForTest(items: OverallScoreDisplayItem[]): Map<string, 1 | 2> {
-  return buildOverallScoreDisplayDecimalsMap(items);
-}
-
-function getMatrixCellDisplayValue(
-  valueNum: number | null,
-  valueNum2: number | null,
-  rawValue: string,
-  valueNote: string | null
-): string {
-  const raw = rawValue.trim();
-  if (!raw) return "--";
-
-  const hasStarMarker = /[*∗﹡✱✳✻]/.test(raw);
-  const pairMatch = raw.match(
-    /^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/
-  );
-
-  if (pairMatch) {
-    const [, first, second] = pairMatch;
-    const hasCurrencySymbol = /[$¥€£]/.test(first) || /[$¥€£]/.test(second);
-
-    if (hasCurrencySymbol) {
-      return `${first.trim()} / ${second.trim()}`;
-    }
-
-    const firstNumeric = formatValueNumForDisplay(valueNum);
-    const secondNumeric = formatValueNumForDisplay(valueNum2);
-
-    if (firstNumeric !== null && secondNumeric !== null) {
-      return `${firstNumeric} / ${secondNumeric}`;
-    }
-
-    return `${first.trim()} / ${second.trim()}`;
-  }
-
-  const currencySingleMatch = raw.match(/^((?:[$¥€£]\s*)[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/);
-  if (currencySingleMatch) {
-    const [, value, tail] = currencySingleMatch;
-    const tailText = tail.trim();
-
-    if (!tailText) return value.trim();
-    if (tailText === "*" || tailText.startsWith("*")) return `${value.trim()}*`;
-    if (valueNote && valueNote.trim().length > 0) return value.trim();
-
-    return `${value.trim()}${tailText}`;
-  }
-
-  const numericDisplay = formatValueNumForDisplay(valueNum);
-  if (numericDisplay !== null) {
-    const hasHashPrefix = /^[#＃]/.test(raw);
-    const prefix = hasHashPrefix ? raw.match(/^[#＃]+/)?.[0] ?? "" : "";
-    return hasStarMarker ? `${prefix}${numericDisplay}*` : `${prefix}${numericDisplay}`;
-  }
-
-  const singleMatch = raw.match(/^([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/);
-  if (singleMatch) {
-    const [, value, tail] = singleMatch;
-    const tailText = tail.trim();
-
-    if (!tailText) return value;
-    if (tailText === "*" || tailText.startsWith("*")) return `${value}*`;
-    if (valueNote && valueNote.trim().length > 0) return value;
-
-    return `${value}${tailText}`;
-  }
-
-  return raw;
-}
-
-function getMatrixCellValueIdentity(entry: MatrixCellEntry): string {
-  if (entry.valueNum !== null || entry.valueNum2 !== null) {
-    return `num:${entry.valueNum ?? ""}|${entry.valueNum2 ?? ""}`;
-  }
-
-  return `raw:${entry.valueRaw}`;
-}
-
-function getMatrixCellSourceValueDedupKey(entry: MatrixCellEntry): string {
-  return `${entry.source ?? ""}__${getMatrixCellValueIdentity(entry)}`;
-}
-
-async function loadHtml2Canvas(): Promise<Html2CanvasFn> {
-  if (typeof window === "undefined") {
-    throw new Error("当前环境不支持图片导出");
-  }
-
-  if (html2canvasLoaderPromise) {
-    return html2canvasLoaderPromise;
-  }
-
-  html2canvasLoaderPromise = import("html2canvas-pro")
-    .then((module) => {
-      const html2canvas = module.default as Html2CanvasFn | undefined;
-      if (typeof html2canvas !== "function") {
-        throw new Error("截图引擎加载失败");
-      }
-      return html2canvas;
-    })
-    .catch((error) => {
-      html2canvasLoaderPromise = null;
-      throw error instanceof Error ? error : new Error("无法加载截图引擎");
-    });
-
-  return html2canvasLoaderPromise;
-}
-
-function resolveCaptureDimensions(element: HTMLElement): { width: number; height: number } {
-  const table = element.querySelector("table") as HTMLElement | null;
-
-  const widthSource = table
-    ? Math.max(table.scrollWidth || 0, table.clientWidth || 0)
-    : Math.max(element.scrollWidth || 0, element.clientWidth || 0);
-
-  const heightSource = table
-    ? Math.max(table.scrollHeight || 0, table.clientHeight || 0)
-    : Math.max(element.scrollHeight || 0, element.clientHeight || 0);
-
-  return {
-    width: Math.max(1, Math.round(widthSource)),
-    height: Math.max(1, Math.round(heightSource))
-  };
-}
-
-export function __resolveCaptureDimensionsForTest(element: HTMLElement): { width: number; height: number } {
-  return resolveCaptureDimensions(element);
-}
-
-async function renderElementToImageBlob(
-  element: HTMLElement,
-  scale: number,
-  mimeType: ExportMimeType
-): Promise<Blob> {
-  const html2canvas = await loadHtml2Canvas();
-
-  const { width, height } = resolveCaptureDimensions(element);
-  const captureBottomPadding = 4;
-  const captureHeight = height + captureBottomPadding;
-  const captureAttr = "data-h2c-export-root";
-
-  element.setAttribute(captureAttr, "1");
-
-  const canvas = await (async () => {
-    try {
-      return await html2canvas(element, {
-        backgroundColor: "#0b1020",
-        scale,
-        foreignObjectRendering: false,
-        useCORS: true,
-        allowTaint: false,
-        logging: false,
-        scrollX: 0,
-        scrollY: 0,
-        width,
-        height: captureHeight,
-        windowWidth: width,
-        windowHeight: captureHeight,
-        onclone: (clonedDoc: Document) => {
-          const clonedRoot = clonedDoc.querySelector(`[${captureAttr}="1"]`) as HTMLElement | null;
-          if (!clonedRoot) return;
-
-          clonedRoot.style.overflow = "visible";
-          clonedRoot.style.maxHeight = "none";
-          clonedRoot.style.height = `${captureHeight}px`;
-          clonedRoot.style.width = `${width}px`;
-
-          const clonedTable = clonedRoot.querySelector("table") as HTMLTableElement | null;
-          if (clonedTable) {
-            clonedTable.style.minWidth = `${width}px`;
-            clonedTable.style.borderCollapse = "separate";
-            clonedTable.style.borderSpacing = "0";
-          }
-
-          const clonedModalityFilters = clonedRoot.querySelectorAll<HTMLElement>("[data-modality-filter='true']");
-          clonedModalityFilters.forEach((filter) => {
-            filter.removeAttribute("open");
-            filter.querySelectorAll<HTMLElement>(".dropdown-content").forEach((panel) => {
-              panel.style.display = "none";
-            });
-          });
-
-          const exportSourceFrameColor = "rgba(93, 167, 255, 0.65)";
-          const exportSourceFrameWidth = 2;
-          const exportCompareBaselineColor = "rgba(250, 211, 106, 0.9)";
-          const exportCompareBaselineWidth = 2;
-          applyExportOverallRowNudgeFallback(clonedRoot);
-          applyExportSourceFrameFallback(clonedRoot, exportSourceFrameColor, exportSourceFrameWidth);
-          applyExportCompareBaselineFallback(clonedRoot, exportCompareBaselineColor, exportCompareBaselineWidth);
-        }
-      });
-    } finally {
-      element.removeAttribute(captureAttr);
-    }
-  })();
-
-  const mimeCandidates = getMimeTypeFallbackChain(mimeType);
-
-  let blob: Blob | null = null;
-  for (const candidateMimeType of mimeCandidates) {
-    const quality = getEncoderQuality(candidateMimeType);
-
-    const blobFromCanvas = await new Promise<Blob | null>((resolve) => {
-      canvas.toBlob(
-        (result) => resolve(result),
-        candidateMimeType,
-        quality
-      );
-    });
-
-    if (blobFromCanvas) {
-      const actualType = blobFromCanvas.type.toLowerCase();
-      if (actualType.includes(candidateMimeType.replace("image/", "")) || candidateMimeType === "image/png") {
-        blob = blobFromCanvas;
-        break;
-      }
-    }
-
-    try {
-      const dataUrl = canvas.toDataURL(candidateMimeType, quality);
-      if (dataUrl.startsWith(`data:${candidateMimeType}`)) {
-        blob = dataUrlToBlob(dataUrl);
-        break;
-      }
-    } catch {
-      // try next fallback type
-    }
-  }
-
-  if (!blob) {
-    throw new Error("图片导出失败");
-  }
-
-  return blob;
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
-  let timer: number | null = null;
-
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = window.setTimeout(() => {
-      reject(new Error(timeoutMessage));
-    }, timeoutMs);
-  });
-
-  return Promise.race([promise, timeoutPromise]).finally(() => {
-    if (timer !== null) {
-      window.clearTimeout(timer);
-    }
-  }) as Promise<T>;
+  window.setTimeout(callback, 0);
 }
 
 export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSourceOptions = [] }: Props) {
@@ -1418,7 +147,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const isSyncingSelectionFromSourceRef = useRef(false);
   const skipSelectionPersistenceOnceRef = useRef(false);
   const columnWidthBySourceRef = useRef<Record<string, Record<string, number>>>({});
-  const columnWidthOverrideKeySetRef = useRef<Set<string>>(new Set());
+  const [columnWidthOverrideKeys, setColumnWidthOverrideKeys] = useState<readonly string[]>([]);
   const columnWidthPersistTimeoutRef = useRef<number | null>(null);
   const heatmapPaletteLoadedRef = useRef(false);
   const columnResizeStateRef = useRef<{
@@ -1539,7 +268,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   }, [searchParams, sourceOptions]);
 
   useEffect(() => {
-    setIsClientReady(true);
+    enqueueStateUpdate(() => setIsClientReady(true));
   }, []);
 
   useEffect(() => {
@@ -1685,6 +414,8 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   }, [isClientReady, sourceOptions, activeSource]);
 
   useEffect(() => {
+    let nextSelectionBySource: Record<string, string[]> | null = null;
+
     try {
       const saved = window.localStorage.getItem(MODEL_SELECTION_BY_SOURCE_STORAGE_KEY);
       if (saved) {
@@ -1702,17 +433,24 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
             normalizedBySource[sourceKey] = normalized;
           });
 
-          modelSelectionBySourceRef.current = normalizedBySource;
+          nextSelectionBySource = normalizedBySource;
         }
       }
     } catch {
       // ignore storage access errors gracefully
     }
 
-    setIsModelSelectionLoaded(true);
+    enqueueStateUpdate(() => {
+      if (nextSelectionBySource) {
+        modelSelectionBySourceRef.current = nextSelectionBySource;
+      }
+      setIsModelSelectionLoaded(true);
+    });
   }, []);
 
   useEffect(() => {
+    let nextModelOrderBySource: Record<string, string[]> | null = null;
+
     try {
       const saved = window.localStorage.getItem(MODEL_ORDER_BY_SOURCE_STORAGE_KEY);
       if (saved) {
@@ -1728,14 +466,19 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
             );
           });
 
-          setModelOrderBySource(normalizedBySource);
+          nextModelOrderBySource = normalizedBySource;
         }
       }
     } catch {
       // ignore storage access errors gracefully
     }
 
-    setIsModelOrderLoaded(true);
+    enqueueStateUpdate(() => {
+      if (nextModelOrderBySource) {
+        setModelOrderBySource(nextModelOrderBySource);
+      }
+      setIsModelOrderLoaded(true);
+    });
   }, []);
 
   useEffect(() => {
@@ -1749,43 +492,64 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   }, [modelOrderBySource, isModelOrderLoaded]);
 
   useEffect(() => {
+    let nextColumnWidthBySource: Record<string, Record<string, number>> | null = null;
+
     try {
       const saved = window.localStorage.getItem(COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved) as unknown;
-        columnWidthBySourceRef.current = normalizeColumnWidthBySource(parsed);
+        nextColumnWidthBySource = normalizeColumnWidthBySource(parsed);
       }
     } catch {
       // ignore storage access errors gracefully
     }
 
-    setIsColumnWidthLoaded(true);
+    enqueueStateUpdate(() => {
+      if (nextColumnWidthBySource) {
+        columnWidthBySourceRef.current = nextColumnWidthBySource;
+      }
+      setIsColumnWidthLoaded(true);
+    });
   }, []);
 
   useEffect(() => {
+    let nextShowCategory: boolean | null = null;
+
     try {
       const saved = window.localStorage.getItem(SHOW_CATEGORY_STORAGE_KEY);
       if (saved === "0" || saved === "1") {
-        setShowCategory(saved === "1");
+        nextShowCategory = saved === "1";
       }
     } catch {
       // ignore storage access errors gracefully
     }
 
-    showCategoryLoadedRef.current = true;
+    enqueueStateUpdate(() => {
+      if (nextShowCategory !== null) {
+        setShowCategory(nextShowCategory);
+      }
+      showCategoryLoadedRef.current = true;
+    });
   }, []);
 
   useEffect(() => {
+    let nextShowDuplicateRows: boolean | null = null;
+
     try {
       const saved = window.localStorage.getItem(SHOW_DUPLICATE_STORAGE_KEY);
       if (saved === "0" || saved === "1") {
-        setShowDuplicateRows(saved === "1");
+        nextShowDuplicateRows = saved === "1";
       }
     } catch {
       // ignore storage access errors gracefully
     }
 
-    showDuplicateLoadedRef.current = true;
+    enqueueStateUpdate(() => {
+      if (nextShowDuplicateRows !== null) {
+        setShowDuplicateRows(nextShowDuplicateRows);
+      }
+      showDuplicateLoadedRef.current = true;
+    });
   }, []);
 
   useEffect(() => {
@@ -1809,13 +573,20 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   }, [showDuplicateRows]);
 
   useEffect(() => {
-    setSelectedRowKey(null);
-    setColumnSortBenchmarkKey(null);
+    enqueueStateUpdate(() => {
+      setSelectedRowKey(null);
+      setColumnSortBenchmarkKey(null);
+    });
   }, [showDuplicateRows]);
 
   useEffect(() => {
-    setSupportsWebpExport(canEncodeCanvasMimeType("image/webp"));
-    setSupportsAvifExport(canEncodeCanvasMimeType("image/avif"));
+    const nextSupportsWebpExport = canEncodeCanvasMimeType("image/webp");
+    const nextSupportsAvifExport = canEncodeCanvasMimeType("image/avif");
+
+    enqueueStateUpdate(() => {
+      setSupportsWebpExport(nextSupportsWebpExport);
+      setSupportsAvifExport(nextSupportsAvifExport);
+    });
   }, []);
 
   const availableExportPresetKeys = useMemo(() => {
@@ -1830,28 +601,33 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   useEffect(() => {
     if (availableExportPresetKeys.includes(exportPreset)) return;
 
-    if (availableExportPresetKeys.includes(DEFAULT_EXPORT_PRESET)) {
-      setExportPreset(DEFAULT_EXPORT_PRESET);
-      return;
-    }
+    const fallback = availableExportPresetKeys.includes(DEFAULT_EXPORT_PRESET)
+      ? DEFAULT_EXPORT_PRESET
+      : availableExportPresetKeys[0];
 
-    const fallback = availableExportPresetKeys[0];
     if (fallback) {
-      setExportPreset(fallback);
+      enqueueStateUpdate(() => setExportPreset(fallback));
     }
   }, [availableExportPresetKeys, exportPreset]);
 
   useEffect(() => {
+    let nextExportPreset: ExportPresetKey | null = null;
+
     try {
       const saved = window.localStorage.getItem(EXPORT_PRESET_STORAGE_KEY);
       if (saved && isExportPresetKey(saved)) {
-        setExportPreset(saved);
+        nextExportPreset = saved;
       }
     } catch {
       // ignore storage access errors gracefully
     }
 
-    exportPresetLoadedRef.current = true;
+    enqueueStateUpdate(() => {
+      if (nextExportPreset) {
+        setExportPreset(nextExportPreset);
+      }
+      exportPresetLoadedRef.current = true;
+    });
   }, []);
 
   useEffect(() => {
@@ -1865,6 +641,10 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   }, [exportPreset]);
 
   useEffect(() => {
+    let nextHeatmapPalette: HeatmapPaletteHex | null = null;
+    let nextHeatmapAlpha = DEFAULT_HEATMAP_ALPHA;
+    let nextHeatmapPresetSelection: HeatmapPresetSelection | null = null;
+
     try {
       const saved = window.localStorage.getItem(HEATMAP_PALETTE_STORAGE_KEY);
       if (saved) {
@@ -1889,15 +669,22 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
           : "custom";
         const parsedAlpha = typeof parsed.alpha === "number" ? parsed.alpha : DEFAULT_HEATMAP_ALPHA;
 
-        setHeatmapPalette(nextPalette);
-        setHeatmapAlpha(clampHeatmapAlpha(parsedAlpha));
-        setHeatmapPresetSelection(nextPresetSelection);
+        nextHeatmapPalette = nextPalette;
+        nextHeatmapAlpha = clampHeatmapAlpha(parsedAlpha);
+        nextHeatmapPresetSelection = nextPresetSelection;
       }
     } catch {
       // ignore storage access errors gracefully
     }
 
-    heatmapPaletteLoadedRef.current = true;
+    enqueueStateUpdate(() => {
+      if (nextHeatmapPalette && nextHeatmapPresetSelection) {
+        setHeatmapPalette(nextHeatmapPalette);
+        setHeatmapAlpha(nextHeatmapAlpha);
+        setHeatmapPresetSelection(nextHeatmapPresetSelection);
+      }
+      heatmapPaletteLoadedRef.current = true;
+    });
   }, []);
 
   useEffect(() => {
@@ -1920,7 +707,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   useEffect(() => {
     if (!copyNotice) return;
 
-    setCopyNoticeVisible(true);
+    enqueueStateUpdate(() => setCopyNoticeVisible(true));
 
     const hideTimer = window.setTimeout(() => {
       setCopyNoticeVisible(false);
@@ -1971,9 +758,8 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       const resizeState = columnResizeStateRef.current;
       if (!resizeState) return;
 
-      columnWidthOverrideKeySetRef.current.add(
-        getColumnWidthOverrideKey(activeSourceRef.current, resizeState.columnKey)
-      );
+      const overrideKey = getColumnWidthOverrideKey(activeSourceRef.current, resizeState.columnKey);
+      setColumnWidthOverrideKeys((prev) => (prev.includes(overrideKey) ? prev : [...prev, overrideKey]));
 
       const nextWidth = clampColumnWidth(
         resizeState.startWidth + (event.clientX - resizeState.startX),
@@ -1994,7 +780,10 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
     const stopResize = () => {
       if (!columnResizeStateRef.current) return;
-      suppressHeaderInteractionsFor();
+      headerInteractionSuppressUntilRef.current = Math.max(
+        headerInteractionSuppressUntilRef.current,
+        Date.now() + 180
+      );
       columnResizeStateRef.current = null;
       setResizingColumnKey(null);
       document.body.classList.remove("column-resizing");
@@ -2626,7 +1415,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     return prunedRows.length > 0 ? prunedRows : filteredRows;
   }, [activeSource, filteredRows, showDuplicateRows, showLowCoverageRows]);
 
-  const modelColumns = useMemo(() => {
+  const modelColumns = useMemo<readonly string[]>(() => {
     const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 
     const modelStats = new Map<string, { providerName: string; numericCount: number; totalCount: number }>();
@@ -2779,16 +1568,18 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   useEffect(() => {
     const visibleModelSet = new Set(modelColumns);
 
-    setCompareModelOrder((prev) => {
-      const next = prev.filter((modelName) => visibleModelSet.has(modelName));
-      return areStringArraysEqual(prev, next) ? prev : next;
+    enqueueStateUpdate(() => {
+      setCompareModelOrder((prev) => {
+        const next = prev.filter((modelName) => visibleModelSet.has(modelName));
+        return areStringArraysEqual(prev, next) ? prev : next;
+      });
     });
   }, [modelColumns]);
 
   useEffect(() => {
     if (!rowPresenceFilterModel) return;
     if (modelColumns.includes(rowPresenceFilterModel)) return;
-    setRowPresenceFilterModel(null);
+    enqueueStateUpdate(() => setRowPresenceFilterModel(null));
   }, [modelColumns, rowPresenceFilterModel]);
 
   const autoModelWidthMap = useMemo(() => {
@@ -3013,6 +1804,8 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     };
   }, [modelColumns, sourceMatchedModelSet]);
 
+  const columnWidthOverrideKeySet = useMemo(() => new Set(columnWidthOverrideKeys), [columnWidthOverrideKeys]);
+
   const modelColumnMeta = useMemo(() => {
     return modelColumns.map((modelName) => {
       const providerIdentity = modelProviderMap.get(modelName);
@@ -3023,7 +1816,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       const storedWidth = activeColumnWidthMap[columnWidthKey];
       const isCompareSelected = compareModelSet.has(modelName);
       const isCompareBaseline = compareBaselineModelName === modelName;
-      const hasManualWidthOverride = columnWidthOverrideKeySetRef.current.has(
+      const hasManualWidthOverride = columnWidthOverrideKeySet.has(
         getColumnWidthOverrideKey(activeSource, columnWidthKey)
       );
       const compareExpandedDefaultWidth = isCompareBaseline
@@ -3056,6 +1849,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     modelProviderBrandColorMap,
     sourceMatchedModelSet,
     sourceMatchedGroupBoundaryByModel,
+    columnWidthOverrideKeySet,
     autoModelWidthMap,
     activeColumnWidthMap,
     compareModelSet,
@@ -5434,3 +4228,13 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     </section>
   );
 }
+
+// Re-export test functions
+export {
+  __buildSourceFrameShadowsForTest,
+  __buildCompareBaselineShadowsForTest,
+  __applyExportSourceFrameFallbackForTest,
+  __applyExportCompareBaselineFallbackForTest,
+  __buildOverallScoreDisplayDecimalsMapForTest,
+  __resolveCaptureDimensionsForTest
+} from "./benchmark-matrix/index";
