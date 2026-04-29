@@ -1,5 +1,5 @@
 import { LOWER_IS_BETTER_ASR_TYPE_REGEX, LOWER_IS_BETTER_RULES } from "./constants";
-import type { MatrixCellEntry, OverallScoreDisplayItem } from "./types";
+import type { OverallScoreDisplayItem } from "./types";
 import { formatValueNumForDisplay } from "./formatters";
 
 function isFleursZhTranslationBenchmark(benchmarkName: string): boolean {

@@ -5,7 +5,7 @@ import {
   Video
 } from "lucide-react";
 import type { CompareDirection, MatrixCellEntry, MatrixInputRow } from "./types";
-import { SOURCE_ALL, SOURCE_EMPTY } from "./constants";
+import { SOURCE_EMPTY } from "./constants";
 import { blendColor } from "./colors";
 
 export function getModelColumnWidthKey(modelName: string): string {
