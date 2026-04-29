@@ -1,6 +1,6 @@
 import { cleanup } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
-import { afterEach, vi } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
 
 if (typeof Element !== "undefined") {
   const elementPrototype = Element.prototype as unknown as Record<string, unknown>;
@@ -14,6 +14,10 @@ if (typeof Element !== "undefined") {
     });
   }
 }
+
+beforeEach(() => {
+  vi.stubGlobal("queueMicrotask", (callback: VoidFunction) => callback());
+});
 
 afterEach(() => {
   cleanup();
