@@ -3,19 +3,29 @@
 ![Lint](https://github.com/sxjeru/llm-bench-matrix/actions/workflows/lint.yml/badge.svg)
 ![Test](https://github.com/sxjeru/llm-bench-matrix/actions/workflows/test.yml/badge.svg)
 
-基于 **Next.js App Router、Drizzle ORM 与 PostgreSQL** 构建的大模型评测矩阵。<br>
+基于 Next.js App Router、Drizzle ORM、PostgreSQL 构建的大模型评测矩阵。<br>
 项目面向多来源 benchmark 数据的展示、整理与维护，提供前台可视化矩阵热力图，及后台数据管理能力。
 
-#### 点击预览：[https://llm.sxjeru.top/](https://llm.sxjeru.top/)
+> #### 点击预览：[https://llm.sxjeru.top/](https://llm.sxjeru.top/)
+
+
+
+<br>
 
 ## 核心能力
 
 - **多来源矩阵展示**：按 Source 查看或聚合多来源数据，支持模型筛选、列排序、列宽调整与热力图配色。
 - **模型对比分析**：支持 Baseline / Compare 对比模式，直观展示模型间 benchmark 差异。
-- **图像导出**：支持将当前矩阵导出为 PNG、WEBP、AVIF，或复制到剪贴板。
+- **图像导出**：支持将当前矩阵一键导出为 PNG、WEBP、AVIF，或复制到剪贴板。
 - **数据导入维护**：支持 CSV 与 XLSM/XLSX 预览导入，提供异常提示、数据清洗与提交能力。
 - **实体管理**：支持 Provider、Model、Benchmark 的增改、合并、重命名与重复检测。
 - **后台保护**：后台管理使用密码登录，并支持首登强制修改默认密码。
+
+#### 导出图片示例：
+
+<img width="2650" height="1638" alt="image" src="https://github.com/user-attachments/assets/6e7a9fa3-cede-4288-af3e-186cc59f36b2" />
+
+<br>
 
 ## 环境变量
 
@@ -34,7 +44,8 @@
 
 > 生产环境必须提供 `ADMIN_PASSWORD`。
 
----
+
+<br>
 
 ## Local DEV
 
