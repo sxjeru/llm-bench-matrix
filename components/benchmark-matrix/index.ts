@@ -1,3 +1,5 @@
+export { BenchmarkMatrix } from "../benchmark-matrix";
+
 // Re-export all types
 export * from "./types";
 

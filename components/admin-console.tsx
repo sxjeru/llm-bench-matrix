@@ -1968,23 +1968,18 @@ export function AdminConsole({
   }, []);
 
   useEffect(() => {
-    setMergedRecordList(mergedRecords);
-    setMergedRecordTargetInputs(
-      mergedRecords.reduce<Record<string, string>>((acc, record) => {
-        acc[`${record.entityType}:${record.sourceId}`] = `${record.targetName} [${record.targetId}]`;
-        return acc;
-      }, {})
-    );
+    queueMicrotask(() => {
+      setMergedRecordList(mergedRecords);
+      setMergedRecordTargetInputs(
+        mergedRecords.reduce<Record<string, string>>((acc, record) => {
+          acc[`${record.entityType}:${record.sourceId}`] = `${record.targetName} [${record.targetId}]`;
+          return acc;
+        }, {})
+      );
+    });
   }, [mergedRecords]);
 
   useEffect(() => {
-    setRenameSearchKeyword("");
-    setRenameSelectedEntityId(null);
-    setRenameNextName("");
-    setRenameNextBenchmarkType("");
-    setRenameSubmitState("idle");
-    setRenameListScrollTop(0);
-
     if (renameListViewportRef.current) {
       renameListViewportRef.current.scrollTop = 0;
     }
@@ -1993,14 +1988,22 @@ export function AdminConsole({
       clearTimeout(renameSubmitResetTimerRef.current);
       renameSubmitResetTimerRef.current = null;
     }
-  }, [renameEntityType]);
+  }, [renameEntityType, renameSearchKeyword]);
 
-  useEffect(() => {
+  function resetRenameStateForEntityType(nextEntityType: "model" | "benchmark") {
+    setRenameEntityType(nextEntityType);
+    setRenameSearchKeyword("");
+    setRenameSelectedEntityId(null);
+    setRenameNextName("");
+    setRenameNextBenchmarkType("");
+    setRenameSubmitState("idle");
     setRenameListScrollTop(0);
-    if (renameListViewportRef.current) {
-      renameListViewportRef.current.scrollTop = 0;
-    }
-  }, [renameSearchKeyword]);
+  }
+
+  function updateRenameSearchKeyword(nextKeyword: string) {
+    setRenameSearchKeyword(nextKeyword);
+    setRenameListScrollTop(0);
+  }
 
   useEffect(() => {
     try {
@@ -2016,7 +2019,7 @@ export function AdminConsole({
         .filter(Boolean)
         .slice(0, 30);
 
-      setPairNoteHistory(normalized);
+      queueMicrotask(() => setPairNoteHistory(normalized));
     } catch {
       // ignore storage read errors gracefully
     }
@@ -2036,7 +2039,7 @@ export function AdminConsole({
         .filter(Boolean)
         .slice(0, 30);
 
-      setStarNoteHistory(normalized);
+      queueMicrotask(() => setStarNoteHistory(normalized));
     } catch {
       // ignore storage read errors gracefully
     }
@@ -2367,6 +2370,21 @@ export function AdminConsole({
       notifySuccess("Provider 已保存，刷新页面可看到下拉选项更新。");
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "保存 provider 失败");
+    }
+  }
+
+  async function onCreateProviderFromSearch() {
+    const name = providerSearchQuery.trim();
+    if (!name) return;
+
+    try {
+      await postJson("/api/admin/providers", { name });
+      setProviderSearchQuery("");
+      setProviderSearchOpen(false);
+      router.refresh();
+      notifySuccess(`Provider "${name}" 已创建，页面刷新后可在列表中选择。`);
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "创建 Provider 失败");
     }
   }
 
@@ -5397,17 +5415,7 @@ export function AdminConsole({
                         <div
                           role="button"
                           className="flex w-full cursor-pointer items-center gap-3 border-b border-base-300/50 px-4 py-2.5 text-left text-sm font-normal text-primary transition-colors hover:bg-primary/10"
-                          onClick={async () => {
-                            try {
-                              await postJson("/api/admin/providers", { name: trimmedQuery });
-                              setProviderSearchQuery("");
-                              setProviderSearchOpen(false);
-                              router.refresh();
-                              notifySuccess(`Provider "${trimmedQuery}" 已创建，页面刷新后可在列表中选择。`);
-                            } catch (error) {
-                              notifyError(error instanceof Error ? error.message : "创建 Provider 失败");
-                            }
-                          }}
+                          onClick={onCreateProviderFromSearch}
                         >
                           <PlusCircle size={15} className="shrink-0" />
                           <span className="flex-1 truncate">
@@ -5825,7 +5833,7 @@ export function AdminConsole({
                 <select
                   className="select select-bordered w-full"
                   value={renameEntityType}
-                  onChange={(event) => setRenameEntityType(event.target.value as "model" | "benchmark")}
+                  onChange={(event) => resetRenameStateForEntityType(event.target.value as "model" | "benchmark")}
                 >
                   <option value="model">model</option>
                   <option value="benchmark">benchmark</option>
@@ -5835,7 +5843,7 @@ export function AdminConsole({
                 <input
                   className="input input-bordered w-full"
                   value={renameSearchKeyword}
-                  onChange={(event) => setRenameSearchKeyword(event.target.value)}
+                  onChange={(event) => updateRenameSearchKeyword(event.target.value)}
                   placeholder="输入名称或 ID 关键字搜索实体"
                 />
               </div>
