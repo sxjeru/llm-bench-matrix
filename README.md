@@ -3,29 +3,19 @@
 ![Lint](https://github.com/sxjeru/llm-bench-matrix/actions/workflows/lint.yml/badge.svg)
 ![Test](https://github.com/sxjeru/llm-bench-matrix/actions/workflows/test.yml/badge.svg)
 
-基于 **Next.js App Router + Drizzle + Postgres** 的大模型评测矩阵可视化项目：
-- 面向前台：多来源多模型 benchmark 榜单展示、筛选、比较、导出图片
-- 面向后台：CSV / XLSM(XLSX) 导入预览、实体维护与合并、数据库管理
+基于 **Next.js App Router、Drizzle ORM 与 PostgreSQL** 构建的大模型评测矩阵。<br>
+项目面向多来源 benchmark 数据的展示、整理与维护，提供前台可视化矩阵热力图，及后台数据管理能力。
 
----
+#### 点击预览：[https://llm.sxjeru.top/](https://llm.sxjeru.top/)
 
-## 功能概览
+## 核心能力
 
-### 前台矩阵
-- 多来源 Source 页签与聚合视图
-- 模型列筛选、拖拽排序、列宽调整
-- 比较模式（Baseline / Compare 差值徽标）
-- 热力图配色预设与透明度调节
-- 表格导出（PNG / WEBP / AVIF）与剪贴板复制
-
-### 后台管理
-- 密码登录与首登强制改密（默认密码保护）
-- 文本 CSV 导入：预览、警告提示、清洗后导入
-- XLSM/XLSX 导入：工作表预览、警告处理、提交导入
-- Provider / Model / Benchmark 的增改合并与去重辅助
-- 设置管理（含模型去重规则等）
-
----
+- **多来源矩阵展示**：按 Source 查看或聚合多来源数据，支持模型筛选、列排序、列宽调整与热力图配色。
+- **模型对比分析**：支持 Baseline / Compare 对比模式，直观展示模型间 benchmark 差异。
+- **图像导出**：支持将当前矩阵导出为 PNG、WEBP、AVIF，或复制到剪贴板。
+- **数据导入维护**：支持 CSV 与 XLSM/XLSX 预览导入，提供异常提示、数据清洗与提交能力。
+- **实体管理**：支持 Provider、Model、Benchmark 的增改、合并、重命名与重复检测。
+- **后台保护**：后台管理使用密码登录，并支持首登强制修改默认密码。
 
 ## 环境变量
 
@@ -38,7 +28,9 @@
 | `DATABASE_POOL_IDLE_TIMEOUT_MS` | 空闲连接超时（ms） | `10000` |
 | `DATABASE_POOL_CONNECTION_TIMEOUT_MS` | 获取连接超时（ms） | `5000` |
 | `DATABASE_POOL_MAX_USES` | 单连接最大复用次数 | `7500` |
-| `ADMIN_PASSWORD` | 后台登录密码 | 务必修改 |
+| `ADMIN_PASSWORD` | 后台登录密码 | 无 |
+| `NEXT_PUBLIC_UMAMI_SCRIPT_URL` | Umami 自托管脚本地址 | 空 |
+| `NEXT_PUBLIC_UMAMI_WEBSITE_ID` | Umami 网站 ID | 空 |
 
 > 生产环境必须提供 `ADMIN_PASSWORD`。
 
@@ -49,15 +41,6 @@
 ```bash
 pnpm install
 cp .env.example .env
-pnpm db:push
+pnpm db:migrate
 pnpm dev
 ```
-
----
-
-## API
-
-- `GET /api/public/records?limit=300`
-  - 返回前台表格数据
-  - 支持 `limit`（1 ~ 1000）
-  - 带速率限制与缓存头
