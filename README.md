@@ -21,16 +21,16 @@
 
 | 变量 | 说明 | 默认值 |
 |---|---|---|
+| `ADMIN_PASSWORD` | 后台登录密码 | 必填 |
 | `DATABASE_URL` | Postgres 连接串 | 无 |
 | `DATABASE_DRIVER` | 驱动选择（如 `pg` / `neon`） | 自动检测 |
-| `DATABASE_CA` | 数据库服务端 CA（可选） | 空 |
+| `DATABASE_CA` | 数据库服务端 CA（可选） | 无 |
 | `DATABASE_POOL_MAX` | 连接池最大连接数 | `5` |
 | `DATABASE_POOL_IDLE_TIMEOUT_MS` | 空闲连接超时（ms） | `10000` |
 | `DATABASE_POOL_CONNECTION_TIMEOUT_MS` | 获取连接超时（ms） | `5000` |
 | `DATABASE_POOL_MAX_USES` | 单连接最大复用次数 | `7500` |
-| `ADMIN_PASSWORD` | 后台登录密码 | 无 |
-| `NEXT_PUBLIC_UMAMI_SCRIPT_URL` | Umami 自托管脚本地址 | 空 |
-| `NEXT_PUBLIC_UMAMI_WEBSITE_ID` | Umami 网站 ID | 空 |
+| `NEXT_PUBLIC_UMAMI_SCRIPT_URL` | Umami 自托管脚本地址 | 无 |
+| `NEXT_PUBLIC_UMAMI_WEBSITE_ID` | Umami 网站 ID | 无 |
 
 > 生产环境必须提供 `ADMIN_PASSWORD`。
 
