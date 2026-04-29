@@ -24,7 +24,7 @@ let parseBenchmarkTextRowsForTest: (
   inputText: string,
   sourceInput?: string | null,
   htmlInput?: string | null
-) => ParsedTextImportResult;
+) => Promise<ParsedTextImportResult>;
 let normalizeDuplicateCompareTextForTest: (input: string) => string;
 let getDuplicateNameSimilarityForTest: (left: string, right: string) => number;
 let hasBenchmarkNumericTokenMismatchForTest: (left: string, right: string) => boolean;
@@ -45,7 +45,7 @@ beforeAll(async () => {
 });
 
 describe("paper-table 文本解析", () => {
-  test("可正确识别 Long Video 分类，并避免 benchmark 特殊符号警告按 model 重复", () => {
+  test("可正确识别 Long Video 分类，并避免 benchmark 特殊符号警告按 model 重复", async () => {
     const inputText = [
       "Benchmark GPT-4.1 Gemini-3-Pro Gemini-3-Flash Seed1.8 Qwen2.5 Kimi GPT-4o",
       "TOMATO [78] 95.2 59.6 60.8 60.8 47.4 57.3 59.9",
@@ -56,7 +56,7 @@ describe("paper-table 文本解析", () => {
       "CGBench [12] - 65.5 65.3 62.4 59.2 59.3 65.0"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
 
     const videoMmeRows = parsed.rows.filter((row) => row.benchmarkName === "VideoMME");
     expect(videoMmeRows.length).toBeGreaterThan(0);
@@ -77,13 +77,13 @@ describe("paper-table 文本解析", () => {
   });
 
 
-  test("可将 77.9 (65.3) 解析为 77.9 / 65.3", () => {
+  test("可将 77.9 (65.3) 解析为 77.9 / 65.3", async () => {
     const inputText = [
       "Benchmark M1 M2 M3 M4 M5",
       "BrowseComp 77.9 (65.3) 43.9 (29.5) 67.8 (57.2) 59.2 77.3"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
     const browseRows = parsed.rows.filter((row) => row.benchmarkName === "BrowseComp");
 
     expect(browseRows.length).toBeGreaterThan(0);
@@ -97,13 +97,13 @@ describe("paper-table 文本解析", () => {
     expect(valueByModel.get("M5")).toBe("77.3");
   });
 
-  test("三值指标标签会自动拆成多个 benchmark", () => {
+  test("三值指标标签会自动拆成多个 benchmark", async () => {
     const inputText = [
       "Benchmark\tModel-A\tModel-B\tModel-C",
       "SongFormBench-HarmonixSet(acc|hr.5f|hr3f)\t75.6|46.8|77.9\t80.6|67.8|83.4\t81.1|72.9|85.3"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
     const benchmarkNames = new Set(parsed.rows.map((row) => row.benchmarkName));
 
     expect(benchmarkNames).toEqual(
@@ -123,13 +123,13 @@ describe("paper-table 文本解析", () => {
     expect(valueByBenchmarkModel.get("SongFormBench-HarmonixSet (hr3f)::Model-C")).toBe("85.3");
   });
 
-  test("双值指标标签会保留双值并写入注释", () => {
+  test("双值指标标签会保留双值并写入注释", async () => {
     const inputText = [
       "Benchmark\tM1\tM2\tM3",
       "Librispeech(clean|other)\t3.36|4.41\t1.30|2.43\t1.11|2.23"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
     const byModel = new Map(parsed.rows.map((row) => [row.modelName, row]));
 
     expect(parsed.rows).toHaveLength(3);
@@ -140,7 +140,7 @@ describe("paper-table 文本解析", () => {
     expect(byModel.get("M1")?.valueNote).toContain("(clean|other)");
   });
 
-  test("可将分行的 τ / 2 / -Bench 前缀合并为 τ2-Bench", () => {
+  test("可将分行的 τ / 2 / -Bench 前缀合并为 τ2-Bench", async () => {
     const inputText = [
       "Benchmark M1 M2 M3 M4 M5",
       "τ",
@@ -151,7 +151,7 @@ describe("paper-table 文本解析", () => {
       "-Bench (telecom) 98.7 98.0 98.2 98.0 94.2"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
     const benchmarkNames = new Set(parsed.rows.map((row) => row.benchmarkName));
 
     expect(benchmarkNames.has("τ2-Bench (retail)")).toBe(true);
@@ -186,13 +186,13 @@ describe("paper-table 文本解析", () => {
     expect(getDuplicateNameSimilarityForTest("GPT‑5.4 Pro", "GPT-5.4 Pro")).toBe(1);
   });
 
-  test("导入文本解析时会把 U+2011 归一化为普通连字符", () => {
+  test("导入文本解析时会把 U+2011 归一化为普通连字符", async () => {
     const inputText = [
       "Benchmark\tGPT‑5.4\tGPT-5.4 Pro",
       "SWE-bench\t57.7\t60.1"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
     const modelNames = new Set(parsed.rows.map((row) => row.modelName));
 
     expect(modelNames.has("GPT‑5.4")).toBe(false);
@@ -232,14 +232,14 @@ describe("paper-table 文本解析", () => {
     ).toBe(false);
   });
 
-  test("VLM 关键词可识别为 Vision 模态", () => {
+  test("VLM 关键词可识别为 Vision 模态", async () => {
     const inputText = [
       "Benchmark M1 M2",
       "VLM Arena",
       "SceneQA 80 81"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
     const sceneRows = parsed.rows.filter((row) => row.benchmarkName === "SceneQA");
 
     expect(sceneRows.length).toBeGreaterThan(0);
@@ -247,7 +247,7 @@ describe("paper-table 文本解析", () => {
     expect(sceneRows.every((row) => row.modalities.includes("Vision"))).toBe(true);
   });
 
-  test("Fleurs 只要含双向标记就不再默认 low-is-better", () => {
+  test("Fleurs 只要含双向标记就不再默认 low-is-better", async () => {
     const inputText = [
       "Benchmark\tM1",
       "Fleurs en⇄zh\t12.3",
@@ -255,7 +255,7 @@ describe("paper-table 文本解析", () => {
       "Fleurs en-fr\t14.1"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
     const fleursZhRow = parsed.rows.find((row) => row.benchmarkName === "Fleurs en⇄zh");
     const fleursBiDirectionalRow = parsed.rows.find((row) => row.benchmarkName === "Fleurs en⇄fr");
     const fleursGeneralRow = parsed.rows.find((row) => row.benchmarkName === "Fleurs en-fr");
@@ -265,14 +265,14 @@ describe("paper-table 文本解析", () => {
     expect(fleursGeneralRow?.higherIsBetter).toBe(false);
   });
 
-  test("分类含 ASR 时默认 low-is-better", () => {
+  test("分类含 ASR 时默认 low-is-better", async () => {
     const inputText = [
       "Benchmark\tM1",
       "ASR\t",
       "Librispeech\t3.2"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
     const row = parsed.rows.find((item) => item.benchmarkName === "Librispeech");
 
     expect(row).toBeDefined();
@@ -280,20 +280,20 @@ describe("paper-table 文本解析", () => {
     expect(row?.higherIsBetter).toBe(false);
   });
 
-  test("benchmark 名包含 MSE 时默认 low-is-better", () => {
+  test("benchmark 名包含 MSE 时默认 low-is-better", async () => {
     const inputText = [
       "Benchmark\tM1",
       "Depth MSE\t0.12"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
     const row = parsed.rows.find((item) => item.benchmarkName === "Depth MSE");
 
     expect(row).toBeDefined();
     expect(row?.higherIsBetter).toBe(false);
   });
 
-  test("Tab 矩阵文本可正确识别 Vision/Audio 分类与模态", () => {
+  test("Tab 矩阵文本可正确识别 Vision/Audio 分类与模态", async () => {
     const inputText = [
       "\tGemma 4 31B\tGemma 4 26B A4B",
       "MMLU Pro\t85.2%\t82.6%",
@@ -303,7 +303,7 @@ describe("paper-table 文本解析", () => {
       "CoVoST\t35.54\t33.47"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
 
     const mmmuRows = parsed.rows.filter((row) => row.benchmarkName === "MMMU Pro");
     expect(mmmuRows.length).toBeGreaterThan(0);
@@ -316,7 +316,7 @@ describe("paper-table 文本解析", () => {
     expect(covostRows.every((row) => row.modalities.includes("Audio"))).toBe(true);
   });
 
-  test("Tab 矩阵文本支持 benchmark 换行并继承上一类型", () => {
+  test("Tab 矩阵文本支持 benchmark 换行并继承上一类型", async () => {
     const inputText = [
       "Benchmark\tKimi K2.6\tGPT-5.4\tClaude Opus 4.6\tGemini 3.1 Pro\tKimi K2.5",
       "Agentic",
@@ -325,7 +325,7 @@ describe("paper-table 文本解析", () => {
       "BrowseComp\t83.2\t82.7\t83.7\t85.9\t74.9"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
 
     expect(parsed.format).toBe("matrix-table");
 
@@ -345,7 +345,7 @@ describe("paper-table 文本解析", () => {
     expect(new Set(browseCompRows.map((row) => row.benchmarkType))).toEqual(new Set(["Agentic"]));
   });
 
-  test("提供 htmlText 时优先按 HTML 表格解析，并识别 colspan 分类行", () => {
+  test("提供 htmlText 时优先按 HTML 表格解析，并识别 colspan 分类行", async () => {
     const fallbackText = [
       "Benchmark\tM1",
       "Fallback\t1.0"
@@ -363,7 +363,7 @@ describe("paper-table 文本解析", () => {
       "</table></body></html>"
     ].join("");
 
-    const parsed = parseBenchmarkTextRowsForTest(fallbackText, "text:unit-test", htmlInput);
+    const parsed = await parseBenchmarkTextRowsForTest(fallbackText, "text:unit-test", htmlInput);
 
     expect(parsed.format).toBe("matrix-table");
     expect(parsed.parseSource).toBe("html");
@@ -382,7 +382,7 @@ describe("paper-table 文本解析", () => {
     expect(valueByModel.get("Kimi K2.5")).toBe("50.2");
   });
 
-  test("HTML 表格外部标题可作为 type 前导行", () => {
+  test("HTML 表格外部标题可作为 type 前导行", async () => {
     const fallbackText = [
       "Benchmark\tM1",
       "Fallback\t1.0"
@@ -400,7 +400,7 @@ describe("paper-table 文本解析", () => {
       "</table></div></body></html>"
     ].join("");
 
-    const parsed = parseBenchmarkTextRowsForTest(fallbackText, "text:unit-test", htmlInput);
+    const parsed = await parseBenchmarkTextRowsForTest(fallbackText, "text:unit-test", htmlInput);
 
     expect(parsed.format).toBe("matrix-table");
     expect(parsed.parseSource).toBe("html");
@@ -416,7 +416,7 @@ describe("paper-table 文本解析", () => {
     expect(terminalRows.every((row) => row.benchmarkTypeProvided)).toBe(true);
   });
 
-  test("提供 htmlText 时可识别中英混合 Category/Benchmark 表头并继承空白分类", () => {
+  test("提供 htmlText 时可识别中英混合 Category/Benchmark 表头并继承空白分类", async () => {
     const fallbackText = [
       "Benchmark\tM1",
       "Fallback\t1.0"
@@ -435,7 +435,7 @@ describe("paper-table 文本解析", () => {
       "</table></body></html>"
     ].join("");
 
-    const parsed = parseBenchmarkTextRowsForTest(fallbackText, "text:unit-test", htmlInput);
+    const parsed = await parseBenchmarkTextRowsForTest(fallbackText, "text:unit-test", htmlInput);
 
     expect(parsed.format).toBe("matrix-table");
     expect(parsed.parseSource).toBe("html");
@@ -456,7 +456,7 @@ describe("paper-table 文本解析", () => {
     expect(hmmtRows.every((row) => row.benchmarkTypeProvided)).toBe(true);
   });
 
-  test("HTML 表格 rowspan 分数会复制到覆盖行", () => {
+  test("HTML 表格 rowspan 分数会复制到覆盖行", async () => {
     const htmlInput = [
       "<html><body><table>",
       "<thead>",
@@ -469,7 +469,7 @@ describe("paper-table 文本解析", () => {
       "</table></body></html>"
     ].join("");
 
-    const parsed = parseBenchmarkTextRowsForTest(htmlInput, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(htmlInput, "text:unit-test");
     expect(parsed.format).toBe("matrix-table");
 
     const valueByBenchmarkAndModel = new Map(
@@ -487,7 +487,7 @@ describe("paper-table 文本解析", () => {
     expect(valueByBenchmarkAndModel.get("BrowseComp (Agent Swarm)::M5")).toBe("78.4");
   });
 
-  test("HTML 表格中的星号值会保留原始写法", () => {
+  test("HTML 表格中的星号值会保留原始写法", async () => {
     const htmlInput = [
       "<html><body><table>",
       "<thead><tr><th>Benchmark</th><th>M1</th></tr></thead>",
@@ -495,7 +495,7 @@ describe("paper-table 文本解析", () => {
       "</table></body></html>"
     ].join("");
 
-    const parsed = parseBenchmarkTextRowsForTest("Benchmark\tX\nFallback\t1", "text:unit-test", htmlInput);
+    const parsed = await parseBenchmarkTextRowsForTest("Benchmark\tX\nFallback\t1", "text:unit-test", htmlInput);
     const starRow = parsed.rows.find((row) => row.benchmarkName === "Star Bench" && row.modelName === "M1");
 
     expect(parsed.parseSource).toBe("html");
@@ -503,7 +503,7 @@ describe("paper-table 文本解析", () => {
     expect(starRow?.valueRaw).toBe("65.4*");
   });
 
-  test("HTML 表格中的 LaTeX 希腊字母会转换为 Unicode 标准字符", () => {
+  test("HTML 表格中的 LaTeX 希腊字母会转换为 Unicode 标准字符", async () => {
     const htmlInput = [
       "<html><body><table>",
       "<thead><tr><th>Benchmark</th><th>M1</th></tr></thead>",
@@ -515,7 +515,7 @@ describe("paper-table 文本解析", () => {
       "</table></body></html>"
     ].join("");
 
-    const parsed = parseBenchmarkTextRowsForTest("Benchmark\tX\nFallback\t1", "text:unit-test", htmlInput);
+    const parsed = await parseBenchmarkTextRowsForTest("Benchmark\tX\nFallback\t1", "text:unit-test", htmlInput);
     const benchmarkNames = new Set(parsed.rows.map((row) => row.benchmarkName));
 
     expect(parsed.parseSource).toBe("html");
@@ -524,7 +524,7 @@ describe("paper-table 文本解析", () => {
     expect(benchmarkNames.has("ϕ-bench")).toBe(true);
   });
 
-  test("多行堆叠模型表头可重建并正确对齐数值列", () => {
+  test("多行堆叠模型表头可重建并正确对齐数值列", async () => {
     const inputText = [
       "Evaluation Claude family",
       "models",
@@ -542,7 +542,7 @@ describe("paper-table 文本解析", () => {
       "SWE-bench Plus 60.0% 50.0% 55.0% 54.0% 52.0%"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
 
     expect(parsed.format).toBe("paper-table");
 
@@ -597,7 +597,7 @@ describe("paper-table 文本解析", () => {
     expect(plusByModel.get("Gemini 3.1 Pro")).toBe("52.0");
   });
 
-  test("Category + Benchmark 双列表头可正确解析并继承分类", () => {
+  test("Category + Benchmark 双列表头可正确解析并继承分类", async () => {
     const inputText = [
       "Category\tBenchmark\tGPT‑5.4\tGPT‑5.4 Pro\tGPT‑5.4 mini\tGPT‑5.4 nano\tGPT‑5.3-Codex\tGPT‑5.2\tGPT‑5.2 Pro\tGPT-5 mini",
       "Knowledge & STEM\tGPQA Diamond\t92.8\t94.4\t88\t82.8\t92.6\t92.4\t93.2\t81.6",
@@ -607,7 +607,7 @@ describe("paper-table 文本解析", () => {
       "\tOfficeQA\t68.1\t—\t—\t—\t65.1\t63.1\t—\t—"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
 
     expect(parsed.format).toBe("matrix-table");
     expect(parsed.rows.length).toBe(25);
@@ -629,13 +629,13 @@ describe("paper-table 文本解析", () => {
     }
   });
 
-  test("逗号分隔矩阵文本可正确识别 Category + Benchmark 列", () => {
+  test("逗号分隔矩阵文本可正确识别 Category + Benchmark 列", async () => {
     const inputText = [
       "Category,Benchmark,Muse Spark Thinking,Opus 4.6 Max,Gemini 3.1 Pro High,GPT 5.4 Xhigh,Grok 4.2 Reasoning",
       "Multimodal,CharXiv Reasoning,86.4,65.3 (Self-Reported: 61.5),80.2,82.8,60.9"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
 
     expect(parsed.format).toBe("matrix-table");
 
@@ -649,13 +649,13 @@ describe("paper-table 文本解析", () => {
     expect(opusRow?.valueNote).toBe("(Self-Reported: 61.5)");
   });
 
-  test("逗号分隔矩阵首列为评测维度时不会被当作模型", () => {
+  test("逗号分隔矩阵首列为评测维度时不会被当作模型", async () => {
     const inputText = [
       "评测维度,Claude Opus 4.7,Claude Opus 4.6,GPT-5.4,GPT-5.4 Pro,Gemini 3.1 Pro",
       "SWE-bench Verified,87.6%,80.8%,-,-,80.6%"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
 
     expect(parsed.format).toBe("matrix-table");
 
@@ -678,13 +678,13 @@ describe("paper-table 文本解析", () => {
     expect(valueByModel.get("Gemini 3.1 Pro")).toBe("80.6");
   });
 
-  test("逗号分隔矩阵首列为任意标签时按右侧数据列推断模型数", () => {
+  test("逗号分隔矩阵首列为任意标签时按右侧数据列推断模型数", async () => {
     const inputText = [
       "随便写点,Claude Opus 4.7,Claude Opus 4.6,GPT-5.4,GPT-5.4 Pro,Gemini 3.1 Pro",
       "SWE-bench Verified,87.6%,80.8%,-,-,80.6%"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
 
     expect(parsed.format).toBe("matrix-table");
 
@@ -702,13 +702,13 @@ describe("paper-table 文本解析", () => {
     expect(benchmarkNames).toEqual(new Set(["SWE-bench Verified"]));
   });
 
-  test("结构化 CSV 识别不受逗号矩阵支持影响", () => {
+  test("结构化 CSV 识别不受逗号矩阵支持影响", async () => {
     const inputText = [
       "provider,model,benchmark,benchmark_type,value_raw,source",
       "OpenAI,GPT-5.4,GPQA Diamond,Knowledge,92.8,text:unit-test"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
 
     expect(parsed.format).toBe("structured-csv");
     expect(parsed.rows).toHaveLength(1);
@@ -717,14 +717,14 @@ describe("paper-table 文本解析", () => {
     expect(parsed.rows[0]?.valueRaw).toBe("92.8");
   });
 
-  test("结构化 CSV 支持 benchmark_type_provided 标记", () => {
+  test("结构化 CSV 支持 benchmark_type_provided 标记", async () => {
     const inputText = [
       "provider,model,benchmark,benchmark_type,benchmark_type_provided,value_raw,source",
       "OpenAI,GPT-5.4,GPQA Diamond,General,0,92.8,text:unit-test",
       "OpenAI,GPT-5.4,AIME 2025,Math,1,91.2,text:unit-test"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
 
     expect(parsed.format).toBe("structured-csv");
     expect(parsed.rows).toHaveLength(2);
@@ -736,13 +736,13 @@ describe("paper-table 文本解析", () => {
     expect(aime?.benchmarkTypeProvided).toBe(true);
   });
 
-  test("矩阵值中的括号说明会拆分为数值与备注", () => {
+  test("矩阵值中的括号说明会拆分为数值与备注", async () => {
     const inputText = [
       "Benchmark\tClaude Sonnet 4\tGPT-5",
       "Terminal-Bench 2.0 (Best self-reported)\t66.5 (Claude Code)\t56.2 (Claude Code)"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
     expect(parsed.format).toBe("matrix-table");
 
     const terminalRows = parsed.rows.filter(
@@ -759,40 +759,40 @@ describe("paper-table 文本解析", () => {
     expect(byModel.get("GPT-5")?.valueNote).toBe("(Claude Code)");
   });
 
-  test("值带 # 前缀时自动标记 higherIsBetter 为 false（矩阵表格）", () => {
+  test("值带 # 前缀时自动标记 higherIsBetter 为 false（矩阵表格）", async () => {
     const inputText = [
       "Benchmark\tModel A\tModel B",
       "Rank Eval\t#3\t#5"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
     const rows = parsed.rows.filter((row) => row.benchmarkName === "Rank Eval");
 
     expect(rows.length).toBe(2);
     expect(rows.every((row) => row.higherIsBetter === false)).toBe(true);
   });
 
-  test("值带 # 前缀时自动标记 higherIsBetter 为 false（论文格式）", () => {
+  test("值带 # 前缀时自动标记 higherIsBetter 为 false（论文格式）", async () => {
     const inputText = [
       "Rank Eval  Model A  Model B",
       "Arena      #3       #5"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
     const rows = parsed.rows.filter((row) => row.benchmarkName === "Arena");
 
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((row) => row.higherIsBetter === false)).toBe(true);
   });
 
-  test("benchmark 方向标识优先于 # 前缀值推断 higherIsBetter", () => {
+  test("benchmark 方向标识优先于 # 前缀值推断 higherIsBetter", async () => {
     const inputText = [
       "Benchmark\tModel A\tModel B",
       "Rank Eval ↑\t#3\t#5",
       "Rank Eval ↓\t#3\t#5"
     ].join("\n");
 
-    const parsed = parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
     const rows = parsed.rows.filter((row) => row.benchmarkName === "Rank Eval");
     const upRows = rows.slice(0, 2);
     const downRows = rows.slice(2, 4);

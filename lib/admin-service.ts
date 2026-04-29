@@ -1,5 +1,4 @@
 import { parse } from "csv-parse/sync";
-import * as XLSX from "xlsx";
 import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
@@ -704,8 +703,9 @@ function extractHtmlTableLeadingTypeHints(inputHtml: string): string[] {
   return Array.from(new Set(hints));
 }
 
-function parseHtmlTableToText(inputHtml: string): string | null {
+async function parseHtmlTableToText(inputHtml: string): Promise<string | null> {
   try {
+    const XLSX = await import("xlsx");
     const workbook = XLSX.read(inputHtml, { type: "string", raw: true });
     const selectedSheet = workbook.SheetNames[0];
     if (!selectedSheet) return null;
@@ -4084,11 +4084,11 @@ function parseBenchmarkTextRowsCore(inputText: string, defaultSource: string | n
   };
 }
 
-function parseBenchmarkTextRows(
+async function parseBenchmarkTextRows(
   inputText: string,
   sourceInput?: string | null,
   htmlInput?: string | null
-): ParsedTextImportResult {
+): Promise<ParsedTextImportResult> {
   const defaultSource = normalizeTextImportSource(sourceInput);
   const textParsed = parseBenchmarkTextRowsCore(inputText, defaultSource);
 
@@ -4099,7 +4099,7 @@ function parseBenchmarkTextRows(
     return textParsed;
   }
 
-  const htmlAsText = parseHtmlTableToText(htmlTableInput);
+  const htmlAsText = await parseHtmlTableToText(htmlTableInput);
   if (!htmlAsText) {
     return textParsed;
   }
@@ -4115,11 +4115,11 @@ function parseBenchmarkTextRows(
   };
 }
 
-export function __parseBenchmarkTextRowsForTest(
+export async function __parseBenchmarkTextRowsForTest(
   inputText: string,
   sourceInput?: string | null,
   htmlInput?: string | null
-): ParsedTextImportResult {
+): Promise<ParsedTextImportResult> {
   return parseBenchmarkTextRows(inputText, sourceInput, htmlInput);
 }
 
@@ -4197,7 +4197,7 @@ async function collectBenchmarkDirectionWarnings(rows: NormalizedTextImportRow[]
 }
 
 export async function previewBenchmarkTextImport(inputText: string, sourceInput?: string | null, htmlInput?: string | null) {
-  const parsed = parseBenchmarkTextRows(inputText, sourceInput, htmlInput);
+  const parsed = await parseBenchmarkTextRows(inputText, sourceInput, htmlInput);
   const directionWarnings = await collectBenchmarkDirectionWarnings(parsed.rows);
   const parseWarnings = parsed.warnings ?? [];
   const allWarnings = [...parseWarnings, ...directionWarnings];
@@ -4236,7 +4236,7 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
 }
 
 export async function importBenchmarkCsv(inputText: string, sourceInput?: string | null, htmlInput?: string | null) {
-  const parsed = parseBenchmarkTextRows(inputText, sourceInput, htmlInput);
+  const parsed = await parseBenchmarkTextRows(inputText, sourceInput, htmlInput);
   const directionWarnings = await collectBenchmarkDirectionWarnings(parsed.rows);
   const parseWarnings = parsed.warnings ?? [];
   const allWarnings = [...parseWarnings, ...directionWarnings];

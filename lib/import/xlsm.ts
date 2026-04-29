@@ -1,4 +1,3 @@
-import * as XLSX from "xlsx";
 import { parseBenchmarkValue } from "@/lib/db/parse-value";
 import { IMPORT_VALUE_PAIR_REGEX, IMPORT_VALUE_RANK_PREFIX_REGEX, IMPORT_VALUE_SINGLE_REGEX } from "@/lib/import/value-patterns";
 
@@ -177,7 +176,8 @@ function getNonEmptyColumnIndices(headerRow: string[]): number[] {
   return indices;
 }
 
-export function parseWorkbookBuffer(buffer: Buffer, sheetName?: string): WorkbookParseResult {
+export async function parseWorkbookBuffer(buffer: Buffer, sheetName?: string): Promise<WorkbookParseResult> {
+  const XLSX = await import("xlsx");
   const workbook = XLSX.read(buffer, { type: "buffer" });
 
   if (workbook.SheetNames.length === 0) {

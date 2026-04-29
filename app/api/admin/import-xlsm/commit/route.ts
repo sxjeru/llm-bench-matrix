@@ -23,7 +23,7 @@ export async function POST(request: Request) {
 
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
-    const parsed = parseWorkbookBuffer(buffer, sheetName);
+    const parsed = await parseWorkbookBuffer(buffer, sheetName);
 
     if (parsed.warnings.length > 0 && !allowWarnings) {
       return NextResponse.json(

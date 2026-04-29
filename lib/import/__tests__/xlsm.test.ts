@@ -15,14 +15,14 @@ function buildWorkbookBuffer(rows: Array<Array<string>>): Buffer {
 }
 
 describe("parseWorkbookBuffer", () => {
-  test("Category 列为空时会继承上一行分类", () => {
+  test("Category 列为空时会继承上一行分类", async () => {
     const buffer = buildWorkbookBuffer([
       ["Category", "Benchmark", "Model A", "Model B"],
       ["Professional", "GDPval", "83", "82"],
       ["", "FinanceAgent v1.1", "56", "61.5"]
     ]);
 
-    const parsed = parseWorkbookBuffer(buffer, "Sheet1");
+    const parsed = await parseWorkbookBuffer(buffer, "Sheet1");
 
     const gdpRows = parsed.records.filter((row) => row.benchmarkName === "GDPval");
     const financeRows = parsed.records.filter((row) => row.benchmarkName === "FinanceAgent v1.1");
@@ -33,13 +33,13 @@ describe("parseWorkbookBuffer", () => {
     expect(financeRows.every((row) => row.category === "Professional")).toBe(true);
   });
 
-  test("支持货币格式值并识别为有效数值", () => {
+  test("支持货币格式值并识别为有效数值", async () => {
     const buffer = buildWorkbookBuffer([
       ["Category", "Benchmark", "Model A"],
       ["Business", "Vending Bench 2", "$4,432.12"]
     ]);
 
-    const parsed = parseWorkbookBuffer(buffer, "Sheet1");
+    const parsed = await parseWorkbookBuffer(buffer, "Sheet1");
     const row = parsed.records.find((item) => item.benchmarkName === "Vending Bench 2");
 
     expect(row).toBeDefined();
@@ -49,13 +49,13 @@ describe("parseWorkbookBuffer", () => {
     expect(parsed.warnings).toHaveLength(0);
   });
 
-  test("支持 56.2 / 60.7* 这类双值+星号格式", () => {
+  test("支持 56.2 / 60.7* 这类双值+星号格式", async () => {
     const buffer = buildWorkbookBuffer([
       ["Category", "Benchmark", "Model A"],
       ["Business", "Pair Bench", "56.2 / 60.7*"]
     ]);
 
-    const parsed = parseWorkbookBuffer(buffer, "Sheet1");
+    const parsed = await parseWorkbookBuffer(buffer, "Sheet1");
     const row = parsed.records.find((item) => item.benchmarkName === "Pair Bench");
 
     expect(row).toBeDefined();
@@ -66,13 +66,13 @@ describe("parseWorkbookBuffer", () => {
     expect(parsed.warnings).toHaveLength(0);
   });
 
-  test("支持 #3.4 这类名次值，且自动标记 higherIsBetter 为 false", () => {
+  test("支持 #3.4 这类名次值，且自动标记 higherIsBetter 为 false", async () => {
     const buffer = buildWorkbookBuffer([
       ["Category", "Benchmark", "Model A"],
       ["Business", "Rank Bench", "#3.4"]
     ]);
 
-    const parsed = parseWorkbookBuffer(buffer, "Sheet1");
+    const parsed = await parseWorkbookBuffer(buffer, "Sheet1");
     const row = parsed.records.find((item) => item.benchmarkName === "Rank Bench");
 
     expect(row).toBeDefined();
@@ -85,13 +85,13 @@ describe("parseWorkbookBuffer", () => {
     expect(parsed.warnings).toHaveLength(0);
   });
 
-  test("支持 75.6 | 46.8 | 77.9 三值管道格式", () => {
+  test("支持 75.6 | 46.8 | 77.9 三值管道格式", async () => {
     const buffer = buildWorkbookBuffer([
       ["Category", "Benchmark", "Model A"],
       ["Audio", "SongFormBench-HarmonixSet(acc|hr.5f|hr3f)", "75.6 | 46.8 | 77.9"]
     ]);
 
-    const parsed = parseWorkbookBuffer(buffer, "Sheet1");
+    const parsed = await parseWorkbookBuffer(buffer, "Sheet1");
     const benchmarkNames = new Set(parsed.records.map((item) => item.benchmarkName));
     const valueByBenchmark = new Map(parsed.records.map((item) => [item.benchmarkName, item.rawValue]));
 
@@ -109,13 +109,13 @@ describe("parseWorkbookBuffer", () => {
     expect(parsed.warnings).toHaveLength(0);
   });
 
-  test("支持 3.36 | 4.41 两值管道格式", () => {
+  test("支持 3.36 | 4.41 两值管道格式", async () => {
     const buffer = buildWorkbookBuffer([
       ["Category", "Benchmark", "Model A"],
       ["Audio", "Librispeech(clean|other)", "3.36 | 4.41"]
     ]);
 
-    const parsed = parseWorkbookBuffer(buffer, "Sheet1");
+    const parsed = await parseWorkbookBuffer(buffer, "Sheet1");
     const row = parsed.records.find((item) => item.benchmarkName === "Librispeech");
 
     expect(row).toBeDefined();
