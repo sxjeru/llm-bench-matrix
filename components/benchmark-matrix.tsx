@@ -2842,7 +2842,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
           </button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 px-3">
+        <div className="flex flex-wrap items-center gap-2 px-3 mt-4">
           <div className="mr-auto flex min-w-0 flex-wrap items-center gap-2 text-xs">
             {compareModelOrder.length > 0 ? (
               <>
