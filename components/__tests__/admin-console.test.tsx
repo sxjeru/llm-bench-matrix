@@ -1944,6 +1944,28 @@ describe("AdminConsole provider config", () => {
     expect(payload.config?.displayTargetProviderId).toBe(2);
   });
 
+  test("展示归并目标列表隐藏已归并的 provider", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <AdminConsole
+        {...buildPropsWithDisplayName()}
+        providers={[
+          { id: 1, name: "OpenAI", slug: "openai", config: { displayName: "OpenAI Official" } },
+          { id: 2, name: "Google", slug: "google", config: { displayName: "Google Labs" } },
+          { id: 3, name: "Anthropic", slug: "anthropic", config: { displayName: "Claude", displayTargetProviderId: 2 } }
+        ]}
+      />
+    );
+
+    const openAiSection = await openProviderConfigPanel(user, "OpenAI");
+    const mergeSelect = within(openAiSection).getByRole("combobox") as HTMLSelectElement;
+    const optionLabels = Array.from(mergeSelect.options).map((option) => option.textContent);
+
+    expect(optionLabels).toContain("Google Labs (google)");
+    expect(optionLabels).not.toContain("Claude (anthropic)");
+  });
+
   test("Provider 搜索支持按 displayName 过滤并展示模型列表", async () => {
     const user = userEvent.setup();
 

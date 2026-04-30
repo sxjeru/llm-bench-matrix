@@ -910,7 +910,9 @@ export function AdminConsole({
 
   const availableDisplayTargetProviders = useMemo(() => {
     if (!selectedProviderForConfig) return [];
-    return providers.filter((provider) => provider.id !== selectedProviderForConfig.id);
+    return providers.filter(
+      (provider) => provider.id !== selectedProviderForConfig.id && typeof provider.config?.displayTargetProviderId !== "number"
+    );
   }, [providers, selectedProviderForConfig]);
 
   const [modelName, setModelName] = useState("");
@@ -5643,7 +5645,7 @@ export function AdminConsole({
 
                   <div className="grid grid-cols-1 gap-x-6 gap-y-5 px-6 pb-5 lg:grid-cols-[minmax(280px,1fr)_1fr] lg:items-end">
                     <label className="form-control w-full">
-                      <span className="label-text mb-1.5 text-xs font-medium opacity-70">展示归并到</span>
+                      <span className="label-text mb-1.5 text-xs font-medium opacity-70">归并到</span>
                       <select
                         className="select select-bordered w-full rounded-xl bg-base-200/40 transition-colors focus:bg-base-100 focus:border-primary focus:outline-none"
                         value={draft.displayTargetProviderId ?? ""}
