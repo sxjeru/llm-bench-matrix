@@ -2,6 +2,8 @@ name: Cleanup Neon preview branch
 on:
   pull_request:
     types: [closed]
+permissions:
+  contents: read
 jobs:
   delete-branch:
     runs-on: ubuntu-latest
