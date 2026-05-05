@@ -24,7 +24,7 @@
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.1",
     "html2canvas-pro": "^2.0.2",
-    "lucide-react": "^1.12.0",
+    "lucide-react": "^1.14.0",
     "next": "16.2.4",
     "pg": "^8.20.0",
     "react": "19.2.5",
