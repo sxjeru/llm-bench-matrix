@@ -3623,6 +3623,11 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
     ? categoryLabelIndex
     : (
       inferredModelHeaderStartIndex !== null
+      && hasExplicitBenchmarkColumn
+      && benchmarkColumnIndex > 0
+      && inferredModelHeaderStartIndex > benchmarkColumnIndex
+      ? benchmarkColumnIndex - 1
+      : inferredModelHeaderStartIndex !== null
       && inferredModelHeaderStartIndex >= 2
       && isMatrixCategoryHeaderCell(headerCells[inferredModelHeaderStartIndex - 2] ?? "")
       ? inferredModelHeaderStartIndex - 2

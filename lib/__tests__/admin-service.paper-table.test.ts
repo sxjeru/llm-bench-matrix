@@ -649,6 +649,30 @@ describe("paper-table 文本解析", () => {
     expect(opusRow?.valueNote).toBe("(Self-Reported: 61.5)");
   });
 
+  test("逗号分隔矩阵存在 Benchmark 列时可按位置推断左侧类别列", async () => {
+    const inputText = [
+      "Capability,Benchmark,Seed2.0 Lite(0428),Seed2.0 Lite(0215),Seed2.0 Pro(0215),Seed2.0 Mini(0215),Seed1.8,GPT-5.4 Mini,GPT-5.4 High,Gemini 3 Flash,Gemini 3 Flash High,Gemini 3 Pro High,Gemini 3.1 Pro,Gemini 3.1 Pro High,Claude Opus 4.7,Claude Sonnet 4.6,Claude Sonnet 4.5",
+      "Knowledge,GPQA Diamond,88.4%,85.1%,88.9%,-,-,88.0%,-,90.7%,-,-,-,-,-,-,-",
+      ",SuperGPQA,69.6%,67.5%,68.7%,-,-,63.9%,-,72.7%,-,-,-,-,-,-,-"
+    ].join("\n");
+
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+
+    expect(parsed.format).toBe("matrix-table");
+
+    const modelNames = new Set(parsed.rows.map((row) => row.modelName));
+    expect(modelNames.has("Capability")).toBe(false);
+    expect(modelNames.has("Benchmark")).toBe(false);
+
+    const gpqaRows = parsed.rows.filter((row) => row.benchmarkName === "GPQA Diamond");
+    expect(gpqaRows).toHaveLength(5);
+    expect(new Set(gpqaRows.map((row) => row.benchmarkType))).toEqual(new Set(["Knowledge"]));
+
+    const superGpqaRows = parsed.rows.filter((row) => row.benchmarkName === "SuperGPQA");
+    expect(superGpqaRows).toHaveLength(5);
+    expect(new Set(superGpqaRows.map((row) => row.benchmarkType))).toEqual(new Set(["Knowledge"]));
+  });
+
   test("逗号分隔矩阵首列为评测维度时不会被当作模型", async () => {
     const inputText = [
       "评测维度,Claude Opus 4.7,Claude Opus 4.6,GPT-5.4,GPT-5.4 Pro,Gemini 3.1 Pro",
