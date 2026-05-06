@@ -4697,6 +4697,36 @@ function hasBenchmarkNumericTokenMismatch(leftName: string, rightName: string): 
   return leftTokens.some((token, index) => token !== rightTokens[index]);
 }
 
+function extractBenchmarkSymbolNumberPairs(input: string): string[] {
+  const normalizedInput = input.replace(
+    SUPERSCRIPT_SUBSCRIPT_DIGIT_REGEX,
+    (value) => SUPERSCRIPT_SUBSCRIPT_DIGIT_MAP[value] ?? value
+  );
+
+  return Array.from(normalizedInput.matchAll(/([@^])\s*(\d+(?:\.\d+)?)/g)).map((match) => {
+    const symbol = match[1] ?? "";
+    const numericToken = match[2] ?? "";
+    const parsed = Number.parseFloat(numericToken);
+    const normalizedNumber = Number.isFinite(parsed) ? String(parsed) : numericToken;
+    return `${symbol}${normalizedNumber}`;
+  });
+}
+
+function hasBenchmarkSymbolSemanticMismatch(leftName: string, rightName: string): boolean {
+  const leftTokens = extractBenchmarkSymbolNumberPairs(leftName);
+  const rightTokens = extractBenchmarkSymbolNumberPairs(rightName);
+
+  if (leftTokens.length === 0 || rightTokens.length === 0) {
+    return false;
+  }
+
+  if (leftTokens.length !== rightTokens.length) {
+    return true;
+  }
+
+  return leftTokens.some((token, index) => token !== rightTokens[index]);
+}
+
 function formatBenchmarkSourceSummary(source: string | null): string {
   const normalized = source?.trim() ?? "";
   return normalized.length > 0 ? normalized : "空 source";
@@ -4882,6 +4912,7 @@ export async function detectDuplicateEntityCandidates(): Promise<DuplicateEntity
       const hasGeneralTypeGap = leftType === "general" || rightType === "general";
       const hasVariantConflict = hasBenchmarkVariantConflict(left.benchmarkName, right.benchmarkName);
       const hasNumericTokenMismatch = hasBenchmarkNumericTokenMismatch(left.benchmarkName, right.benchmarkName);
+      const hasSymbolSemanticMismatch = hasBenchmarkSymbolSemanticMismatch(left.benchmarkName, right.benchmarkName);
 
       const reasons: string[] = [];
       let confidence: DuplicateConfidence = "low";
@@ -4920,6 +4951,11 @@ export async function detectDuplicateEntityCandidates(): Promise<DuplicateEntity
 
       if (hasNumericTokenMismatch) {
         reasons.push("numeric-token-mismatch");
+        confidence = "low";
+      }
+
+      if (hasSymbolSemanticMismatch) {
+        reasons.push("symbol-semantic-mismatch");
         confidence = "low";
       }
 
@@ -4985,6 +5021,10 @@ export function __hasBenchmarkNumericTokenMismatchForTest(left: string, right: s
 
 export function __hasBenchmarkVariantNoiseNormalizedNameMatchForTest(left: string, right: string): boolean {
   return hasBenchmarkVariantNoiseNormalizedNameMatch(left, right);
+}
+
+export function __hasBenchmarkSymbolSemanticMismatchForTest(left: string, right: string): boolean {
+  return hasBenchmarkSymbolSemanticMismatch(left, right);
 }
 
 type RawBenchmarkScaleConsistencyAggregateRow = {

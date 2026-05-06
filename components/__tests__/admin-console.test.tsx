@@ -2078,6 +2078,59 @@ describe("AdminConsole merge interactions", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  test("重复候选支持勾选并批量合并", async () => {
+    const user = userEvent.setup();
+
+    const duplicateResult = buildDuplicateDetectionResponse();
+    duplicateResult.modelCandidates.push({
+      sourceId: 3,
+      sourceName: "Model C",
+      sourceProviderName: "OpenAI",
+      sourceValueCount: 4,
+      targetId: 2,
+      targetName: "Model B",
+      targetProviderName: "OpenAI",
+      targetValueCount: 12,
+      confidence: "medium",
+      similarity: 0.91,
+      characterRepeatScore: 0.9,
+      reasons: ["char-similarity-0.910"]
+    });
+    const fetchMock = mockFetchSequence(duplicateResult, { ok: true }, { ok: true });
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await openMergeTab(user);
+    await user.click(screen.getByRole("button", { name: "检测重复候选" }));
+    await screen.findByRole("button", { name: "Model 候选（2）" });
+
+    await user.click(screen.getByRole("checkbox", { name: "选择当前列表全部候选" }));
+    expect(screen.getByText("已选 2 / 2")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "批量合并已选" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
+    expect(JSON.parse((fetchMock.mock.calls[1]?.[1] as RequestInit).body as string)).toMatchObject({
+      entityType: "model",
+      sourceId: 1,
+      targetId: 2
+    });
+    expect(JSON.parse((fetchMock.mock.calls[2]?.[1] as RequestInit).body as string)).toMatchObject({
+      entityType: "model",
+      sourceId: 3,
+      targetId: 2
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Model A \[1\]\s*→\s*Model B \[2\]/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Model C \[3\]\s*→\s*Model B \[2\]/)).not.toBeInTheDocument();
+    });
+    expect(await screen.findByText("批量合并完成：2 条。")).toBeInTheDocument();
+  });
+
   test("右上通知支持并列显示多条消息", async () => {
     const user = userEvent.setup();
 

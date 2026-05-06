@@ -1014,6 +1014,8 @@ export function AdminConsole({
   const [duplicateDetectionResult, setDuplicateDetectionResult] = useState<DuplicateDetectionResult | null>(null);
   const [duplicateDetectionEntityType, setDuplicateDetectionEntityType] = useState<"model" | "benchmark">("model");
   const [duplicateConfidenceFilter, setDuplicateConfidenceFilter] = useState<"high-medium" | "all">("high-medium");
+  const [selectedDuplicateCandidateKeys, setSelectedDuplicateCandidateKeys] = useState<Record<string, boolean>>({});
+  const [isBatchMergingDuplicates, setIsBatchMergingDuplicates] = useState(false);
   const [isCheckingScaleConsistency, setIsCheckingScaleConsistency] = useState(false);
   const [scaleConsistencyIssues, setScaleConsistencyIssues] = useState<ScaleConsistencyIssue[]>([]);
   const [scaleConsistencyCheckedAt, setScaleConsistencyCheckedAt] = useState<string | null>(null);
@@ -1931,6 +1933,27 @@ export function AdminConsole({
       duplicateConfidenceFilter === "all" || candidate.confidence !== "low"
     );
   }, [duplicateDetectionResult, duplicateConfidenceFilter]);
+
+  const selectedVisibleModelDuplicateCandidates = useMemo(
+    () => visibleModelDuplicateCandidates.filter((candidate) => selectedDuplicateCandidateKeys[getDuplicateCandidateKey("model", candidate)]),
+    [visibleModelDuplicateCandidates, selectedDuplicateCandidateKeys]
+  );
+
+  const selectedVisibleBenchmarkDuplicateCandidates = useMemo(
+    () => visibleBenchmarkDuplicateCandidates.filter((candidate) => selectedDuplicateCandidateKeys[getDuplicateCandidateKey("benchmark", candidate)]),
+    [visibleBenchmarkDuplicateCandidates, selectedDuplicateCandidateKeys]
+  );
+
+  const activeDuplicateCandidateCount =
+    duplicateDetectionEntityType === "model"
+      ? visibleModelDuplicateCandidates.length
+      : visibleBenchmarkDuplicateCandidates.length;
+  const selectedActiveDuplicateCandidateCount =
+    duplicateDetectionEntityType === "model"
+      ? selectedVisibleModelDuplicateCandidates.length
+      : selectedVisibleBenchmarkDuplicateCandidates.length;
+  const isAllActiveDuplicateCandidatesSelected =
+    activeDuplicateCandidateCount > 0 && selectedActiveDuplicateCandidateCount === activeDuplicateCandidateCount;
 
   const scaleConsistencyAffectedValueCount = useMemo(
     () => scaleConsistencyIssues.reduce((sum, item) => sum + item.smallValueCount + item.largeValueCount, 0),
@@ -3264,6 +3287,39 @@ export function AdminConsole({
     return reason;
   }
 
+  function getDuplicateCandidateKey(
+    entityType: "model" | "benchmark",
+    candidate: { sourceId: number; targetId: number }
+  ) {
+    return `${entityType}:${candidate.sourceId}:${candidate.targetId}`;
+  }
+
+  function setDuplicateCandidateSelected(
+    entityType: "model" | "benchmark",
+    candidate: { sourceId: number; targetId: number },
+    selected: boolean
+  ) {
+    const key = getDuplicateCandidateKey(entityType, candidate);
+    setSelectedDuplicateCandidateKeys((prev) => ({
+      ...prev,
+      [key]: selected
+    }));
+  }
+
+  function toggleAllVisibleDuplicateCandidates(selected: boolean) {
+    const candidates = duplicateDetectionEntityType === "model"
+      ? visibleModelDuplicateCandidates
+      : visibleBenchmarkDuplicateCandidates;
+
+    setSelectedDuplicateCandidateKeys((prev) => {
+      const next = { ...prev };
+      candidates.forEach((candidate) => {
+        next[getDuplicateCandidateKey(duplicateDetectionEntityType, candidate)] = selected;
+      });
+      return next;
+    });
+  }
+
   function applyModelDuplicateCandidate(candidate: DuplicateModelCandidate) {
     setMergeType("model");
     setMergeSourceInput(`${candidate.sourceName} [${candidate.sourceId}]`);
@@ -3333,6 +3389,13 @@ export function AdminConsole({
         benchmarkCandidates: prev.benchmarkCandidates.filter(shouldKeepCandidate)
       };
     });
+
+    setSelectedDuplicateCandidateKeys((prev) => {
+      const next = { ...prev };
+      delete next[`${entityType}:${sourceId}:${targetId}`];
+      delete next[`${entityType}:${targetId}:${sourceId}`];
+      return next;
+    });
   }
 
   function upsertMergedRecordAfterMerge(
@@ -3380,6 +3443,7 @@ export function AdminConsole({
       const result = await postJson("/api/admin/detect-duplicates", {});
       const typedResult = result as DuplicateDetectionResult;
       setDuplicateDetectionResult(typedResult);
+      setSelectedDuplicateCandidateKeys({});
 
       if ((typedResult.modelCandidates?.length ?? 0) > 0) {
         setDuplicateDetectionEntityType("model");
@@ -3557,6 +3621,50 @@ export function AdminConsole({
     } catch (error) {
       setMergeSubmitState("idle");
       notifyError(error instanceof Error ? error.message : "合并失败");
+    }
+  }
+
+  async function onBatchMergeDuplicateCandidates() {
+    if (isBatchMergingDuplicates || selectedActiveDuplicateCandidateCount === 0) return;
+
+    const entityType = duplicateDetectionEntityType;
+    const candidates = entityType === "model"
+      ? selectedVisibleModelDuplicateCandidates
+      : selectedVisibleBenchmarkDuplicateCandidates;
+
+    setIsBatchMergingDuplicates(true);
+
+    let mergedCount = 0;
+    try {
+      for (const candidate of candidates) {
+        await postJson("/api/admin/merge", {
+          entityType,
+          sourceId: candidate.sourceId,
+          targetId: candidate.targetId,
+          targetBenchmarkName: entityType === "benchmark"
+            ? (candidate as DuplicateBenchmarkCandidate).targetName
+            : undefined
+        });
+
+        upsertMergedRecordAfterMerge(
+          entityType,
+          candidate.sourceId,
+          candidate.targetId,
+          entityType === "benchmark" ? (candidate as DuplicateBenchmarkCandidate).targetName : undefined
+        );
+        removeDuplicateCandidateByMerge(entityType, candidate.sourceId, candidate.targetId);
+        mergedCount += 1;
+      }
+
+      notifySuccess(`批量合并完成：${mergedCount} 条。`);
+    } catch (error) {
+      notifyError(
+        error instanceof Error
+          ? `批量合并中断：已完成 ${mergedCount} 条；${error.message}`
+          : `批量合并中断：已完成 ${mergedCount} 条`
+      );
+    } finally {
+      setIsBatchMergingDuplicates(false);
     }
   }
 
@@ -6044,6 +6152,28 @@ export function AdminConsole({
                     </button>
                   </div>
 
+                  <div className="flex flex-wrap items-center gap-2 rounded-xl border border-base-300/70 bg-base-100/60 p-2 text-xs">
+                    <label className="flex cursor-pointer items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="checkbox checkbox-sm"
+                        checked={isAllActiveDuplicateCandidatesSelected}
+                        disabled={activeDuplicateCandidateCount === 0 || isBatchMergingDuplicates}
+                        onChange={(e) => toggleAllVisibleDuplicateCandidates(e.target.checked)}
+                      />
+                      <span>选择当前列表全部候选</span>
+                    </label>
+                    <span className="opacity-70">已选 {selectedActiveDuplicateCandidateCount} / {activeDuplicateCandidateCount}</span>
+                    <button
+                      type="button"
+                      className="btn btn-xs btn-error ml-auto"
+                      disabled={selectedActiveDuplicateCandidateCount === 0 || isBatchMergingDuplicates}
+                      onClick={onBatchMergeDuplicateCandidates}
+                    >
+                      {isBatchMergingDuplicates ? "批量合并中..." : "批量合并已选"}
+                    </button>
+                  </div>
+
                   {duplicateDetectionEntityType === "model" ? (
                     visibleModelDuplicateCandidates.length === 0 ? (
                       <div className="rounded-xl border border-dashed border-base-300 p-3 text-sm opacity-70">
@@ -6057,6 +6187,16 @@ export function AdminConsole({
                             className={`rounded-xl border p-3 shadow-sm ${duplicateCandidateCardClass(candidate.confidence)}`}
                           >
                             <div className="flex flex-wrap items-start gap-2">
+                              <label className="flex cursor-pointer items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  className="checkbox checkbox-sm"
+                                  checked={Boolean(selectedDuplicateCandidateKeys[getDuplicateCandidateKey("model", candidate)])}
+                                  disabled={isBatchMergingDuplicates}
+                                  onChange={(e) => setDuplicateCandidateSelected("model", candidate, e.target.checked)}
+                                  aria-label={`选择 ${candidate.sourceName} 合并到 ${candidate.targetName}`}
+                                />
+                              </label>
                               <span className="font-semibold">
                                 {candidate.sourceName} [{candidate.sourceId}] → {candidate.targetName} [{candidate.targetId}]
                               </span>
@@ -6106,6 +6246,16 @@ export function AdminConsole({
                             className={`rounded-xl border p-3 shadow-sm ${duplicateCandidateCardClass(candidate.confidence)}`}
                           >
                             <div className="flex flex-wrap items-start gap-2">
+                              <label className="flex cursor-pointer items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  className="checkbox checkbox-sm"
+                                  checked={Boolean(selectedDuplicateCandidateKeys[getDuplicateCandidateKey("benchmark", candidate)])}
+                                  disabled={isBatchMergingDuplicates}
+                                  onChange={(e) => setDuplicateCandidateSelected("benchmark", candidate, e.target.checked)}
+                                  aria-label={`选择 ${candidate.sourceName} 合并到 ${candidate.targetName}`}
+                                />
+                              </label>
                               <span className="font-semibold">
                                 {candidate.sourceName} [{candidate.sourceType}] → {candidate.targetName} [{candidate.targetType}]
                               </span>

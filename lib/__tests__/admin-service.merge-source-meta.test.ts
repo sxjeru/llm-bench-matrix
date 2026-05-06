@@ -17,10 +17,13 @@ type MergeEntityFn = (input: {
   targetBenchmarkName?: string;
 }) => Promise<void>;
 
+type HasBenchmarkSymbolSemanticMismatchFn = (left: string, right: string) => boolean;
+
 type TransactionCallback = (tx: unknown) => Promise<unknown>;
 
 let mergeEntityForTest: MergeEntityFn;
 let importBenchmarkCsvForTest: ImportBenchmarkCsvFn;
+let hasBenchmarkSymbolSemanticMismatchForTest: HasBenchmarkSymbolSemanticMismatchFn;
 let dbForTest: {
   select: (...args: unknown[]) => unknown;
   transaction: (callback: TransactionCallback) => Promise<unknown>;
@@ -32,6 +35,7 @@ beforeAll(async () => {
   const adminServiceModule = await import("@/lib/admin-service");
   mergeEntityForTest = adminServiceModule.mergeEntity as MergeEntityFn;
   importBenchmarkCsvForTest = adminServiceModule.importBenchmarkCsv as ImportBenchmarkCsvFn;
+  hasBenchmarkSymbolSemanticMismatchForTest = adminServiceModule.__hasBenchmarkSymbolSemanticMismatchForTest as HasBenchmarkSymbolSemanticMismatchFn;
 
   const dbClientModule = await import("@/lib/db/client");
   dbForTest = dbClientModule.db as typeof dbForTest;
@@ -42,6 +46,22 @@ beforeEach(() => {
 });
 
 describe("mergeEntity benchmark source meta migration", () => {
+  test("benchmark 重复检测会识别 @ 和 ^ 的关键语义差异", () => {
+    expect(
+      hasBenchmarkSymbolSemanticMismatchForTest(
+        "Claw-Eval (Pass@3) [Agentic]",
+        "Claw-Eval (Pass^3) [Coding Agent]"
+      )
+    ).toBe(true);
+
+    expect(
+      hasBenchmarkSymbolSemanticMismatchForTest(
+        "Claw-Eval (Pass@3)",
+        "Claw-Eval (Pass@3)"
+      )
+    ).toBe(false);
+  });
+
   function createSelectWhereMock(results: unknown[]) {
     const queue = [...results];
 
