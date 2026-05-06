@@ -1,17 +1,26 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
+
+const mockSearchParams = new URLSearchParams();
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/",
   useRouter: () => ({
     replace: vi.fn()
   }),
-  useSearchParams: () => new URLSearchParams()
+  useSearchParams: () => mockSearchParams
 }));
 
 describe("BenchmarkMatrix source tabs", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    for (const key of Array.from(mockSearchParams.keys())) {
+      mockSearchParams.delete(key);
+    }
+  });
+
   test("同系列 source 页签按新版本优先排序（如 Qwen3.6 在 Qwen3.5 前）", () => {
     render(
       <BenchmarkMatrix
@@ -132,5 +141,47 @@ describe("BenchmarkMatrix source tabs", () => {
       expect(screen.getByText("已选模型 2/2")).toBeInTheDocument();
     });
     expect(screen.getByText("Bench-S")).toBeInTheDocument();
+  });
+
+  test("带 source 参数时优先使用当前 source 结果里的 benchmark 类型", () => {
+    mockSearchParams.set("source", "text:Seed2.0-0428");
+
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:Seed2.0-0428"]}
+        rows={[
+          {
+            providerName: "Seed",
+            modelName: "Seed2.0 Pro",
+            benchmarkName: "Claw-Eval",
+            benchmarkType: "Agentic",
+            benchmarkCanonicalKey: "claw-eval:agentic",
+            benchTime: "2026-05-06T00:00:00.000Z",
+            valueRaw: "77",
+            valueNum: 77,
+            valueNote: null,
+            source: "text:Seed2.0-0428"
+          }
+        ]}
+        allRows={[
+          {
+            providerName: "Seed",
+            modelName: "Seed2.0 Pro",
+            benchmarkName: "Claw-Eval",
+            benchmarkType: "Coding Agent",
+            benchmarkCanonicalKey: "claw-eval:codingagent",
+            benchTime: "2026-05-06T00:00:00.000Z",
+            valueRaw: "77",
+            valueNum: 77,
+            valueNote: null,
+            source: "text:Seed2.0-0428"
+          }
+        ]}
+      />
+    );
+
+    expect(screen.getByRole("tab", { name: "Seed2.0-0428" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Agentic")).toBeInTheDocument();
+    expect(screen.queryByText("Coding Agent")).not.toBeInTheDocument();
   });
 });

@@ -935,7 +935,21 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
   }
 
-  const rowsBySource = useMemo(() => {
+  const scopedRowsBySource = useMemo(() => {
+    const map = new Map<string, MatrixInputRow[]>();
+
+    rows.forEach((row) => {
+      const sourceKey = getSourceKey(row.source);
+      if (!map.has(sourceKey)) {
+        map.set(sourceKey, []);
+      }
+      map.get(sourceKey)!.push(row);
+    });
+
+    return map;
+  }, [rows]);
+
+  const allRowsBySource = useMemo(() => {
     const map = new Map<string, MatrixInputRow[]>();
 
     allRows.forEach((row) => {
@@ -1030,13 +1044,13 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       return rows;
     }
 
-    const sourceScopedRows = rowsBySource.get(activeSource) ?? [];
+    const sourceScopedRows = scopedRowsBySource.get(activeSource) ?? allRowsBySource.get(activeSource) ?? [];
     if (sourceScopedRows.length > 0) {
       return sourceScopedRows;
     }
 
     return rows;
-  }, [allRows, rows, rowsBySource, activeSource, showDuplicateRows]);
+  }, [allRows, rows, scopedRowsBySource, allRowsBySource, activeSource, showDuplicateRows]);
 
   const baseBenchmarkKeySet = useMemo(() => {
     const keys = new Set<string>();

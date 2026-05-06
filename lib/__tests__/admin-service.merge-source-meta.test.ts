@@ -18,12 +18,19 @@ type MergeEntityFn = (input: {
 }) => Promise<void>;
 
 type HasBenchmarkSymbolSemanticMismatchFn = (left: string, right: string) => boolean;
+type GetDashboardRowsFn = (limit?: number | null, sourceFilter?: string | null) => Promise<Array<{
+  benchmarkName: string;
+  benchmarkType: string;
+  modalities: string[];
+  source: string | null;
+}>>;
 
 type TransactionCallback = (tx: unknown) => Promise<unknown>;
 
 let mergeEntityForTest: MergeEntityFn;
 let importBenchmarkCsvForTest: ImportBenchmarkCsvFn;
 let hasBenchmarkSymbolSemanticMismatchForTest: HasBenchmarkSymbolSemanticMismatchFn;
+let getDashboardRowsForTest: GetDashboardRowsFn;
 let dbForTest: {
   select: (...args: unknown[]) => unknown;
   transaction: (callback: TransactionCallback) => Promise<unknown>;
@@ -36,6 +43,9 @@ beforeAll(async () => {
   mergeEntityForTest = adminServiceModule.mergeEntity as MergeEntityFn;
   importBenchmarkCsvForTest = adminServiceModule.importBenchmarkCsv as ImportBenchmarkCsvFn;
   hasBenchmarkSymbolSemanticMismatchForTest = adminServiceModule.__hasBenchmarkSymbolSemanticMismatchForTest as HasBenchmarkSymbolSemanticMismatchFn;
+
+  const queryModule = await import("@/lib/db/queries");
+  getDashboardRowsForTest = queryModule.getDashboardRows as GetDashboardRowsFn;
 
   const dbClientModule = await import("@/lib/db/client");
   dbForTest = dbClientModule.db as typeof dbForTest;
@@ -60,6 +70,67 @@ describe("mergeEntity benchmark source meta migration", () => {
         "Claw-Eval (Pass@3)"
       )
     ).toBe(false);
+  });
+
+  test("source 视图会优先展示 benchmark_source_meta 中保留的原类别", async () => {
+    const baseRows = [
+      {
+        id: 1,
+        providerId: 1,
+        providerName: "Anthropic",
+        providerConfig: null,
+        modelName: "Claude 4",
+        benchmarkName: "Claw-Eval",
+        benchmarkType: "Coding Agent",
+        higherIsBetter: true,
+        benchmarkTypeOverride: "Agentic",
+        benchmarkCanonicalKey: "claweval:codingagent",
+        modalities: ["Text"],
+        modalitiesOverride: ["Agentic"],
+        benchTime: new Date("2026-05-06T00:00:00.000Z"),
+        valueRaw: "75",
+        valueNum: 75,
+        valueNum2: null,
+        valueNote: null,
+        source: "text:claw-source"
+      }
+    ];
+
+    const providerRows: unknown[] = [];
+    const dashboardLimit = vi.fn().mockResolvedValue(baseRows);
+    const dashboardOrderBy = vi.fn(() => ({ limit: dashboardLimit }));
+    const dashboardWhere = vi.fn(() => ({ orderBy: dashboardOrderBy }));
+    const dashboardLeftJoin = vi.fn(() => ({ where: dashboardWhere }));
+    const dashboardInnerJoin3 = vi.fn(() => ({ leftJoin: dashboardLeftJoin }));
+    const dashboardInnerJoin2 = vi.fn(() => ({ innerJoin: dashboardInnerJoin3 }));
+    const dashboardInnerJoin1 = vi.fn(() => ({ innerJoin: dashboardInnerJoin2 }));
+    const dashboardFrom = vi.fn(() => ({ innerJoin: dashboardInnerJoin1 }));
+
+    const providerSelect = {
+      from: vi.fn(() => ({
+        where: vi.fn().mockResolvedValue(providerRows)
+      }))
+    };
+
+    const selectMock = vi.fn().mockImplementation((selection?: unknown) => {
+      if (selection && typeof selection === "object") {
+        return { from: dashboardFrom };
+      }
+      return providerSelect;
+    });
+
+    const dbSelectSpy = vi.spyOn(dbForTest, "select").mockImplementation(selectMock);
+
+    try {
+      const sourceRows = await getDashboardRowsForTest(null, "text:claw-source");
+      const allRows = await getDashboardRowsForTest(null, null);
+
+      expect(sourceRows[0]?.benchmarkType).toBe("Agentic");
+      expect(sourceRows[0]?.modalities).toEqual(["Agentic"]);
+      expect(allRows[0]?.benchmarkType).toBe("Coding Agent");
+    } finally {
+      dbSelectSpy.mockRestore();
+    }
   });
 
   function createSelectWhereMock(results: unknown[]) {
