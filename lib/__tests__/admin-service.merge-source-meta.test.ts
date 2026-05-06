@@ -291,7 +291,7 @@ describe("mergeEntity benchmark source meta migration", () => {
     transactionSpy.mockRestore();
   });
 
-  test("矩阵分类继承得到的非 General type 导入时不会错误复用同名 General benchmark", async () => {
+  test("矩阵分类继承得到的非 General type 导入时会复用同名 General benchmark，并用 source meta 保留导入分类", async () => {
     const inputText = [
       "Category\tBenchmark\tGPT-5.4",
       "Professional\tOfficeQA Pro\t68.1"
@@ -316,19 +316,6 @@ describe("mergeEntity benchmark source meta migration", () => {
       }
     ];
 
-    const createdBenchmark = {
-      id: 22,
-      benchmarkName: "OfficeQA Pro",
-      benchmarkType: "Professional",
-      unit: "score",
-      higherIsBetter: true,
-      modalities: ["Professional"],
-      canonicalKey: "officeqapro:professional",
-      sourceBenchmarkId: null,
-      mergedIntoBenchmarkId: null,
-      createdAt: new Date("2026-04-24T00:00:00.000Z")
-    };
-
     const createdProvider = { id: 1, name: "OpenAI", slug: "openai", createdAt: new Date("2026-04-01T00:00:00.000Z") };
     const createdModel = {
       id: 2,
@@ -349,20 +336,10 @@ describe("mergeEntity benchmark source meta migration", () => {
     const modelSelectWhere = vi.fn().mockReturnValue({ limit: modelSelectLimit });
     const modelSelectFrom = vi.fn().mockReturnValue({ where: modelSelectWhere });
 
-    const benchmarkCanonicalLimit = vi.fn().mockResolvedValue([]);
-    const benchmarkCanonicalWhere = vi.fn().mockReturnValue({ limit: benchmarkCanonicalLimit });
-    const benchmarkCanonicalFrom = vi.fn().mockReturnValue({ where: benchmarkCanonicalWhere });
-
-    const benchmarkNameTypeLimit = vi.fn().mockResolvedValue([]);
-    const benchmarkNameTypeWhere = vi.fn().mockReturnValue({ limit: benchmarkNameTypeLimit });
-    const benchmarkNameTypeFrom = vi.fn().mockReturnValue({ where: benchmarkNameTypeWhere });
-
     const txSelect = vi.fn()
       .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(activeBenchmarks) }) })
       .mockReturnValueOnce({ from: providerSelectFrom })
-      .mockReturnValueOnce({ from: modelSelectFrom })
-      .mockReturnValueOnce({ from: benchmarkCanonicalFrom })
-      .mockReturnValueOnce({ from: benchmarkNameTypeFrom });
+      .mockReturnValueOnce({ from: modelSelectFrom });
 
     const insertCalls: Array<{ target: string; payload: unknown }> = [];
 
@@ -380,12 +357,6 @@ describe("mergeEntity benchmark source meta migration", () => {
       return { returning: modelReturning };
     });
 
-    const benchmarkReturning = vi.fn().mockResolvedValue([createdBenchmark]);
-    const benchmarkValuesInsert = vi.fn((payload: unknown) => {
-      insertCalls.push({ target: "benchmarks", payload });
-      return { returning: benchmarkReturning };
-    });
-
     const valueRowsInsert = vi.fn((payload: unknown) => {
       insertCalls.push({ target: "benchmark_values", payload });
       return Promise.resolve(undefined);
@@ -400,7 +371,6 @@ describe("mergeEntity benchmark source meta migration", () => {
     const txInsert = vi.fn()
       .mockReturnValueOnce({ values: providerValues })
       .mockReturnValueOnce({ values: modelValues })
-      .mockReturnValueOnce({ values: benchmarkValuesInsert })
       .mockReturnValueOnce({ values: valueRowsInsert })
       .mockReturnValueOnce({ values: sourceMetaValues });
 
@@ -419,17 +389,106 @@ describe("mergeEntity benchmark source meta migration", () => {
       const result = await importBenchmarkCsvForTest(inputText, "text:unit-test");
 
       expect(result.inserted).toBe(1);
-      expect(benchmarkValuesInsert).toHaveBeenCalledWith(
+      expect(insertCalls.some((call) => call.target === "benchmarks")).toBe(false);
+      expect(valueRowsInsert).toHaveBeenCalledWith([
         expect.objectContaining({
-          benchmarkName: "OfficeQA Pro",
-          benchmarkType: "Professional"
+          benchmarkId: 11
         })
-      );
+      ]);
       expect(sourceMetaValues).toHaveBeenCalledWith([
         expect.objectContaining({
-          benchmarkId: 22,
+          benchmarkId: 11,
           source: "text:unit-test",
           benchmarkType: "Professional"
+        })
+      ]);
+    } finally {
+      transactionSpy.mockRestore();
+      dbSelectSpy.mockRestore();
+    }
+  });
+
+  test("导入同名但类别不同的 benchmark 时会复用已有更多记录的同名 benchmark，并保留新 source 类别", async () => {
+    const inputText = [
+      "Category\tBenchmark\tQwen3.6",
+      "STEM\tMMMU-Pro\t72.4"
+    ].join("\n");
+
+    const dbSelectSpy = vi.spyOn(dbForTest, "select").mockImplementation(() => {
+      throw new Error("connect ECONNREFUSED 127.0.0.1:5432");
+    });
+
+    const activeBenchmarks = [
+      {
+        id: 58,
+        benchmarkName: "MMMU-Pro",
+        benchmarkType: "STEM and Puzzle",
+        unit: "score",
+        higherIsBetter: true,
+        modalities: ["STEM", "Puzzle"],
+        canonicalKey: "mmmupro:stemandpuzzle",
+        sourceBenchmarkId: null,
+        mergedIntoBenchmarkId: null,
+        createdAt: new Date("2026-04-01T00:00:00.000Z")
+      }
+    ];
+
+    const createdProvider = { id: 1, name: "Qwen", slug: "qwen", createdAt: new Date("2026-04-01T00:00:00.000Z") };
+    const createdModel = {
+      id: 2,
+      providerId: 1,
+      modelName: "Qwen3.6",
+      modelAlias: null,
+      canonicalKey: "qwen36",
+      sourceModelId: null,
+      mergedIntoModelId: null,
+      createdAt: new Date("2026-04-01T00:00:00.000Z")
+    };
+
+    const txSelect = vi.fn()
+      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(activeBenchmarks) }) })
+      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([createdProvider]) }) }) })
+      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }) }) });
+
+    const providerReturning = vi.fn().mockResolvedValue([createdProvider]);
+    const modelReturning = vi.fn().mockResolvedValue([createdModel]);
+    const valueRowsInsert = vi.fn().mockResolvedValue(undefined);
+    const sourceMetaOnConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
+    const sourceMetaValues = vi.fn(() => ({ onConflictDoUpdate: sourceMetaOnConflictDoUpdate }));
+
+    const txInsert = vi.fn()
+      .mockReturnValueOnce({ values: vi.fn(() => ({ onConflictDoUpdate: vi.fn(() => ({ returning: providerReturning })) })) })
+      .mockReturnValueOnce({ values: vi.fn(() => ({ returning: modelReturning })) })
+      .mockReturnValueOnce({ values: valueRowsInsert })
+      .mockReturnValueOnce({ values: sourceMetaValues });
+
+    const tx = {
+      select: txSelect,
+      insert: txInsert,
+      update: vi.fn(() => ({ set: vi.fn() })),
+      delete: vi.fn()
+    };
+
+    const transactionSpy = vi
+      .spyOn(dbForTest, "transaction")
+      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+
+    try {
+      const result = await importBenchmarkCsvForTest(inputText, "text:Qwen3.6");
+
+      expect(result.inserted).toBe(1);
+      expect(txInsert).toHaveBeenCalledTimes(4);
+      expect(valueRowsInsert).toHaveBeenCalledWith([
+        expect.objectContaining({
+          benchmarkId: 58,
+          source: "text:Qwen3.6"
+        })
+      ]);
+      expect(sourceMetaValues).toHaveBeenCalledWith([
+        expect.objectContaining({
+          benchmarkId: 58,
+          source: "text:Qwen3.6",
+          benchmarkType: "STEM"
         })
       ]);
     } finally {

@@ -3125,7 +3125,7 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
       if (candidates.length === 0) return null;
 
       const normalizedType = benchmarkType.trim().toLowerCase();
-      return candidates.find((item) => item.benchmarkType.trim().toLowerCase() === normalizedType) ?? null;
+      return candidates.find((item) => item.benchmarkType.trim().toLowerCase() === normalizedType) ?? candidates[0] ?? null;
     };
 
     for (const row of rows) {
