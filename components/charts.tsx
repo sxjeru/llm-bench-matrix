@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { formatLocalDateLabel } from "./benchmark-matrix/formatters";
 import {
   Bar,
   BarChart,
@@ -99,11 +100,12 @@ export function DashboardCharts({ rows }: { rows: Row[] }) {
     return rows
       .filter((row) => row.valueNum !== null)
       .map((row) => ({
-        time: new Date(row.benchTime).toISOString().slice(0, 10),
+        time: formatLocalDateLabel(row.benchTime),
+        timestamp: new Date(row.benchTime).getTime(),
         score: Number(row.valueNum),
         label: `${row.modelName} · ${row.benchmarkName}`
       }))
-      .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+      .sort((a, b) => a.timestamp - b.timestamp)
       .slice(-48);
   }, [rows]);
 

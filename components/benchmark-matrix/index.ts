@@ -19,6 +19,8 @@ export {
 
 // Re-export all functions from formatters module
 export {
+  formatDateTimeLocalInputValue,
+  formatLocalDateLabel,
   formatTooltipTime,
   formatValueNumForDisplay,
   formatComparisonDeltaValue

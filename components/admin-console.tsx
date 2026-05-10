@@ -24,6 +24,7 @@ import {
   Video,
   X
 } from "lucide-react";
+import { formatDateTimeLocalInputValue } from "@/components/benchmark-matrix/formatters";
 import { isValidHexColor, resolveProviderBrandColor } from "@/lib/provider-config";
 
 type ProviderOption = {
@@ -929,7 +930,7 @@ export function AdminConsole({
   const [valueBenchmarkId, setValueBenchmarkId] = useState<number | "">(benchmarks[0]?.id ?? "");
   const [valueRaw, setValueRaw] = useState("");
   const [valueSource, setValueSource] = useState("");
-  const [benchTime, setBenchTime] = useState(() => new Date().toISOString().slice(0, 16));
+  const [benchTime, setBenchTime] = useState(() => formatDateTimeLocalInputValue(new Date()));
 
   const [csvText, setCsvText] = useState(
     ""

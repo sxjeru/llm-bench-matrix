@@ -1,9 +1,47 @@
+function padDatePart(value: number): string {
+  return value.toString().padStart(2, "0");
+}
+
+function formatLocalDateParts(date: Date): {
+  year: string;
+  month: string;
+  day: string;
+  hour: string;
+  minute: string;
+} {
+  return {
+    year: date.getFullYear().toString(),
+    month: padDatePart(date.getMonth() + 1),
+    day: padDatePart(date.getDate()),
+    hour: padDatePart(date.getHours()),
+    minute: padDatePart(date.getMinutes())
+  };
+}
+
 export function formatTooltipTime(input: string): string {
   const date = new Date(input);
   if (Number.isNaN(date.getTime())) {
     return input;
   }
-  return date.toISOString().slice(0, 16).replace("T", " ");
+  const { year, month, day, hour, minute } = formatLocalDateParts(date);
+  return `${year}-${month}-${day} ${hour}:${minute}`;
+}
+
+export function formatLocalDateLabel(input: string): string {
+  const date = new Date(input);
+  if (Number.isNaN(date.getTime())) {
+    return input;
+  }
+  const { year, month, day } = formatLocalDateParts(date);
+  return `${year}-${month}-${day}`;
+}
+
+export function formatDateTimeLocalInputValue(date: Date): string {
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const { year, month, day, hour, minute } = formatLocalDateParts(date);
+  return `${year}-${month}-${day}T${hour}:${minute}`;
 }
 
 export function formatValueNumForDisplay(valueNum: number | null): string | null {
