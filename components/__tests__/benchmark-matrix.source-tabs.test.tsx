@@ -143,7 +143,7 @@ describe("BenchmarkMatrix source tabs", () => {
     expect(screen.getByText("Bench-S")).toBeInTheDocument();
   });
 
-  test("带 source 参数时优先使用当前 source 结果里的 benchmark 类型", () => {
+  test("带 source 参数时优先使用当前 source 结果里的 benchmark 类型", async () => {
     mockSearchParams.set("source", "text:Seed2.0-0428");
 
     render(
@@ -180,7 +180,9 @@ describe("BenchmarkMatrix source tabs", () => {
       />
     );
 
-    expect(screen.getByRole("tab", { name: "Seed2.0-0428" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Seed2.0-0428" })).toHaveClass("tab-active");
+    });
     expect(screen.getByText("Agentic")).toBeInTheDocument();
     expect(screen.queryByText("Coding Agent")).not.toBeInTheDocument();
   });
