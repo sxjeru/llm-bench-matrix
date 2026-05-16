@@ -19,6 +19,9 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Install coverage
+        run: npm install --save-dev vitest @vitest/coverage-v8
+
       - name: Run tests
         run: npx vitest run --coverage
 
