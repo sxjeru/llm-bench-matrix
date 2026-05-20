@@ -34,6 +34,8 @@ export default async function HomePage() {
     source: row.source
   });
 
+  const mappedRows = rows.map(toMatrixRow);
+
   return (
     <>
       <section className="home-metrics-grid">
@@ -61,8 +63,8 @@ export default async function HomePage() {
       <Suspense fallback={null}>
         <BenchmarkMatrix
           sourceOptions={sourceOptions}
-          rows={rows.map(toMatrixRow)}
-          allRows={rows.map(toMatrixRow)}
+          rows={mappedRows}
+          allRows={mappedRows}
         />
       </Suspense>
 

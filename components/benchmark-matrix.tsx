@@ -973,6 +973,16 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     return map;
   }, [allRows]);
 
+  const allRowsWithSourceMeta = useMemo(
+    () => allRows.map((row) => applySourceMeta(row)),
+    [allRows]
+  );
+
+  const indexedSourceRows = useMemo(
+    () => (activeSource === SOURCE_ALL ? allRows : allRowsWithSourceMeta),
+    [allRows, allRowsWithSourceMeta, activeSource]
+  );
+
   const allRowsIndex = useMemo(() => {
     const modelProviderMap = new Map<string, ProviderIdentity>();
     const modelProviderBrandColorMap = new Map<string, string | null>();
@@ -980,9 +990,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     const rowsByModel = new Map<string, IndexedMatrixInputRow[]>();
     const rowsByGroupingKey = new Map<string, IndexedMatrixInputRow[]>();
 
-    allRows.forEach((inputRow) => {
-      const row = activeSource === SOURCE_ALL ? inputRow : applySourceMeta(inputRow);
-
+    indexedSourceRows.forEach((row) => {
       if (!modelProviderMap.has(row.modelName)) {
         const displayName = row.providerDisplayName?.trim() || row.providerName || "Unknown";
         modelProviderMap.set(row.modelName, {
@@ -1019,7 +1027,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       rowsByModel,
       rowsByGroupingKey
     };
-  }, [allRows, activeSource, showDuplicateRows]);
+  }, [indexedSourceRows, showDuplicateRows]);
 
   const coveredModelsByGroupingKey = useMemo(() => {
     const coveredMap = new Map<string, Set<string>>();
