@@ -6,9 +6,11 @@ export type MatrixInputRow = {
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
+  sourceBenchmarkType?: string | null;
   higherIsBetter?: boolean;
   benchmarkCanonicalKey?: string | null;
   modalities?: string[];
+  sourceModalities?: string[] | null;
   benchTime: string;
   valueRaw: string;
   valueNum: number | null;

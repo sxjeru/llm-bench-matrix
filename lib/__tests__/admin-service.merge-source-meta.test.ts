@@ -21,7 +21,9 @@ type HasBenchmarkSymbolSemanticMismatchFn = (left: string, right: string) => boo
 type GetDashboardRowsFn = (limit?: number | null, sourceFilter?: string | null) => Promise<Array<{
   benchmarkName: string;
   benchmarkType: string;
+  sourceBenchmarkType: string | null;
   modalities: string[];
+  sourceModalities: string[] | null;
   source: string | null;
 }>>;
 
@@ -125,8 +127,10 @@ describe("mergeEntity benchmark source meta migration", () => {
       const sourceRows = await getDashboardRowsForTest(null, "text:claw-source");
       const allRows = await getDashboardRowsForTest(null, null);
 
-      expect(sourceRows[0]?.benchmarkType).toBe("Agentic");
-      expect(sourceRows[0]?.modalities).toEqual(["Agentic"]);
+      expect(sourceRows[0]?.benchmarkType).toBe("Coding Agent");
+      expect(sourceRows[0]?.sourceBenchmarkType).toBe("Agentic");
+      expect(sourceRows[0]?.modalities).toEqual(["Text"]);
+      expect(sourceRows[0]?.sourceModalities).toEqual(["Agentic"]);
       expect(allRows[0]?.benchmarkType).toBe("Coding Agent");
     } finally {
       dbSelectSpy.mockRestore();

@@ -1,4 +1,5 @@
 import { and, count, countDistinct, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db/client";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 import { normalizeProviderConfig } from "@/lib/provider-config";
@@ -22,9 +23,11 @@ export type DashboardRow = {
   modelName: string;
   benchmarkName: string;
   benchmarkType: string;
+  sourceBenchmarkType: string | null;
   higherIsBetter: boolean;
   benchmarkCanonicalKey: string;
   modalities: string[];
+  sourceModalities: string[] | null;
   benchTime: string;
   valueRaw: string;
   valueNum: number | null;
@@ -50,7 +53,7 @@ const sourceOptionsCache = new Map<string, TimedCacheEntry<string[]>>();
 const sourceOptionsInFlight = new Map<string, Promise<string[]>>();
 
 /**
- * Clear all in-memory query caches. Call after admin write operations
+ * Clear dashboard caches after admin write operations
  * (import, merge, delete, etc.) so subsequent reads reflect updated data.
  */
 export function invalidateAllCaches() {
@@ -61,6 +64,16 @@ export function invalidateAllCaches() {
   dashboardRowsInFlight.clear();
   dashboardStatsInFlight.clear();
   sourceOptionsInFlight.clear();
+
+  try {
+    revalidatePath("/");
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("static generation store missing")) {
+      return;
+    }
+
+    throw error;
+  }
 }
 
 function normalizeSourceFilterKey(sourceFilter?: string | null): string {
@@ -186,10 +199,6 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
         : [];
       const displayTargetProviderById = new Map(displayTargetProviders.map((provider) => [provider.id, provider]));
 
-      const shouldUseSourceMeta = Boolean(
-        normalizedSourceFilter && normalizedSourceFilter !== SOURCE_EMPTY_KEY
-      );
-
       return rows.map((row) => {
         const providerConfig = normalizeProviderConfig(row.providerConfig);
         const displayTargetProvider = typeof providerConfig.displayTargetProviderId === "number"
@@ -213,14 +222,12 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
         providerEntityId: displayTargetProvider?.id ?? row.providerId,
         modelName: row.modelName,
         benchmarkName: row.benchmarkName,
-        benchmarkType: shouldUseSourceMeta
-          ? (row.benchmarkTypeOverride ?? row.benchmarkType)
-          : row.benchmarkType,
+        benchmarkType: row.benchmarkType,
+        sourceBenchmarkType: row.benchmarkTypeOverride,
         higherIsBetter: row.higherIsBetter,
         benchmarkCanonicalKey: row.benchmarkCanonicalKey,
-        modalities: shouldUseSourceMeta
-          ? (row.modalitiesOverride ?? row.modalities ?? [])
-          : (row.modalities ?? []),
+        modalities: row.modalities ?? [],
+        sourceModalities: row.modalitiesOverride,
         benchTime: row.benchTime.toISOString(),
         valueRaw: row.valueRaw,
         valueNum: toNullableNumber(row.valueNum),

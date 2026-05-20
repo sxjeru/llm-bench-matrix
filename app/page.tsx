@@ -2,30 +2,13 @@ import { BenchmarkMatrix } from "@/components/benchmark-matrix";
 import { getDashboardRows, getDashboardStats, getSourceOptions } from "@/lib/db/queries";
 import { Suspense } from "react";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
-type SearchParamsShape = Record<string, string | string[] | undefined>;
+export default async function HomePage() {
+  const rowsPromise = getDashboardRows(null, null);
 
-type HomePageProps = {
-  searchParams?: SearchParamsShape | Promise<SearchParamsShape>;
-};
-
-export default async function HomePage({ searchParams }: HomePageProps) {
-  const resolvedSearchParams = searchParams
-    ? (typeof (searchParams as Promise<SearchParamsShape>).then === "function"
-        ? await (searchParams as Promise<SearchParamsShape>)
-        : (searchParams as SearchParamsShape))
-    : {};
-
-  const sourceParamRaw = resolvedSearchParams.source;
-  const sourceParam = Array.isArray(sourceParamRaw) ? sourceParamRaw[0] : sourceParamRaw;
-
-  const rowsPromise = getDashboardRows(null, sourceParam);
-  const allRowsPromise = sourceParam ? getDashboardRows(null, null) : rowsPromise;
-
-  const [rows, allRows, sourceOptions, stats] = await Promise.all([
+  const [rows, sourceOptions, stats] = await Promise.all([
     rowsPromise,
-    allRowsPromise,
     getSourceOptions(),
     getDashboardStats(null)
   ]);
@@ -38,9 +21,11 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     modelName: row.modelName,
     benchmarkName: row.benchmarkName,
     benchmarkType: row.benchmarkType,
+    sourceBenchmarkType: row.sourceBenchmarkType,
     higherIsBetter: row.higherIsBetter,
     benchmarkCanonicalKey: row.benchmarkCanonicalKey,
     modalities: row.modalities,
+    sourceModalities: row.sourceModalities,
     benchTime: row.benchTime,
     valueRaw: row.valueRaw,
     valueNum: row.valueNum,
@@ -48,6 +33,8 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     valueNote: row.valueNote,
     source: row.source
   });
+
+  const mappedRows = rows.map(toMatrixRow);
 
   return (
     <>
@@ -76,8 +63,8 @@ export default async function HomePage({ searchParams }: HomePageProps) {
       <Suspense fallback={null}>
         <BenchmarkMatrix
           sourceOptions={sourceOptions}
-          rows={rows.map(toMatrixRow)}
-          allRows={allRows.map(toMatrixRow)}
+          rows={mappedRows}
+          allRows={mappedRows}
         />
       </Suspense>
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "../../../../lib/admin-auth";
 import { ensureModelByProviderId } from "../../../../lib/admin-service";
+import { invalidateAllCaches } from "../../../../lib/db/queries";
 
 const schema = z.object({
   providerId: z.number().int().positive(),
@@ -28,5 +29,6 @@ export async function POST(request: Request) {
     sourceModelId: parsed.data.sourceModelId
   });
 
+  invalidateAllCaches();
   return NextResponse.json({ model });
 }

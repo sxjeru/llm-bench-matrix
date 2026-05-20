@@ -1,7 +1,16 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
-import { DELETE, PATCH, POST } from "@/app/api/admin/providers/route";
+import { beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
+import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-auth";
 import { deleteProviderAndTransferModels, ensureProvider, updateProviderConfig } from "@/lib/admin-service";
+
+let POST: typeof import("@/app/api/admin/providers/route").POST;
+let PATCH: typeof import("@/app/api/admin/providers/route").PATCH;
+let DELETE: typeof import("@/app/api/admin/providers/route").DELETE;
+
+beforeAll(async () => {
+  process.env.DATABASE_URL ??= "postgres://test:test@127.0.0.1:5432/test";
+  ({ POST, PATCH, DELETE } = await import("@/app/api/admin/providers/route"));
+});
 
 vi.mock("@/lib/admin-auth", () => ({
   requireAdmin: vi.fn()
@@ -24,7 +33,10 @@ describe("POST /api/admin/providers", () => {
     const mockProvider = {
       id: 1,
       name: "OpenAI",
-      config: {}
+      slug: "openai",
+      config: {},
+      createdAt: new Date(),
+      updatedAt: new Date()
     };
 
     vi.mocked(ensureProvider).mockResolvedValue(mockProvider);
@@ -73,7 +85,7 @@ describe("POST /api/admin/providers", () => {
   });
 
   test("应该拒绝无鉴权请求", async () => {
-    const deniedResponse = new Response("Unauthorized", { status: 401 });
+    const deniedResponse = NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     vi.mocked(requireAdmin).mockResolvedValue(deniedResponse);
 
     const response = await POST(
@@ -407,7 +419,7 @@ describe("PATCH /api/admin/providers", () => {
   });
 
   test("应该拒绝无鉴权请求", async () => {
-    const deniedResponse = new Response("Unauthorized", { status: 401 });
+    const deniedResponse = NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     vi.mocked(requireAdmin).mockResolvedValue(deniedResponse);
 
     const response = await PATCH(
