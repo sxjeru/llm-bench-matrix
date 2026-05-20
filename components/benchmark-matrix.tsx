@@ -134,6 +134,16 @@ function enqueueStateUpdate(callback: () => void) {
   window.setTimeout(callback, 0);
 }
 
+function applySourceMeta(row: MatrixInputRow): MatrixInputRow {
+  const sourceBenchmarkType = row.sourceBenchmarkType?.trim();
+
+  return {
+    ...row,
+    benchmarkType: sourceBenchmarkType || row.benchmarkType,
+    modalities: row.sourceModalities ?? row.modalities
+  };
+}
+
 export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSourceOptions = [] }: Props) {
   const sectionRef = useRef<HTMLElement | null>(null);
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
@@ -943,7 +953,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       if (!map.has(sourceKey)) {
         map.set(sourceKey, []);
       }
-      map.get(sourceKey)!.push(row);
+      map.get(sourceKey)!.push(applySourceMeta(row));
     });
 
     return map;
@@ -957,7 +967,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       if (!map.has(sourceKey)) {
         map.set(sourceKey, []);
       }
-      map.get(sourceKey)!.push(row);
+      map.get(sourceKey)!.push(applySourceMeta(row));
     });
 
     return map;
@@ -970,7 +980,9 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     const rowsByModel = new Map<string, IndexedMatrixInputRow[]>();
     const rowsByGroupingKey = new Map<string, IndexedMatrixInputRow[]>();
 
-    allRows.forEach((row) => {
+    allRows.forEach((inputRow) => {
+      const row = activeSource === SOURCE_ALL ? inputRow : applySourceMeta(inputRow);
+
       if (!modelProviderMap.has(row.modelName)) {
         const displayName = row.providerDisplayName?.trim() || row.providerName || "Unknown";
         modelProviderMap.set(row.modelName, {
@@ -1007,7 +1019,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       rowsByModel,
       rowsByGroupingKey
     };
-  }, [allRows, showDuplicateRows]);
+  }, [allRows, activeSource, showDuplicateRows]);
 
   const coveredModelsByGroupingKey = useMemo(() => {
     const coveredMap = new Map<string, Set<string>>();

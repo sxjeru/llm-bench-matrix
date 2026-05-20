@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "../../../../lib/admin-auth";
 import { rebuildBenchmarkCanonicalKeysByRule, rebuildModelCanonicalKeysByRule } from "../../../../lib/admin-service";
-import { getSettings, saveSetting } from "../../../../lib/db/queries";
+import { getSettings, invalidateAllCaches, saveSetting } from "../../../../lib/db/queries";
 
 const SENSITIVE_SETTING_KEYS = new Set([
   "admin_password_hash",
@@ -41,6 +41,7 @@ export async function POST(request: Request) {
   }
 
   await saveSetting(parsed.data);
+  invalidateAllCaches();
 
   if (parsed.data.key === "model_dedupe_rule") {
     const [modelRebuildResult, benchmarkRebuildResult] = await Promise.all([
