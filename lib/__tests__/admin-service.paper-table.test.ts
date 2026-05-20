@@ -416,6 +416,49 @@ describe("paper-table 文本解析", () => {
     expect(terminalRows.every((row) => row.benchmarkTypeProvided)).toBe(true);
   });
 
+  test("HTML 仅模型表头时可识别隐式 benchmark 首列与单独 type 行", async () => {
+    const fallbackText = [
+      "Benchmark\tM1",
+      "Fallback\t1.0"
+    ].join("\n");
+
+    const htmlInput = [
+      "<html><body><table>",
+      "<thead>",
+      "<tr><th>Opus-4.6 Max</th><th>K2.6 Thinking</th><th>GLM-5.1 Thinking</th><th>DS-V4-Pro Max</th><th>Qwen3.6-Plus</th><th>Qwen3.7-Max</th></tr>",
+      "</thead>",
+      "<tbody>",
+      "<tr><td>Coding Agent</td></tr>",
+      "<tr><td>Terminal Bench 2.0-Terminus</td><td>65.4</td><td>66.7</td><td>63.5</td><td>67.9</td><td>61.6</td><td>69.7</td></tr>",
+      "<tr><td>SWE-Verified</td><td>80.8</td><td>80.2</td><td>--</td><td>80.6</td><td>78.8</td><td>80.4</td></tr>",
+      "</tbody>",
+      "</table></body></html>"
+    ].join("");
+
+    const parsed = await parseBenchmarkTextRowsForTest(fallbackText, "text:unit-test", htmlInput);
+
+    expect(parsed.format).toBe("matrix-table");
+    expect(parsed.parseSource).toBe("html");
+
+    const terminalRows = parsed.rows.filter((row) => row.benchmarkName === "Terminal Bench 2.0-Terminus");
+    expect(terminalRows).toHaveLength(6);
+    expect(new Set(terminalRows.map((row) => row.benchmarkType))).toEqual(new Set(["Coding Agent"]));
+    expect(terminalRows.every((row) => row.benchmarkTypeProvided)).toBe(true);
+
+    const sweRows = parsed.rows.filter((row) => row.benchmarkName === "SWE-Verified");
+    expect(sweRows).toHaveLength(5);
+    expect(new Set(sweRows.map((row) => row.benchmarkType))).toEqual(new Set(["Coding Agent"]));
+    expect(sweRows.every((row) => row.benchmarkTypeProvided)).toBe(true);
+
+    const terminalValueByModel = new Map(terminalRows.map((row) => [row.modelName, row.valueRaw]));
+    expect(terminalValueByModel.get("Opus-4.6 Max")).toBe("65.4");
+    expect(terminalValueByModel.get("Qwen3.7-Max")).toBe("69.7");
+
+    const sweValueByModel = new Map(sweRows.map((row) => [row.modelName, row.valueRaw]));
+    expect(sweValueByModel.has("GLM-5.1 Thinking")).toBe(false);
+    expect(sweValueByModel.get("Qwen3.7-Max")).toBe("80.4");
+  });
+
   test("提供 htmlText 时可识别中英混合 Category/Benchmark 表头并继承空白分类", async () => {
     const fallbackText = [
       "Benchmark\tM1",

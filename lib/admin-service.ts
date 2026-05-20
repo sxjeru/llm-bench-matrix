@@ -3513,6 +3513,30 @@ function inferMatrixModelCountFromDataLines(lines: string[], startLineIndex: num
   return bestCount >= 2 ? bestCount : null;
 }
 
+function hasImplicitMatrixBenchmarkColumn(
+  lines: string[],
+  startLineIndex: number,
+  expectedModelCount: number,
+  headerColumnCount: number
+): boolean {
+  if (expectedModelCount < 2 || headerColumnCount !== expectedModelCount) {
+    return false;
+  }
+
+  return lines
+    .slice(startLineIndex)
+    .some((line) => {
+      const cells = splitTableLine(line);
+      const trailingValueCount = getTrailingMatrixValueCellCount(cells);
+      if (trailingValueCount !== expectedModelCount || cells.length !== expectedModelCount + 1) {
+        return false;
+      }
+
+      const leadingCell = (cells[0] || "").trim();
+      return Boolean(leadingCell) && !isMatrixValueLikeCell(leadingCell);
+    });
+}
+
 function isMatrixBenchmarkContinuationFragment(label: string): boolean {
   const trimmed = label.trim();
   if (!trimmed) return false;
@@ -3613,8 +3637,19 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
     index !== benchmarkLabelIndex && isMatrixCategoryHeaderCell(cell)
   );
   const hasExplicitBenchmarkColumn = benchmarkLabelIndex >= 0;
+  const hasImplicitBenchmarkColumn = !hasExplicitBenchmarkColumn
+    && categoryLabelIndex < 0
+    && inferredModelCountFromData !== null
+    && hasImplicitMatrixBenchmarkColumn(
+      rawLines,
+      headerLineIndex + 1,
+      inferredModelCountFromData,
+      headerCells.length
+    );
   const benchmarkColumnIndex = hasExplicitBenchmarkColumn
     ? benchmarkLabelIndex
+    : hasImplicitBenchmarkColumn
+      ? 0
     : (inferredModelHeaderStartIndex !== null && inferredModelHeaderStartIndex > 0
       ? inferredModelHeaderStartIndex - 1
       : 0);
@@ -3659,7 +3694,7 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
     : (hasExplicitBenchmarkColumn
       ? benchmarkColumnIndex + 1
       : (startsWithBenchmarkLabel ? 1 : 0));
-  const modelValueStartIndex = modelHeaderStartIndex;
+  const modelValueStartIndex = hasImplicitBenchmarkColumn ? 1 : modelHeaderStartIndex;
 
   const modelNames = headerCells
     .slice(modelHeaderStartIndex)
