@@ -4208,7 +4208,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
             </span>
           ) : null}
 
-          <span className="block max-h-44 space-y-1 overflow-auto">
+          <span className="block max-h-[65vh] space-y-1 overflow-auto">
             {activeCellTooltip.entries.map((entry) => (
               <span
                 key={`${entry.valueRaw}-${entry.valueNote ?? ""}-${entry.source ?? "-"}-${entry.benchTime}`}
