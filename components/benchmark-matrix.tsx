@@ -146,7 +146,6 @@ function applySourceMeta(row: MatrixInputRow): MatrixInputRow {
 }
 
 type SourceValueDisplayItem = {
-  key: string;
   displayValue: string;
 };
 
@@ -195,7 +194,6 @@ function getSourceValueDisplayItem(entries: MatrixCellEntry[], activeSource: str
   const displayValue = getMatrixCellDisplayValue(entry.valueNum, entry.valueNum2, entry.valueRaw, entry.valueNote);
 
   return {
-    key: `${activeSource}-${sourceLabel}-${displayValue}-${entry.valueNote?.trim() ?? ""}`,
     displayValue
   };
 }
@@ -4077,17 +4075,20 @@ export function BenchmarkMatrix({
                     const compareDeltaText = showCompareBadge && compareDeltaRaw !== null
                       ? formatComparisonDeltaValue(compareDeltaRaw)
                       : "";
-                    const sourceValueDeltaDirection: CompareDirection = sourceValueDeltaRaw === null
+                    const sourceValueDeltaEffective = sourceValueDeltaRaw === null
+                      ? null
+                      : (isRowLowerBetter ? -sourceValueDeltaRaw : sourceValueDeltaRaw);
+                    const sourceValueDeltaDirection: CompareDirection = sourceValueDeltaEffective === null
                       ? "flat"
-                      : Math.abs(sourceValueDeltaRaw) < Number.EPSILON
+                      : Math.abs(sourceValueDeltaEffective) < Number.EPSILON
                         ? "flat"
-                        : sourceValueDeltaRaw > 0
+                        : sourceValueDeltaEffective > 0
                           ? "up"
                           : "down";
                     const sourceValueDeltaIntensity =
-                      sourceValueDeltaRaw === null || sourceDeltaAbsP90 === null
+                      sourceValueDeltaEffective === null || sourceDeltaAbsP90 === null
                         ? 0
-                        : clampCompareIntensity(Math.abs(sourceValueDeltaRaw) / sourceDeltaAbsP90);
+                        : clampCompareIntensity(Math.abs(sourceValueDeltaEffective) / sourceDeltaAbsP90);
                     const showSourceValueDeltaBadge =
                       shouldRenderSourceValues && sourceValueDeltaRaw !== null && !showCompareBadge;
                     const sourceValueDeltaBadgeStyle = showSourceValueDeltaBadge
