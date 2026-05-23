@@ -149,12 +149,6 @@ type SourceValueDisplayItem = {
   displayValue: string;
 };
 
-function getSourceValueEntry(entries: MatrixCellEntry[], activeSource: string): MatrixCellEntry | null {
-  return activeSource === SOURCE_ALL
-    ? entries[0] ?? null
-    : entries.find((item) => getSourceKey(item.source) === activeSource) ?? null;
-}
-
 function getPreferredMatrixCellEntry(entries: MatrixCellEntry[]): MatrixCellEntry | null {
   let preferred: MatrixCellEntry | null = null;
 
@@ -165,6 +159,12 @@ function getPreferredMatrixCellEntry(entries: MatrixCellEntry[]): MatrixCellEntr
   });
 
   return preferred;
+}
+
+function getSourceValueEntry(entries: MatrixCellEntry[], activeSource: string): MatrixCellEntry | null {
+  return activeSource === SOURCE_ALL
+    ? getPreferredMatrixCellEntry(entries)
+    : entries.find((item) => getSourceKey(item.source) === activeSource) ?? null;
 }
 
 function getSourceValueDeltaRaw(entries: MatrixCellEntry[], activeSource: string): number | null {
