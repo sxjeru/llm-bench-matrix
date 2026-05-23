@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 export default function AdminLoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loginStatus, setLoginStatus] = useState<"idle" | "submitting" | "redirecting">("idle");
 
   const [showChangeDialog, setShowChangeDialog] = useState(false);
   const [newPassword, setNewPassword] = useState("");
@@ -41,7 +41,7 @@ export default function AdminLoginPage() {
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    setLoading(true);
+    setLoginStatus("submitting");
 
     try {
       const response = await fetch("/api/admin/login", {
@@ -55,20 +55,22 @@ export default function AdminLoginPage() {
       const result = await response.json();
       if (!response.ok) {
         setError(result.error || "登录失败");
+        setLoginStatus("idle");
         return;
       }
 
       if (result.mustChangePassword) {
         setShowChangeDialog(true);
+        setLoginStatus("idle");
         return;
       }
 
+      setLoginStatus("redirecting");
       router.push(getRedirectTarget());
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "登录失败");
-    } finally {
-      setLoading(false);
+      setLoginStatus("idle");
     }
   }
 
@@ -182,8 +184,8 @@ export default function AdminLoginPage() {
               />
             </div>
             <div className="span-12">
-              <button type="submit" disabled={loading}>
-                {loading ? "登录中..." : "登录后台"}
+              <button type="submit" disabled={loginStatus !== "idle"}>
+                {loginStatus === "redirecting" ? "正在进入后台..." : loginStatus === "submitting" ? "登录中..." : "登录后台"}
               </button>
             </div>
           </div>
