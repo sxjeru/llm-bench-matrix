@@ -3852,7 +3852,7 @@ export function BenchmarkMatrix({
                 : [];
               const sourceDeltaAbsP90 = sourceDeltaAbsValues.length > 0
                 ? Math.max(
-                    getSortedQuantile([...sourceDeltaAbsValues].sort((a, b) => a - b), 0.9),
+                    getSortedQuantile(sourceDeltaAbsValues.sort((a, b) => a - b), 0.9),
                     Number.EPSILON
                   )
                 : null;
@@ -3895,7 +3895,7 @@ export function BenchmarkMatrix({
                   : [];
               const compareAbsEffectiveDeltaP90 = compareAbsEffectiveDeltaValues.length > 0
                 ? Math.max(
-                    getSortedQuantile([...compareAbsEffectiveDeltaValues].sort((a, b) => a - b), 0.9),
+                    getSortedQuantile(compareAbsEffectiveDeltaValues.sort((a, b) => a - b), 0.9),
                     Number.EPSILON
                   )
                 : null;

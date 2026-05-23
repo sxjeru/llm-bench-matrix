@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
+import { SHOW_SOURCE_VALUES_STORAGE_KEY } from "@/components/benchmark-matrix/constants";
 
 const mockSearchParams = new URLSearchParams();
 const mockReplace = vi.fn((url?: string) => {
@@ -357,4 +358,76 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
 
     expect(screen.queryByRole("button", { name: "显示原始值" })).not.toBeInTheDocument();
   });
+
+  test("Ctrl+点击 Source 原值按钮会开启差值视图并显示 delta 徽标", async () => {
+    const user = userEvent.setup();
+    render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
+
+    // 切换到 S1 页签以显示按钮
+    await user.click(screen.getByRole("tab", { name: "S1" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "显示原始值" })).toBeInTheDocument();
+    });
+
+    const button = screen.getByRole("button", { name: "显示原始值" });
+
+    // 使用 Ctrl+点击 开启差值视图
+    fireEvent.click(button, { ctrlKey: true });
+
+    // 断言：差值徽标出现 (S1 值为 80，默认值为 82，差值为 -2，显示为 ▼2)
+    const mergedCell = screen.getByText("80").closest("td")!;
+    const sourceDeltaBadge = mergedCell.querySelector('[data-source-delta-badge="1"]') as HTMLElement | null;
+    expect(sourceDeltaBadge).not.toBeNull();
+    expect(sourceDeltaBadge).toHaveTextContent("▼2");
+  });
+
+  test("从 localStorage 中读取 Source 原值设置", async () => {
+    const user = userEvent.setup();
+    // 预先将开关状态写入 localStorage
+    window.localStorage.setItem(SHOW_SOURCE_VALUES_STORAGE_KEY, "1");
+
+    render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
+
+    // 初始渲染（"全部" 页签）时应该仍显示默认的最大值
+    expect(screen.getByText("82")).toBeInTheDocument();
+
+    // 切换到 S1 页签
+    await user.click(screen.getByRole("tab", { name: "S1" }));
+
+    // 因为开启了 Source 原值，所以应该直接显示 S1 的原始值 80
+    await waitFor(() => {
+      expect(screen.getByText("80")).toBeInTheDocument();
+    });
+    const mergedCell = screen.getByText("80").closest("td")!;
+    expect(mergedCell).toHaveTextContent("80");
+  });
+
+  test("切换 Source 原值按钮会将设置持久化到 localStorage", async () => {
+    const user = userEvent.setup();
+    // 初始为关闭状态
+    window.localStorage.setItem(SHOW_SOURCE_VALUES_STORAGE_KEY, "0");
+
+    render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
+
+    // 切换到 S1 页签以显示按钮
+    await user.click(screen.getByRole("tab", { name: "S1" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "显示原始值" })).toBeInTheDocument();
+    });
+
+    const button = screen.getByRole("button", { name: "显示原始值" });
+
+    // 点击一次：打开
+    await user.click(button);
+    await waitFor(() => {
+      expect(window.localStorage.getItem(SHOW_SOURCE_VALUES_STORAGE_KEY)).toBe("1");
+    });
+
+    // 再点击一次：关闭
+    await user.click(button);
+    await waitFor(() => {
+      expect(window.localStorage.getItem(SHOW_SOURCE_VALUES_STORAGE_KEY)).toBe("0");
+    });
+  });
 });
+
