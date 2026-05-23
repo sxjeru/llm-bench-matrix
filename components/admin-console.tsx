@@ -6,9 +6,7 @@ import {
   Check,
   ChevronDown,
   Database,
-  Eye,
   FileSpreadsheet,
-  Headphones,
   Layers,
   Merge as MergeIcon,
   Palette,
@@ -19,9 +17,7 @@ import {
   ShieldAlert,
   Table2,
   Trash2,
-  TriangleAlert,
   Upload,
-  Video,
   X
 } from "lucide-react";
 import { formatDateTimeLocalInputValue } from "@/components/benchmark-matrix/formatters";
@@ -101,6 +97,17 @@ import {
   toProviderConfigDraft
 } from "./admin-console/utils/provider";
 import { extractTextImportWarningDetails } from "./admin-console/utils/warnings";
+import {
+  ClearDatabaseConfirmDialog,
+  ConfirmImportWithoutPreviewDialog,
+  ConfirmImportWithoutSourceDialog,
+  DeleteSourceConfirmDialog,
+  ProviderDeleteConfirmDialog,
+  SheetPickerDialog
+} from "./admin-console/views/confirm-dialogs";
+import { AdminConsoleNotices } from "./admin-console/views/notices";
+import { ModalityBadge } from "./admin-console/views/shared/modality-badge";
+import { AdminConsoleTabNav } from "./admin-console/views/tab-nav";
 
 function getProviderOptionLabel(provider: ProviderOption) {
   const displayName = provider.config?.displayName?.trim();
@@ -2501,49 +2508,7 @@ export function AdminConsole({
   }
 
   function renderModalityBadge(modalityInput: string, key: string) {
-    const modality = normalizeModalityName(modalityInput);
-
-    if (modality === "Text") {
-      return null;
-    }
-
-    if (modality === "Vision") {
-      return (
-        <span key={key} className="inline-flex items-center rounded-md bg-cyan-500/15 px-1.5 py-0.5 text-cyan-300" title="Vision">
-          <Eye size={12} />
-        </span>
-      );
-    }
-
-    if (modality === "Audio") {
-      return (
-        <span key={key} className="inline-flex items-center rounded-md bg-purple-500/15 px-1.5 py-0.5 text-purple-300" title="Audio">
-          <Headphones size={12} />
-        </span>
-      );
-    }
-
-    if (modality === "Video") {
-      return (
-        <span key={key} className="inline-flex items-center rounded-md bg-pink-500/15 px-1.5 py-0.5 text-pink-300" title="Video">
-          <Video size={12} />
-        </span>
-      );
-    }
-
-    if (modality === "Multimodal") {
-      return (
-        <span
-          key={key}
-          className="inline-flex items-center rounded-md bg-amber-500/15 px-1.5 py-0.5 text-amber-300"
-          title="Multimodal"
-        >
-          <Layers size={12} />
-        </span>
-      );
-    }
-
-    return null;
+    return <ModalityBadge key={key} modalityInput={modalityInput} />;
   }
 
   async function onPreviewCsvImport() {
@@ -3566,372 +3531,61 @@ export function AdminConsole({
     && resolvedMergeTargetId !== null
     && resolvedMergeSourceId !== resolvedMergeTargetId;
 
-  const tabClass = (key: TabKey) =>
-    `btn rounded-xl border-0 text-base md:text-base transition-all duration-200 ease-out ${
-      activeTab === key
-        ? "bg-primary text-primary-content font-semibold shadow-md"
-        : "bg-transparent text-base-content/70 hover:bg-base-100/70 hover:text-base-content"
-    }`;
-
   return (
     <>
-      {noticeList.length > 0 ? (
-        <div className="pointer-events-none fixed right-6 top-20 z-[120] flex flex-col items-end gap-3">
-          {noticeList.map((notice) => (
-            <div
-              key={notice.id}
-              className={`pointer-events-auto flex w-[360px] max-w-[90vw] items-start gap-3.5 rounded-2xl border p-4 shadow-[0_8px_30px_rgb(0,0,0,0.12)] backdrop-blur-2xl transition-all duration-400 ease-out ${
-                notice.visible ? "translate-y-0 opacity-100 scale-100" : "-translate-y-4 opacity-0 scale-95"
-              } ${
-                notice.type === "success" 
-                  ? "border-emerald-500/30 bg-emerald-900/95 text-emerald-50 shadow-emerald-950/30" 
-                  : "border-rose-500/30 bg-rose-900/95 text-rose-50 shadow-rose-950/30"
-              }`}
-            >
-              <div
-                className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
-                  notice.type === "success" 
-                    ? "bg-emerald-500/30 text-emerald-100" 
-                    : "bg-rose-500/30 text-rose-100"
-                }`}
-              >
-                {notice.type === "success" ? <Check size={14} strokeWidth={3} /> : <TriangleAlert size={14} strokeWidth={3} />}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-[14px] font-semibold tracking-wide">{notice.message}</div>
-                {notice.details && notice.details.length > 0 ? (
-                  <div className={`mt-1.5 flex flex-col gap-1.5 text-[13px] leading-relaxed ${
-                    notice.type === "success" ? "text-emerald-100/80" : "text-rose-100/80"
-                  }`}>
-                    {notice.details.map((detail, index) => (
-                      <p key={`notice-detail-${notice.id}-${index}`} className="break-words">
-                        {detail}
-                      </p>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : null}
+      <AdminConsoleNotices noticeList={noticeList} />
 
-      {sheetPickerOpen ? (
-        <div className="modal modal-open">
-          <div className="modal-box">
-            <h3 className="font-bold text-lg">选择工作表</h3>
-            <p className="py-2 text-sm opacity-80">请选择要导入的工作表，选中后会自动刷新预览。</p>
-            <div className="flex flex-col gap-2">
-              {sheetNames.map((name) => (
-                <button key={name} type="button" className="btn btn-outline" onClick={() => onSelectSheet(name)}>
-                  {name}
-                </button>
-              ))}
-            </div>
-            <div className="modal-action">
-              <button type="button" className="btn" onClick={() => setSheetPickerOpen(false)}>
-                关闭
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <SheetPickerDialog
+        open={sheetPickerOpen}
+        sheetNames={sheetNames}
+        onSelectSheet={onSelectSheet}
+        onClose={() => setSheetPickerOpen(false)}
+      />
 
-      {confirmImportWithoutPreviewOpen ? (
-        <div
-          className="fixed inset-0 z-[170] flex items-center justify-center bg-black/45 p-4"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              setConfirmImportWithoutPreviewOpen(false);
-            }
-          }}
-        >
-          <div className="w-full max-w-xl rounded-2xl border border-base-300/80 bg-base-100/95 p-6 shadow-2xl backdrop-blur">
-            <h3 className="text-lg font-bold">尚未预览，确认直接导入？</h3>
-            <p className="mt-2 text-sm opacity-80">
-              你还没有点击“预览导入结果”。建议先预览再导入，以检查重复嫌疑、注释和合并策略。
-            </p>
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => setConfirmImportWithoutPreviewOpen(false)}
-                disabled={isImportingTextCsv}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={onConfirmImportWithoutPreview}
-                disabled={isImportingTextCsv}
-              >
-                {isImportingTextCsv ? "导入中..." : "仍然导入"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <ConfirmImportWithoutPreviewDialog
+        open={confirmImportWithoutPreviewOpen}
+        isImportingTextCsv={isImportingTextCsv}
+        onClose={() => setConfirmImportWithoutPreviewOpen(false)}
+        onConfirm={onConfirmImportWithoutPreview}
+      />
 
-      {confirmImportWithoutSourceOpen ? (
-        <div
-          className="fixed inset-0 z-[170] flex items-center justify-center bg-black/45 p-4"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              setConfirmImportWithoutSourceOpen(false);
-            }
-          }}
-        >
-          <div className="w-full max-w-xl rounded-2xl border border-base-300/80 bg-base-100/95 p-6 shadow-2xl backdrop-blur">
-            <h3 className="text-lg font-bold">Source 为空，确认继续导入？</h3>
-            <p className="mt-2 text-sm opacity-80">
-              当前导入将不会带统一 source 标记，后续按 source 筛选/删除会更困难。
-            </p>
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => setConfirmImportWithoutSourceOpen(false)}
-                disabled={isImportingTextCsv}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={onConfirmImportWithoutSource}
-                disabled={isImportingTextCsv}
-              >
-                {isImportingTextCsv ? "导入中..." : "继续导入"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <ConfirmImportWithoutSourceDialog
+        open={confirmImportWithoutSourceOpen}
+        isImportingTextCsv={isImportingTextCsv}
+        onClose={() => setConfirmImportWithoutSourceOpen(false)}
+        onConfirm={onConfirmImportWithoutSource}
+      />
 
-      {clearDatabaseConfirmOpen ? (
-        <div
-          className="fixed inset-0 z-[170] flex items-center justify-center bg-black/45 p-4"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              closeClearDatabaseConfirm();
-            }
-          }}
-        >
-          <div className="w-full max-w-xl rounded-2xl border border-error/35 bg-base-100/95 p-6 shadow-2xl backdrop-blur">
-            <h3 className="text-lg font-bold text-error">确认清空数据库？</h3>
-            <p className="mt-2 text-sm opacity-85">
-              该操作会删除除 <code>settings</code> 外所有表数据，且无法恢复。
-            </p>
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={closeClearDatabaseConfirm}
-                disabled={isClearingDatabase}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="btn btn-error"
-                onClick={onConfirmClearDatabase}
-                disabled={isClearingDatabase}
-              >
-                {isClearingDatabase ? "清空中..." : "确认清空"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <ClearDatabaseConfirmDialog
+        open={clearDatabaseConfirmOpen}
+        isClearingDatabase={isClearingDatabase}
+        onClose={closeClearDatabaseConfirm}
+        onConfirm={onConfirmClearDatabase}
+      />
 
-      {confirmDeleteSourceOpen ? (
-        <div
-          className="fixed inset-0 z-[170] flex items-center justify-center bg-black/45 p-4"
-          onClick={(event) => {
-            if (event.target === event.currentTarget && !isDeletingSourceData) {
-              setConfirmDeleteSourceOpen(false);
-            }
-          }}
-        >
-          <div className="w-full max-w-xl rounded-2xl border border-base-300/80 bg-base-100/95 p-6 shadow-2xl backdrop-blur">
-            <h3 className="text-lg font-bold text-error">确认删除 source 数据？</h3>
-            <p className="mt-2 text-sm opacity-85">
-              将删除 <code>{getDeleteSourceDisplayLabel(deleteSourceInput)}</code> 匹配的所有 benchmark_values 记录（不可恢复）。
-            </p>
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => setConfirmDeleteSourceOpen(false)}
-                disabled={isDeletingSourceData}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="btn btn-error"
-                onClick={onConfirmDeleteSourceData}
-                disabled={isDeletingSourceData}
-              >
-                {isDeletingSourceData ? "删除中..." : "确认删除"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <DeleteSourceConfirmDialog
+        open={confirmDeleteSourceOpen}
+        isDeletingSourceData={isDeletingSourceData}
+        deleteSourceInput={deleteSourceInput}
+        getDeleteSourceDisplayLabel={getDeleteSourceDisplayLabel}
+        onClose={() => setConfirmDeleteSourceOpen(false)}
+        onConfirm={onConfirmDeleteSourceData}
+      />
 
-      {providerDeleteConfirmOpen ? (() => {
-        const providerToDelete = providerDeleteTargetId !== null
-          ? providers.find((provider) => provider.id === providerDeleteTargetId) ?? null
-          : null;
-        const transferCandidates = providers.filter((provider) => provider.id !== providerDeleteTargetId);
-        const transferTarget = providerDeleteTransferTargetId !== null
-          ? providers.find((provider) => provider.id === providerDeleteTransferTargetId) ?? null
-          : null;
-        const providerModels = providerToDelete ? models.filter((model) => model.providerId === providerToDelete.id) : [];
-
-        return (
-          <div
-            className="fixed inset-0 z-[170] flex items-center justify-center bg-black/45 p-4"
-            onClick={(event) => {
-              if (event.target === event.currentTarget && deletingProviderId === null) {
-                closeDeleteProviderConfirm();
-              }
-            }}
-          >
-            <div className="w-full max-w-xl rounded-2xl border border-error/35 bg-base-100/95 p-6 shadow-2xl backdrop-blur">
-              <h3 className="text-lg font-bold text-error">确认删除 Provider？</h3>
-              <p className="mt-2 text-sm opacity-85">
-                将删除 <code>{providerToDelete?.name ?? "当前 provider"}</code>。为避免级联删除模型与分数数据，需先把其下 models 迁移到其他 provider。
-              </p>
-
-              <div className="mt-4 space-y-4">
-                <div className="rounded-xl border border-base-300/70 bg-base-200/30 px-4 py-3 text-sm">
-                  <div className="font-medium">待迁移模型数：{providerModels.length}</div>
-                  <div className="mt-1 text-xs opacity-70">
-                    {providerModels.length > 0
-                      ? `删除前会把这 ${providerModels.length} 个 model 的 provider 归属整体迁移。`
-                      : "当前 provider 下暂无 model，删除时不会触发模型迁移。"}
-                  </div>
-                </div>
-
-                <label className="form-control w-full">
-                  <span className="label-text mb-1.5 text-xs font-medium opacity-70">迁移 models 到</span>
-                  <select
-                    className="select select-bordered w-full rounded-xl bg-base-200/40 transition-colors focus:bg-base-100 focus:border-primary focus:outline-none"
-                    value={providerDeleteTransferTargetId ?? ""}
-                    onChange={(e) => setProviderDeleteTransferTargetId(e.target.value ? Number(e.target.value) : null)}
-                    disabled={deletingProviderId !== null || transferCandidates.length === 0}
-                  >
-                    <option value="">请选择目标 Provider</option>
-                    {transferCandidates.map((provider) => (
-                      <option key={`provider-delete-transfer-${provider.id}`} value={provider.id}>
-                        {provider.config?.displayName?.trim() || provider.name} ({provider.slug})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                {transferTarget ? (
-                  <div className="rounded-xl border border-base-300/70 bg-base-200/20 px-4 py-3 text-xs opacity-75">
-                    确认后会先把 models 迁移到 <span className="font-medium">{transferTarget.config?.displayName?.trim() || transferTarget.name}</span>，再删除当前 provider。
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="mt-5 flex justify-end gap-2">
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={closeDeleteProviderConfirm}
-                  disabled={deletingProviderId !== null}
-                >
-                  取消
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-error"
-                  onClick={onConfirmDeleteProvider}
-                  disabled={deletingProviderId !== null || transferCandidates.length === 0 || providerDeleteTransferTargetId === null}
-                >
-                  {deletingProviderId !== null ? "删除中..." : "确认迁移并删除"}
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })() : null}
+      <ProviderDeleteConfirmDialog
+        open={providerDeleteConfirmOpen}
+        providers={providers}
+        models={models}
+        providerDeleteTargetId={providerDeleteTargetId}
+        providerDeleteTransferTargetId={providerDeleteTransferTargetId}
+        deletingProviderId={deletingProviderId}
+        onClose={closeDeleteProviderConfirm}
+        onTransferTargetChange={setProviderDeleteTransferTargetId}
+        onConfirm={onConfirmDeleteProvider}
+      />
 
       <div className="space-y-4">
-        <div
-          role="tablist"
-          className="inline-flex w-full max-w-3xl flex-wrap items-center gap-1 rounded-2xl border border-base-300/70 bg-base-200/70 p-1.5 shadow-inner backdrop-blur"
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "import"}
-            className={tabClass("import")}
-            onClick={() => setActiveTab("import")}
-          >
-            导入中心
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "entry"}
-            className={tabClass("entry")}
-            onClick={() => setActiveTab("entry")}
-          >
-            数据录入
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "providers"}
-            className={tabClass("providers")}
-            onClick={() => setActiveTab("providers")}
-          >
-            Provider 配置
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "rename"}
-            className={tabClass("rename")}
-            onClick={() => setActiveTab("rename")}
-          >
-            名称维护
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "merge"}
-            className={tabClass("merge")}
-            onClick={() => setActiveTab("merge")}
-          >
-            实体去重
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "maintenance"}
-            className={tabClass("maintenance")}
-            onClick={() => setActiveTab("maintenance")}
-          >
-            数据维护
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "settings"}
-            className={tabClass("settings")}
-            onClick={() => setActiveTab("settings")}
-          >
-            数据库设置
-          </button>
-        </div>
+        <AdminConsoleTabNav activeTab={activeTab} onTabChange={setActiveTab} />
 
         {activeTab === "import" ? (
           <div className="grid grid-cols-1 gap-4">
