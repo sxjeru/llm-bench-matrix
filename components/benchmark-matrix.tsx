@@ -147,29 +147,29 @@ function applySourceMeta(row: MatrixInputRow): MatrixInputRow {
 
 type SourceValueDisplayItem = {
   key: string;
-  sourceLabel: string;
-  rawValue: string;
+  displayValue: string;
 };
 
-function getSourceValueDisplayItems(entries: MatrixCellEntry[]): SourceValueDisplayItem[] {
-  const seen = new Set<string>();
-  const items: SourceValueDisplayItem[] = [];
+function getSourceValueEntry(entries: MatrixCellEntry[], activeSource: string): MatrixCellEntry | null {
+  return activeSource === SOURCE_ALL
+    ? entries[0]
+    : entries.find((item) => getSourceKey(item.source) === activeSource) ?? null;
+}
 
-  entries.forEach((entry, index) => {
-    const sourceLabel = getSourceLabel(getSourceKey(entry.source));
-    const rawValue = entry.valueRaw.trim() || "--";
-    const dedupKey = `${sourceLabel}\u0000${rawValue}\u0000${entry.valueNote?.trim() ?? ""}`;
+function getSourceValueDisplayItem(entries: MatrixCellEntry[], activeSource: string): SourceValueDisplayItem | null {
+  const entry = getSourceValueEntry(entries, activeSource);
 
-    if (seen.has(dedupKey)) return;
-    seen.add(dedupKey);
-    items.push({
-      key: `${index}-${sourceLabel}-${rawValue}-${entry.valueNote?.trim() ?? ""}`,
-      sourceLabel,
-      rawValue
-    });
-  });
+  if (!entry) {
+    return null;
+  }
 
-  return items;
+  const sourceLabel = getSourceLabel(getSourceKey(entry.source));
+  const displayValue = getMatrixCellDisplayValue(entry.valueNum, entry.valueNum2, entry.valueRaw, entry.valueNote);
+
+  return {
+    key: `${activeSource}-${sourceLabel}-${displayValue}-${entry.valueNote?.trim() ?? ""}`,
+    displayValue
+  };
 }
 
 const SOURCE_NEW_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
@@ -1823,17 +1823,17 @@ export function BenchmarkMatrix({
       });
 
       const uniqueEntries = Array.from(uniqueEntriesMap.values());
-      const sourceValueItems = getSourceValueDisplayItems(uniqueEntries);
       const valueIdentitySet = new Set(uniqueEntries.map((entry) => getMatrixCellValueIdentity(entry)));
       const noteText = (preferredEntry.valueNote ?? "").trim();
       const hasMeaningfulMultipleValues = uniqueEntries.length > 1 && valueIdentitySet.size > 1;
       const questionMarkPadding = hasMeaningfulMultipleValues || noteText.length > 0 ? 16 : 0;
+      const sourceValueItem = hasMeaningfulMultipleValues
+        ? getSourceValueDisplayItem(uniqueEntries, activeSource)
+        : null;
 
       const compactDisplayValue = displayValue.replace(/\s*\/\s*/g, "/");
-      const sourceValueWidth = displaySourceValuesInCells && sourceValueItems.length > 0
-        ? Math.max(...sourceValueItems.map((item) => (
-            measureTextWidth(`${item.sourceLabel}: ${item.rawValue}`, "600 11px Inter, ui-sans-serif, system-ui") + 20
-          )))
+      const sourceValueWidth = displaySourceValuesInCells && sourceValueItem
+        ? measureTextWidth(sourceValueItem.displayValue, "600 14px Inter, ui-sans-serif, system-ui") + 18 + questionMarkPadding
         : 0;
       const measured = Math.max(
         measureTextWidth(compactDisplayValue, "600 14px Inter, ui-sans-serif, system-ui") + 18 + questionMarkPadding,
@@ -1858,7 +1858,7 @@ export function BenchmarkMatrix({
     });
 
     return map;
-  }, [modelColumns, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells]);
+  }, [modelColumns, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource]);
 
   useEffect(() => {
     if (!isColumnWidthLoaded) return;
@@ -2202,14 +2202,29 @@ export function BenchmarkMatrix({
 
           const uniqueEntries = Array.from(uniqueEntriesMap.values());
           const valueIdentitySet = new Set(uniqueEntries.map((entry) => getMatrixCellValueIdentity(entry)));
-          const noteText = (cell.valueNote ?? "").trim();
           const hasMeaningfulMultipleValues = uniqueEntries.length > 1 && valueIdentitySet.size > 1;
+          const sourceEntry = displaySourceValuesInCells && hasMeaningfulMultipleValues
+            ? getSourceValueEntry(uniqueEntries, activeSource)
+            : null;
+          const effectiveValueRaw = sourceEntry ? sourceEntry.valueRaw : cell.valueRaw;
+          const effectiveValueNum = sourceEntry ? sourceEntry.valueNum : cell.valueNum;
+          const effectiveValueNum2 = sourceEntry ? sourceEntry.valueNum2 : cell.valueNum2;
+          const effectiveValueNote = sourceEntry ? sourceEntry.valueNote : cell.valueNote;
+          const effectiveSource = sourceEntry ? sourceEntry.source : cell.source;
+          const effectiveBenchTime = sourceEntry ? sourceEntry.benchTime : cell.benchTime;
+          const noteText = (effectiveValueNote ?? "").trim();
 
           finalizedCells.set(modelName, {
             ...cell,
+            valueRaw: effectiveValueRaw,
+            valueNum: effectiveValueNum,
+            valueNum2: effectiveValueNum2,
+            valueNote: effectiveValueNote,
+            source: effectiveSource,
+            benchTime: effectiveBenchTime,
             uniqueEntries,
             noteText,
-            displayValue: getMatrixCellDisplayValue(cell.valueNum, cell.valueNum2, cell.valueRaw, cell.valueNote),
+            displayValue: getMatrixCellDisplayValue(effectiveValueNum, effectiveValueNum2, effectiveValueRaw, effectiveValueNote),
             hasMeaningfulMultipleValues,
             shouldShowQuestionMark: hasMeaningfulMultipleValues || noteText.length > 0
           });
@@ -2251,7 +2266,7 @@ export function BenchmarkMatrix({
       })
       .filter((row) => row.rowDataCount > 0)
       .sort((a, b) => a.firstSeenIndex - b.firstSeenIndex);
-  }, [baseSourceRows, coveragePrunedRows, showDuplicateRows]);
+  }, [baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource]);
 
   function getRowSortCycle(): RowSortMode[] {
     return activeSource === SOURCE_ALL
@@ -3152,17 +3167,6 @@ export function BenchmarkMatrix({
             显示重名行
           </button>
 
-          {hasSourceData ? (
-            <button
-              type="button"
-              className="btn btn-xs btn-ghost"
-              onClick={() => setShowSourceValues((prev) => !prev)}
-            >
-              {displaySourceValuesInCells ? <Eye size={14} /> : <EyeOff size={14} />}
-              显示 Source 原值
-            </button>
-          ) : null}
-
           {activeSource === SOURCE_ALL ? (
             <button
               type="button"
@@ -3171,6 +3175,17 @@ export function BenchmarkMatrix({
             >
               {showLowCoverageRows ? <Eye size={14} /> : <EyeOff size={14} />}
               {showLowCoverageRows ? "隐藏低覆盖行" : "显示低覆盖行"}
+            </button>
+          ) : null}
+
+          {hasSourceData ? (
+            <button
+              type="button"
+              className="btn btn-xs btn-ghost"
+              onClick={() => setShowSourceValues((prev) => !prev)}
+            >
+              {displaySourceValuesInCells ? <Eye size={14} /> : <EyeOff size={14} />}
+              显示原始值
             </button>
           ) : null}
         </div>
@@ -3920,8 +3935,10 @@ export function BenchmarkMatrix({
                     const noteText = cell?.noteText ?? "";
                     const shouldShowQuestionMark = cell?.shouldShowQuestionMark ?? false;
                     const uniqueEntries = cell?.uniqueEntries ?? [];
-                    const sourceValueItems = displaySourceValuesInCells ? getSourceValueDisplayItems(uniqueEntries) : [];
-                    const shouldRenderSourceValues = sourceValueItems.length > 0;
+                    const sourceValueItem = displaySourceValuesInCells && cell?.hasMeaningfulMultipleValues
+                      ? getSourceValueDisplayItem(uniqueEntries, activeSource)
+                      : null;
+                    const shouldRenderSourceValues = Boolean(sourceValueItem);
                     const isTopCellFirst =
                       comparableCellNum !== null &&
                       primaryComparableTop !== null &&
@@ -4056,22 +4073,7 @@ export function BenchmarkMatrix({
                         }}
                       >
                         {shouldRenderSourceValues ? (
-                          <span className="flex min-w-0 flex-col gap-0.5">
-                            {sourceValueItems.map((item) => (
-                              <span
-                                key={item.key}
-                                className="inline-flex min-w-0 items-baseline gap-1 rounded-md border border-white/10 bg-slate-950/20 px-1.5 py-0.5 text-[11px] leading-tight"
-                                title={`${item.sourceLabel}: ${item.rawValue}`}
-                              >
-                                <span className="max-w-[112px] shrink truncate text-[10px] font-medium opacity-70">
-                                  {item.sourceLabel}
-                                </span>
-                                <span className="min-w-0 truncate font-semibold">
-                                  {item.rawValue}
-                                </span>
-                              </span>
-                            ))}
-                          </span>
+                          <span style={singleCellScoreStyle}>{sourceValueItem!.displayValue}</span>
                         ) : isPairNumericDisplay && pairFirstDisplay && pairSecondDisplay ? (
                           <span className="inline-flex items-center gap-0 leading-none">
                             <span style={isTopCellFirst ? topRankSegmentStyle : isSecondCellFirst ? secondRankSegmentStyle : undefined}>{pairFirstDisplay}</span>
