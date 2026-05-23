@@ -5252,10 +5252,10 @@ export function AdminConsole({
                           key={`rename-entity-${renameEntityType}-${item.id}`}
                           role="button"
                           tabIndex={0}
-                          className={`absolute left-0 right-0 grid cursor-pointer grid-cols-[80px_minmax(0,1fr)_180px] items-center border-b border-base-300/50 px-1 text-left transition-colors ${
+                          className={`absolute left-0 right-0 grid cursor-pointer grid-cols-[80px_minmax(0,1fr)_180px] items-center border-b px-1 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 ${
                             isSelected
-                              ? "bg-base-200/55 text-base-content border-l-2 border-base-content/25"
-                              : "bg-transparent hover:bg-base-200/35"
+                              ? "z-10 rounded-lg border border-primary/35 bg-primary/15 font-semibold text-base-content shadow-sm ring-1 ring-primary/25 before:absolute before:bottom-1.5 before:left-0 before:top-1.5 before:w-1 before:rounded-r-full before:bg-primary before:content-['']"
+                              : "border-base-300/50 bg-transparent hover:bg-base-200/35"
                           }`}
                           style={{
                             top: `${top}px`,
@@ -5348,7 +5348,7 @@ export function AdminConsole({
           <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
             <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold">
               <MergeIcon size={18} />
-              实体合并（去重）
+              实体合并去重
             </h3>
             <div className="mb-5 rounded-2xl border border-primary/25 bg-gradient-to-br from-base-200/45 via-base-100/30 to-base-100/70 p-4 shadow-sm">
               <div className="flex flex-wrap items-center gap-2">
