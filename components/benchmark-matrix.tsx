@@ -150,32 +150,26 @@ type SourceValueDisplayItem = {
 };
 
 function getPreferredMatrixCellEntry(entries: MatrixCellEntry[], higherIsBetter = true): MatrixCellEntry | null {
-  let preferred: MatrixCellEntry | null = null;
+  if (entries.length === 0) return null;
 
-  entries.forEach((entry) => {
-    if (!preferred) {
-      preferred = entry;
-    } else if (entry.valueNum !== null) {
-      if (preferred.valueNum === null) {
-        preferred = entry;
-      } else {
-        const isBetter = higherIsBetter
-          ? entry.valueNum > preferred.valueNum
-          : entry.valueNum < preferred.valueNum;
-        if (isBetter) {
-          preferred = entry;
-        }
-      }
-    }
+  return entries.reduce((preferred, entry) => {
+    if (entry.valueNum === null) return preferred;
+    if (preferred.valueNum === null) return entry;
+
+    const isBetter = higherIsBetter
+      ? entry.valueNum > preferred.valueNum
+      : entry.valueNum < preferred.valueNum;
+
+    return isBetter ? entry : preferred;
   });
-
-  return preferred;
 }
 
 function getSourceValueEntry(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): MatrixCellEntry | null {
-  return activeSource === SOURCE_ALL
-    ? getPreferredMatrixCellEntry(entries, higherIsBetter)
-    : entries.find((item) => getSourceKey(item.source) === activeSource) ?? null;
+  if (activeSource === SOURCE_ALL) {
+    return getPreferredMatrixCellEntry(entries, higherIsBetter);
+  }
+  const filtered = entries.filter((item) => getSourceKey(item.source) === activeSource);
+  return getPreferredMatrixCellEntry(filtered, higherIsBetter);
 }
 
 function getSourceValueDeltaRaw(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): number | null {
@@ -326,7 +320,7 @@ export function BenchmarkMatrix({
       || allRows.some((row) => row.source?.trim()),
     [allSourceOptions, allRows]
   );
-  const displaySourceValuesInCells = showSourceValues && hasSourceData;
+  const displaySourceValuesInCells = showSourceValues && hasSourceData && activeSource !== SOURCE_ALL;
   const displaySourceValueDeltasInCells = displaySourceValuesInCells && showSourceValueDeltas;
   const overflowSourceKeySet = useMemo(() => new Set(overflowSourceKeys), [overflowSourceKeys]);
   const visibleSourceOptions = useMemo(

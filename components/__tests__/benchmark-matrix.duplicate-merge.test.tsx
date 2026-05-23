@@ -451,11 +451,24 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
         providerName: "OpenAI",
         modelName: "Model A",
         benchmarkName: "Latency",
-        benchmarkType: "Performance",
-        benchmarkCanonicalKey: "latency:performance",
+        benchmarkType: "Performance2",
+        benchmarkCanonicalKey: "latency:performance2",
         benchTime: "2026-04-06T01:00:00.000Z",
         valueRaw: "95 ms",
         valueNum: 95,
+        valueNote: null,
+        source: "text:S1",
+        higherIsBetter: false
+      },
+      {
+        providerName: "OpenAI",
+        modelName: "Model A",
+        benchmarkName: "Latency",
+        benchmarkType: "Performance3",
+        benchmarkCanonicalKey: "latency:performance3",
+        benchTime: "2026-04-06T02:00:00.000Z",
+        valueRaw: "150 ms",
+        valueNum: 150,
         valueNote: null,
         source: "text:S2",
         higherIsBetter: false
@@ -469,13 +482,40 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
       />
     );
 
+    // 在 "全部" 页签，默认应显示所有 entries 中的最佳值（由于 lowerIsBetter: false，最理想是 95 ms）
+    expect(screen.getByText("95")).toBeInTheDocument();
+
     // 切换到 S1 页签
     await user.click(screen.getByRole("tab", { name: "S1" }));
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "显示原始值" })).toBeInTheDocument();
     });
 
+    // 开启 Source 原值
+    await user.click(screen.getByRole("button", { name: "显示原始值" }));
 
+    // S1 有两个 entry：120 ms 和 95 ms。因为 lowerIsBetter=false，95 是更好的值，应该优先显示 95
+    const mergedCell = screen.getByText("95").closest("td")!;
+    expect(mergedCell).toHaveTextContent("95");
+
+    // 用 Ctrl+点击开启差值视图
+    fireEvent.click(screen.getByRole("button", { name: "显示原始值" }), { ctrlKey: true });
+
+    // preferredEntry (整体最佳值) 为 95 ms，S1 最佳值也是 95 ms，差值为 0，不应有 delta 徽标
+    expect(mergedCell.querySelector('[data-source-delta-badge="1"]')).toBeNull();
+
+    // 切换到 S2 页签 (S2 只有一个 entry: 150 ms)
+    await user.click(screen.getByRole("tab", { name: "S2" }));
+
+    // S2 应该显示 150
+    expect(screen.getByText("150")).toBeInTheDocument();
+    const mergedCellS2 = screen.getByText("150").closest("td")!;
+
+    // S2 值为 150 ms，整体最佳值为 95 ms，差值是 55，因为 lowerIsBetter=false，比最佳值差了 55 (值增加是更差的，所以显示 ▼55，方向为 down，因为变差了)
+    const sourceDeltaBadge = mergedCellS2.querySelector('[data-source-delta-badge="1"]') as HTMLElement | null;
+    expect(sourceDeltaBadge).not.toBeNull();
+    expect(sourceDeltaBadge).toHaveAttribute("data-compare-direction", "down");
+    expect(sourceDeltaBadge).toHaveTextContent("▼55");
   });
 });
 
