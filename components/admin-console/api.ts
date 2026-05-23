@@ -1,3 +1,20 @@
+export async function getJson(url: string, init?: RequestInit) {
+  const response = await fetch(url, init);
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const reason =
+      typeof data?.error === "string"
+        ? data.error
+        : data?.error
+          ? JSON.stringify(data.error)
+          : `Request failed: ${response.status}`;
+    throw new Error(reason);
+  }
+
+  return data;
+}
+
 export async function postJson(
   url: string,
   payload: unknown,

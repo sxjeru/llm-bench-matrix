@@ -2499,6 +2499,133 @@ export async function createBenchmarkValue(input: {
   return created;
 }
 
+export type BenchmarkValueOverlapStats = {
+  sourceId: number;
+  targetId: number;
+  sameCount: number;
+  overlapCount: number;
+  sourceValueCount: number;
+  targetValueCount: number;
+  sourceModelCount: number;
+  targetModelCount: number;
+};
+
+function normalizeBenchmarkOverlapNumericValue(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const text = String(value).trim();
+  if (!text) {
+    return null;
+  }
+
+  const match = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(text);
+  if (!match) {
+    return text;
+  }
+
+  const sign = match[1] === "-" ? "-" : "";
+  const integerPart = (match[2] ?? "0").replace(/^0+(?=\d)/, "");
+  const fractionPart = (match[3] ?? "").replace(/0+$/, "");
+  const normalized = fractionPart ? `${integerPart}.${fractionPart}` : integerPart;
+
+  return normalized === "0" ? "0" : `${sign}${normalized}`;
+}
+
+function getBenchmarkOverlapValueKey(row: { valueRaw: string; valueNum: unknown; valueNum2: unknown }): string {
+  const valueNum = normalizeBenchmarkOverlapNumericValue(row.valueNum);
+  const valueNum2 = normalizeBenchmarkOverlapNumericValue(row.valueNum2);
+
+  if (valueNum !== null || valueNum2 !== null) {
+    return `num:${valueNum ?? ""}|${valueNum2 ?? ""}`;
+  }
+
+  return `raw:${row.valueRaw.trim().replace(/\s+/g, " ").toLowerCase()}`;
+}
+
+export async function getBenchmarkValueOverlapStats(input: {
+  sourceId: number;
+  targetId: number;
+}): Promise<BenchmarkValueOverlapStats> {
+  if (input.sourceId === input.targetId) {
+    throw new Error("sourceId and targetId cannot be the same");
+  }
+
+  const rows = await db
+    .select({
+      benchmarkId: benchmarkValues.benchmarkId,
+      modelId: benchmarkValues.modelId,
+      valueRaw: benchmarkValues.valueRaw,
+      valueNum: benchmarkValues.valueNum,
+      valueNum2: benchmarkValues.valueNum2
+    })
+    .from(benchmarkValues)
+    .where(inArray(benchmarkValues.benchmarkId, [input.sourceId, input.targetId]));
+
+  const sourceValuesByModel = new Map<number, Set<string>>();
+  const targetValuesByModel = new Map<number, Set<string>>();
+  let sourceValueCount = 0;
+  let targetValueCount = 0;
+
+  rows.forEach((row) => {
+    const valuesByModel = row.benchmarkId === input.sourceId
+      ? sourceValuesByModel
+      : row.benchmarkId === input.targetId
+        ? targetValuesByModel
+        : null;
+
+    if (!valuesByModel) {
+      return;
+    }
+
+    if (row.benchmarkId === input.sourceId) {
+      sourceValueCount += 1;
+    } else {
+      targetValueCount += 1;
+    }
+
+    const valueKey = getBenchmarkOverlapValueKey(row);
+    const existingValues = valuesByModel.get(row.modelId);
+    if (existingValues) {
+      existingValues.add(valueKey);
+      return;
+    }
+
+    valuesByModel.set(row.modelId, new Set([valueKey]));
+  });
+
+  let sameCount = 0;
+  let overlapCount = 0;
+
+  sourceValuesByModel.forEach((sourceValues, modelId) => {
+    const targetValues = targetValuesByModel.get(modelId);
+    if (!targetValues) {
+      return;
+    }
+
+    overlapCount += 1;
+
+    for (const value of sourceValues) {
+      if (targetValues.has(value)) {
+        sameCount += 1;
+        return;
+      }
+    }
+  });
+
+  return {
+    sourceId: input.sourceId,
+    targetId: input.targetId,
+    sameCount,
+    overlapCount,
+    sourceValueCount,
+    targetValueCount,
+    sourceModelCount: sourceValuesByModel.size,
+    targetModelCount: targetValuesByModel.size
+  };
+}
+
 export async function mergeEntity(input: {
   entityType: "model" | "benchmark";
   sourceId: number;

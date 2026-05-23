@@ -169,6 +169,17 @@ export type MergeSubmitState = "idle" | "submitting" | "success";
 
 export type RenameSubmitState = "idle" | "submitting" | "success";
 
+export type BenchmarkValueOverlapStats = {
+  sourceId: number;
+  targetId: number;
+  sameCount: number;
+  overlapCount: number;
+  sourceValueCount: number;
+  targetValueCount: number;
+  sourceModelCount: number;
+  targetModelCount: number;
+};
+
 export type DuplicateConfidence = "high" | "medium" | "low";
 
 export type DuplicateModelCandidate = {

@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { formatDateTimeLocalInputValue } from "@/components/benchmark-matrix/formatters";
 import { isValidHexColor, resolveProviderBrandColor } from "@/lib/provider-config";
-import { postFormData, postJson } from "./admin-console/api";
+import { getJson, postFormData, postJson } from "./admin-console/api";
 import {
   BENCHMARK_SUSPECT_KEYWORDS,
   MODALITY_OPTIONS,
@@ -38,6 +38,7 @@ import {
 } from "./admin-console/constants";
 import type {
   BenchmarkOption,
+  BenchmarkValueOverlapStats,
   BenchmarkWarningItem,
   BenchmarkWarningLevel,
   DuplicateBenchmarkCandidate,
@@ -270,6 +271,11 @@ export function AdminConsole({
   const [mergeTargetInput, setMergeTargetInput] = useState("");
   const [mergeTargetBenchmarkNameInput, setMergeTargetBenchmarkNameInput] = useState("");
   const [mergeSubmitState, setMergeSubmitState] = useState<MergeSubmitState>("idle");
+  const [benchmarkValueOverlapState, setBenchmarkValueOverlapState] = useState<{
+    key: string;
+    status: "idle" | "loading" | "success" | "error";
+    stats: BenchmarkValueOverlapStats | null;
+  }>({ key: "", status: "idle", stats: null });
   const mergeSubmitResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mergeSubmitButtonRef = useRef<HTMLButtonElement | null>(null);
   const [mergedRecordList, setMergedRecordList] = useState<MergedRecord[]>(mergedRecords);
@@ -1198,6 +1204,73 @@ export function AdminConsole({
     () => parseMergeEntityId(mergeTargetInput, mergeEntityOptions),
     [mergeTargetInput, mergeEntityOptions]
   );
+
+  const benchmarkValueOverlapKey =
+    mergeType === "benchmark"
+    && resolvedMergeSourceId !== null
+    && resolvedMergeTargetId !== null
+    && resolvedMergeSourceId !== resolvedMergeTargetId
+      ? `${resolvedMergeSourceId}:${resolvedMergeTargetId}`
+      : "";
+  const shouldShowBenchmarkValueOverlap = benchmarkValueOverlapKey.length > 0;
+
+  useEffect(() => {
+    if (!benchmarkValueOverlapKey) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const [sourceId, targetId] = benchmarkValueOverlapKey.split(":");
+
+    getJson(
+      `/api/admin/benchmarks/value-overlap?sourceId=${sourceId}&targetId=${targetId}`,
+      { signal: controller.signal }
+    )
+      .then((result) => {
+        setBenchmarkValueOverlapState({
+          key: benchmarkValueOverlapKey,
+          status: "success",
+          stats: result as BenchmarkValueOverlapStats
+        });
+      })
+      .catch((error) => {
+        if (error instanceof Error && error.name === "AbortError") {
+          return;
+        }
+        setBenchmarkValueOverlapState({
+          key: benchmarkValueOverlapKey,
+          status: "error",
+          stats: null
+        });
+      });
+
+    return () => controller.abort();
+  }, [benchmarkValueOverlapKey]);
+
+  const benchmarkValueOverlapStats =
+    benchmarkValueOverlapState.key === benchmarkValueOverlapKey && benchmarkValueOverlapState.status === "success"
+      ? benchmarkValueOverlapState.stats
+      : null;
+  const isLoadingBenchmarkValueOverlap =
+    shouldShowBenchmarkValueOverlap && benchmarkValueOverlapState.key !== benchmarkValueOverlapKey;
+
+  const benchmarkValueOverlapBadgeClass = useMemo(() => {
+    if (isLoadingBenchmarkValueOverlap) {
+      return "badge-outline";
+    }
+
+    const sameCount = benchmarkValueOverlapStats?.sameCount ?? 0;
+    const overlapCount = benchmarkValueOverlapStats?.overlapCount ?? 0;
+    if (sameCount <= 0 || overlapCount <= 0) {
+      return "badge-error";
+    }
+
+    return sameCount / overlapCount < 0.1 ? "badge-warning" : "badge-success";
+  }, [benchmarkValueOverlapStats, isLoadingBenchmarkValueOverlap]);
+
+  const shouldRenderBenchmarkValueOverlapBadge =
+    shouldShowBenchmarkValueOverlap
+    && (isLoadingBenchmarkValueOverlap || (benchmarkValueOverlapStats?.overlapCount ?? 0) > 0);
 
   const visibleModelDuplicateCandidates = useMemo(() => {
     if (!duplicateDetectionResult) return [];
@@ -5701,8 +5774,18 @@ export function AdminConsole({
                   ))}
                 </datalist>
               </div>
-              <div className="md:col-span-12 text-xs opacity-75">
-                解析结果：source = {resolvedMergeSourceId ?? "-"}，target = {resolvedMergeTargetId ?? "-"}
+              <div className="md:col-span-12 flex flex-wrap items-center gap-2 text-xs">
+                <span className="opacity-75">解析结果：source = {resolvedMergeSourceId ?? "-"}，target = {resolvedMergeTargetId ?? "-"}</span>
+                {shouldRenderBenchmarkValueOverlapBadge ? (
+                  <span
+                    className={`badge badge-xs ${benchmarkValueOverlapBadgeClass}`}
+                    style={isLoadingBenchmarkValueOverlap ? undefined : { color: "#0f172a" }}
+                  >
+                    相同值 = {isLoadingBenchmarkValueOverlap
+                      ? "计算中..."
+                      : `${benchmarkValueOverlapStats?.sameCount ?? 0} / ${benchmarkValueOverlapStats?.overlapCount ?? 0}`}
+                  </span>
+                ) : null}
               </div>
               {mergeType === "benchmark" ? (
                 <div className="md:col-span-8">
