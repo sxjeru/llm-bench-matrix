@@ -149,27 +149,38 @@ type SourceValueDisplayItem = {
   displayValue: string;
 };
 
-function getPreferredMatrixCellEntry(entries: MatrixCellEntry[]): MatrixCellEntry | null {
+function getPreferredMatrixCellEntry(entries: MatrixCellEntry[], higherIsBetter = true): MatrixCellEntry | null {
   let preferred: MatrixCellEntry | null = null;
 
   entries.forEach((entry) => {
-    if (!preferred || (entry.valueNum !== null && (preferred.valueNum === null || entry.valueNum > preferred.valueNum))) {
+    if (!preferred) {
       preferred = entry;
+    } else if (entry.valueNum !== null) {
+      if (preferred.valueNum === null) {
+        preferred = entry;
+      } else {
+        const isBetter = higherIsBetter
+          ? entry.valueNum > preferred.valueNum
+          : entry.valueNum < preferred.valueNum;
+        if (isBetter) {
+          preferred = entry;
+        }
+      }
     }
   });
 
   return preferred;
 }
 
-function getSourceValueEntry(entries: MatrixCellEntry[], activeSource: string): MatrixCellEntry | null {
+function getSourceValueEntry(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): MatrixCellEntry | null {
   return activeSource === SOURCE_ALL
-    ? getPreferredMatrixCellEntry(entries)
+    ? getPreferredMatrixCellEntry(entries, higherIsBetter)
     : entries.find((item) => getSourceKey(item.source) === activeSource) ?? null;
 }
 
-function getSourceValueDeltaRaw(entries: MatrixCellEntry[], activeSource: string): number | null {
-  const sourceEntry = getSourceValueEntry(entries, activeSource);
-  const preferredEntry = getPreferredMatrixCellEntry(entries);
+function getSourceValueDeltaRaw(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): number | null {
+  const sourceEntry = getSourceValueEntry(entries, activeSource, higherIsBetter);
+  const preferredEntry = getPreferredMatrixCellEntry(entries, higherIsBetter);
 
   if (!sourceEntry || !preferredEntry || sourceEntry.valueNum === null || preferredEntry.valueNum === null) {
     return null;
@@ -183,8 +194,8 @@ function getSourceValueDeltaRaw(entries: MatrixCellEntry[], activeSource: string
   return delta;
 }
 
-function getSourceValueDisplayItem(entries: MatrixCellEntry[], activeSource: string): SourceValueDisplayItem | null {
-  const entry = getSourceValueEntry(entries, activeSource);
+function getSourceValueDisplayItem(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): SourceValueDisplayItem | null {
+  const entry = getSourceValueEntry(entries, activeSource, higherIsBetter);
 
   if (!entry) {
     return null;
@@ -1803,6 +1814,7 @@ export function BenchmarkMatrix({
 
     const entriesByGroup = new Map<string, MatrixCellEntry[]>();
     const preferredEntryByGroup = new Map<string, MatrixCellEntry>();
+    const higherIsBetterByGroup = new Map<string, boolean>();
     const modelNameByGroup = new Map<string, string>();
 
     coveragePrunedRows.forEach((row) => {
@@ -1819,11 +1831,16 @@ export function BenchmarkMatrix({
 
       if (!entriesByGroup.has(groupKey)) {
         entriesByGroup.set(groupKey, []);
+        const rowHigherIsBetter = typeof row.higherIsBetter === "boolean"
+          ? row.higherIsBetter
+          : !isLowerBetterBenchmark(row.benchmarkName, row.benchmarkType);
+        higherIsBetterByGroup.set(groupKey, rowHigherIsBetter);
       }
       entriesByGroup.get(groupKey)!.push(entry);
 
+      const groupHigherIsBetter = higherIsBetterByGroup.get(groupKey) ?? true;
       const preferred = preferredEntryByGroup.get(groupKey);
-      if (!preferred || (entry.valueNum !== null && (preferred.valueNum === null || entry.valueNum > preferred.valueNum))) {
+      if (!preferred || (entry.valueNum !== null && (preferred.valueNum === null || (groupHigherIsBetter ? entry.valueNum > preferred.valueNum : entry.valueNum < preferred.valueNum)))) {
         preferredEntryByGroup.set(groupKey, entry);
       }
 
@@ -1855,11 +1872,12 @@ export function BenchmarkMatrix({
       const noteText = (preferredEntry.valueNote ?? "").trim();
       const hasMeaningfulMultipleValues = uniqueEntries.length > 1 && valueIdentitySet.size > 1;
       const questionMarkPadding = hasMeaningfulMultipleValues || noteText.length > 0 ? 16 : 0;
+      const groupHigherIsBetter = higherIsBetterByGroup.get(groupKey) ?? true;
       const sourceValueItem = hasMeaningfulMultipleValues
-        ? getSourceValueDisplayItem(uniqueEntries, activeSource)
+        ? getSourceValueDisplayItem(uniqueEntries, activeSource, groupHigherIsBetter)
         : null;
       const sourceDeltaRaw = displaySourceValueDeltasInCells && hasMeaningfulMultipleValues
-        ? getSourceValueDeltaRaw(uniqueEntries, activeSource)
+        ? getSourceValueDeltaRaw(uniqueEntries, activeSource, groupHigherIsBetter)
         : null;
       const sourceDeltaPadding = sourceDeltaRaw !== null
         ? Math.min(28, 9 + formatComparisonDeltaValue(sourceDeltaRaw).length * 3)
@@ -2210,7 +2228,14 @@ export function BenchmarkMatrix({
         });
         existingCell.hasMultipleValues = existingCell.allEntries.length > 1;
 
-        if (row.valueNum !== null && (existingCell.valueNum === null || row.valueNum > existingCell.valueNum)) {
+        const cellHigherIsBetter = matrixRow.higherIsBetter;
+        const isCellBetter =
+          row.valueNum !== null &&
+          existingCell.valueNum !== null &&
+          (cellHigherIsBetter
+            ? row.valueNum > existingCell.valueNum
+            : row.valueNum < existingCell.valueNum);
+        if (row.valueNum !== null && (existingCell.valueNum === null || isCellBetter)) {
           existingCell.valueNum = row.valueNum;
           existingCell.valueNum2 = row.valueNum2 ?? null;
           existingCell.valueRaw = row.valueRaw;
@@ -2238,7 +2263,7 @@ export function BenchmarkMatrix({
           const valueIdentitySet = new Set(uniqueEntries.map((entry) => getMatrixCellValueIdentity(entry)));
           const hasMeaningfulMultipleValues = uniqueEntries.length > 1 && valueIdentitySet.size > 1;
           const sourceEntry = displaySourceValuesInCells && hasMeaningfulMultipleValues
-            ? getSourceValueEntry(uniqueEntries, activeSource)
+            ? getSourceValueEntry(uniqueEntries, activeSource, matrixRow.higherIsBetter)
             : null;
           const effectiveValueRaw = sourceEntry ? sourceEntry.valueRaw : cell.valueRaw;
           const effectiveValueNum = sourceEntry ? sourceEntry.valueNum : cell.valueNum;
@@ -3845,7 +3870,7 @@ export function BenchmarkMatrix({
                         return null;
                       }
 
-                      const deltaRaw = getSourceValueDeltaRaw(cell.uniqueEntries, activeSource);
+                      const deltaRaw = getSourceValueDeltaRaw(cell.uniqueEntries, activeSource, matrixRow.higherIsBetter);
                       return deltaRaw === null ? null : Math.abs(deltaRaw);
                     })
                     .filter((value): value is number => value !== null && Number.isFinite(value))
@@ -4014,10 +4039,10 @@ export function BenchmarkMatrix({
                     const shouldShowQuestionMark = cell?.shouldShowQuestionMark ?? false;
                     const uniqueEntries = cell?.uniqueEntries ?? [];
                     const sourceValueItem = displaySourceValuesInCells && cell?.hasMeaningfulMultipleValues
-                      ? getSourceValueDisplayItem(uniqueEntries, activeSource)
+                      ? getSourceValueDisplayItem(uniqueEntries, activeSource, matrixRow.higherIsBetter)
                       : null;
                     const sourceValueDeltaRaw = displaySourceValueDeltasInCells && cell?.hasMeaningfulMultipleValues
-                      ? getSourceValueDeltaRaw(uniqueEntries, activeSource)
+                      ? getSourceValueDeltaRaw(uniqueEntries, activeSource, matrixRow.higherIsBetter)
                       : null;
                     const shouldRenderSourceValues = Boolean(sourceValueItem);
                     const isTopCellFirst =

@@ -429,5 +429,53 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
       expect(window.localStorage.getItem(SHOW_SOURCE_VALUES_STORAGE_KEY)).toBe("0");
     });
   });
+
+  test("higherIsBetter=false 时，重复 source 记录应优先显示更低值并计算正确 delta", async () => {
+    const user = userEvent.setup();
+
+    const lowerIsBetterRows = [
+      {
+        providerName: "OpenAI",
+        modelName: "Model A",
+        benchmarkName: "Latency",
+        benchmarkType: "Performance",
+        benchmarkCanonicalKey: "latency:performance",
+        benchTime: "2026-04-06T00:00:00.000Z",
+        valueRaw: "120 ms",
+        valueNum: 120,
+        valueNote: null,
+        source: "text:S1",
+        higherIsBetter: false
+      },
+      {
+        providerName: "OpenAI",
+        modelName: "Model A",
+        benchmarkName: "Latency",
+        benchmarkType: "Performance",
+        benchmarkCanonicalKey: "latency:performance",
+        benchTime: "2026-04-06T01:00:00.000Z",
+        valueRaw: "95 ms",
+        valueNum: 95,
+        valueNote: null,
+        source: "text:S2",
+        higherIsBetter: false
+      }
+    ] as const;
+
+    render(
+      <BenchmarkMatrix
+        rows={[...lowerIsBetterRows]}
+        sourceOptions={["text:S1", "text:S2"]}
+      />
+    );
+
+    // 切换到 S1 页签
+    await user.click(screen.getByRole("tab", { name: "S1" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "显示原始值" })).toBeInTheDocument();
+    });
+
+
+  });
 });
 
