@@ -1,15 +1,32 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
 
+const mockSearchParams = new URLSearchParams();
+const mockReplace = vi.fn((url?: string) => {
+  for (const key of Array.from(mockSearchParams.keys())) {
+    mockSearchParams.delete(key);
+  }
+
+  if (!url) return;
+
+  const queryIndex = url.indexOf("?");
+  if (queryIndex < 0) return;
+
+  const nextParams = new URLSearchParams(url.slice(queryIndex + 1));
+  nextParams.forEach((value, key) => {
+    mockSearchParams.set(key, value);
+  });
+});
+
 vi.mock("next/navigation", () => ({
   usePathname: () => "/",
   useRouter: () => ({
-    replace: vi.fn()
+    replace: mockReplace
   }),
-  useSearchParams: () => new URLSearchParams()
+  useSearchParams: () => mockSearchParams
 }));
 
 const duplicateBenchmarkRows = [
@@ -120,6 +137,10 @@ const duplicateSourceCompareRows = [
 describe("BenchmarkMatrix 重名 benchmark 合并", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    mockReplace.mockClear();
+    for (const key of Array.from(mockSearchParams.keys())) {
+      mockSearchParams.delete(key);
+    }
   });
 
   test("显示重名列默认关闭时，按 canonicalKey 冒号前缀合并重名 benchmark", () => {
@@ -182,19 +203,32 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(screen.getByText("81.2")).toBeInTheDocument();
   });
 
-  test("Source 原值显示默认关闭，合并单元格仍显示最大值", () => {
+  test("全部页签不显示 Source 原值开关，切换到具体 source 后才显示", async () => {
+    const user = userEvent.setup();
+
     render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
-    expect(screen.getByRole("button", { name: "显示原始值" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "显示原始值" })).not.toBeInTheDocument();
     expect(screen.getByText("82")).toBeInTheDocument();
     expect(screen.queryByTitle("text:S1: 80 raw")).not.toBeInTheDocument();
     expect(screen.queryByTitle("text:S2: 82 raw")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "S1" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "显示原始值" })).toBeInTheDocument();
+    });
   });
 
   test("开启 Source 原值后，合并单元格展示当前 source 的原始值", async () => {
     const user = userEvent.setup();
 
     render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
+
+    await user.click(screen.getByRole("tab", { name: "S1" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "显示原始值" })).toBeInTheDocument();
+    });
 
     const mergedCell = screen.getByText("82").closest("td")!;
 
@@ -213,6 +247,11 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     const user = userEvent.setup();
 
     render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
+
+    await user.click(screen.getByRole("tab", { name: "S1" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "显示原始值" })).toBeInTheDocument();
+    });
 
     await user.click(screen.getByRole("button", { name: "显示原始值" }));
 
@@ -238,6 +277,11 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
 
     render(<BenchmarkMatrix rows={[...duplicateSourceCompareRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
+    await user.click(screen.getByRole("tab", { name: "S1" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "显示原始值" })).toBeInTheDocument();
+    });
+
     await user.click(screen.getByRole("button", { name: "显示原始值" }));
     fireEvent.click(screen.getByRole("button", { name: "显示原始值" }), { ctrlKey: true });
 
@@ -255,8 +299,15 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(modelBCell.querySelector('[data-source-delta-badge="1"]')).toBeNull();
   });
 
-  test("关闭 Source 原值后恢复最大值展示", () => {
+  test("关闭 Source 原值后恢复最大值展示", async () => {
+    const user = userEvent.setup();
+
     render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
+
+    await user.click(screen.getByRole("tab", { name: "S1" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "显示原始值" })).toBeInTheDocument();
+    });
 
     const toggle = screen.getByRole("button", { name: "显示原始值" });
     fireEvent.click(toggle);
@@ -265,6 +316,23 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(screen.getByText("82")).toBeInTheDocument();
     expect(screen.queryByTitle("text:S1: 80 raw")).not.toBeInTheDocument();
     expect(screen.queryByTitle("text:S2: 82 raw")).not.toBeInTheDocument();
+  });
+
+  test("切回全部页签后隐藏 Source 原值开关", async () => {
+    const user = userEvent.setup();
+
+    render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
+
+    await user.click(screen.getByRole("tab", { name: "S1" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "显示原始值" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("tab", { name: "全部" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "显示原始值" })).not.toBeInTheDocument();
+    });
   });
 
   test("没有 source 数据时不显示原始值按钮", () => {

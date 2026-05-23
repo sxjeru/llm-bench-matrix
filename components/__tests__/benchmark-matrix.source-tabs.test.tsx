@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
+import { formatTooltipTime } from "@/components/benchmark-matrix/formatters";
 
 const mockSearchParams = new URLSearchParams();
 
@@ -185,6 +186,154 @@ describe("BenchmarkMatrix source tabs", () => {
     });
     expect(screen.getByText("Agentic")).toBeInTheDocument();
     expect(screen.queryByText("Coding Agent")).not.toBeInTheDocument();
+  });
+
+  test("根据 updatedAt / benchTime 仅为正确 source 页签展示 new 标记", async () => {
+    const referenceTime = new Date("2026-05-10T12:00:00.000Z");
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(referenceTime.getTime());
+
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:Alpha", "text:Beta", "text:Gamma"]}
+        rows={[
+          {
+            providerName: "Provider A",
+            modelName: "Model A",
+            benchmarkName: "Bench-A",
+            benchmarkType: "General",
+            benchTime: "2026-05-01T00:00:00.000Z",
+            updatedAt: "2026-05-09T10:00:00.000Z",
+            valueRaw: "81",
+            valueNum: 81,
+            valueNote: null,
+            source: "text:Alpha"
+          },
+          {
+            providerName: "Provider B",
+            modelName: "Model B",
+            benchmarkName: "Bench-B",
+            benchmarkType: "General",
+            benchTime: "2026-05-02T00:00:00.000Z",
+            valueRaw: "79",
+            valueNum: 79,
+            valueNote: null,
+            source: "text:Beta"
+          },
+          {
+            providerName: "Provider C",
+            modelName: "Model C",
+            benchmarkName: "Bench-C",
+            benchmarkType: "General",
+            benchTime: "2026-05-03T00:00:00.000Z",
+            valueRaw: "78",
+            valueNum: 78,
+            valueNote: null,
+            source: "text:Gamma"
+          }
+        ]}
+      />
+    );
+
+    await waitFor(() => {
+      const alphaTab = screen.getByRole("tab", { name: "Alpha" });
+      expect(alphaTab.querySelector("span.bg-emerald-300")).not.toBeNull();
+    });
+
+    const alphaTab = screen.getByRole("tab", { name: "Alpha" });
+    const betaTab = screen.getByRole("tab", { name: "Beta" });
+    const gammaTab = screen.getByRole("tab", { name: "Gamma" });
+
+    expect(alphaTab.querySelector("span.bg-emerald-300")).not.toBeNull();
+    expect(betaTab.querySelector("span.bg-emerald-300")).toBeNull();
+    expect(gammaTab.querySelector("span.bg-emerald-300")).toBeNull();
+
+    nowSpy.mockRestore();
+  });
+
+  test("有近期更新时 source 页签 title 包含“最近更新 + 格式化时间”", async () => {
+    const referenceTime = new Date("2026-05-10T12:00:00.000Z");
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(referenceTime.getTime());
+
+    const latestUpdatedAt = "2026-05-09T18:08:00.000Z";
+
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:Delta"]}
+        rows={[
+          {
+            providerName: "Provider D",
+            modelName: "Model D",
+            benchmarkName: "Bench-D",
+            benchmarkType: "General",
+            benchTime: "2026-05-04T00:00:00.000Z",
+            updatedAt: latestUpdatedAt,
+            valueRaw: "88",
+            valueNum: 88,
+            valueNote: null,
+            source: "text:Delta"
+          }
+        ]}
+      />
+    );
+
+    await waitFor(() => {
+      const deltaTab = screen.getByRole("tab", { name: "Delta" });
+      expect(deltaTab).toHaveAttribute(
+        "title",
+        `Delta · 最近更新 ${formatTooltipTime(latestUpdatedAt)}`
+      );
+    });
+
+    nowSpy.mockRestore();
+  });
+
+  test("缺少时间戳时不展示 new 标记与最近更新提示", async () => {
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(new Date("2026-05-10T12:00:00.000Z").getTime());
+
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:NoTime-A", "text:NoTime-B"]}
+        rows={[
+          {
+            providerName: "Provider N1",
+            modelName: "Model N1",
+            benchmarkName: "Bench-N1",
+            benchmarkType: "General",
+            benchTime: "",
+            valueRaw: "70",
+            valueNum: 70,
+            valueNote: null,
+            source: "text:NoTime-A"
+          },
+          {
+            providerName: "Provider N2",
+            modelName: "Model N2",
+            benchmarkName: "Bench-N2",
+            benchmarkType: "General",
+            benchTime: "",
+            valueRaw: "71",
+            valueNum: 71,
+            valueNote: null,
+            source: "text:NoTime-B"
+          }
+        ]}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "NoTime-A" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "NoTime-B" })).toBeInTheDocument();
+    });
+
+    const tabA = screen.getByRole("tab", { name: "NoTime-A" });
+    const tabB = screen.getByRole("tab", { name: "NoTime-B" });
+
+    expect(tabA.querySelector("span.bg-emerald-300")).toBeNull();
+    expect(tabB.querySelector("span.bg-emerald-300")).toBeNull();
+    expect(tabA.getAttribute("title") ?? "").not.toContain("最近更新");
+    expect(tabB.getAttribute("title") ?? "").not.toContain("最近更新");
+
+    nowSpy.mockRestore();
   });
 
 });

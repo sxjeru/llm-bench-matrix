@@ -3223,7 +3223,7 @@ export function BenchmarkMatrix({
             </button>
           ) : null}
 
-          {hasSourceData ? (
+          {hasSourceData && activeSource !== SOURCE_ALL ? (
             <button
               type="button"
               className="btn btn-xs btn-ghost"
