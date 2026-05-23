@@ -2722,6 +2722,7 @@ export type RenameEntityInput = {
   entityType: "model" | "benchmark";
   entityId: number;
   nextName: string;
+  nextProviderId?: number;
   nextBenchmarkType?: string;
   mergeOnConflict?: boolean;
 };
@@ -2732,6 +2733,8 @@ export type RenameEntityResult = {
   entityId: number;
   previousName: string;
   nextName: string;
+  previousProviderId?: number;
+  nextProviderId?: number;
   previousBenchmarkType?: string;
   nextBenchmarkType?: string;
   action: "renamed" | "merged-and-renamed" | "unchanged";
@@ -2884,6 +2887,23 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
       throw new Error(`model ${input.entityId} 已被合并到 ${current.mergedIntoModelId}，请改名目标实体`);
     }
 
+    const nextProviderId = input.nextProviderId ?? current.providerId;
+    if (!Number.isInteger(nextProviderId) || nextProviderId <= 0) {
+      throw new Error("nextProviderId must be a positive integer");
+    }
+
+    if (nextProviderId !== current.providerId) {
+      const [targetProvider] = await tx
+        .select({ id: providers.id })
+        .from(providers)
+        .where(eq(providers.id, nextProviderId))
+        .limit(1);
+
+      if (!targetProvider) {
+        throw new Error(`provider not found: ${nextProviderId}`);
+      }
+    }
+
     const nextCanonicalKey = buildModelCanonicalKey(nextName, dedupeRule);
 
     const [conflict] = await tx
@@ -2899,7 +2919,7 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
           ne(models.id, input.entityId),
           or(
             eq(models.canonicalKey, nextCanonicalKey),
-            and(eq(models.providerId, current.providerId), eq(models.modelName, nextName))
+            and(eq(models.providerId, nextProviderId), eq(models.modelName, nextName))
           )
         )
       )
@@ -2910,13 +2930,15 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
     let mergedSourceName: string | undefined;
 
     if (!conflict) {
-      if (current.modelName === nextName && current.canonicalKey === nextCanonicalKey) {
+      if (current.modelName === nextName && current.canonicalKey === nextCanonicalKey && current.providerId === nextProviderId) {
         return {
           ok: true,
           entityType: "model" as const,
           entityId: current.id,
           previousName: current.modelName,
           nextName,
+          previousProviderId: current.providerId,
+          nextProviderId,
           action: "unchanged" as const
         };
       }
@@ -2958,6 +2980,7 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
     await tx
       .update(models)
       .set({
+        providerId: nextProviderId,
         modelName: nextName,
         canonicalKey: nextCanonicalKey
       })
@@ -2969,6 +2992,8 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
       entityId: current.id,
       previousName: current.modelName,
       nextName,
+      previousProviderId: current.providerId,
+      nextProviderId,
       action,
       mergedSourceId,
       mergedSourceName

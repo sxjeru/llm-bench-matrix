@@ -56,6 +56,7 @@ import type {
   PreviewRow,
   Props,
   ProviderConfigDraft,
+  ProviderOption,
   RenameSubmitState,
   ScaleConsistencyCheckResult,
   ScaleConsistencyIssue,
@@ -98,6 +99,15 @@ import {
   toProviderConfigDraft
 } from "./admin-console/utils/provider";
 import { extractTextImportWarningDetails } from "./admin-console/utils/warnings";
+
+function getProviderOptionLabel(provider: ProviderOption) {
+  const displayName = provider.config?.displayName?.trim();
+  if (displayName && displayName.toLowerCase() !== provider.name.toLowerCase()) {
+    return `${displayName} (${provider.name})`;
+  }
+
+  return provider.name;
+}
 
 export function AdminConsole({
   providers,
@@ -286,6 +296,7 @@ export function AdminConsole({
   const [renameSearchKeyword, setRenameSearchKeyword] = useState("");
   const [renameSelectedEntityId, setRenameSelectedEntityId] = useState<number | null>(null);
   const [renameNextName, setRenameNextName] = useState("");
+  const [renameNextProviderInput, setRenameNextProviderInput] = useState("");
   const [renameNextBenchmarkType, setRenameNextBenchmarkType] = useState("");
   const [renameMergeOnConflict, setRenameMergeOnConflict] = useState(true);
   const [renameSubmitState, setRenameSubmitState] = useState<RenameSubmitState>("idle");
@@ -1094,6 +1105,15 @@ export function AdminConsole({
     [models]
   );
 
+  const providerEntityOptions = useMemo(
+    () =>
+      providers.map((item) => ({
+        id: item.id,
+        label: getProviderOptionLabel(item)
+      })),
+    [providers]
+  );
+
   const benchmarkEntityOptions = useMemo(
     () =>
       benchmarks.map((item) => ({
@@ -1279,6 +1299,7 @@ export function AdminConsole({
     setRenameSearchKeyword("");
     setRenameSelectedEntityId(null);
     setRenameNextName("");
+    setRenameNextProviderInput("");
     setRenameNextBenchmarkType("");
     setRenameSubmitState("idle");
     setRenameListScrollTop(0);
@@ -2166,6 +2187,21 @@ export function AdminConsole({
     return true;
   }
 
+  function resolveExistingTextImportModel(modelNameInput: string): ModelOption | null {
+    const normalizedModelName = modelNameInput.trim();
+    if (!normalizedModelName) return null;
+
+    const exactModel = existingModelExactMap.get(normalizedModelName.toLowerCase());
+    if (exactModel) return exactModel;
+
+    const canonicalKey = normalizeModelNameByDedupeRule(normalizedModelName, modelDedupeRule);
+    const canonicalMatchedModel = existingModelByCanonicalKey.get(canonicalKey);
+    if (canonicalMatchedModel) return canonicalMatchedModel;
+
+    const sameNameModels = existingModelByNameMap.get(normalizedModelName.toLowerCase()) ?? [];
+    return sameNameModels[0] ?? null;
+  }
+
   function onMatrixBenchmarkNameInputChange(benchmarkKey: string, nextBenchmarkName: string) {
     setMatrixBenchmarkNameDrafts((prev) => ({
       ...prev,
@@ -2230,6 +2266,8 @@ export function AdminConsole({
   function onMatrixModelNameInputBlur(modelName: string, inputValue: string) {
     const normalized = inputValue.trim();
     const committedModelName = normalized.length > 0 ? normalized : modelName;
+    const matchedExistingModel = resolveExistingTextImportModel(committedModelName);
+    const resolvedModelName = matchedExistingModel?.modelName ?? committedModelName;
 
     setMatrixModelNameDrafts((prev) => {
       if (!(modelName in prev)) return prev;
@@ -2238,8 +2276,8 @@ export function AdminConsole({
       return next;
     });
 
-    if (committedModelName !== modelName) {
-      onRenameTextImportModel(modelName, committedModelName);
+    if (resolvedModelName !== modelName) {
+      onRenameTextImportModel(modelName, resolvedModelName);
     }
   }
 
@@ -2869,6 +2907,7 @@ export function AdminConsole({
       );
       removeDuplicateCandidateByMerge(mergeType, resolvedMergeSourceId, resolvedMergeTargetId);
 
+      setMergeTargetBenchmarkNameInput("");
       setMergeSubmitState("success");
 
       mergeSubmitResetTimerRef.current = setTimeout(() => {
@@ -3011,13 +3050,39 @@ export function AdminConsole({
     if (renameEntityType === "model") {
       const matchedModel = modelById.get(entityId);
       setRenameNextName(matchedModel?.modelName ?? "");
+      setRenameNextProviderInput(matchedModel ? getProviderInputValue(matchedModel.providerId) : "");
       setRenameNextBenchmarkType("");
       return;
     }
 
     const matchedBenchmark = benchmarkById.get(entityId);
     setRenameNextName(matchedBenchmark?.benchmarkName ?? "");
+    setRenameNextProviderInput("");
     setRenameNextBenchmarkType(matchedBenchmark?.benchmarkType ?? "");
+  }
+
+  function getProviderInputValue(providerId: number) {
+    const provider = providerById.get(providerId);
+    return provider ? `${getProviderOptionLabel(provider)} [${provider.id}]` : "";
+  }
+
+  function parseRenameProviderId(rawInput: string): number | null {
+    const parsedId = parseMergeEntityId(rawInput, providerEntityOptions);
+    if (parsedId !== null && providerById.has(parsedId)) {
+      return parsedId;
+    }
+
+    const normalized = rawInput.trim().toLowerCase();
+    if (!normalized) return null;
+
+    const matchedProvider = providers.find((provider) => {
+      const displayName = provider.config?.displayName?.trim().toLowerCase() ?? "";
+      return provider.name.toLowerCase() === normalized
+        || provider.slug.toLowerCase() === normalized
+        || displayName === normalized;
+    });
+
+    return matchedProvider?.id ?? null;
   }
 
   async function onRenameEntity(event: FormEvent<HTMLFormElement>) {
@@ -3047,6 +3112,15 @@ export function AdminConsole({
       return;
     }
 
+    const normalizedNextProviderId = renameEntityType === "model"
+      ? parseRenameProviderId(renameNextProviderInput)
+      : null;
+
+    if (renameEntityType === "model" && normalizedNextProviderId === null) {
+      notifyError("model provider 不能为空，请从下拉候选选择或输入 provider 名称/ID");
+      return;
+    }
+
     if (renameSubmitResetTimerRef.current) {
       clearTimeout(renameSubmitResetTimerRef.current);
       renameSubmitResetTimerRef.current = null;
@@ -3059,6 +3133,7 @@ export function AdminConsole({
         entityType: renameEntityType,
         entityId: renameSelectedEntityId,
         nextName: normalizedNextName,
+        nextProviderId: renameEntityType === "model" ? normalizedNextProviderId : undefined,
         nextBenchmarkType: renameEntityType === "benchmark" ? normalizedNextBenchmarkType : undefined,
         mergeOnConflict: renameMergeOnConflict
       });
@@ -3068,10 +3143,15 @@ export function AdminConsole({
       const persistedNextBenchmarkType = renameEntityType === "benchmark"
         ? (typeof result?.nextBenchmarkType === "string" ? result.nextBenchmarkType : normalizedNextBenchmarkType)
         : "";
+      const persistedNextProviderId = renameEntityType === "model" && typeof result?.nextProviderId === "number"
+        ? result.nextProviderId
+        : normalizedNextProviderId;
 
       setRenameNextName(persistedNextName);
       if (renameEntityType === "benchmark") {
         setRenameNextBenchmarkType(persistedNextBenchmarkType);
+      } else if (persistedNextProviderId !== null) {
+        setRenameNextProviderInput(getProviderInputValue(persistedNextProviderId) || String(persistedNextProviderId));
       }
       setRenameSubmitState("success");
 
@@ -5194,7 +5274,7 @@ export function AdminConsole({
               实体名称维护
             </h3>
             <p className="mb-3 text-sm opacity-80">
-              支持搜索并更改已有 model / benchmark 名称。若命中重名冲突，可自动合并并保留当前选中实体。
+              支持搜索并更改已有 model 名称与 provider / benchmark 名称与 type。若命中重名冲突，可自动合并并保留当前选中实体。
             </p>
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
@@ -5291,7 +5371,7 @@ export function AdminConsole({
                   placeholder="请先在上方列表选中实体"
                 />
               </div>
-              <div className={renameEntityType === "benchmark" ? "md:col-span-3" : "md:col-span-5"}>
+              <div className={renameEntityType === "benchmark" ? "md:col-span-3" : "md:col-span-4"}>
                 <div className="mb-1 text-xs opacity-70">新名称</div>
                 <input
                   className="input input-bordered w-full"
@@ -5313,7 +5393,25 @@ export function AdminConsole({
                   />
                 </div>
               ) : null}
-              <div className={renameEntityType === "benchmark" ? "md:col-span-3 flex items-end" : "md:col-span-3 flex items-end"}>
+              {renameEntityType === "model" && renameSelectedEntityId !== null ? (
+                <div className="md:col-span-3">
+                  <div className="mb-1 text-xs opacity-70">Provider</div>
+                  <input
+                    list="rename-provider-options"
+                    className="input input-bordered w-full"
+                    value={renameNextProviderInput}
+                    onChange={(event) => setRenameNextProviderInput(event.target.value)}
+                    placeholder="输入或选择 provider"
+                    required
+                  />
+                  <datalist id="rename-provider-options">
+                    {providerEntityOptions.map((item) => (
+                      <option key={`rename-provider-${item.id}`} value={`${item.label} [${item.id}]`} />
+                    ))}
+                  </datalist>
+                </div>
+              ) : null}
+              <div className={renameEntityType === "benchmark" ? "md:col-span-3 flex items-end" : "md:col-span-2 flex items-end"}>
                 <label className="label cursor-pointer justify-start gap-2">
                   <input
                     type="checkbox"
