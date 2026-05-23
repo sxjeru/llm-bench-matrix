@@ -44,9 +44,19 @@ function createJsonResponse(payload: unknown, ok = true, status = 200): Response
 }
 
 function mockFetchSequence(...payloads: unknown[]) {
-  const fetchMock = vi.fn();
-  payloads.forEach((payload) => {
-    fetchMock.mockResolvedValueOnce(createJsonResponse(payload));
+  const queuedPayloads = [...payloads];
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.toString()
+        : input.url;
+
+    if (url === "/api/admin/benchmarks/preview-value-overlap") {
+      return createJsonResponse({ stats: [] });
+    }
+
+    return createJsonResponse(queuedPayloads.shift() ?? {});
   });
 
   vi.stubGlobal("fetch", fetchMock);
@@ -994,6 +1004,89 @@ describe("AdminConsole text import", () => {
     expect(optionButton).toBeInTheDocument();
   });
 
+  test("矩阵预览中的重复嫌疑 benchmark 候选显示重复率与冲突数", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 2,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "Bench 1",
+          benchmarkType: "Type-C",
+          rawValue: "70.1",
+          valueNum: 70.1,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        },
+        {
+          rowNumber: 2,
+          providerName: "OpenAI",
+          modelName: "Model B",
+          benchmarkName: "Bench 1",
+          benchmarkType: "Type-C",
+          rawValue: "71.2",
+          valueNum: 71.2,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    const queuedPayloads: unknown[] = [previewResponse];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+
+      if (url === "/api/admin/benchmarks/preview-value-overlap") {
+        return createJsonResponse({
+          stats: [
+            {
+              previewBenchmarkKey: "Bench 1@@Type-C",
+              candidateBenchmarkId: 11,
+              previewTotal: 2,
+              modelOverlapCount: 2,
+              exactDuplicateCount: 1,
+              conflictCount: 1,
+              duplicateRate: 0.5
+            }
+          ]
+        });
+      }
+
+      return createJsonResponse(queuedPayloads.shift() ?? {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const matrixTable = await findMatrixPreviewTable();
+    const benchmarkInput = within(matrixTable).getByDisplayValue("Bench 1") as HTMLInputElement;
+    const benchmarkRow = benchmarkInput.closest("tr");
+    if (!benchmarkRow) {
+      throw new Error("Benchmark row not found");
+    }
+
+    await user.click(benchmarkInput);
+
+    expect(await within(benchmarkRow).findByText("重复 1/2 (50%) · 重叠 2 · 冲突 1")).toBeInTheDocument();
+  });
+
   test("预览内 benchmark 快捷合并后仍优先保留导入 type", async () => {
     const user = userEvent.setup();
 
@@ -1061,11 +1154,11 @@ describe("AdminConsole text import", () => {
     await user.click(screen.getByRole("button", { name: "执行导入" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls.some((call) => call[0] === "/api/admin/import-csv")).toBe(true);
     });
 
-    const secondCall = fetchMock.mock.calls[1];
-    const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
+    const importCall = fetchMock.mock.calls.find((call) => call[0] === "/api/admin/import-csv");
+    const secondPayload = JSON.parse(((importCall?.[1] as RequestInit).body ?? "{}") as string) as {
       csvText?: string;
     };
 

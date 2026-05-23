@@ -2510,6 +2510,27 @@ export type BenchmarkValueOverlapStats = {
   targetModelCount: number;
 };
 
+export type BenchmarkPreviewValueOverlapInput = {
+  items: Array<{
+    previewBenchmarkKey: string;
+    candidateBenchmarkIds: number[];
+    cells: Array<{
+      modelName: string;
+      rawValue: string;
+    }>;
+  }>;
+};
+
+export type BenchmarkPreviewValueOverlapStats = {
+  previewBenchmarkKey: string;
+  candidateBenchmarkId: number;
+  previewTotal: number;
+  modelOverlapCount: number;
+  exactDuplicateCount: number;
+  conflictCount: number;
+  duplicateRate: number;
+};
+
 function normalizeBenchmarkOverlapNumericValue(value: unknown): string | null {
   if (value === null || value === undefined) {
     return null;
@@ -2624,6 +2645,137 @@ export async function getBenchmarkValueOverlapStats(input: {
     sourceModelCount: sourceValuesByModel.size,
     targetModelCount: targetValuesByModel.size
   };
+}
+
+export async function getBenchmarkPreviewValueOverlapStats(
+  input: BenchmarkPreviewValueOverlapInput
+): Promise<{ stats: BenchmarkPreviewValueOverlapStats[] }> {
+  const items = input.items.slice(0, 200).map((item) => ({
+    previewBenchmarkKey: item.previewBenchmarkKey,
+    candidateBenchmarkIds: Array.from(new Set(item.candidateBenchmarkIds.filter((id) => Number.isInteger(id) && id > 0))).slice(0, 20),
+    cells: item.cells
+      .filter((cell) => cell.modelName.trim().length > 0 && cell.rawValue.trim().length > 0)
+      .slice(0, 200)
+  }));
+
+  const candidateBenchmarkIds = Array.from(
+    new Set(items.flatMap((item) => item.candidateBenchmarkIds))
+  );
+
+  if (items.length === 0 || candidateBenchmarkIds.length === 0) {
+    return { stats: [] };
+  }
+
+  const dedupeRule = await getModelDedupeRule();
+  const modelCanonicalKeys = Array.from(
+    new Set(
+      items
+        .flatMap((item) => item.cells.map((cell) => cell.modelName))
+        .map((modelName) => buildModelCanonicalKey(modelName, dedupeRule))
+        .filter(Boolean)
+    )
+  );
+
+  const [matchedModels, candidateBenchmarks, existingValues] = await Promise.all([
+    modelCanonicalKeys.length > 0
+      ? db
+          .select({
+            id: models.id,
+            canonicalKey: models.canonicalKey
+          })
+          .from(models)
+          .where(and(inArray(models.canonicalKey, modelCanonicalKeys), isNull(models.mergedIntoModelId)))
+      : Promise.resolve([]),
+    db
+      .select({
+        id: benchmarks.id,
+        benchmarkName: benchmarks.benchmarkName
+      })
+      .from(benchmarks)
+      .where(inArray(benchmarks.id, candidateBenchmarkIds)),
+    db
+      .select({
+        benchmarkId: benchmarkValues.benchmarkId,
+        modelId: benchmarkValues.modelId,
+        valueRaw: benchmarkValues.valueRaw,
+        valueNum: benchmarkValues.valueNum,
+        valueNum2: benchmarkValues.valueNum2
+      })
+      .from(benchmarkValues)
+      .where(inArray(benchmarkValues.benchmarkId, candidateBenchmarkIds))
+  ]);
+
+  const modelIdByCanonicalKey = new Map<string, number>();
+  matchedModels.forEach((model) => {
+    if (!modelIdByCanonicalKey.has(model.canonicalKey)) {
+      modelIdByCanonicalKey.set(model.canonicalKey, model.id);
+    }
+  });
+
+  const benchmarkNameById = new Map(candidateBenchmarks.map((benchmark) => [benchmark.id, benchmark.benchmarkName]));
+  const existingValuesByBenchmarkModel = new Map<string, Set<string>>();
+
+  existingValues.forEach((value) => {
+    const key = `${value.benchmarkId}:${value.modelId}`;
+    const valueKey = getBenchmarkOverlapValueKey(value);
+    const existingSet = existingValuesByBenchmarkModel.get(key);
+    if (existingSet) {
+      existingSet.add(valueKey);
+      return;
+    }
+
+    existingValuesByBenchmarkModel.set(key, new Set([valueKey]));
+  });
+
+  const stats: BenchmarkPreviewValueOverlapStats[] = [];
+
+  items.forEach((item) => {
+    const previewCells = item.cells.filter((cell) => cell.rawValue.trim().length > 0);
+    const resolvedPreviewCells = previewCells.map((cell) => ({
+      rawValue: cell.rawValue,
+      modelId: modelIdByCanonicalKey.get(buildModelCanonicalKey(cell.modelName, dedupeRule)) ?? null
+    }));
+
+    item.candidateBenchmarkIds.forEach((candidateBenchmarkId) => {
+      let modelOverlapCount = 0;
+      let exactDuplicateCount = 0;
+      let conflictCount = 0;
+      const candidateBenchmarkName = benchmarkNameById.get(candidateBenchmarkId) ?? "";
+
+      resolvedPreviewCells.forEach((cell) => {
+        if (cell.modelId === null) {
+          return;
+        }
+
+        const existingValueKeys = existingValuesByBenchmarkModel.get(`${candidateBenchmarkId}:${cell.modelId}`);
+        if (!existingValueKeys) {
+          return;
+        }
+
+        modelOverlapCount += 1;
+
+        const previewValue = normalizeStoredBenchmarkValue(candidateBenchmarkName, parseBenchmarkValue(cell.rawValue));
+        const previewValueKey = getBenchmarkOverlapValueKey(previewValue);
+        if (existingValueKeys.has(previewValueKey)) {
+          exactDuplicateCount += 1;
+        } else {
+          conflictCount += 1;
+        }
+      });
+
+      stats.push({
+        previewBenchmarkKey: item.previewBenchmarkKey,
+        candidateBenchmarkId,
+        previewTotal: previewCells.length,
+        modelOverlapCount,
+        exactDuplicateCount,
+        conflictCount,
+        duplicateRate: previewCells.length > 0 ? exactDuplicateCount / previewCells.length : 0
+      });
+    });
+  });
+
+  return { stats };
 }
 
 export async function mergeEntity(input: {

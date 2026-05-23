@@ -180,6 +180,16 @@ export type BenchmarkValueOverlapStats = {
   targetModelCount: number;
 };
 
+export type BenchmarkPreviewValueOverlapStats = {
+  previewBenchmarkKey: string;
+  candidateBenchmarkId: number;
+  previewTotal: number;
+  modelOverlapCount: number;
+  exactDuplicateCount: number;
+  conflictCount: number;
+  duplicateRate: number;
+};
+
 export type DuplicateConfidence = "high" | "medium" | "low";
 
 export type DuplicateModelCandidate = {

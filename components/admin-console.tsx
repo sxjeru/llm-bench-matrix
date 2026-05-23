@@ -38,6 +38,7 @@ import {
 } from "./admin-console/constants";
 import type {
   BenchmarkOption,
+  BenchmarkPreviewValueOverlapStats,
   BenchmarkValueOverlapStats,
   BenchmarkWarningItem,
   BenchmarkWarningLevel,
@@ -108,6 +109,40 @@ function getProviderOptionLabel(provider: ProviderOption) {
   }
 
   return provider.name;
+}
+
+function getBenchmarkPreviewValueOverlapStatsKey(previewBenchmarkKey: string, candidateBenchmarkId: number) {
+  return JSON.stringify([previewBenchmarkKey, candidateBenchmarkId]);
+}
+
+function formatBenchmarkPreviewValueOverlapStats(stats: BenchmarkPreviewValueOverlapStats) {
+  const duplicateRatePercent = Math.round(stats.duplicateRate * 100);
+  const parts = [
+    `重复 ${stats.exactDuplicateCount}/${stats.previewTotal} (${duplicateRatePercent}%)`
+  ];
+
+  if (stats.modelOverlapCount !== stats.exactDuplicateCount || stats.conflictCount > 0) {
+    parts.push(`重叠 ${stats.modelOverlapCount}`);
+  }
+  if (stats.conflictCount > 0) {
+    parts.push(`冲突 ${stats.conflictCount}`);
+  }
+
+  return parts.join(" · ");
+}
+
+function getBenchmarkPreviewValueOverlapBadgeClass(stats: BenchmarkPreviewValueOverlapStats) {
+  if (stats.conflictCount > 0) {
+    return "text-warning";
+  }
+  if (stats.previewTotal > 0 && stats.duplicateRate >= 0.8) {
+    return "text-success";
+  }
+  if (stats.exactDuplicateCount > 0) {
+    return "text-info";
+  }
+
+  return "text-base-content/60";
 }
 
 export function AdminConsole({
@@ -276,6 +311,11 @@ export function AdminConsole({
     status: "idle" | "loading" | "success" | "error";
     stats: BenchmarkValueOverlapStats | null;
   }>({ key: "", status: "idle", stats: null });
+  const [benchmarkPreviewValueOverlapState, setBenchmarkPreviewValueOverlapState] = useState<{
+    key: string;
+    status: "idle" | "loading" | "success" | "error";
+    stats: BenchmarkPreviewValueOverlapStats[];
+  }>({ key: "", status: "idle", stats: [] });
   const mergeSubmitResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mergeSubmitButtonRef = useRef<HTMLButtonElement | null>(null);
   const [mergedRecordList, setMergedRecordList] = useState<MergedRecord[]>(mergedRecords);
@@ -823,6 +863,112 @@ export function AdminConsole({
       typeUniqueCount
     };
   }, [matrixPreview.rows]);
+
+  const benchmarkPreviewValueOverlapPayload = useMemo(() => {
+    const items = benchmarkWarnings
+      .map((warning) => {
+        const candidateBenchmarkIds = Array.from(new Set([
+          ...warning.candidateTargetIds,
+          ...(warning.suggestedTargetId ? [warning.suggestedTargetId] : [])
+        ]));
+        if (candidateBenchmarkIds.length === 0) return null;
+
+        const matrixRow = matrixPreview.rows.find((row) => row.key === warning.key);
+        if (!matrixRow) return null;
+
+        const cells = Object.values(matrixRow.cellRowIndexByModel)
+          .map((rowIndex) => textImportDraftRows[rowIndex])
+          .filter((row): row is TextImportPreviewRow => Boolean(row) && row.rawValue.trim().length > 0)
+          .map((row) => ({
+            modelName: row.modelName,
+            rawValue: row.rawValue
+          }));
+
+        if (cells.length === 0) return null;
+
+        return {
+          previewBenchmarkKey: warning.key,
+          candidateBenchmarkIds,
+          cells
+        };
+      })
+      .filter((item): item is {
+        previewBenchmarkKey: string;
+        candidateBenchmarkIds: number[];
+        cells: Array<{ modelName: string; rawValue: string }>;
+      } => item !== null);
+
+    return {
+      key: items.length > 0 ? JSON.stringify(items) : "",
+      items
+    };
+  }, [benchmarkWarnings, matrixPreview.rows, textImportDraftRows]);
+
+  useEffect(() => {
+    if (!benchmarkPreviewValueOverlapPayload.key) {
+      setBenchmarkPreviewValueOverlapState({ key: "", status: "idle", stats: [] });
+      return;
+    }
+
+    const controller = new AbortController();
+    setBenchmarkPreviewValueOverlapState({
+      key: benchmarkPreviewValueOverlapPayload.key,
+      status: "loading",
+      stats: []
+    });
+
+    fetch("/api/admin/benchmarks/preview-value-overlap", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: benchmarkPreviewValueOverlapPayload.items }),
+      signal: controller.signal
+    })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const reason = typeof data?.error === "string" ? data.error : "benchmark 预览重复率统计失败";
+          throw new Error(reason);
+        }
+
+        setBenchmarkPreviewValueOverlapState({
+          key: benchmarkPreviewValueOverlapPayload.key,
+          status: "success",
+          stats: Array.isArray(data?.stats) ? data.stats : []
+        });
+      })
+      .catch((error) => {
+        if (error instanceof Error && error.name === "AbortError") {
+          return;
+        }
+
+        setBenchmarkPreviewValueOverlapState({
+          key: benchmarkPreviewValueOverlapPayload.key,
+          status: "error",
+          stats: []
+        });
+      });
+
+    return () => controller.abort();
+  }, [benchmarkPreviewValueOverlapPayload]);
+
+  const benchmarkPreviewValueOverlapStatsMap = useMemo(() => {
+    const map = new Map<string, BenchmarkPreviewValueOverlapStats>();
+    if (
+      benchmarkPreviewValueOverlapState.key !== benchmarkPreviewValueOverlapPayload.key
+      || benchmarkPreviewValueOverlapState.status !== "success"
+    ) {
+      return map;
+    }
+
+    benchmarkPreviewValueOverlapState.stats.forEach((stats) => {
+      map.set(
+        getBenchmarkPreviewValueOverlapStatsKey(stats.previewBenchmarkKey, stats.candidateBenchmarkId),
+        stats
+      );
+    });
+
+    return map;
+  }, [benchmarkPreviewValueOverlapPayload.key, benchmarkPreviewValueOverlapState]);
 
   const pairValueRows = useMemo(() => {
     return textImportDraftRows
@@ -4309,30 +4455,50 @@ export function AdminConsole({
                                               role="listbox"
                                               className="absolute left-0 right-0 top-full z-[95] mt-1 max-h-60 overflow-auto rounded-md border border-base-300 bg-base-100/95 p-1 shadow-xl backdrop-blur"
                                             >
-                                              {benchmarkCandidateOptions.map((option) => (
-                                                <div
-                                                  key={`matrix-benchmark-override-option-${matrixRow.key}-${option.targetId}`}
-                                                  role="option"
-                                                  aria-selected={false}
-                                                  tabIndex={0}
-                                                  className="cursor-pointer rounded-sm px-2 py-1 text-left text-xs leading-5 text-base-content hover:bg-base-200/90"
-                                                  onMouseDown={(event) => {
-                                                    event.preventDefault();
-                                                    applyBenchmarkOverwriteByTargetId(matrixRow.key, option.targetId);
-                                                    setOpenMatrixBenchmarkCandidateFor(null);
-                                                  }}
-                                                  onKeyDown={(event) => {
-                                                    if (event.key !== "Enter" && event.key !== " ") {
-                                                      return;
-                                                    }
-                                                    event.preventDefault();
-                                                    applyBenchmarkOverwriteByTargetId(matrixRow.key, option.targetId);
-                                                    setOpenMatrixBenchmarkCandidateFor(null);
-                                                  }}
-                                                >
-                                                  {`${option.label} [${option.targetId}]`}
-                                                </div>
-                                              ))}
+                                              {benchmarkCandidateOptions.map((option) => {
+                                                const overlapStats = benchmarkPreviewValueOverlapStatsMap.get(
+                                                  getBenchmarkPreviewValueOverlapStatsKey(matrixRow.key, option.targetId)
+                                                );
+                                                const isLoadingOverlapStats =
+                                                  benchmarkPreviewValueOverlapState.key === benchmarkPreviewValueOverlapPayload.key
+                                                  && benchmarkPreviewValueOverlapState.status === "loading";
+
+                                                return (
+                                                  <div
+                                                    key={`matrix-benchmark-override-option-${matrixRow.key}-${option.targetId}`}
+                                                    role="option"
+                                                    aria-selected={false}
+                                                    tabIndex={0}
+                                                    className="cursor-pointer rounded-sm px-2 py-1 text-left text-xs leading-5 text-base-content hover:bg-base-200/90"
+                                                    onMouseDown={(event) => {
+                                                      event.preventDefault();
+                                                      applyBenchmarkOverwriteByTargetId(matrixRow.key, option.targetId);
+                                                      setOpenMatrixBenchmarkCandidateFor(null);
+                                                    }}
+                                                    onKeyDown={(event) => {
+                                                      if (event.key !== "Enter" && event.key !== " ") {
+                                                        return;
+                                                      }
+                                                      event.preventDefault();
+                                                      applyBenchmarkOverwriteByTargetId(matrixRow.key, option.targetId);
+                                                      setOpenMatrixBenchmarkCandidateFor(null);
+                                                    }}
+                                                  >
+                                                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                                      <span className="font-medium">{`${option.label} [${option.targetId}]`}</span>
+                                                      {overlapStats ? (
+                                                        <span
+                                                          className={`inline-flex shrink-0 whitespace-nowrap text-[11px] font-medium ${getBenchmarkPreviewValueOverlapBadgeClass(overlapStats)}`}
+                                                        >
+                                                          {formatBenchmarkPreviewValueOverlapStats(overlapStats)}
+                                                        </span>
+                                                      ) : isLoadingOverlapStats ? (
+                                                        <span className="inline-flex shrink-0 whitespace-nowrap text-[11px] font-medium text-base-content/60">重复率计算中...</span>
+                                                      ) : null}
+                                                    </div>
+                                                  </div>
+                                                );
+                                              })}
                                             </div>
                                           ) : null}
                                         </div>
