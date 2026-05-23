@@ -322,10 +322,9 @@ export function BenchmarkMatrix({
   const activeSourceRef = useRef(SOURCE_ALL);
   const pendingSourceSyncRef = useRef<string | null>(null);
   const hasSourceData = useMemo(
-    () => allSourceOptions.some((source) => source.trim().length > 0)
-      || rows.some((row) => row.source?.trim())
+    () => allSourceOptions.length > 0
       || allRows.some((row) => row.source?.trim()),
-    [allSourceOptions, rows, allRows]
+    [allSourceOptions, allRows]
   );
   const displaySourceValuesInCells = showSourceValues && hasSourceData;
   const displaySourceValueDeltasInCells = displaySourceValuesInCells && showSourceValueDeltas;
@@ -344,18 +343,26 @@ export function BenchmarkMatrix({
   const sourceNewStateByKey = useMemo(() => {
     if (sourceNewReferenceTime === null) return new Map<string, { updatedAtMs: number; isNew: boolean }>();
 
-    const latestUpdateBySource = new Map<string, number>();
+    const latestTimeStrBySource = new Map<string, string>();
 
     allRows.forEach((row) => {
       const sourceKey = getSourceKey(row.source);
       if (sourceKey === SOURCE_ALL) return;
 
-      const updatedAtMs = parseTimestampMs(row.updatedAt) ?? parseTimestampMs(row.benchTime);
-      if (updatedAtMs === null) return;
+      const timeStr = row.updatedAt || row.benchTime;
+      if (!timeStr) return;
 
-      const prev = latestUpdateBySource.get(sourceKey);
-      if (prev === undefined || updatedAtMs > prev) {
-        latestUpdateBySource.set(sourceKey, updatedAtMs);
+      const prev = latestTimeStrBySource.get(sourceKey);
+      if (prev === undefined || timeStr > prev) {
+        latestTimeStrBySource.set(sourceKey, timeStr);
+      }
+    });
+
+    const latestUpdateBySource = new Map<string, number>();
+    latestTimeStrBySource.forEach((timeStr, sourceKey) => {
+      const parsed = parseTimestampMs(timeStr);
+      if (parsed !== null) {
+        latestUpdateBySource.set(sourceKey, parsed);
       }
     });
 
