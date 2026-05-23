@@ -186,4 +186,5 @@ describe("BenchmarkMatrix source tabs", () => {
     expect(screen.getByText("Agentic")).toBeInTheDocument();
     expect(screen.queryByText("Coding Agent")).not.toBeInTheDocument();
   });
+
 });
