@@ -45,6 +45,7 @@ import {
   type ExportPresetKey,
   type OverallScoreDisplayItem,
   SOURCE_ALL,
+  SOURCE_NEW_WINDOW_MS,
   MODALITY_OPTIONS,
   SHOW_CATEGORY_STORAGE_KEY,
   SHOW_DUPLICATE_STORAGE_KEY,
@@ -123,93 +124,14 @@ import {
   buildSourceFrameShadows,
   buildCompareBaselineShadows,
   renderElementToImageBlob,
-  withTimeout
+  withTimeout,
+  enqueueStateUpdate,
+  applySourceMeta,
+  getSourceValueEntry,
+  getSourceValueDeltaRaw,
+  getSourceValueDisplayItem,
+  parseTimestampMs
 } from "./benchmark-matrix/index";
-
-function enqueueStateUpdate(callback: () => void) {
-  if (typeof queueMicrotask === "function") {
-    queueMicrotask(callback);
-    return;
-  }
-
-  window.setTimeout(callback, 0);
-}
-
-function applySourceMeta(row: MatrixInputRow): MatrixInputRow {
-  const sourceBenchmarkType = row.sourceBenchmarkType?.trim();
-
-  return {
-    ...row,
-    benchmarkType: sourceBenchmarkType || row.benchmarkType,
-    modalities: row.sourceModalities ?? row.modalities
-  };
-}
-
-type SourceValueDisplayItem = {
-  displayValue: string;
-};
-
-function getPreferredMatrixCellEntry(entries: MatrixCellEntry[], higherIsBetter = true): MatrixCellEntry | null {
-  if (entries.length === 0) return null;
-
-  return entries.reduce((preferred, entry) => {
-    if (entry.valueNum === null) return preferred;
-    if (preferred.valueNum === null) return entry;
-
-    const isBetter = higherIsBetter
-      ? entry.valueNum > preferred.valueNum
-      : entry.valueNum < preferred.valueNum;
-
-    return isBetter ? entry : preferred;
-  });
-}
-
-function getSourceValueEntry(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): MatrixCellEntry | null {
-  if (activeSource === SOURCE_ALL) {
-    return getPreferredMatrixCellEntry(entries, higherIsBetter);
-  }
-  const filtered = entries.filter((item) => getSourceKey(item.source) === activeSource);
-  return getPreferredMatrixCellEntry(filtered, higherIsBetter);
-}
-
-function getSourceValueDeltaRaw(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): number | null {
-  const sourceEntry = getSourceValueEntry(entries, activeSource, higherIsBetter);
-  const preferredEntry = getPreferredMatrixCellEntry(entries, higherIsBetter);
-
-  if (!sourceEntry || !preferredEntry || sourceEntry.valueNum === null || preferredEntry.valueNum === null) {
-    return null;
-  }
-
-  const delta = sourceEntry.valueNum - preferredEntry.valueNum;
-  if (!Number.isFinite(delta) || Math.abs(delta) < Number.EPSILON) {
-    return null;
-  }
-
-  return delta;
-}
-
-function getSourceValueDisplayItem(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): SourceValueDisplayItem | null {
-  const entry = getSourceValueEntry(entries, activeSource, higherIsBetter);
-
-  if (!entry) {
-    return null;
-  }
-
-  const displayValue = getMatrixCellDisplayValue(entry.valueNum, entry.valueNum2, entry.valueRaw, entry.valueNote);
-
-  return {
-    displayValue
-  };
-}
-
-const SOURCE_NEW_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
-
-function parseTimestampMs(value?: string | null): number | null {
-  if (!value) return null;
-
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? timestamp : null;
-}
 
 export function BenchmarkMatrix({
   rows,

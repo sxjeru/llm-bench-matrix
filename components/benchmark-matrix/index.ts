@@ -50,12 +50,19 @@ export {
 
 // Re-export all functions from utils module
 export {
+  enqueueStateUpdate,
+  applySourceMeta,
   getModelColumnWidthKey,
   getColumnWidthOverrideKey,
   clampColumnWidth,
   normalizeColumnWidthBySource,
   areColumnWidthMapsEqual,
   areStringArraysEqual,
+  getPreferredMatrixCellEntry,
+  getSourceValueEntry,
+  getSourceValueDeltaRaw,
+  getSourceValueDisplayItem,
+  parseTimestampMs,
   getSourceKey,
   getSourceLabel,
   sourceTabDisplayLabel,

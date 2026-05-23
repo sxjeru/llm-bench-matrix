@@ -8,6 +8,7 @@ export const LOWER_IS_BETTER_ASR_TYPE_REGEX = /\basr\b/i;
 
 export const SOURCE_ALL = "__ALL__";
 export const SOURCE_EMPTY = "__EMPTY__";
+export const SOURCE_NEW_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
 export const MODALITY_OPTIONS = ["Text", "Vision", "Audio", "Video", "Multimodal"] as const;
 export const SHOW_CATEGORY_STORAGE_KEY = "benchmark-matrix:show-category";
 export const SHOW_DUPLICATE_STORAGE_KEY = "benchmark-matrix:show-duplicate";

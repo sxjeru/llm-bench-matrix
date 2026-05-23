@@ -5,8 +5,32 @@ import {
   Video
 } from "lucide-react";
 import type { CompareDirection, MatrixCellEntry, MatrixInputRow } from "./types";
-import { SOURCE_EMPTY } from "./constants";
+import { SOURCE_ALL, SOURCE_EMPTY } from "./constants";
 import { blendColor } from "./colors";
+import { getMatrixCellDisplayValue } from "./scoring";
+
+type SourceValueDisplayItem = {
+  displayValue: string;
+};
+
+export function enqueueStateUpdate(callback: () => void) {
+  if (typeof queueMicrotask === "function") {
+    queueMicrotask(callback);
+    return;
+  }
+
+  window.setTimeout(callback, 0);
+}
+
+export function applySourceMeta(row: MatrixInputRow): MatrixInputRow {
+  const sourceBenchmarkType = row.sourceBenchmarkType?.trim();
+
+  return {
+    ...row,
+    benchmarkType: sourceBenchmarkType || row.benchmarkType,
+    modalities: row.sourceModalities ?? row.modalities
+  };
+}
 
 export function getModelColumnWidthKey(modelName: string): string {
   return `model:${modelName}`;
@@ -66,6 +90,66 @@ export function areStringArraysEqual(left: string[], right: string[]): boolean {
   }
 
   return true;
+}
+
+export function getPreferredMatrixCellEntry(entries: MatrixCellEntry[], higherIsBetter = true): MatrixCellEntry | null {
+  if (entries.length === 0) return null;
+
+  return entries.reduce((preferred, entry) => {
+    if (entry.valueNum === null) return preferred;
+    if (preferred.valueNum === null) return entry;
+
+    const isBetter = higherIsBetter
+      ? entry.valueNum > preferred.valueNum
+      : entry.valueNum < preferred.valueNum;
+
+    return isBetter ? entry : preferred;
+  });
+}
+
+export function getSourceValueEntry(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): MatrixCellEntry | null {
+  if (activeSource === SOURCE_ALL) {
+    return getPreferredMatrixCellEntry(entries, higherIsBetter);
+  }
+  const filtered = entries.filter((item) => getSourceKey(item.source) === activeSource);
+  return getPreferredMatrixCellEntry(filtered, higherIsBetter);
+}
+
+export function getSourceValueDeltaRaw(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): number | null {
+  const sourceEntry = getSourceValueEntry(entries, activeSource, higherIsBetter);
+  const preferredEntry = getPreferredMatrixCellEntry(entries, higherIsBetter);
+
+  if (!sourceEntry || !preferredEntry || sourceEntry.valueNum === null || preferredEntry.valueNum === null) {
+    return null;
+  }
+
+  const delta = sourceEntry.valueNum - preferredEntry.valueNum;
+  if (!Number.isFinite(delta) || Math.abs(delta) < Number.EPSILON) {
+    return null;
+  }
+
+  return delta;
+}
+
+export function getSourceValueDisplayItem(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): SourceValueDisplayItem | null {
+  const entry = getSourceValueEntry(entries, activeSource, higherIsBetter);
+
+  if (!entry) {
+    return null;
+  }
+
+  const displayValue = getMatrixCellDisplayValue(entry.valueNum, entry.valueNum2, entry.valueRaw, entry.valueNote);
+
+  return {
+    displayValue
+  };
+}
+
+export function parseTimestampMs(value?: string | null): number | null {
+  if (!value) return null;
+
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 export function getSourceKey(source: string | null): string {
