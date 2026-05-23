@@ -195,7 +195,6 @@ function getSourceValueDisplayItem(entries: MatrixCellEntry[], activeSource: str
     return null;
   }
 
-  const sourceLabel = getSourceLabel(getSourceKey(entry.source));
   const displayValue = getMatrixCellDisplayValue(entry.valueNum, entry.valueNum2, entry.valueRaw, entry.valueNote);
 
   return {
@@ -2263,6 +2262,7 @@ export function BenchmarkMatrix({
           const uniqueEntries = Array.from(uniqueEntriesMap.values());
           const valueIdentitySet = new Set(uniqueEntries.map((entry) => getMatrixCellValueIdentity(entry)));
           const hasMeaningfulMultipleValues = uniqueEntries.length > 1 && valueIdentitySet.size > 1;
+          // 目前 Source 原值展示并非只认当前 activeSource
           const sourceEntry = displaySourceValuesInCells && hasMeaningfulMultipleValues
             ? getSourceValueEntry(uniqueEntries, activeSource, matrixRow.higherIsBetter)
             : null;
