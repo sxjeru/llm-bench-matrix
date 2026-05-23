@@ -172,6 +172,15 @@ function getSourceValueDisplayItems(entries: MatrixCellEntry[]): SourceValueDisp
   return items;
 }
 
+const SOURCE_NEW_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+
+function parseTimestampMs(value?: string | null): number | null {
+  if (!value) return null;
+
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
 export function BenchmarkMatrix({
   rows,
   allRows = rows,
@@ -246,6 +255,7 @@ export function BenchmarkMatrix({
   const [isExportCaptureMode, setIsExportCaptureMode] = useState(false);
   const [copyNotice, setCopyNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [copyNoticeVisible, setCopyNoticeVisible] = useState(false);
+  const [sourceNewReferenceTime, setSourceNewReferenceTime] = useState<number | null>(null);
   const [activeCellTooltip, setActiveCellTooltip] = useState<{
     x: number;
     y: number;
@@ -292,6 +302,53 @@ export function BenchmarkMatrix({
   const getSourceTabDisplayText = (source: { key: string; label: string }) => (
     source.key === SOURCE_ALL ? source.label : sourceTabDisplayLabel(source.key)
   );
+  const sourceNewStateByKey = useMemo(() => {
+    if (sourceNewReferenceTime === null) return new Map<string, { updatedAtMs: number; isNew: boolean }>();
+
+    const latestUpdateBySource = new Map<string, number>();
+
+    allRows.forEach((row) => {
+      const sourceKey = getSourceKey(row.source);
+      if (sourceKey === SOURCE_ALL) return;
+
+      const updatedAtMs = parseTimestampMs(row.updatedAt) ?? parseTimestampMs(row.benchTime);
+      if (updatedAtMs === null) return;
+
+      const prev = latestUpdateBySource.get(sourceKey);
+      if (prev === undefined || updatedAtMs > prev) {
+        latestUpdateBySource.set(sourceKey, updatedAtMs);
+      }
+    });
+
+    let latestSourceKey: string | null = null;
+    let latestSourceUpdatedAt = Number.NEGATIVE_INFINITY;
+    latestUpdateBySource.forEach((updatedAtMs, sourceKey) => {
+      if (updatedAtMs > latestSourceUpdatedAt) {
+        latestSourceKey = sourceKey;
+        latestSourceUpdatedAt = updatedAtMs;
+      }
+    });
+
+    const stateByKey = new Map<string, { updatedAtMs: number; isNew: boolean }>();
+    latestUpdateBySource.forEach((updatedAtMs, sourceKey) => {
+      const ageMs = sourceNewReferenceTime - updatedAtMs;
+      const isRecent = ageMs >= 0 && ageMs <= SOURCE_NEW_WINDOW_MS;
+      const isLatest = sourceKey === latestSourceKey;
+
+      if (isRecent || isLatest) {
+        stateByKey.set(sourceKey, { updatedAtMs, isNew: true });
+      }
+    });
+
+    return stateByKey;
+  }, [allRows, sourceNewReferenceTime]);
+  const getSourceTabTitle = (source: { key: string; label: string }) => {
+    const displayText = getSourceTabDisplayText(source);
+    const newState = sourceNewStateByKey.get(source.key);
+    if (!newState) return displayText;
+
+    return `${displayText} · 最近更新 ${formatTooltipTime(new Date(newState.updatedAtMs).toISOString())}`;
+  };
 
   useEffect(() => {
     const sourceFromUrl = searchParams.get("source");
@@ -323,6 +380,10 @@ export function BenchmarkMatrix({
 
   useEffect(() => {
     enqueueStateUpdate(() => setIsClientReady(true));
+  }, []);
+
+  useEffect(() => {
+    enqueueStateUpdate(() => setSourceNewReferenceTime(Date.now()));
   }, []);
 
   useEffect(() => {
@@ -2851,9 +2912,12 @@ export function BenchmarkMatrix({
                             : "hover:!rounded-xl hover:bg-white/10 hover:text-base-content"
                         }`}
                         onClick={() => setSourceAndUrl(source.key)}
-                        title={getSourceTabDisplayText(source)}
+                        title={getSourceTabTitle(source)}
                       >
                         {getSourceTabDisplayText(source)}
+                        {sourceNewStateByKey.has(source.key) ? (
+                          <span className="pointer-events-none absolute right-[4px] top-[6px] h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_0_1px_rgba(6,78,59,0.75),0_0_8px_rgba(110,231,183,0.45)]" aria-label="New" />
+                        ) : null}
                       </button>
                     ))}
                   </div>
@@ -2905,9 +2969,12 @@ export function BenchmarkMatrix({
                                 : "hover:!rounded-xl hover:bg-white/10 hover:text-base-content"
                             }`}
                             onClick={() => setSourceAndUrl(source.key)}
-                            title={getSourceTabDisplayText(source)}
+                            title={getSourceTabTitle(source)}
                           >
                             {getSourceTabDisplayText(source)}
+                            {sourceNewStateByKey.has(source.key) ? (
+                              <span className="pointer-events-none absolute right-[4px] top-[6px] h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_0_1px_rgba(6,78,59,0.75),0_0_8px_rgba(110,231,183,0.45)]" aria-label="New" />
+                            ) : null}
                           </button>
                         ))}
                       </div>
@@ -2936,6 +3003,9 @@ export function BenchmarkMatrix({
                     }`}
                   >
                     {getSourceTabDisplayText(source)}
+                    {sourceNewStateByKey.has(source.key) ? (
+                      <span className="pointer-events-none absolute right-[4px] top-[6px] h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_0_1px_rgba(6,78,59,0.75),0_0_8px_rgba(110,231,183,0.45)]" />
+                    ) : null}
                   </button>
                 ))}
                 <button

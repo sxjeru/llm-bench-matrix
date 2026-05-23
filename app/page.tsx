@@ -31,7 +31,8 @@ export default async function HomePage() {
     valueNum: row.valueNum,
     valueNum2: row.valueNum2,
     valueNote: row.valueNote,
-    source: row.source
+    source: row.source,
+    updatedAt: row.updatedAt
   });
 
   const mappedRows = rows.map(toMatrixRow);
