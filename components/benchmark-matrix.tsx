@@ -152,8 +152,36 @@ type SourceValueDisplayItem = {
 
 function getSourceValueEntry(entries: MatrixCellEntry[], activeSource: string): MatrixCellEntry | null {
   return activeSource === SOURCE_ALL
-    ? entries[0]
+    ? entries[0] ?? null
     : entries.find((item) => getSourceKey(item.source) === activeSource) ?? null;
+}
+
+function getPreferredMatrixCellEntry(entries: MatrixCellEntry[]): MatrixCellEntry | null {
+  let preferred: MatrixCellEntry | null = null;
+
+  entries.forEach((entry) => {
+    if (!preferred || (entry.valueNum !== null && (preferred.valueNum === null || entry.valueNum > preferred.valueNum))) {
+      preferred = entry;
+    }
+  });
+
+  return preferred;
+}
+
+function getSourceValueDeltaRaw(entries: MatrixCellEntry[], activeSource: string): number | null {
+  const sourceEntry = getSourceValueEntry(entries, activeSource);
+  const preferredEntry = getPreferredMatrixCellEntry(entries);
+
+  if (!sourceEntry || !preferredEntry || sourceEntry.valueNum === null || preferredEntry.valueNum === null) {
+    return null;
+  }
+
+  const delta = sourceEntry.valueNum - preferredEntry.valueNum;
+  if (!Number.isFinite(delta) || Math.abs(delta) < Number.EPSILON) {
+    return null;
+  }
+
+  return delta;
 }
 
 function getSourceValueDisplayItem(entries: MatrixCellEntry[], activeSource: string): SourceValueDisplayItem | null {
@@ -218,6 +246,7 @@ export function BenchmarkMatrix({
   const [showCategory, setShowCategory] = useState(true);
   const [showDuplicateRows, setShowDuplicateRows] = useState(false);
   const [showSourceValues, setShowSourceValues] = useState(false);
+  const [showSourceValueDeltas, setShowSourceValueDeltas] = useState(false);
   const [showLowCoverageRows, setShowLowCoverageRows] = useState(false);
   const [isClientReady, setIsClientReady] = useState(false);
   const [isModelSelectionLoaded, setIsModelSelectionLoaded] = useState(false);
@@ -290,6 +319,7 @@ export function BenchmarkMatrix({
     [allSourceOptions, rows, allRows]
   );
   const displaySourceValuesInCells = showSourceValues && hasSourceData;
+  const displaySourceValueDeltasInCells = displaySourceValuesInCells && showSourceValueDeltas;
   const overflowSourceKeySet = useMemo(() => new Set(overflowSourceKeys), [overflowSourceKeys]);
   const visibleSourceOptions = useMemo(
     () => sourceOptions.filter((source) => !overflowSourceKeySet.has(source.key)),
@@ -1830,10 +1860,16 @@ export function BenchmarkMatrix({
       const sourceValueItem = hasMeaningfulMultipleValues
         ? getSourceValueDisplayItem(uniqueEntries, activeSource)
         : null;
+      const sourceDeltaRaw = displaySourceValueDeltasInCells && hasMeaningfulMultipleValues
+        ? getSourceValueDeltaRaw(uniqueEntries, activeSource)
+        : null;
+      const sourceDeltaPadding = sourceDeltaRaw !== null
+        ? Math.min(28, 9 + formatComparisonDeltaValue(sourceDeltaRaw).length * 3)
+        : 0;
 
       const compactDisplayValue = displayValue.replace(/\s*\/\s*/g, "/");
       const sourceValueWidth = displaySourceValuesInCells && sourceValueItem
-        ? measureTextWidth(sourceValueItem.displayValue, "600 14px Inter, ui-sans-serif, system-ui") + 18 + questionMarkPadding
+        ? measureTextWidth(sourceValueItem.displayValue, "600 14px Inter, ui-sans-serif, system-ui") + 18 + questionMarkPadding + sourceDeltaPadding
         : 0;
       const measured = Math.max(
         measureTextWidth(compactDisplayValue, "600 14px Inter, ui-sans-serif, system-ui") + 18 + questionMarkPadding,
@@ -1858,7 +1894,7 @@ export function BenchmarkMatrix({
     });
 
     return map;
-  }, [modelColumns, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource]);
+  }, [modelColumns, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, displaySourceValueDeltasInCells, activeSource]);
 
   useEffect(() => {
     if (!isColumnWidthLoaded) return;
@@ -3182,7 +3218,23 @@ export function BenchmarkMatrix({
             <button
               type="button"
               className="btn btn-xs btn-ghost"
-              onClick={() => setShowSourceValues((prev) => !prev)}
+              title="普通点击切换当前 source 值；按住 Ctrl 点击切换差值徽标"
+              onClick={(event) => {
+                if (isCompareModifierClick(event)) {
+                  event.preventDefault();
+                  setShowSourceValues(true);
+                  setShowSourceValueDeltas((prev) => !prev);
+                  return;
+                }
+
+                setShowSourceValues((prev) => {
+                  const next = !prev;
+                  if (!next) {
+                    setShowSourceValueDeltas(false);
+                  }
+                  return next;
+                });
+              }}
             >
               {displaySourceValuesInCells ? <Eye size={14} /> : <EyeOff size={14} />}
               显示原始值
@@ -3778,6 +3830,25 @@ export function BenchmarkMatrix({
               const primaryComparableSecond = primaryComparableDistinctDesc[1] ?? null;
               const secondaryComparableTop = secondaryComparableDistinctDesc[0] ?? null;
               const secondaryComparableSecond = secondaryComparableDistinctDesc[1] ?? null;
+              const sourceDeltaAbsValues = displaySourceValueDeltasInCells
+                ? modelColumnMeta
+                    .map((model) => {
+                      const cell = matrixRow.cells.get(model.modelName);
+                      if (!cell?.hasMeaningfulMultipleValues) {
+                        return null;
+                      }
+
+                      const deltaRaw = getSourceValueDeltaRaw(cell.uniqueEntries, activeSource);
+                      return deltaRaw === null ? null : Math.abs(deltaRaw);
+                    })
+                    .filter((value): value is number => value !== null && Number.isFinite(value))
+                : [];
+              const sourceDeltaAbsP90 = sourceDeltaAbsValues.length > 0
+                ? Math.max(
+                    getSortedQuantile([...sourceDeltaAbsValues].sort((a, b) => a - b), 0.9),
+                    Number.EPSILON
+                  )
+                : null;
               const topRankSegmentStyle = {
                 fontWeight: 800
               };
@@ -3938,6 +4009,9 @@ export function BenchmarkMatrix({
                     const sourceValueItem = displaySourceValuesInCells && cell?.hasMeaningfulMultipleValues
                       ? getSourceValueDisplayItem(uniqueEntries, activeSource)
                       : null;
+                    const sourceValueDeltaRaw = displaySourceValueDeltasInCells && cell?.hasMeaningfulMultipleValues
+                      ? getSourceValueDeltaRaw(uniqueEntries, activeSource)
+                      : null;
                     const shouldRenderSourceValues = Boolean(sourceValueItem);
                     const isTopCellFirst =
                       comparableCellNum !== null &&
@@ -3990,17 +4064,45 @@ export function BenchmarkMatrix({
                     const compareBadgeStyle = showCompareBadge
                       ? getCompareDeltaBadgeStyle(compareDirection, compareIntensity, isExportCaptureMode)
                       : null;
-                    const showQuestionMarkIcon = (shouldRenderSourceValues ? noteText.length > 0 : shouldShowQuestionMark) && !showCompareBadge;
                     const compareArrow = compareDirection === "up" ? "▲" : compareDirection === "down" ? "▼" : "•";
                     const compareDeltaText = showCompareBadge && compareDeltaRaw !== null
                       ? formatComparisonDeltaValue(compareDeltaRaw)
                       : "";
+                    const sourceValueDeltaDirection: CompareDirection = sourceValueDeltaRaw === null
+                      ? "flat"
+                      : Math.abs(sourceValueDeltaRaw) < Number.EPSILON
+                        ? "flat"
+                        : sourceValueDeltaRaw > 0
+                          ? "up"
+                          : "down";
+                    const sourceValueDeltaIntensity =
+                      sourceValueDeltaRaw === null || sourceDeltaAbsP90 === null
+                        ? 0
+                        : clampCompareIntensity(Math.abs(sourceValueDeltaRaw) / sourceDeltaAbsP90);
+                    const showSourceValueDeltaBadge =
+                      shouldRenderSourceValues && sourceValueDeltaRaw !== null && !showCompareBadge;
+                    const sourceValueDeltaBadgeStyle = showSourceValueDeltaBadge
+                      ? getCompareDeltaBadgeStyle(sourceValueDeltaDirection, sourceValueDeltaIntensity, isExportCaptureMode)
+                      : null;
+                    const sourceValueDeltaArrow = sourceValueDeltaDirection === "up" ? "▲" : sourceValueDeltaDirection === "down" ? "▼" : "•";
+                    const sourceValueDeltaText = showSourceValueDeltaBadge && sourceValueDeltaRaw !== null
+                      ? formatComparisonDeltaValue(sourceValueDeltaRaw)
+                      : "";
+                    const activeDeltaBadgeStyle = showCompareBadge ? compareBadgeStyle : sourceValueDeltaBadgeStyle;
+                    const activeDeltaDirection = showCompareBadge ? compareDirection : sourceValueDeltaDirection;
+                    const activeDeltaArrow = showCompareBadge ? compareArrow : sourceValueDeltaArrow;
+                    const activeDeltaText = showCompareBadge ? compareDeltaText : sourceValueDeltaText;
+                    const activeDeltaTitle = showCompareBadge
+                      ? `相对基准 ${compareBaselineModelName} 的差值`
+                      : "相对表格默认取值的差值";
+                    const showAnyDeltaBadge = showCompareBadge || showSourceValueDeltaBadge;
+                    const showQuestionMarkIcon = (shouldRenderSourceValues ? noteText.length > 0 : shouldShowQuestionMark) && !showAnyDeltaBadge;
 
                     const basePadding = showQuestionMarkIcon
                       ? (isPairNumericDisplay ? 18 : 22)
                       : 6;
-                    const comparePadding = showCompareBadge
-                      ? Math.min(28, 9 + compareDeltaText.length * 3)
+                    const comparePadding = showAnyDeltaBadge
+                      ? Math.min(28, 9 + activeDeltaText.length * 3)
                       : 0;
                     const cellPaddingRight = `${basePadding + comparePadding}px`;
                     const singleCellScoreStyle = !isPairNumericDisplay
@@ -4083,43 +4185,44 @@ export function BenchmarkMatrix({
                         ) : (
                           <span style={singleCellScoreStyle}>{rawText}</span>
                         )}
-                        {showCompareBadge && compareBadgeStyle ? (
+                        {showAnyDeltaBadge && activeDeltaBadgeStyle ? (
                           <span
-                            data-compare-delta-badge="1"
-                            data-compare-direction={compareDirection}
+                            data-compare-delta-badge={showCompareBadge ? "1" : undefined}
+                            data-source-delta-badge={showSourceValueDeltaBadge ? "1" : undefined}
+                            data-compare-direction={activeDeltaDirection}
                             className="absolute top-1/2 inline-flex h-[14px] -translate-y-1/2 items-center overflow-hidden rounded-[5px] border text-[9px] font-semibold leading-none"
                             style={{
                               right: "3px",
-                              color: compareBadgeStyle.textColor,
-                              borderColor: compareBadgeStyle.borderColor,
-                              backgroundColor: compareBadgeStyle.backgroundColor,
-                              boxShadow: compareBadgeStyle.boxShadow,
-                              textShadow: compareBadgeStyle.textShadow,
-                              WebkitTextStroke: compareBadgeStyle.textStroke
+                              color: activeDeltaBadgeStyle.textColor,
+                              borderColor: activeDeltaBadgeStyle.borderColor,
+                              backgroundColor: activeDeltaBadgeStyle.backgroundColor,
+                              boxShadow: activeDeltaBadgeStyle.boxShadow,
+                              textShadow: activeDeltaBadgeStyle.textShadow,
+                              WebkitTextStroke: activeDeltaBadgeStyle.textStroke
                             }}
-                            title={`相对基准 ${compareBaselineModelName} 的差值`}
+                            title={activeDeltaTitle}
                           >
                             <span
                               className="inline-flex h-full min-w-[11px] items-center justify-center px-[2px] text-[9px] font-bold leading-none"
                               style={{
-                                color: compareBadgeStyle.textColor
+                                color: activeDeltaBadgeStyle.textColor
                               }}
                             >
-                              {compareArrow}
+                              {activeDeltaArrow}
                             </span>
                             <span
                               className="h-[8px] w-px"
                               style={{
-                                backgroundColor: compareBadgeStyle.separatorColor
+                                backgroundColor: activeDeltaBadgeStyle.separatorColor
                               }}
                             />
                             <span
                               className="inline-flex h-full items-center px-[3px] text-[9px] font-semibold leading-none"
                               style={{
-                                color: compareBadgeStyle.textColor
+                                color: activeDeltaBadgeStyle.textColor
                               }}
                             >
-                              {compareDeltaText}
+                              {activeDeltaText}
                             </span>
                           </span>
                         ) : null}
