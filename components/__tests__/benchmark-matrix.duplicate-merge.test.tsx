@@ -133,27 +133,30 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
   test("Source 原值显示默认关闭，合并单元格仍显示最大值", () => {
     render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
-    expect(screen.getByRole("button", { name: "显示 Source 原值" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "显示原始值" })).toBeInTheDocument();
     expect(screen.getByText("82")).toBeInTheDocument();
     expect(screen.queryByTitle("text:S1: 80 raw")).not.toBeInTheDocument();
     expect(screen.queryByTitle("text:S2: 82 raw")).not.toBeInTheDocument();
   });
 
-  test("开启 Source 原值后，合并单元格展示各 source 的原始值", () => {
+  test("开启 Source 原值后，合并单元格展示当前 source 的原始值", () => {
     render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "显示 Source 原值" }));
+    fireEvent.click(screen.getByRole("button", { name: "显示原始值" }));
 
-    expect(screen.getByTitle("text:S1: 80 raw")).toBeInTheDocument();
-    expect(screen.getByTitle("text:S2: 82 raw")).toBeInTheDocument();
-    expect(screen.getByText("80 raw")).toBeInTheDocument();
-    expect(screen.getByText("82 raw")).toBeInTheDocument();
+    expect(screen.getByText("80")).toBeInTheDocument();
+    expect(screen.queryByText("82")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "S2" }));
+
+    expect(screen.getByText("82")).toBeInTheDocument();
+    expect(screen.queryByText("80")).not.toBeInTheDocument();
   });
 
   test("关闭 Source 原值后恢复最大值展示", () => {
     render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
-    const toggle = screen.getByRole("button", { name: "显示 Source 原值" });
+    const toggle = screen.getByRole("button", { name: "显示原始值" });
     fireEvent.click(toggle);
     fireEvent.click(toggle);
 
@@ -162,7 +165,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(screen.queryByTitle("text:S2: 82 raw")).not.toBeInTheDocument();
   });
 
-  test("没有 source 数据时不显示 Source 原值按钮", () => {
+  test("没有 source 数据时不显示原始值按钮", () => {
     render(
       <BenchmarkMatrix
         rows={[
@@ -182,6 +185,6 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
       />
     );
 
-    expect(screen.queryByRole("button", { name: "显示 Source 原值" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "显示原始值" })).not.toBeInTheDocument();
   });
 });
