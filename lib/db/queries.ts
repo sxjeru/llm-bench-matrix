@@ -34,6 +34,7 @@ export type DashboardRow = {
   valueNum2: number | null;
   valueNote: string | null;
   source: string | null;
+  updatedAt: string;
 };
 
 const SOURCE_EMPTY_KEY = "__EMPTY__";
@@ -170,7 +171,8 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
           valueNum: benchmarkValues.valueNum,
           valueNum2: benchmarkValues.valueNum2,
           valueNote: benchmarkValues.valueNote,
-          source: benchmarkValues.source
+          source: benchmarkValues.source,
+          updatedAt: benchmarkValues.createdAt
         })
         .from(benchmarkValues)
         .innerJoin(models, eq(benchmarkValues.modelId, models.id))
@@ -233,7 +235,8 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
         valueNum: toNullableNumber(row.valueNum),
         valueNum2: toNullableNumber(row.valueNum2),
         valueNote: row.valueNote,
-        source: row.source
+        source: row.source,
+        updatedAt: row.updatedAt.toISOString()
         };
       });
     }

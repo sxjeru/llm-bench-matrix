@@ -11,6 +11,7 @@ export const SOURCE_EMPTY = "__EMPTY__";
 export const MODALITY_OPTIONS = ["Text", "Vision", "Audio", "Video", "Multimodal"] as const;
 export const SHOW_CATEGORY_STORAGE_KEY = "benchmark-matrix:show-category";
 export const SHOW_DUPLICATE_STORAGE_KEY = "benchmark-matrix:show-duplicate";
+export const SHOW_SOURCE_VALUES_STORAGE_KEY = "benchmark-matrix:show-source-values";
 export const MODEL_SELECTION_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:model-selection-by-source";
 export const MODEL_ORDER_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:model-order-by-source";
 export const COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:column-width-by-source";

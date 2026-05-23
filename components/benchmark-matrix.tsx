@@ -48,6 +48,7 @@ import {
   MODALITY_OPTIONS,
   SHOW_CATEGORY_STORAGE_KEY,
   SHOW_DUPLICATE_STORAGE_KEY,
+  SHOW_SOURCE_VALUES_STORAGE_KEY,
   MODEL_SELECTION_BY_SOURCE_STORAGE_KEY,
   MODEL_ORDER_BY_SOURCE_STORAGE_KEY,
   COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY,
@@ -144,7 +145,77 @@ function applySourceMeta(row: MatrixInputRow): MatrixInputRow {
   };
 }
 
-export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSourceOptions = [] }: Props) {
+type SourceValueDisplayItem = {
+  displayValue: string;
+};
+
+function getPreferredMatrixCellEntry(entries: MatrixCellEntry[], higherIsBetter = true): MatrixCellEntry | null {
+  if (entries.length === 0) return null;
+
+  return entries.reduce((preferred, entry) => {
+    if (entry.valueNum === null) return preferred;
+    if (preferred.valueNum === null) return entry;
+
+    const isBetter = higherIsBetter
+      ? entry.valueNum > preferred.valueNum
+      : entry.valueNum < preferred.valueNum;
+
+    return isBetter ? entry : preferred;
+  });
+}
+
+function getSourceValueEntry(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): MatrixCellEntry | null {
+  if (activeSource === SOURCE_ALL) {
+    return getPreferredMatrixCellEntry(entries, higherIsBetter);
+  }
+  const filtered = entries.filter((item) => getSourceKey(item.source) === activeSource);
+  return getPreferredMatrixCellEntry(filtered, higherIsBetter);
+}
+
+function getSourceValueDeltaRaw(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): number | null {
+  const sourceEntry = getSourceValueEntry(entries, activeSource, higherIsBetter);
+  const preferredEntry = getPreferredMatrixCellEntry(entries, higherIsBetter);
+
+  if (!sourceEntry || !preferredEntry || sourceEntry.valueNum === null || preferredEntry.valueNum === null) {
+    return null;
+  }
+
+  const delta = sourceEntry.valueNum - preferredEntry.valueNum;
+  if (!Number.isFinite(delta) || Math.abs(delta) < Number.EPSILON) {
+    return null;
+  }
+
+  return delta;
+}
+
+function getSourceValueDisplayItem(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): SourceValueDisplayItem | null {
+  const entry = getSourceValueEntry(entries, activeSource, higherIsBetter);
+
+  if (!entry) {
+    return null;
+  }
+
+  const displayValue = getMatrixCellDisplayValue(entry.valueNum, entry.valueNum2, entry.valueRaw, entry.valueNote);
+
+  return {
+    displayValue
+  };
+}
+
+const SOURCE_NEW_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+
+function parseTimestampMs(value?: string | null): number | null {
+  if (!value) return null;
+
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+export function BenchmarkMatrix({
+  rows,
+  allRows = rows,
+  sourceOptions: allSourceOptions = []
+}: Props) {
   const sectionRef = useRef<HTMLElement | null>(null);
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
   const sourceTabsViewportRef = useRef<HTMLDivElement | null>(null);
@@ -153,6 +224,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const showCategoryLoadedRef = useRef(false);
   const showDuplicateLoadedRef = useRef(false);
+  const showSourceValuesLoadedRef = useRef(false);
   const modelSelectionBySourceRef = useRef<Record<string, string[]>>({});
   const isSyncingSelectionFromSourceRef = useRef(false);
   const skipSelectionPersistenceOnceRef = useRef(false);
@@ -175,6 +247,8 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showCategory, setShowCategory] = useState(true);
   const [showDuplicateRows, setShowDuplicateRows] = useState(false);
+  const [showSourceValues, setShowSourceValues] = useState(false);
+  const [showSourceValueDeltas, setShowSourceValueDeltas] = useState(false);
   const [showLowCoverageRows, setShowLowCoverageRows] = useState(false);
   const [isClientReady, setIsClientReady] = useState(false);
   const [isModelSelectionLoaded, setIsModelSelectionLoaded] = useState(false);
@@ -212,6 +286,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const [isExportCaptureMode, setIsExportCaptureMode] = useState(false);
   const [copyNotice, setCopyNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [copyNoticeVisible, setCopyNoticeVisible] = useState(false);
+  const [sourceNewReferenceTime, setSourceNewReferenceTime] = useState<number | null>(null);
   const [activeCellTooltip, setActiveCellTooltip] = useState<{
     x: number;
     y: number;
@@ -239,6 +314,13 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   const [activeSource, setActiveSource] = useState(SOURCE_ALL);
   const activeSourceRef = useRef(SOURCE_ALL);
   const pendingSourceSyncRef = useRef<string | null>(null);
+  const hasSourceData = useMemo(
+    () => allSourceOptions.length > 0
+      || allRows.some((row) => row.source?.trim()),
+    [allSourceOptions, allRows]
+  );
+  const displaySourceValuesInCells = showSourceValues && hasSourceData && activeSource !== SOURCE_ALL;
+  const displaySourceValueDeltasInCells = displaySourceValuesInCells && showSourceValueDeltas;
   const overflowSourceKeySet = useMemo(() => new Set(overflowSourceKeys), [overflowSourceKeys]);
   const visibleSourceOptions = useMemo(
     () => sourceOptions.filter((source) => !overflowSourceKeySet.has(source.key)),
@@ -248,6 +330,64 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     () => sourceOptions.filter((source) => overflowSourceKeySet.has(source.key)),
     [sourceOptions, overflowSourceKeySet]
   );
+  const getSourceTabDisplayText = (source: { key: string; label: string }) => (
+    source.key === SOURCE_ALL ? source.label : sourceTabDisplayLabel(source.key)
+  );
+  const sourceNewStateByKey = useMemo(() => {
+    if (sourceNewReferenceTime === null) return new Map<string, { updatedAtMs: number; isNew: boolean }>();
+
+    const latestTimeStrBySource = new Map<string, string>();
+
+    allRows.forEach((row) => {
+      const sourceKey = getSourceKey(row.source);
+      if (sourceKey === SOURCE_ALL) return;
+
+      const timeStr = row.updatedAt || row.benchTime;
+      if (!timeStr) return;
+
+      const prev = latestTimeStrBySource.get(sourceKey);
+      if (prev === undefined || timeStr > prev) {
+        latestTimeStrBySource.set(sourceKey, timeStr);
+      }
+    });
+
+    const latestUpdateBySource = new Map<string, number>();
+    latestTimeStrBySource.forEach((timeStr, sourceKey) => {
+      const parsed = parseTimestampMs(timeStr);
+      if (parsed !== null) {
+        latestUpdateBySource.set(sourceKey, parsed);
+      }
+    });
+
+    let latestSourceKey: string | null = null;
+    let latestSourceUpdatedAt = Number.NEGATIVE_INFINITY;
+    latestUpdateBySource.forEach((updatedAtMs, sourceKey) => {
+      if (updatedAtMs > latestSourceUpdatedAt) {
+        latestSourceKey = sourceKey;
+        latestSourceUpdatedAt = updatedAtMs;
+      }
+    });
+
+    const stateByKey = new Map<string, { updatedAtMs: number; isNew: boolean }>();
+    latestUpdateBySource.forEach((updatedAtMs, sourceKey) => {
+      const ageMs = sourceNewReferenceTime - updatedAtMs;
+      const isRecent = ageMs >= 0 && ageMs <= SOURCE_NEW_WINDOW_MS;
+      const isLatest = sourceKey === latestSourceKey;
+
+      if (isRecent || isLatest) {
+        stateByKey.set(sourceKey, { updatedAtMs, isNew: true });
+      }
+    });
+
+    return stateByKey;
+  }, [allRows, sourceNewReferenceTime]);
+  const getSourceTabTitle = (source: { key: string; label: string }) => {
+    const displayText = getSourceTabDisplayText(source);
+    const newState = sourceNewStateByKey.get(source.key);
+    if (!newState) return displayText;
+
+    return `${displayText} · 最近更新 ${formatTooltipTime(new Date(newState.updatedAtMs).toISOString())}`;
+  };
 
   useEffect(() => {
     const sourceFromUrl = searchParams.get("source");
@@ -279,6 +419,10 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
   useEffect(() => {
     enqueueStateUpdate(() => setIsClientReady(true));
+  }, []);
+
+  useEffect(() => {
+    enqueueStateUpdate(() => setSourceNewReferenceTime(Date.now()));
   }, []);
 
   useEffect(() => {
@@ -563,6 +707,26 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
   }, []);
 
   useEffect(() => {
+    let nextShowSourceValues: boolean | null = null;
+
+    try {
+      const saved = window.localStorage.getItem(SHOW_SOURCE_VALUES_STORAGE_KEY);
+      if (saved === "0" || saved === "1") {
+        nextShowSourceValues = saved === "1";
+      }
+    } catch {
+      // ignore storage access errors gracefully
+    }
+
+    enqueueStateUpdate(() => {
+      if (nextShowSourceValues !== null) {
+        setShowSourceValues(nextShowSourceValues);
+      }
+      showSourceValuesLoadedRef.current = true;
+    });
+  }, []);
+
+  useEffect(() => {
     if (!showCategoryLoadedRef.current) return;
 
     try {
@@ -581,6 +745,16 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       // ignore storage access errors gracefully
     }
   }, [showDuplicateRows]);
+
+  useEffect(() => {
+    if (!showSourceValuesLoadedRef.current) return;
+
+    try {
+      window.localStorage.setItem(SHOW_SOURCE_VALUES_STORAGE_KEY, showSourceValues ? "1" : "0");
+    } catch {
+      // ignore storage access errors gracefully
+    }
+  }, [showSourceValues]);
 
   useEffect(() => {
     enqueueStateUpdate(() => {
@@ -1640,6 +1814,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
     const entriesByGroup = new Map<string, MatrixCellEntry[]>();
     const preferredEntryByGroup = new Map<string, MatrixCellEntry>();
+    const higherIsBetterByGroup = new Map<string, boolean>();
     const modelNameByGroup = new Map<string, string>();
 
     coveragePrunedRows.forEach((row) => {
@@ -1656,11 +1831,16 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
       if (!entriesByGroup.has(groupKey)) {
         entriesByGroup.set(groupKey, []);
+        const rowHigherIsBetter = typeof row.higherIsBetter === "boolean"
+          ? row.higherIsBetter
+          : !isLowerBetterBenchmark(row.benchmarkName, row.benchmarkType);
+        higherIsBetterByGroup.set(groupKey, rowHigherIsBetter);
       }
       entriesByGroup.get(groupKey)!.push(entry);
 
+      const groupHigherIsBetter = higherIsBetterByGroup.get(groupKey) ?? true;
       const preferred = preferredEntryByGroup.get(groupKey);
-      if (!preferred || (entry.valueNum !== null && (preferred.valueNum === null || entry.valueNum > preferred.valueNum))) {
+      if (!preferred || (entry.valueNum !== null && (preferred.valueNum === null || (groupHigherIsBetter ? entry.valueNum > preferred.valueNum : entry.valueNum < preferred.valueNum)))) {
         preferredEntryByGroup.set(groupKey, entry);
       }
 
@@ -1692,9 +1872,25 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       const noteText = (preferredEntry.valueNote ?? "").trim();
       const hasMeaningfulMultipleValues = uniqueEntries.length > 1 && valueIdentitySet.size > 1;
       const questionMarkPadding = hasMeaningfulMultipleValues || noteText.length > 0 ? 16 : 0;
+      const groupHigherIsBetter = higherIsBetterByGroup.get(groupKey) ?? true;
+      const sourceValueItem = hasMeaningfulMultipleValues
+        ? getSourceValueDisplayItem(uniqueEntries, activeSource, groupHigherIsBetter)
+        : null;
+      const sourceDeltaRaw = displaySourceValueDeltasInCells && hasMeaningfulMultipleValues
+        ? getSourceValueDeltaRaw(uniqueEntries, activeSource, groupHigherIsBetter)
+        : null;
+      const sourceDeltaPadding = sourceDeltaRaw !== null
+        ? Math.min(28, 9 + formatComparisonDeltaValue(sourceDeltaRaw).length * 3)
+        : 0;
 
       const compactDisplayValue = displayValue.replace(/\s*\/\s*/g, "/");
-      const measured = measureTextWidth(compactDisplayValue, "600 14px Inter, ui-sans-serif, system-ui") + 18 + questionMarkPadding;
+      const sourceValueWidth = displaySourceValuesInCells && sourceValueItem
+        ? measureTextWidth(sourceValueItem.displayValue, "600 14px Inter, ui-sans-serif, system-ui") + 18 + questionMarkPadding + sourceDeltaPadding
+        : 0;
+      const measured = Math.max(
+        measureTextWidth(compactDisplayValue, "600 14px Inter, ui-sans-serif, system-ui") + 18 + questionMarkPadding,
+        sourceValueWidth
+      );
       const previous = valueWidthByModel.get(modelName) ?? 0;
 
       if (measured > previous) {
@@ -1714,7 +1910,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
     });
 
     return map;
-  }, [modelColumns, coveragePrunedRows, showDuplicateRows]);
+  }, [modelColumns, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, displaySourceValueDeltasInCells, activeSource]);
 
   useEffect(() => {
     if (!isColumnWidthLoaded) return;
@@ -2032,7 +2228,14 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
         });
         existingCell.hasMultipleValues = existingCell.allEntries.length > 1;
 
-        if (row.valueNum !== null && (existingCell.valueNum === null || row.valueNum > existingCell.valueNum)) {
+        const cellHigherIsBetter = matrixRow.higherIsBetter;
+        const isCellBetter =
+          row.valueNum !== null &&
+          existingCell.valueNum !== null &&
+          (cellHigherIsBetter
+            ? row.valueNum > existingCell.valueNum
+            : row.valueNum < existingCell.valueNum);
+        if (row.valueNum !== null && (existingCell.valueNum === null || isCellBetter)) {
           existingCell.valueNum = row.valueNum;
           existingCell.valueNum2 = row.valueNum2 ?? null;
           existingCell.valueRaw = row.valueRaw;
@@ -2058,14 +2261,30 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
 
           const uniqueEntries = Array.from(uniqueEntriesMap.values());
           const valueIdentitySet = new Set(uniqueEntries.map((entry) => getMatrixCellValueIdentity(entry)));
-          const noteText = (cell.valueNote ?? "").trim();
           const hasMeaningfulMultipleValues = uniqueEntries.length > 1 && valueIdentitySet.size > 1;
+          // 目前 Source 原值展示并非只认当前 activeSource
+          const sourceEntry = displaySourceValuesInCells && hasMeaningfulMultipleValues
+            ? getSourceValueEntry(uniqueEntries, activeSource, matrixRow.higherIsBetter)
+            : null;
+          const effectiveValueRaw = sourceEntry ? sourceEntry.valueRaw : cell.valueRaw;
+          const effectiveValueNum = sourceEntry ? sourceEntry.valueNum : cell.valueNum;
+          const effectiveValueNum2 = sourceEntry ? sourceEntry.valueNum2 : cell.valueNum2;
+          const effectiveValueNote = sourceEntry ? sourceEntry.valueNote : cell.valueNote;
+          const effectiveSource = sourceEntry ? sourceEntry.source : cell.source;
+          const effectiveBenchTime = sourceEntry ? sourceEntry.benchTime : cell.benchTime;
+          const noteText = (effectiveValueNote ?? "").trim();
 
           finalizedCells.set(modelName, {
             ...cell,
+            valueRaw: effectiveValueRaw,
+            valueNum: effectiveValueNum,
+            valueNum2: effectiveValueNum2,
+            valueNote: effectiveValueNote,
+            source: effectiveSource,
+            benchTime: effectiveBenchTime,
             uniqueEntries,
             noteText,
-            displayValue: getMatrixCellDisplayValue(cell.valueNum, cell.valueNum2, cell.valueRaw, cell.valueNote),
+            displayValue: getMatrixCellDisplayValue(effectiveValueNum, effectiveValueNum2, effectiveValueRaw, effectiveValueNote),
             hasMeaningfulMultipleValues,
             shouldShowQuestionMark: hasMeaningfulMultipleValues || noteText.length > 0
           });
@@ -2107,7 +2326,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
       })
       .filter((row) => row.rowDataCount > 0)
       .sort((a, b) => a.firstSeenIndex - b.firstSeenIndex);
-  }, [baseSourceRows, coveragePrunedRows, showDuplicateRows]);
+  }, [baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource]);
 
   function getRowSortCycle(): RowSortMode[] {
     return activeSource === SOURCE_ALL
@@ -2762,15 +2981,21 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                         key={source.key}
                         type="button"
                         role="tab"
-                        className={`tab h-9 min-h-0 shrink-0 rounded-xl text-base-content/80 transition-all duration-150 ${
+                        className={`tab relative h-9 min-h-0 shrink-0 overflow-visible rounded-xl text-base-content/80 transition-all duration-150 ${
                           activeSource === source.key
                             ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content font-semibold shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
                             : "hover:!rounded-xl hover:bg-white/10 hover:text-base-content"
                         }`}
                         onClick={() => setSourceAndUrl(source.key)}
-                        title={source.key === SOURCE_ALL ? source.label : sourceTabDisplayLabel(source.key)}
+                        title={getSourceTabTitle(source)}
                       >
-                        {source.key === SOURCE_ALL ? source.label : sourceTabDisplayLabel(source.key)}
+                        {getSourceTabDisplayText(source)}
+                        {sourceNewStateByKey.has(source.key) ? (
+                          <span
+                            aria-hidden="true"
+                            className="pointer-events-none absolute right-[4px] top-[6px] h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_0_1px_rgba(6,78,59,0.75),0_0_8px_rgba(110,231,183,0.45)]"
+                          />
+                        ) : null}
                       </button>
                     ))}
                   </div>
@@ -2816,15 +3041,21 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                             key={`overflow-${source.key}`}
                             type="button"
                             role="tab"
-                            className={`tab h-9 min-h-0 rounded-xl text-base-content/80 transition-all duration-150 ${
+                            className={`tab relative h-9 min-h-0 overflow-visible rounded-xl text-base-content/80 transition-all duration-150 ${
                               activeSource === source.key
                                 ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content font-semibold shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
                                 : "hover:!rounded-xl hover:bg-white/10 hover:text-base-content"
                             }`}
                             onClick={() => setSourceAndUrl(source.key)}
-                            title={source.key === SOURCE_ALL ? source.label : sourceTabDisplayLabel(source.key)}
+                            title={getSourceTabTitle(source)}
                           >
-                            {source.key === SOURCE_ALL ? source.label : sourceTabDisplayLabel(source.key)}
+                            {getSourceTabDisplayText(source)}
+                            {sourceNewStateByKey.has(source.key) ? (
+                              <span
+                                aria-hidden="true"
+                                className="pointer-events-none absolute right-[4px] top-[6px] h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_0_1px_rgba(6,78,59,0.75),0_0_8px_rgba(110,231,183,0.45)]"
+                              />
+                            ) : null}
                           </button>
                         ))}
                       </div>
@@ -2846,13 +3077,19 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     type="button"
                     data-source-tab-measure="item"
                     data-source-tab-measure-key={source.key}
-                    className={`tab h-9 min-h-0 shrink-0 rounded-xl text-base-content/80 transition-all duration-150 ${
+                    className={`tab relative h-9 min-h-0 shrink-0 overflow-visible rounded-xl text-base-content/80 transition-all duration-150 ${
                       activeSource === source.key
                         ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content font-semibold shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
                         : "hover:!rounded-xl hover:bg-white/10 hover:text-base-content"
                     }`}
                   >
-                    {source.key === SOURCE_ALL ? source.label : sourceTabDisplayLabel(source.key)}
+                    {getSourceTabDisplayText(source)}
+                    {sourceNewStateByKey.has(source.key) ? (
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute right-[4px] top-[6px] h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_0_1px_rgba(6,78,59,0.75),0_0_8px_rgba(110,231,183,0.45)]"
+                      />
+                    ) : null}
                   </button>
                 ))}
                 <button
@@ -3007,6 +3244,33 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
             >
               {showLowCoverageRows ? <Eye size={14} /> : <EyeOff size={14} />}
               {showLowCoverageRows ? "隐藏低覆盖行" : "显示低覆盖行"}
+            </button>
+          ) : null}
+
+          {hasSourceData && activeSource !== SOURCE_ALL ? (
+            <button
+              type="button"
+              className="btn btn-xs btn-ghost"
+              title="普通点击切换当前 source 值；按住 Ctrl 点击切换差值徽标"
+              onClick={(event) => {
+                if (isCompareModifierClick(event)) {
+                  event.preventDefault();
+                  setShowSourceValues(true);
+                  setShowSourceValueDeltas((prev) => !prev);
+                  return;
+                }
+
+                setShowSourceValues((prev) => {
+                  const next = !prev;
+                  if (!next) {
+                    setShowSourceValueDeltas(false);
+                  }
+                  return next;
+                });
+              }}
+            >
+              {displaySourceValuesInCells ? <Eye size={14} /> : <EyeOff size={14} />}
+              显示原始值
             </button>
           ) : null}
         </div>
@@ -3599,6 +3863,25 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
               const primaryComparableSecond = primaryComparableDistinctDesc[1] ?? null;
               const secondaryComparableTop = secondaryComparableDistinctDesc[0] ?? null;
               const secondaryComparableSecond = secondaryComparableDistinctDesc[1] ?? null;
+              const sourceDeltaAbsValues = displaySourceValueDeltasInCells
+                ? modelColumnMeta
+                    .map((model) => {
+                      const cell = matrixRow.cells.get(model.modelName);
+                      if (!cell?.hasMeaningfulMultipleValues) {
+                        return null;
+                      }
+
+                      const deltaRaw = getSourceValueDeltaRaw(cell.uniqueEntries, activeSource, matrixRow.higherIsBetter);
+                      return deltaRaw === null ? null : Math.abs(deltaRaw);
+                    })
+                    .filter((value): value is number => value !== null && Number.isFinite(value))
+                : [];
+              const sourceDeltaAbsP90 = sourceDeltaAbsValues.length > 0
+                ? Math.max(
+                    getSortedQuantile(sourceDeltaAbsValues.sort((a, b) => a - b), 0.9),
+                    Number.EPSILON
+                  )
+                : null;
               const topRankSegmentStyle = {
                 fontWeight: 800
               };
@@ -3638,7 +3921,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                   : [];
               const compareAbsEffectiveDeltaP90 = compareAbsEffectiveDeltaValues.length > 0
                 ? Math.max(
-                    getSortedQuantile([...compareAbsEffectiveDeltaValues].sort((a, b) => a - b), 0.9),
+                    getSortedQuantile(compareAbsEffectiveDeltaValues.sort((a, b) => a - b), 0.9),
                     Number.EPSILON
                   )
                 : null;
@@ -3756,6 +4039,13 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     const noteText = cell?.noteText ?? "";
                     const shouldShowQuestionMark = cell?.shouldShowQuestionMark ?? false;
                     const uniqueEntries = cell?.uniqueEntries ?? [];
+                    const sourceValueItem = displaySourceValuesInCells && cell?.hasMeaningfulMultipleValues
+                      ? getSourceValueDisplayItem(uniqueEntries, activeSource, matrixRow.higherIsBetter)
+                      : null;
+                    const sourceValueDeltaRaw = displaySourceValueDeltasInCells && cell?.hasMeaningfulMultipleValues
+                      ? getSourceValueDeltaRaw(uniqueEntries, activeSource, matrixRow.higherIsBetter)
+                      : null;
+                    const shouldRenderSourceValues = Boolean(sourceValueItem);
                     const isTopCellFirst =
                       comparableCellNum !== null &&
                       primaryComparableTop !== null &&
@@ -3807,17 +4097,48 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                     const compareBadgeStyle = showCompareBadge
                       ? getCompareDeltaBadgeStyle(compareDirection, compareIntensity, isExportCaptureMode)
                       : null;
-                    const showQuestionMarkIcon = shouldShowQuestionMark && !showCompareBadge;
                     const compareArrow = compareDirection === "up" ? "▲" : compareDirection === "down" ? "▼" : "•";
                     const compareDeltaText = showCompareBadge && compareDeltaRaw !== null
                       ? formatComparisonDeltaValue(compareDeltaRaw)
                       : "";
+                    const sourceValueDeltaEffective = sourceValueDeltaRaw === null
+                      ? null
+                      : (isRowLowerBetter ? -sourceValueDeltaRaw : sourceValueDeltaRaw);
+                    const sourceValueDeltaDirection: CompareDirection = sourceValueDeltaEffective === null
+                      ? "flat"
+                      : Math.abs(sourceValueDeltaEffective) < Number.EPSILON
+                        ? "flat"
+                        : sourceValueDeltaEffective > 0
+                          ? "up"
+                          : "down";
+                    const sourceValueDeltaIntensity =
+                      sourceValueDeltaEffective === null || sourceDeltaAbsP90 === null
+                        ? 0
+                        : clampCompareIntensity(Math.abs(sourceValueDeltaEffective) / sourceDeltaAbsP90);
+                    const showSourceValueDeltaBadge =
+                      shouldRenderSourceValues && sourceValueDeltaRaw !== null && !showCompareBadge;
+                    const sourceValueDeltaBadgeStyle = showSourceValueDeltaBadge
+                      ? getCompareDeltaBadgeStyle(sourceValueDeltaDirection, sourceValueDeltaIntensity, isExportCaptureMode)
+                      : null;
+                    const sourceValueDeltaArrow = sourceValueDeltaDirection === "up" ? "▲" : sourceValueDeltaDirection === "down" ? "▼" : "•";
+                    const sourceValueDeltaText = showSourceValueDeltaBadge && sourceValueDeltaRaw !== null
+                      ? formatComparisonDeltaValue(sourceValueDeltaRaw)
+                      : "";
+                    const activeDeltaBadgeStyle = showCompareBadge ? compareBadgeStyle : sourceValueDeltaBadgeStyle;
+                    const activeDeltaDirection = showCompareBadge ? compareDirection : sourceValueDeltaDirection;
+                    const activeDeltaArrow = showCompareBadge ? compareArrow : sourceValueDeltaArrow;
+                    const activeDeltaText = showCompareBadge ? compareDeltaText : sourceValueDeltaText;
+                    const activeDeltaTitle = showCompareBadge
+                      ? `相对基准 ${compareBaselineModelName} 的差值`
+                      : "相对表格默认取值的差值";
+                    const showAnyDeltaBadge = showCompareBadge || showSourceValueDeltaBadge;
+                    const showQuestionMarkIcon = (shouldRenderSourceValues ? noteText.length > 0 : shouldShowQuestionMark) && !showAnyDeltaBadge;
 
                     const basePadding = showQuestionMarkIcon
                       ? (isPairNumericDisplay ? 18 : 22)
                       : 6;
-                    const comparePadding = showCompareBadge
-                      ? Math.min(28, 9 + compareDeltaText.length * 3)
+                    const comparePadding = showAnyDeltaBadge
+                      ? Math.min(28, 9 + activeDeltaText.length * 3)
                       : 0;
                     const cellPaddingRight = `${basePadding + comparePadding}px`;
                     const singleCellScoreStyle = !isPairNumericDisplay
@@ -3880,7 +4201,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                           paddingRight: cellPaddingRight,
                           fontSize: "14px",
                           lineHeight: 1.2,
-                          whiteSpace: "nowrap",
+                          whiteSpace: shouldRenderSourceValues ? "normal" : "nowrap",
                           position: "relative",
                           width: model.columnWidth,
                           minWidth: model.columnWidth,
@@ -3889,7 +4210,9 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                           ...(modelIndex === modelColumnMeta.length - 1 ? rowRightEdgeStyle ?? {} : {})
                         }}
                       >
-                        {isPairNumericDisplay && pairFirstDisplay && pairSecondDisplay ? (
+                        {shouldRenderSourceValues ? (
+                          <span style={singleCellScoreStyle}>{sourceValueItem!.displayValue}</span>
+                        ) : isPairNumericDisplay && pairFirstDisplay && pairSecondDisplay ? (
                           <span className="inline-flex items-center gap-0 leading-none">
                             <span style={isTopCellFirst ? topRankSegmentStyle : isSecondCellFirst ? secondRankSegmentStyle : undefined}>{pairFirstDisplay}</span>
                             <span className="mx-[1px] opacity-85">/</span>
@@ -3898,43 +4221,44 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
                         ) : (
                           <span style={singleCellScoreStyle}>{rawText}</span>
                         )}
-                        {showCompareBadge && compareBadgeStyle ? (
+                        {showAnyDeltaBadge && activeDeltaBadgeStyle ? (
                           <span
-                            data-compare-delta-badge="1"
-                            data-compare-direction={compareDirection}
+                            data-compare-delta-badge={showCompareBadge ? "1" : undefined}
+                            data-source-delta-badge={showSourceValueDeltaBadge ? "1" : undefined}
+                            data-compare-direction={activeDeltaDirection}
                             className="absolute top-1/2 inline-flex h-[14px] -translate-y-1/2 items-center overflow-hidden rounded-[5px] border text-[9px] font-semibold leading-none"
                             style={{
                               right: "3px",
-                              color: compareBadgeStyle.textColor,
-                              borderColor: compareBadgeStyle.borderColor,
-                              backgroundColor: compareBadgeStyle.backgroundColor,
-                              boxShadow: compareBadgeStyle.boxShadow,
-                              textShadow: compareBadgeStyle.textShadow,
-                              WebkitTextStroke: compareBadgeStyle.textStroke
+                              color: activeDeltaBadgeStyle.textColor,
+                              borderColor: activeDeltaBadgeStyle.borderColor,
+                              backgroundColor: activeDeltaBadgeStyle.backgroundColor,
+                              boxShadow: activeDeltaBadgeStyle.boxShadow,
+                              textShadow: activeDeltaBadgeStyle.textShadow,
+                              WebkitTextStroke: activeDeltaBadgeStyle.textStroke
                             }}
-                            title={`相对基准 ${compareBaselineModelName} 的差值`}
+                            title={activeDeltaTitle}
                           >
                             <span
                               className="inline-flex h-full min-w-[11px] items-center justify-center px-[2px] text-[9px] font-bold leading-none"
                               style={{
-                                color: compareBadgeStyle.textColor
+                                color: activeDeltaBadgeStyle.textColor
                               }}
                             >
-                              {compareArrow}
+                              {activeDeltaArrow}
                             </span>
                             <span
                               className="h-[8px] w-px"
                               style={{
-                                backgroundColor: compareBadgeStyle.separatorColor
+                                backgroundColor: activeDeltaBadgeStyle.separatorColor
                               }}
                             />
                             <span
                               className="inline-flex h-full items-center px-[3px] text-[9px] font-semibold leading-none"
                               style={{
-                                color: compareBadgeStyle.textColor
+                                color: activeDeltaBadgeStyle.textColor
                               }}
                             >
-                              {compareDeltaText}
+                              {activeDeltaText}
                             </span>
                           </span>
                         ) : null}
@@ -4208,7 +4532,7 @@ export function BenchmarkMatrix({ rows, allRows = rows, sourceOptions: allSource
             </span>
           ) : null}
 
-          <span className="block max-h-44 space-y-1 overflow-auto">
+          <span className="block max-h-[65vh] space-y-1 overflow-auto">
             {activeCellTooltip.entries.map((entry) => (
               <span
                 key={`${entry.valueRaw}-${entry.valueNote ?? ""}-${entry.source ?? "-"}-${entry.benchTime}`}

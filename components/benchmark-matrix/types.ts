@@ -17,6 +17,7 @@ export type MatrixInputRow = {
   valueNum2?: number | null;
   valueNote: string | null;
   source: string | null;
+  updatedAt?: string | null;
 };
 
 export type MatrixCellEntry = {

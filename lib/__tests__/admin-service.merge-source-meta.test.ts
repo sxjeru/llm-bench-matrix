@@ -94,7 +94,8 @@ describe("mergeEntity benchmark source meta migration", () => {
         valueNum: 75,
         valueNum2: null,
         valueNote: null,
-        source: "text:claw-source"
+        source: "text:claw-source",
+        updatedAt: new Date("2026-05-06T00:00:00.000Z")
       }
     ];
 
