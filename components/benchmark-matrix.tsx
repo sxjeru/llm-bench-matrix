@@ -7,8 +7,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
-  useState,
-  type PointerEvent as ReactPointerEvent
+  useState
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -27,7 +26,11 @@ import {
 } from "lucide-react";
 import { resolveProviderBrandColor } from "@/lib/provider-config";
 import {
-  saveColumnWidthBySource,
+  useMatrixColumnResize,
+  useMatrixColumnWidths,
+  type ColumnResizeState
+} from "./benchmark-matrix/column-width";
+import {
   saveModelOrderBySource,
   saveModelSelectionBySource,
   useExportPresetStorage,
@@ -79,18 +82,12 @@ import {
   MODALITY_OPTIONS,
   CATEGORY_COLUMN_WIDTH_KEY,
   BENCHMARK_COLUMN_WIDTH_KEY,
-  DEFAULT_CATEGORY_COLUMN_WIDTH,
-  DEFAULT_BENCHMARK_COLUMN_WIDTH,
   MIN_CATEGORY_COLUMN_WIDTH,
   MAX_CATEGORY_COLUMN_WIDTH,
   MIN_BENCHMARK_COLUMN_WIDTH,
   MAX_BENCHMARK_COLUMN_WIDTH,
-  DEFAULT_MODEL_COLUMN_BASELINE_WIDTH,
   MIN_MODEL_COLUMN_RESIZE_WIDTH,
-  COMPARE_BASELINE_DEFAULT_EXPANDED_WIDTH,
-  COMPARE_BADGE_DEFAULT_EXPANDED_WIDTH,
   MAX_MODEL_COLUMN_WIDTH,
-  COLUMN_WIDTH_STORAGE_DEBOUNCE_MS,
   PROVIDER_MODEL_AUTO_COLLAPSE_LIMIT,
   HEATMAP_PRESETS,
   DEFAULT_HEATMAP_PRESET_KEY,
@@ -112,19 +109,10 @@ import {
   hexToRgbTuple,
   rgbaFromHex,
   getHeatCellStyle,
-  isSourceHeaderPrefixMatch,
-  getModelColumnWidthKey,
-  getColumnWidthOverrideKey,
-  clampColumnWidth,
-  areColumnWidthMapsEqual,
   areStringArraysEqual,
-  getSourceKey,
   sourceTabDisplayLabel,
-  getMatrixGroupingKey,
   renderModalityBadge,
   normalizeMatchToken,
-  getMatrixCellValueIdentity,
-  getMatrixCellSourceValueDedupKey,
   isCompareModifierClick,
   isSelectionModifierClick,
   clampCompareIntensity,
@@ -162,13 +150,7 @@ export function BenchmarkMatrix({
   const [columnWidthOverrideKeys, setColumnWidthOverrideKeys] = useState<readonly string[]>([]);
   const columnWidthPersistTimeoutRef = useRef<number | null>(null);
   const heatmapPaletteLoadedRef = useRef(false);
-  const columnResizeStateRef = useRef<{
-    columnKey: string;
-    startX: number;
-    startWidth: number;
-    minWidth: number;
-    maxWidth: number;
-  } | null>(null);
+  const columnResizeStateRef = useRef<ColumnResizeState | null>(null);
   const headerInteractionSuppressUntilRef = useRef(0);
   const exportPresetLoadedRef = useRef(false);
   const pathname = usePathname();
@@ -398,53 +380,15 @@ export function BenchmarkMatrix({
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, [isSourceOverflowMenuOpen]);
 
-  useEffect(() => {
-    const handlePointerMove = (event: PointerEvent) => {
-      const resizeState = columnResizeStateRef.current;
-      if (!resizeState) return;
-
-      const overrideKey = getColumnWidthOverrideKey(activeSourceRef.current, resizeState.columnKey);
-      setColumnWidthOverrideKeys((prev) => (prev.includes(overrideKey) ? prev : [...prev, overrideKey]));
-
-      const nextWidth = clampColumnWidth(
-        resizeState.startWidth + (event.clientX - resizeState.startX),
-        resizeState.minWidth,
-        resizeState.maxWidth
-      );
-
-      setActiveColumnWidthMap((prev) => {
-        if (prev[resizeState.columnKey] === nextWidth) {
-          return prev;
-        }
-        return {
-          ...prev,
-          [resizeState.columnKey]: nextWidth
-        };
-      });
-    };
-
-    const stopResize = () => {
-      if (!columnResizeStateRef.current) return;
-      headerInteractionSuppressUntilRef.current = Math.max(
-        headerInteractionSuppressUntilRef.current,
-        Date.now() + 180
-      );
-      columnResizeStateRef.current = null;
-      setResizingColumnKey(null);
-      document.body.classList.remove("column-resizing");
-    };
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", stopResize);
-    window.addEventListener("pointercancel", stopResize);
-
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", stopResize);
-      window.removeEventListener("pointercancel", stopResize);
-      document.body.classList.remove("column-resizing");
-    };
-  }, []);
+  const { beginColumnResize, shouldSuppressHeaderInteractions } = useMatrixColumnResize({
+    activeSourceRef,
+    columnResizeStateRef,
+    headerInteractionSuppressUntilRef,
+    resizingColumnKey,
+    setActiveColumnWidthMap,
+    setColumnWidthOverrideKeys,
+    setResizingColumnKey
+  });
 
   const isImageActionBusy = isDownloadingTableImage || isCopyingTableImage;
   const showExportMenu = isExportMenuOpen || (!suppressHoverMenu && isExportMenuHovered);
@@ -486,41 +430,6 @@ export function BenchmarkMatrix({
   function resetHeatmapPaletteToDefault() {
     applyHeatmapPreset(DEFAULT_HEATMAP_PRESET_KEY);
     setHeatmapAlpha(DEFAULT_HEATMAP_ALPHA);
-  }
-
-  function beginColumnResize(
-    event: ReactPointerEvent<HTMLElement>,
-    columnKey: string,
-    currentWidth: number,
-    minWidth: number,
-    maxWidth: number
-  ) {
-    event.preventDefault();
-    event.stopPropagation();
-
-    columnResizeStateRef.current = {
-      columnKey,
-      startX: event.clientX,
-      startWidth: currentWidth,
-      minWidth,
-      maxWidth
-    };
-
-    setResizingColumnKey(columnKey);
-    document.body.classList.add("column-resizing");
-    suppressHeaderInteractionsFor();
-  }
-
-  function suppressHeaderInteractionsFor(durationMs = 180) {
-    headerInteractionSuppressUntilRef.current = Math.max(
-      headerInteractionSuppressUntilRef.current,
-      Date.now() + durationMs
-    );
-  }
-
-  function shouldSuppressHeaderInteractions(): boolean {
-    if (resizingColumnKey !== null) return true;
-    return Date.now() < headerInteractionSuppressUntilRef.current;
   }
 
   function resetModelColumnDragState() {
@@ -783,321 +692,31 @@ export function BenchmarkMatrix({
     enqueueStateUpdate(() => setRowPresenceFilterModel(null));
   }, [modelColumns, rowPresenceFilterModel]);
 
-  const autoModelWidthMap = useMemo(() => {
-    const map = new Map<string, number>();
-    const valueWidthByModel = new Map<string, number>();
-
-    const measureTextWidth = (() => {
-      if (typeof document === "undefined") {
-        return (text: string) => text.length * 7;
-      }
-
-      const canvas = document.createElement("canvas");
-      const context = canvas.getContext("2d");
-
-      if (!context) {
-        return (text: string) => text.length * 7;
-      }
-
-      return (text: string, font: string) => {
-        context.font = font;
-        return context.measureText(text).width;
-      };
-    })();
-
-    const entriesByGroup = new Map<string, MatrixCellEntry[]>();
-    const preferredEntryByGroup = new Map<string, MatrixCellEntry>();
-    const higherIsBetterByGroup = new Map<string, boolean>();
-    const modelNameByGroup = new Map<string, string>();
-
-    coveragePrunedRows.forEach((row) => {
-      const groupKey = `${getMatrixGroupingKey(row, showDuplicateRows)}::${row.modelName}`;
-
-      const entry: MatrixCellEntry = {
-        valueRaw: row.valueRaw,
-        valueNum: row.valueNum,
-        valueNum2: row.valueNum2 ?? null,
-        valueNote: row.valueNote,
-        source: row.source,
-        benchTime: row.benchTime
-      };
-
-      if (!entriesByGroup.has(groupKey)) {
-        entriesByGroup.set(groupKey, []);
-        const rowHigherIsBetter = typeof row.higherIsBetter === "boolean"
-          ? row.higherIsBetter
-          : !isLowerBetterBenchmark(row.benchmarkName, row.benchmarkType);
-        higherIsBetterByGroup.set(groupKey, rowHigherIsBetter);
-      }
-      entriesByGroup.get(groupKey)!.push(entry);
-
-      const groupHigherIsBetter = higherIsBetterByGroup.get(groupKey) ?? true;
-      const preferred = preferredEntryByGroup.get(groupKey);
-      if (!preferred || (entry.valueNum !== null && (preferred.valueNum === null || (groupHigherIsBetter ? entry.valueNum > preferred.valueNum : entry.valueNum < preferred.valueNum)))) {
-        preferredEntryByGroup.set(groupKey, entry);
-      }
-
-      modelNameByGroup.set(groupKey, row.modelName);
-    });
-
-    entriesByGroup.forEach((entries, groupKey) => {
-      const modelName = modelNameByGroup.get(groupKey);
-      if (!modelName || entries.length === 0) return;
-
-      const preferredEntry = preferredEntryByGroup.get(groupKey) ?? entries[0]!;
-      const displayValue = getMatrixCellDisplayValue(
-        preferredEntry.valueNum,
-        preferredEntry.valueNum2,
-        preferredEntry.valueRaw,
-        preferredEntry.valueNote
-      );
-
-      const uniqueEntriesMap = new Map<string, MatrixCellEntry>();
-      entries.forEach((entry) => {
-        const dedupKey = getMatrixCellSourceValueDedupKey(entry);
-        if (!uniqueEntriesMap.has(dedupKey)) {
-          uniqueEntriesMap.set(dedupKey, entry);
-        }
-      });
-
-      const uniqueEntries = Array.from(uniqueEntriesMap.values());
-      const valueIdentitySet = new Set(uniqueEntries.map((entry) => getMatrixCellValueIdentity(entry)));
-      const noteText = (preferredEntry.valueNote ?? "").trim();
-      const hasMeaningfulMultipleValues = uniqueEntries.length > 1 && valueIdentitySet.size > 1;
-      const questionMarkPadding = hasMeaningfulMultipleValues || noteText.length > 0 ? 16 : 0;
-      const groupHigherIsBetter = higherIsBetterByGroup.get(groupKey) ?? true;
-      const sourceValueItem = hasMeaningfulMultipleValues
-        ? getSourceValueDisplayItem(uniqueEntries, activeSource, groupHigherIsBetter)
-        : null;
-      const sourceDeltaRaw = displaySourceValueDeltasInCells && hasMeaningfulMultipleValues
-        ? getSourceValueDeltaRaw(uniqueEntries, activeSource, groupHigherIsBetter)
-        : null;
-      const sourceDeltaPadding = sourceDeltaRaw !== null
-        ? Math.min(28, 9 + formatComparisonDeltaValue(sourceDeltaRaw).length * 3)
-        : 0;
-
-      const compactDisplayValue = displayValue.replace(/\s*\/\s*/g, "/");
-      const sourceValueWidth = displaySourceValuesInCells && sourceValueItem
-        ? measureTextWidth(sourceValueItem.displayValue, "600 14px Inter, ui-sans-serif, system-ui") + 18 + questionMarkPadding + sourceDeltaPadding
-        : 0;
-      const measured = Math.max(
-        measureTextWidth(compactDisplayValue, "600 14px Inter, ui-sans-serif, system-ui") + 18 + questionMarkPadding,
-        sourceValueWidth
-      );
-      const previous = valueWidthByModel.get(modelName) ?? 0;
-
-      if (measured > previous) {
-        valueWidthByModel.set(modelName, measured);
-      }
-    });
-
-    modelColumns.forEach((modelName) => {
-      const valueWidth = valueWidthByModel.get(modelName) ?? 0;
-      const autoWidth = clampColumnWidth(
-        Math.max(DEFAULT_MODEL_COLUMN_BASELINE_WIDTH, valueWidth),
-        MIN_MODEL_COLUMN_RESIZE_WIDTH,
-        MAX_MODEL_COLUMN_WIDTH
-      );
-
-      map.set(getModelColumnWidthKey(modelName), autoWidth);
-    });
-
-    return map;
-  }, [modelColumns, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, displaySourceValueDeltasInCells, activeSource]);
-
-  useEffect(() => {
-    if (!isColumnWidthLoaded) return;
-
-    const savedForSource = columnWidthBySourceRef.current[activeSource] ?? {};
-    const nextMap: Record<string, number> = {
-      ...savedForSource,
-      [CATEGORY_COLUMN_WIDTH_KEY]: clampColumnWidth(
-        savedForSource[CATEGORY_COLUMN_WIDTH_KEY] ?? DEFAULT_CATEGORY_COLUMN_WIDTH,
-        MIN_CATEGORY_COLUMN_WIDTH,
-        MAX_CATEGORY_COLUMN_WIDTH
-      ),
-      [BENCHMARK_COLUMN_WIDTH_KEY]: clampColumnWidth(
-        savedForSource[BENCHMARK_COLUMN_WIDTH_KEY] ?? DEFAULT_BENCHMARK_COLUMN_WIDTH,
-        MIN_BENCHMARK_COLUMN_WIDTH,
-        MAX_BENCHMARK_COLUMN_WIDTH
-      )
-    };
-
-    autoModelWidthMap.forEach((autoWidth, modelWidthKey) => {
-      const stored = savedForSource[modelWidthKey];
-      nextMap[modelWidthKey] = clampColumnWidth(
-        stored ?? autoWidth,
-        MIN_MODEL_COLUMN_RESIZE_WIDTH,
-        MAX_MODEL_COLUMN_WIDTH
-      );
-    });
-
-    setActiveColumnWidthMap((prev) => (areColumnWidthMapsEqual(prev, nextMap) ? prev : nextMap));
-  }, [activeSource, autoModelWidthMap, isColumnWidthLoaded]);
-
-  useEffect(() => {
-    if (!isColumnWidthLoaded) return;
-
-    const sourceKey = activeSourceRef.current;
-    const previousForSource = columnWidthBySourceRef.current[sourceKey] ?? {};
-
-    if (areColumnWidthMapsEqual(previousForSource, activeColumnWidthMap)) {
-      return;
-    }
-
-    columnWidthBySourceRef.current = {
-      ...columnWidthBySourceRef.current,
-      [sourceKey]: activeColumnWidthMap
-    };
-
-    if (columnWidthPersistTimeoutRef.current !== null) {
-      window.clearTimeout(columnWidthPersistTimeoutRef.current);
-    }
-
-    columnWidthPersistTimeoutRef.current = window.setTimeout(() => {
-      columnWidthPersistTimeoutRef.current = null;
-
-      saveColumnWidthBySource(columnWidthBySourceRef.current);
-    }, COLUMN_WIDTH_STORAGE_DEBOUNCE_MS);
-  }, [activeColumnWidthMap, isColumnWidthLoaded]);
-
-  useEffect(() => {
-    return () => {
-      if (columnWidthPersistTimeoutRef.current !== null) {
-        window.clearTimeout(columnWidthPersistTimeoutRef.current);
-        columnWidthPersistTimeoutRef.current = null;
-      }
-    };
-  }, []);
-
-  const categoryColumnWidth = useMemo(
-    () => clampColumnWidth(
-      activeColumnWidthMap[CATEGORY_COLUMN_WIDTH_KEY] ?? DEFAULT_CATEGORY_COLUMN_WIDTH,
-      MIN_CATEGORY_COLUMN_WIDTH,
-      MAX_CATEGORY_COLUMN_WIDTH
-    ),
-    [activeColumnWidthMap]
-  );
-
-  const benchmarkColumnWidth = useMemo(
-    () => clampColumnWidth(
-      activeColumnWidthMap[BENCHMARK_COLUMN_WIDTH_KEY] ?? DEFAULT_BENCHMARK_COLUMN_WIDTH,
-      MIN_BENCHMARK_COLUMN_WIDTH,
-      MAX_BENCHMARK_COLUMN_WIDTH
-    ),
-    [activeColumnWidthMap]
-  );
-
-  const sourceMatchedModelSet = useMemo(() => {
-    if (!sourceTabMatchLabel) return new Set<string>();
-
-    return new Set(
-      modelColumns.filter((modelName) => isSourceHeaderPrefixMatch(modelName, sourceTabMatchLabel))
-    );
-  }, [modelColumns, sourceTabMatchLabel]);
-
-  const sourceMatchedGroupBoundaryByModel = useMemo(() => {
-    const firstSet = new Set<string>();
-    const lastSet = new Set<string>();
-
-    modelColumns.forEach((modelName, index) => {
-      if (!sourceMatchedModelSet.has(modelName)) return;
-
-      const previousModel = modelColumns[index - 1];
-      const nextModel = modelColumns[index + 1];
-      const hasPreviousMatched = previousModel ? sourceMatchedModelSet.has(previousModel) : false;
-      const hasNextMatched = nextModel ? sourceMatchedModelSet.has(nextModel) : false;
-
-      if (!hasPreviousMatched) {
-        firstSet.add(modelName);
-      }
-
-      if (!hasNextMatched) {
-        lastSet.add(modelName);
-      }
-    });
-
-    return {
-      firstSet,
-      lastSet
-    };
-  }, [modelColumns, sourceMatchedModelSet]);
-
-  const columnWidthOverrideKeySet = useMemo(() => new Set(columnWidthOverrideKeys), [columnWidthOverrideKeys]);
-
-  const modelColumnMeta = useMemo(() => {
-    return modelColumns.map((modelName) => {
-      const providerIdentity = modelProviderMap.get(modelName);
-      const providerName = providerIdentity?.displayName ?? "Unknown";
-      const canonicalProviderName = providerIdentity?.canonicalName ?? providerName;
-      const columnWidthKey = getModelColumnWidthKey(modelName);
-      const autoWidth = autoModelWidthMap.get(columnWidthKey) ?? DEFAULT_MODEL_COLUMN_BASELINE_WIDTH;
-      const storedWidth = activeColumnWidthMap[columnWidthKey];
-      const isCompareSelected = compareModelSet.has(modelName);
-      const isCompareBaseline = compareBaselineModelName === modelName;
-      const hasManualWidthOverride = columnWidthOverrideKeySet.has(
-        getColumnWidthOverrideKey(activeSource, columnWidthKey)
-      );
-      const compareExpandedDefaultWidth = isCompareBaseline
-        ? COMPARE_BASELINE_DEFAULT_EXPANDED_WIDTH
-        : COMPARE_BADGE_DEFAULT_EXPANDED_WIDTH;
-      const shouldApplyCompareExpandedDefault = isCompareSelected && !hasManualWidthOverride;
-      const preferredWidth = shouldApplyCompareExpandedDefault
-        ? Math.max(storedWidth ?? autoWidth, compareExpandedDefaultWidth)
-        : (storedWidth ?? autoWidth);
-      const columnWidth = clampColumnWidth(
-        preferredWidth,
-        MIN_MODEL_COLUMN_RESIZE_WIDTH,
-        MAX_MODEL_COLUMN_WIDTH
-      );
-
-      return {
-        modelName,
-        columnWidthKey,
-        providerName,
-        color: resolveProviderBrandColor(canonicalProviderName, modelProviderBrandColorMap.get(modelName) ?? null),
-        columnWidth,
-        isSourceMatched: sourceMatchedModelSet.has(modelName),
-        isSourceMatchedFirst: sourceMatchedGroupBoundaryByModel.firstSet.has(modelName),
-        isSourceMatchedLast: sourceMatchedGroupBoundaryByModel.lastSet.has(modelName)
-      };
-    });
-  }, [
+  const {
+    categoryColumnWidth,
+    benchmarkColumnWidth,
+    modelColumnMeta,
+    hiddenResizeHandleKeys
+  } = useMatrixColumnWidths({
     modelColumns,
+    coveragePrunedRows,
+    showDuplicateRows,
+    displaySourceValuesInCells,
+    displaySourceValueDeltasInCells,
+    activeSource,
+    activeSourceRef,
+    activeColumnWidthMap,
+    setActiveColumnWidthMap,
+    columnWidthBySourceRef,
+    columnWidthPersistTimeoutRef,
+    columnWidthOverrideKeys,
+    isColumnWidthLoaded,
+    sourceTabMatchLabel,
     modelProviderMap,
     modelProviderBrandColorMap,
-    sourceMatchedModelSet,
-    sourceMatchedGroupBoundaryByModel,
-    columnWidthOverrideKeySet,
-    autoModelWidthMap,
-    activeColumnWidthMap,
     compareModelSet,
-    compareBaselineModelName,
-    activeSource
-  ]);
-
-  const hiddenResizeHandleKeys = useMemo(() => {
-    const hidden = new Set<string>();
-
-    modelColumnMeta.forEach((model, index) => {
-      if (model.isSourceMatchedFirst) {
-        if (index === 0) {
-          hidden.add(BENCHMARK_COLUMN_WIDTH_KEY);
-        } else {
-          const previousModel = modelColumnMeta[index - 1];
-          if (previousModel) {
-            hidden.add(previousModel.columnWidthKey);
-          }
-        }
-      }
-
-      if (model.isSourceMatchedLast) {
-        hidden.add(model.columnWidthKey);
-      }
-    });
-
-    return hidden;
-  }, [modelColumnMeta]);
+    compareBaselineModelName
+  });
 
   const matrixRows = useMemo(
     () => buildMatrixRows(baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource),
