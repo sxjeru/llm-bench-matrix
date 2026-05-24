@@ -2667,14 +2667,18 @@ export async function getBenchmarkPreviewValueOverlapStats(
   }
 
   const dedupeRule = await getModelDedupeRule();
-  const modelCanonicalKeys = Array.from(
-    new Set(
-      items
-        .flatMap((item) => item.cells.map((cell) => cell.modelName))
-        .map((modelName) => buildModelCanonicalKey(modelName, dedupeRule))
-        .filter(Boolean)
-    )
-  );
+  const canonicalKeyByModelName = new Map<string, string>();
+  for (const item of items) {
+    for (const cell of item.cells) {
+      if (!canonicalKeyByModelName.has(cell.modelName)) {
+        const key = buildModelCanonicalKey(cell.modelName, dedupeRule);
+        if (key) {
+          canonicalKeyByModelName.set(cell.modelName, key);
+        }
+      }
+    }
+  }
+  const modelCanonicalKeys = Array.from(new Set(canonicalKeyByModelName.values()));
 
   const [matchedModels, candidateBenchmarks, existingValues] = await Promise.all([
     modelCanonicalKeys.length > 0
@@ -2733,7 +2737,7 @@ export async function getBenchmarkPreviewValueOverlapStats(
     const previewCells = item.cells.filter((cell) => cell.rawValue.trim().length > 0);
     const resolvedPreviewCells = previewCells.map((cell) => ({
       rawValue: cell.rawValue,
-      modelId: modelIdByCanonicalKey.get(buildModelCanonicalKey(cell.modelName, dedupeRule)) ?? null
+      modelId: modelIdByCanonicalKey.get(canonicalKeyByModelName.get(cell.modelName) ?? "") ?? null
     }));
 
     item.candidateBenchmarkIds.forEach((candidateBenchmarkId) => {

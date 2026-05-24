@@ -45,7 +45,7 @@ function createJsonResponse(payload: unknown, ok = true, status = 200): Response
 
 function mockFetchSequence(...payloads: unknown[]) {
   const queuedPayloads = [...payloads];
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string"
       ? input
       : input instanceof URL
@@ -54,6 +54,10 @@ function mockFetchSequence(...payloads: unknown[]) {
 
     if (url === "/api/admin/benchmarks/preview-value-overlap") {
       return createJsonResponse({ stats: [] });
+    }
+
+    if (url.startsWith("/api/admin/benchmarks/value-overlap")) {
+      return createJsonResponse({ conflictCount: 0, overlapCount: 0 });
     }
 
     return createJsonResponse(queuedPayloads.shift() ?? {});
@@ -1043,7 +1047,7 @@ describe("AdminConsole text import", () => {
     };
 
     const queuedPayloads: unknown[] = [previewResponse];
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string"
         ? input
         : input instanceof URL
@@ -2268,17 +2272,17 @@ describe("AdminConsole merge interactions", () => {
     await user.click(screen.getByRole("button", { name: "合并实体" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
     });
 
-    const secondCall = fetchMock.mock.calls[1];
-    const secondPayload = JSON.parse(((secondCall?.[1] as RequestInit).body ?? "{}") as string) as {
+    const mergeCall = fetchMock.mock.calls[2];
+    const mergePayload = JSON.parse(((mergeCall?.[1] as RequestInit).body ?? "{}") as string) as {
       entityType?: string;
       targetBenchmarkName?: string;
     };
 
-    expect(secondPayload.entityType).toBe("benchmark");
-    expect(secondPayload.targetBenchmarkName).toBe("Bench-2-Renamed");
+    expect(mergePayload.entityType).toBe("benchmark");
+    expect(mergePayload.targetBenchmarkName).toBe("Bench-2-Renamed");
 
     const mergedRowSource = await screen.findByText(/Bench-1 \[Type-A\] \[11\]/);
     const mergedRow = mergedRowSource.closest("tr");
