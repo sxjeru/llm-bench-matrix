@@ -27,6 +27,14 @@ import {
 } from "lucide-react";
 import { resolveProviderBrandColor } from "@/lib/provider-config";
 import {
+  saveColumnWidthBySource,
+  saveModelOrderBySource,
+  saveModelSelectionBySource,
+  useExportPresetStorage,
+  useHeatmapPaletteStorage,
+  useMatrixPreferenceStorage
+} from "./benchmark-matrix/persistence";
+import {
   buildAllModelNames,
   buildAllRowsIndex,
   buildBaseBenchmarkKeySet,
@@ -70,14 +78,6 @@ import {
   type ExportPresetKey,
   SOURCE_ALL,
   MODALITY_OPTIONS,
-  SHOW_CATEGORY_STORAGE_KEY,
-  SHOW_DUPLICATE_STORAGE_KEY,
-  SHOW_SOURCE_VALUES_STORAGE_KEY,
-  MODEL_SELECTION_BY_SOURCE_STORAGE_KEY,
-  MODEL_ORDER_BY_SOURCE_STORAGE_KEY,
-  COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY,
-  HEATMAP_PALETTE_STORAGE_KEY,
-  EXPORT_PRESET_STORAGE_KEY,
   CATEGORY_COLUMN_WIDTH_KEY,
   BENCHMARK_COLUMN_WIDTH_KEY,
   DEFAULT_CATEGORY_COLUMN_WIDTH,
@@ -117,7 +117,6 @@ import {
   getModelColumnWidthKey,
   getColumnWidthOverrideKey,
   clampColumnWidth,
-  normalizeColumnWidthBySource,
   areColumnWidthMapsEqual,
   areStringArraysEqual,
   getSourceKey,
@@ -449,194 +448,25 @@ export function BenchmarkMatrix({
     };
   }, [isClientReady, sourceOptions, activeSource]);
 
-  useEffect(() => {
-    let nextSelectionBySource: Record<string, string[]> | null = null;
-
-    try {
-      const saved = window.localStorage.getItem(MODEL_SELECTION_BY_SOURCE_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as Record<string, unknown>;
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          const normalizedBySource: Record<string, string[]> = {};
-
-          Object.entries(parsed).forEach(([sourceKey, value]) => {
-            if (!Array.isArray(value)) return;
-
-            const normalized = Array.from(
-              new Set(value.filter((item): item is string => typeof item === "string"))
-            ).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
-
-            normalizedBySource[sourceKey] = normalized;
-          });
-
-          nextSelectionBySource = normalizedBySource;
-        }
-      }
-    } catch {
-      // ignore storage access errors gracefully
-    }
-
-    enqueueStateUpdate(() => {
-      if (nextSelectionBySource) {
-        modelSelectionBySourceRef.current = nextSelectionBySource;
-      }
-      setIsModelSelectionLoaded(true);
-    });
-  }, []);
-
-  useEffect(() => {
-    let nextModelOrderBySource: Record<string, string[]> | null = null;
-
-    try {
-      const saved = window.localStorage.getItem(MODEL_ORDER_BY_SOURCE_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as Record<string, unknown>;
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          const normalizedBySource: Record<string, string[]> = {};
-
-          Object.entries(parsed).forEach(([sourceKey, value]) => {
-            if (!Array.isArray(value)) return;
-
-            normalizedBySource[sourceKey] = Array.from(
-              new Set(value.filter((item): item is string => typeof item === "string"))
-            );
-          });
-
-          nextModelOrderBySource = normalizedBySource;
-        }
-      }
-    } catch {
-      // ignore storage access errors gracefully
-    }
-
-    enqueueStateUpdate(() => {
-      if (nextModelOrderBySource) {
-        setModelOrderBySource(nextModelOrderBySource);
-      }
-      setIsModelOrderLoaded(true);
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!isModelOrderLoaded) return;
-
-    try {
-      window.localStorage.setItem(MODEL_ORDER_BY_SOURCE_STORAGE_KEY, JSON.stringify(modelOrderBySource));
-    } catch {
-      // ignore storage access errors gracefully
-    }
-  }, [modelOrderBySource, isModelOrderLoaded]);
-
-  useEffect(() => {
-    let nextColumnWidthBySource: Record<string, Record<string, number>> | null = null;
-
-    try {
-      const saved = window.localStorage.getItem(COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as unknown;
-        nextColumnWidthBySource = normalizeColumnWidthBySource(parsed);
-      }
-    } catch {
-      // ignore storage access errors gracefully
-    }
-
-    enqueueStateUpdate(() => {
-      if (nextColumnWidthBySource) {
-        columnWidthBySourceRef.current = nextColumnWidthBySource;
-      }
-      setIsColumnWidthLoaded(true);
-    });
-  }, []);
-
-  useEffect(() => {
-    let nextShowCategory: boolean | null = null;
-
-    try {
-      const saved = window.localStorage.getItem(SHOW_CATEGORY_STORAGE_KEY);
-      if (saved === "0" || saved === "1") {
-        nextShowCategory = saved === "1";
-      }
-    } catch {
-      // ignore storage access errors gracefully
-    }
-
-    enqueueStateUpdate(() => {
-      if (nextShowCategory !== null) {
-        setShowCategory(nextShowCategory);
-      }
-      showCategoryLoadedRef.current = true;
-    });
-  }, []);
-
-  useEffect(() => {
-    let nextShowDuplicateRows: boolean | null = null;
-
-    try {
-      const saved = window.localStorage.getItem(SHOW_DUPLICATE_STORAGE_KEY);
-      if (saved === "0" || saved === "1") {
-        nextShowDuplicateRows = saved === "1";
-      }
-    } catch {
-      // ignore storage access errors gracefully
-    }
-
-    enqueueStateUpdate(() => {
-      if (nextShowDuplicateRows !== null) {
-        setShowDuplicateRows(nextShowDuplicateRows);
-      }
-      showDuplicateLoadedRef.current = true;
-    });
-  }, []);
-
-  useEffect(() => {
-    let nextShowSourceValues: boolean | null = null;
-
-    try {
-      const saved = window.localStorage.getItem(SHOW_SOURCE_VALUES_STORAGE_KEY);
-      if (saved === "0" || saved === "1") {
-        nextShowSourceValues = saved === "1";
-      }
-    } catch {
-      // ignore storage access errors gracefully
-    }
-
-    enqueueStateUpdate(() => {
-      if (nextShowSourceValues !== null) {
-        setShowSourceValues(nextShowSourceValues);
-      }
-      showSourceValuesLoadedRef.current = true;
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!showCategoryLoadedRef.current) return;
-
-    try {
-      window.localStorage.setItem(SHOW_CATEGORY_STORAGE_KEY, showCategory ? "1" : "0");
-    } catch {
-      // ignore storage access errors gracefully
-    }
-  }, [showCategory]);
-
-  useEffect(() => {
-    if (!showDuplicateLoadedRef.current) return;
-
-    try {
-      window.localStorage.setItem(SHOW_DUPLICATE_STORAGE_KEY, showDuplicateRows ? "1" : "0");
-    } catch {
-      // ignore storage access errors gracefully
-    }
-  }, [showDuplicateRows]);
-
-  useEffect(() => {
-    if (!showSourceValuesLoadedRef.current) return;
-
-    try {
-      window.localStorage.setItem(SHOW_SOURCE_VALUES_STORAGE_KEY, showSourceValues ? "1" : "0");
-    } catch {
-      // ignore storage access errors gracefully
-    }
-  }, [showSourceValues]);
+  useMatrixPreferenceStorage({
+    modelSelectionBySourceRef,
+    setIsModelSelectionLoaded,
+    modelOrderBySource,
+    setModelOrderBySource,
+    isModelOrderLoaded,
+    setIsModelOrderLoaded,
+    columnWidthBySourceRef,
+    setIsColumnWidthLoaded,
+    showCategoryLoadedRef,
+    showCategory,
+    setShowCategory,
+    showDuplicateLoadedRef,
+    showDuplicateRows,
+    setShowDuplicateRows,
+    showSourceValuesLoadedRef,
+    showSourceValues,
+    setShowSourceValues
+  });
 
   useEffect(() => {
     enqueueStateUpdate(() => {
@@ -676,99 +506,21 @@ export function BenchmarkMatrix({
     }
   }, [availableExportPresetKeys, exportPreset]);
 
-  useEffect(() => {
-    let nextExportPreset: ExportPresetKey | null = null;
+  useExportPresetStorage({
+    exportPresetLoadedRef,
+    exportPreset,
+    setExportPreset
+  });
 
-    try {
-      const saved = window.localStorage.getItem(EXPORT_PRESET_STORAGE_KEY);
-      if (saved && isExportPresetKey(saved)) {
-        nextExportPreset = saved;
-      }
-    } catch {
-      // ignore storage access errors gracefully
-    }
-
-    enqueueStateUpdate(() => {
-      if (nextExportPreset) {
-        setExportPreset(nextExportPreset);
-      }
-      exportPresetLoadedRef.current = true;
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!exportPresetLoadedRef.current) return;
-
-    try {
-      window.localStorage.setItem(EXPORT_PRESET_STORAGE_KEY, exportPreset);
-    } catch {
-      // ignore storage access errors gracefully
-    }
-  }, [exportPreset]);
-
-  useEffect(() => {
-    let nextHeatmapPalette: HeatmapPaletteHex | null = null;
-    let nextHeatmapAlpha = DEFAULT_HEATMAP_ALPHA;
-    let nextHeatmapPresetSelection: HeatmapPresetSelection | null = null;
-
-    try {
-      const saved = window.localStorage.getItem(HEATMAP_PALETTE_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as {
-          low?: unknown;
-          mid?: unknown;
-          high?: unknown;
-          alpha?: unknown;
-          preset?: unknown;
-        };
-
-        const nextPalette: HeatmapPaletteHex = {
-          low: normalizeHexColor(typeof parsed.low === "string" ? parsed.low : "", DEFAULT_HEATMAP_PALETTE_HEX.low),
-          mid: normalizeHexColor(typeof parsed.mid === "string" ? parsed.mid : "", DEFAULT_HEATMAP_PALETTE_HEX.mid),
-          high: normalizeHexColor(typeof parsed.high === "string" ? parsed.high : "", DEFAULT_HEATMAP_PALETTE_HEX.high)
-        };
-
-        const presetRaw = typeof parsed.preset === "string" ? parsed.preset : "";
-        const isKnownPreset = presetRaw in HEATMAP_PRESETS;
-        const nextPresetSelection: HeatmapPresetSelection = isKnownPreset
-          ? (presetRaw as HeatmapPresetKey)
-          : "custom";
-        const parsedAlpha = typeof parsed.alpha === "number" ? parsed.alpha : DEFAULT_HEATMAP_ALPHA;
-
-        nextHeatmapPalette = nextPalette;
-        nextHeatmapAlpha = clampHeatmapAlpha(parsedAlpha);
-        nextHeatmapPresetSelection = nextPresetSelection;
-      }
-    } catch {
-      // ignore storage access errors gracefully
-    }
-
-    enqueueStateUpdate(() => {
-      if (nextHeatmapPalette && nextHeatmapPresetSelection) {
-        setHeatmapPalette(nextHeatmapPalette);
-        setHeatmapAlpha(nextHeatmapAlpha);
-        setHeatmapPresetSelection(nextHeatmapPresetSelection);
-      }
-      heatmapPaletteLoadedRef.current = true;
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!heatmapPaletteLoadedRef.current) return;
-
-    try {
-      window.localStorage.setItem(
-        HEATMAP_PALETTE_STORAGE_KEY,
-        JSON.stringify({
-          ...heatmapPalette,
-          alpha: heatmapAlpha,
-          preset: heatmapPresetSelection
-        })
-      );
-    } catch {
-      // ignore storage access errors gracefully
-    }
-  }, [heatmapPalette, heatmapAlpha, heatmapPresetSelection]);
+  useHeatmapPaletteStorage({
+    heatmapPaletteLoadedRef,
+    heatmapPalette,
+    setHeatmapPalette,
+    heatmapAlpha,
+    setHeatmapAlpha,
+    heatmapPresetSelection,
+    setHeatmapPresetSelection
+  });
 
   useEffect(() => {
     if (!copyNotice) return;
@@ -1161,11 +913,7 @@ export function BenchmarkMatrix({
       modelSelectionBySourceRef.current = nextSelectionBySource;
     }
 
-    try {
-      window.localStorage.setItem(MODEL_SELECTION_BY_SOURCE_STORAGE_KEY, JSON.stringify(modelSelectionBySourceRef.current));
-    } catch {
-      // ignore storage access errors gracefully
-    }
+    saveModelSelectionBySource(modelSelectionBySourceRef.current);
   }, [selectedModels, activeSource, isModelSelectionLoaded, allModelNames, defaultSelectedModels, defaultAllSourceModels]);
 
   useEffect(() => {
@@ -1404,11 +1152,7 @@ export function BenchmarkMatrix({
     columnWidthPersistTimeoutRef.current = window.setTimeout(() => {
       columnWidthPersistTimeoutRef.current = null;
 
-      try {
-        window.localStorage.setItem(COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY, JSON.stringify(columnWidthBySourceRef.current));
-      } catch {
-        // ignore storage access errors gracefully
-      }
+      saveColumnWidthBySource(columnWidthBySourceRef.current);
     }, COLUMN_WIDTH_STORAGE_DEBOUNCE_MS);
   }, [activeColumnWidthMap, isColumnWidthLoaded]);
 
@@ -1726,11 +1470,7 @@ export function BenchmarkMatrix({
     delete nextSelectionBySource[sourceKey];
     modelSelectionBySourceRef.current = nextSelectionBySource;
 
-    try {
-      window.localStorage.setItem(MODEL_SELECTION_BY_SOURCE_STORAGE_KEY, JSON.stringify(nextSelectionBySource));
-    } catch {
-      // ignore storage access errors gracefully
-    }
+    saveModelSelectionBySource(nextSelectionBySource);
 
     setModelOrderBySource((prev) => {
       if (!(sourceKey in prev)) return prev;
@@ -1738,11 +1478,7 @@ export function BenchmarkMatrix({
       const next = { ...prev };
       delete next[sourceKey];
 
-      try {
-        window.localStorage.setItem(MODEL_ORDER_BY_SOURCE_STORAGE_KEY, JSON.stringify(next));
-      } catch {
-        // ignore storage access errors gracefully
-      }
+      saveModelOrderBySource(next);
 
       return next;
     });
