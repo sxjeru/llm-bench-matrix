@@ -2680,16 +2680,37 @@ export async function getBenchmarkPreviewValueOverlapStats(
   }
   const modelCanonicalKeys = Array.from(new Set(canonicalKeyByModelName.values()));
 
-  const [matchedModels, candidateBenchmarks, existingValues] = await Promise.all([
-    modelCanonicalKeys.length > 0
-      ? db
-          .select({
-            id: models.id,
-            canonicalKey: models.canonicalKey
-          })
-          .from(models)
-          .where(and(inArray(models.canonicalKey, modelCanonicalKeys), isNull(models.mergedIntoModelId)))
-      : Promise.resolve([]),
+  const matchedModels = modelCanonicalKeys.length > 0
+    ? await db
+        .select({
+          id: models.id,
+          canonicalKey: models.canonicalKey
+        })
+        .from(models)
+        .where(inArray(models.canonicalKey, modelCanonicalKeys))
+    : [];
+
+  const matchedModelIds = Array.from(new Set(matchedModels.map((model) => model.id)));
+
+  if (matchedModelIds.length === 0) {
+    return {
+      stats: items.flatMap((item) => {
+        const previewTotal = item.cells.filter((cell) => cell.rawValue.trim().length > 0).length;
+
+        return item.candidateBenchmarkIds.map((candidateBenchmarkId) => ({
+          previewBenchmarkKey: item.previewBenchmarkKey,
+          candidateBenchmarkId,
+          previewTotal,
+          modelOverlapCount: 0,
+          exactDuplicateCount: 0,
+          conflictCount: 0,
+          duplicateRate: 0
+        }));
+      })
+    };
+  }
+
+  const [candidateBenchmarks, existingValues] = await Promise.all([
     db
       .select({
         id: benchmarks.id,
@@ -2706,7 +2727,12 @@ export async function getBenchmarkPreviewValueOverlapStats(
         valueNum2: benchmarkValues.valueNum2
       })
       .from(benchmarkValues)
-      .where(inArray(benchmarkValues.benchmarkId, candidateBenchmarkIds))
+      .where(
+        and(
+          inArray(benchmarkValues.benchmarkId, candidateBenchmarkIds),
+          inArray(benchmarkValues.modelId, matchedModelIds)
+        )
+      )
   ]);
 
   const modelIdByCanonicalKey = new Map<string, number>();
