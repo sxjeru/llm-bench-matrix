@@ -7,8 +7,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
-  useState,
-  type PointerEvent as ReactPointerEvent
+  useState
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -27,12 +26,49 @@ import {
 } from "lucide-react";
 import { resolveProviderBrandColor } from "@/lib/provider-config";
 import {
-  type MatrixInputRow,
+  useMatrixColumnResize,
+  useMatrixColumnWidths,
+  type ColumnResizeState
+} from "./benchmark-matrix/column-width";
+import { useMatrixImageActions } from "./benchmark-matrix/image-actions";
+import {
+  saveModelOrderBySource,
+  saveModelSelectionBySource,
+  useExportPresetStorage,
+  useHeatmapPaletteStorage,
+  useMatrixPreferenceStorage
+} from "./benchmark-matrix/persistence";
+import {
+  buildAllModelNames,
+  buildAllRowsIndex,
+  buildBaseBenchmarkKeySet,
+  buildBaseModelNameSet,
+  buildCoverageMetaByModel,
+  buildCoveragePrunedRows,
+  buildCoveredModelsByGroupingKey,
+  buildDefaultAllSourceModels,
+  buildDefaultSelectedModels,
+  buildDisplayedCoverageMetaByModel,
+  buildFilteredRows,
+  buildHeaderUniqueCounts,
+  buildMatrixRows,
+  buildModelColumns,
+  buildModelCoveragePercentMap,
+  buildOverallHeatRange,
+  buildOverallScoreDisplayDecimalsByModel,
+  buildOverallSummaryByModel,
+  buildProviderAverageCoveragePercentMap,
+  buildProviderGroups,
+  buildRowsBySource,
+  buildRowsWithSourceMeta,
+  filterMatrixRowsByModalities,
+  filterMatrixRowsByPresence,
+  resolveBaseSourceRows,
+  sortMatrixRows
+} from "./benchmark-matrix/selectors";
+import { useMatrixSourceTabs } from "./benchmark-matrix/source-tabs";
+import {
   type MatrixCellEntry,
-  type MatrixCell,
-  type IndexedMatrixInputRow,
-  type MatrixRow,
-  type ProviderIdentity,
   type OverallModelSummary,
   type RowSortColumn,
   type RowSortMode,
@@ -43,33 +79,16 @@ import {
   type HeatmapPaletteRgb,
   type CompareDirection,
   type ExportPresetKey,
-  type OverallScoreDisplayItem,
   SOURCE_ALL,
   MODALITY_OPTIONS,
-  SHOW_CATEGORY_STORAGE_KEY,
-  SHOW_DUPLICATE_STORAGE_KEY,
-  SHOW_SOURCE_VALUES_STORAGE_KEY,
-  MODEL_SELECTION_BY_SOURCE_STORAGE_KEY,
-  MODEL_ORDER_BY_SOURCE_STORAGE_KEY,
-  COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY,
-  HEATMAP_PALETTE_STORAGE_KEY,
-  EXPORT_PRESET_STORAGE_KEY,
   CATEGORY_COLUMN_WIDTH_KEY,
   BENCHMARK_COLUMN_WIDTH_KEY,
-  DEFAULT_CATEGORY_COLUMN_WIDTH,
-  DEFAULT_BENCHMARK_COLUMN_WIDTH,
   MIN_CATEGORY_COLUMN_WIDTH,
   MAX_CATEGORY_COLUMN_WIDTH,
   MIN_BENCHMARK_COLUMN_WIDTH,
   MAX_BENCHMARK_COLUMN_WIDTH,
-  DEFAULT_MODEL_COLUMN_BASELINE_WIDTH,
   MIN_MODEL_COLUMN_RESIZE_WIDTH,
-  COMPARE_BASELINE_DEFAULT_EXPANDED_WIDTH,
-  COMPARE_BADGE_DEFAULT_EXPANDED_WIDTH,
   MAX_MODEL_COLUMN_WIDTH,
-  COLUMN_WIDTH_STORAGE_DEBOUNCE_MS,
-  ALL_SOURCE_ROW_COVERAGE_THRESHOLD,
-  ALL_SOURCE_COLUMN_COVERAGE_THRESHOLD,
   PROVIDER_MODEL_AUTO_COLLAPSE_LIMIT,
   HEATMAP_PRESETS,
   DEFAULT_HEATMAP_PRESET_KEY,
@@ -82,8 +101,6 @@ import {
   isLowerBetterBenchmark,
   getBenchmarkComparableScore,
   getSortedQuantile,
-  buildDenseRankMap,
-  buildOverallScoreDisplayDecimalsMap,
   getMatrixCellDisplayValue,
   formatTooltipTime,
   formatValueNumForDisplay,
@@ -93,123 +110,22 @@ import {
   hexToRgbTuple,
   rgbaFromHex,
   getHeatCellStyle,
-  compareSourceTabKeysByVersion,
-  compareModelNameByColumnOrder,
-  isSourceHeaderPrefixMatch,
-  getModelColumnWidthKey,
-  getColumnWidthOverrideKey,
-  clampColumnWidth,
-  normalizeColumnWidthBySource,
-  areColumnWidthMapsEqual,
   areStringArraysEqual,
-  getSourceKey,
-  getSourceLabel,
   sourceTabDisplayLabel,
-  pickPreferredBenchmarkDisplayName,
-  getMatrixGroupingKey,
-  normalizeModalityList,
   renderModalityBadge,
   normalizeMatchToken,
-  hasMeaningfulMatrixRawValue,
-  getMatrixCellValueIdentity,
-  getMatrixCellSourceValueDedupKey,
   isCompareModifierClick,
   isSelectionModifierClick,
   clampCompareIntensity,
   getCompareDeltaBadgeStyle,
   isExportPresetKey,
   canEncodeCanvasMimeType,
-  mimeTypeToFormat,
   buildSourceFrameShadows,
   buildCompareBaselineShadows,
-  renderElementToImageBlob,
-  withTimeout
+  enqueueStateUpdate,
+  getSourceValueDeltaRaw,
+  getSourceValueDisplayItem
 } from "./benchmark-matrix/index";
-
-function enqueueStateUpdate(callback: () => void) {
-  if (typeof queueMicrotask === "function") {
-    queueMicrotask(callback);
-    return;
-  }
-
-  window.setTimeout(callback, 0);
-}
-
-function applySourceMeta(row: MatrixInputRow): MatrixInputRow {
-  const sourceBenchmarkType = row.sourceBenchmarkType?.trim();
-
-  return {
-    ...row,
-    benchmarkType: sourceBenchmarkType || row.benchmarkType,
-    modalities: row.sourceModalities ?? row.modalities
-  };
-}
-
-type SourceValueDisplayItem = {
-  displayValue: string;
-};
-
-function getPreferredMatrixCellEntry(entries: MatrixCellEntry[], higherIsBetter = true): MatrixCellEntry | null {
-  if (entries.length === 0) return null;
-
-  return entries.reduce((preferred, entry) => {
-    if (entry.valueNum === null) return preferred;
-    if (preferred.valueNum === null) return entry;
-
-    const isBetter = higherIsBetter
-      ? entry.valueNum > preferred.valueNum
-      : entry.valueNum < preferred.valueNum;
-
-    return isBetter ? entry : preferred;
-  });
-}
-
-function getSourceValueEntry(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): MatrixCellEntry | null {
-  if (activeSource === SOURCE_ALL) {
-    return getPreferredMatrixCellEntry(entries, higherIsBetter);
-  }
-  const filtered = entries.filter((item) => getSourceKey(item.source) === activeSource);
-  return getPreferredMatrixCellEntry(filtered, higherIsBetter);
-}
-
-function getSourceValueDeltaRaw(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): number | null {
-  const sourceEntry = getSourceValueEntry(entries, activeSource, higherIsBetter);
-  const preferredEntry = getPreferredMatrixCellEntry(entries, higherIsBetter);
-
-  if (!sourceEntry || !preferredEntry || sourceEntry.valueNum === null || preferredEntry.valueNum === null) {
-    return null;
-  }
-
-  const delta = sourceEntry.valueNum - preferredEntry.valueNum;
-  if (!Number.isFinite(delta) || Math.abs(delta) < Number.EPSILON) {
-    return null;
-  }
-
-  return delta;
-}
-
-function getSourceValueDisplayItem(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): SourceValueDisplayItem | null {
-  const entry = getSourceValueEntry(entries, activeSource, higherIsBetter);
-
-  if (!entry) {
-    return null;
-  }
-
-  const displayValue = getMatrixCellDisplayValue(entry.valueNum, entry.valueNum2, entry.valueRaw, entry.valueNote);
-
-  return {
-    displayValue
-  };
-}
-
-const SOURCE_NEW_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
-
-function parseTimestampMs(value?: string | null): number | null {
-  if (!value) return null;
-
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? timestamp : null;
-}
 
 export function BenchmarkMatrix({
   rows,
@@ -232,13 +148,7 @@ export function BenchmarkMatrix({
   const [columnWidthOverrideKeys, setColumnWidthOverrideKeys] = useState<readonly string[]>([]);
   const columnWidthPersistTimeoutRef = useRef<number | null>(null);
   const heatmapPaletteLoadedRef = useRef(false);
-  const columnResizeStateRef = useRef<{
-    columnKey: string;
-    startX: number;
-    startWidth: number;
-    minWidth: number;
-    maxWidth: number;
-  } | null>(null);
+  const columnResizeStateRef = useRef<ColumnResizeState | null>(null);
   const headerInteractionSuppressUntilRef = useRef(0);
   const exportPresetLoadedRef = useRef(false);
   const pathname = usePathname();
@@ -300,122 +210,38 @@ export function BenchmarkMatrix({
     summary: OverallModelSummary;
   } | null>(null);
 
-  const sourceOptions = useMemo(() => {
-    const rowSourceKeys = rows.map((row) => getSourceKey(row.source));
-    const externalSourceKeys = allSourceOptions.map((source) => getSourceKey(source));
-    const keys = Array.from(new Set([...rowSourceKeys, ...externalSourceKeys])).sort(compareSourceTabKeysByVersion);
+  const {
+    sourceOptions,
+    activeSource,
+    activeSourceRef,
+    hasSourceData,
+    visibleSourceOptions,
+    overflowSourceOptions,
+    sourceNewStateByKey,
+    getSourceTabDisplayText,
+    getSourceTabTitle,
+    setSourceAndUrl
+  } = useMatrixSourceTabs({
+    rows,
+    allRows,
+    allSourceOptions,
+    isClientReady,
+    pathname,
+    router,
+    searchParams,
+    sourceNewReferenceTime,
+    overflowSourceKeys,
+    setOverflowSourceKeys,
+    isSourceOverflowMenuOpen,
+    setIsSourceOverflowMenuOpen,
+    sourceTabsViewportRef,
+    sourceTabsMeasureRef,
+    skipSelectionPersistenceOnceRef,
+    setRowSortState
+  });
 
-    return [
-      { key: SOURCE_ALL, label: "全部" },
-      ...keys.map((key) => ({ key, label: getSourceLabel(key) }))
-    ];
-  }, [rows, allSourceOptions]);
-
-  const [activeSource, setActiveSource] = useState(SOURCE_ALL);
-  const activeSourceRef = useRef(SOURCE_ALL);
-  const pendingSourceSyncRef = useRef<string | null>(null);
-  const hasSourceData = useMemo(
-    () => allSourceOptions.length > 0
-      || allRows.some((row) => row.source?.trim()),
-    [allSourceOptions, allRows]
-  );
   const displaySourceValuesInCells = showSourceValues && hasSourceData && activeSource !== SOURCE_ALL;
   const displaySourceValueDeltasInCells = displaySourceValuesInCells && showSourceValueDeltas;
-  const overflowSourceKeySet = useMemo(() => new Set(overflowSourceKeys), [overflowSourceKeys]);
-  const visibleSourceOptions = useMemo(
-    () => sourceOptions.filter((source) => !overflowSourceKeySet.has(source.key)),
-    [sourceOptions, overflowSourceKeySet]
-  );
-  const overflowSourceOptions = useMemo(
-    () => sourceOptions.filter((source) => overflowSourceKeySet.has(source.key)),
-    [sourceOptions, overflowSourceKeySet]
-  );
-  const getSourceTabDisplayText = (source: { key: string; label: string }) => (
-    source.key === SOURCE_ALL ? source.label : sourceTabDisplayLabel(source.key)
-  );
-  const sourceNewStateByKey = useMemo(() => {
-    if (sourceNewReferenceTime === null) return new Map<string, { updatedAtMs: number; isNew: boolean }>();
-
-    const latestTimeStrBySource = new Map<string, string>();
-
-    allRows.forEach((row) => {
-      const sourceKey = getSourceKey(row.source);
-      if (sourceKey === SOURCE_ALL) return;
-
-      const timeStr = row.updatedAt || row.benchTime;
-      if (!timeStr) return;
-
-      const prev = latestTimeStrBySource.get(sourceKey);
-      if (prev === undefined || timeStr > prev) {
-        latestTimeStrBySource.set(sourceKey, timeStr);
-      }
-    });
-
-    const latestUpdateBySource = new Map<string, number>();
-    latestTimeStrBySource.forEach((timeStr, sourceKey) => {
-      const parsed = parseTimestampMs(timeStr);
-      if (parsed !== null) {
-        latestUpdateBySource.set(sourceKey, parsed);
-      }
-    });
-
-    let latestSourceKey: string | null = null;
-    let latestSourceUpdatedAt = Number.NEGATIVE_INFINITY;
-    latestUpdateBySource.forEach((updatedAtMs, sourceKey) => {
-      if (updatedAtMs > latestSourceUpdatedAt) {
-        latestSourceKey = sourceKey;
-        latestSourceUpdatedAt = updatedAtMs;
-      }
-    });
-
-    const stateByKey = new Map<string, { updatedAtMs: number; isNew: boolean }>();
-    latestUpdateBySource.forEach((updatedAtMs, sourceKey) => {
-      const ageMs = sourceNewReferenceTime - updatedAtMs;
-      const isRecent = ageMs >= 0 && ageMs <= SOURCE_NEW_WINDOW_MS;
-      const isLatest = sourceKey === latestSourceKey;
-
-      if (isRecent || isLatest) {
-        stateByKey.set(sourceKey, { updatedAtMs, isNew: true });
-      }
-    });
-
-    return stateByKey;
-  }, [allRows, sourceNewReferenceTime]);
-  const getSourceTabTitle = (source: { key: string; label: string }) => {
-    const displayText = getSourceTabDisplayText(source);
-    const newState = sourceNewStateByKey.get(source.key);
-    if (!newState) return displayText;
-
-    return `${displayText} · 最近更新 ${formatTooltipTime(new Date(newState.updatedAtMs).toISOString())}`;
-  };
-
-  useEffect(() => {
-    const sourceFromUrl = searchParams.get("source");
-    const isKnown = sourceFromUrl
-      ? sourceOptions.some((item) => item.key === sourceFromUrl)
-      : false;
-    const nextSource = sourceFromUrl && isKnown ? sourceFromUrl : SOURCE_ALL;
-
-    const pendingSource = pendingSourceSyncRef.current;
-    if (pendingSource) {
-      if (nextSource === pendingSource) {
-        pendingSourceSyncRef.current = null;
-      } else {
-        return;
-      }
-    }
-
-    setActiveSource((prev) => {
-      if (prev === nextSource) return prev;
-      skipSelectionPersistenceOnceRef.current = true;
-      return nextSource;
-    });
-
-    if (activeSourceRef.current !== nextSource) {
-      const nextMode: RowSortMode = nextSource === SOURCE_ALL ? "data" : "source";
-      setRowSortState((prev) => (prev.mode === nextMode ? prev : { ...prev, mode: nextMode }));
-    }
-  }, [searchParams, sourceOptions]);
 
   useEffect(() => {
     enqueueStateUpdate(() => setIsClientReady(true));
@@ -427,334 +253,27 @@ export function BenchmarkMatrix({
 
   useEffect(() => {
     activeSourceRef.current = activeSource;
-  }, [activeSource]);
+  }, [activeSource, activeSourceRef]);
 
-  useLayoutEffect(() => {
-    if (!isClientReady) return;
-
-    const allKeys = sourceOptions.map((item) => item.key);
-
-    const computeOverflowKeys = () => {
-      const viewportElement = sourceTabsViewportRef.current;
-      const measureElement = sourceTabsMeasureRef.current;
-
-      if (!viewportElement || !measureElement || allKeys.length === 0) {
-        setOverflowSourceKeys((prev) => (prev.length > 0 ? [] : prev));
-        return;
-      }
-
-      const availableWidth = viewportElement.clientWidth;
-      const widthByKey = new Map<string, number>();
-
-      measureElement.querySelectorAll<HTMLElement>("[data-source-tab-measure='item']").forEach((node) => {
-        const key = node.dataset.sourceTabMeasureKey;
-        if (!key) return;
-
-        const width = Math.ceil(node.getBoundingClientRect().width);
-        if (width > 0) {
-          widthByKey.set(key, width);
-        }
-      });
-
-      const overflowMeasureNode = measureElement.querySelector<HTMLElement>("[data-source-tab-measure='more']");
-      const overflowButtonWidth = Math.ceil(overflowMeasureNode?.getBoundingClientRect().width ?? 72);
-
-      const hasValidMeasurements =
-        availableWidth > 0 &&
-        allKeys.every((key) => (widthByKey.get(key) ?? 0) > 0);
-
-      if (!hasValidMeasurements) {
-        setOverflowSourceKeys((prev) => (prev.length > 0 ? [] : prev));
-        return;
-      }
-
-      const totalWidth = allKeys.reduce((sum, key) => sum + (widthByKey.get(key) ?? 0), 0);
-      if (totalWidth <= availableWidth) {
-        setOverflowSourceKeys((prev) => (prev.length > 0 ? [] : prev));
-        return;
-      }
-
-      const widthLimit = Math.max(availableWidth - overflowButtonWidth - 8, 0);
-      if (widthLimit <= 0) {
-        const fallbackVisibleKeys = allKeys.includes(activeSource) ? [activeSource] : allKeys.slice(0, 1);
-        const fallbackVisibleSet = new Set(fallbackVisibleKeys);
-        const nextOverflowKeys = allKeys.filter((key) => !fallbackVisibleSet.has(key));
-
-        setOverflowSourceKeys((prev) => (areStringArraysEqual(prev, nextOverflowKeys) ? prev : nextOverflowKeys));
-        return;
-      }
-
-      const visibleKeys: string[] = [];
-      let usedWidth = 0;
-
-      for (const key of allKeys) {
-        const width = widthByKey.get(key) ?? 0;
-        if (usedWidth + width <= widthLimit || visibleKeys.length === 0) {
-          visibleKeys.push(key);
-          usedWidth += width;
-        } else {
-          break;
-        }
-      }
-
-      const forceIncludeKey = (key: string, mandatory: boolean) => {
-        if (!allKeys.includes(key) || visibleKeys.includes(key)) return;
-
-        const width = widthByKey.get(key) ?? 0;
-
-        while (visibleKeys.length > 0 && usedWidth + width > widthLimit) {
-          const removed = visibleKeys.pop();
-          if (!removed) break;
-          usedWidth -= widthByKey.get(removed) ?? 0;
-        }
-
-        if (usedWidth + width <= widthLimit || visibleKeys.length === 0) {
-          visibleKeys.push(key);
-          usedWidth += width;
-          return;
-        }
-
-        if (mandatory) {
-          visibleKeys.splice(0, visibleKeys.length, key);
-          usedWidth = width;
-        }
-      };
-
-      forceIncludeKey(activeSource, true);
-      if (activeSource !== SOURCE_ALL) {
-        forceIncludeKey(SOURCE_ALL, false);
-      }
-
-      const orderMap = new Map(allKeys.map((key, index) => [key, index]));
-      const visibleSet = new Set(
-        Array.from(new Set(visibleKeys)).sort(
-          (left, right) => (orderMap.get(left) ?? 0) - (orderMap.get(right) ?? 0)
-        )
-      );
-
-      const nextOverflowKeys = allKeys.filter((key) => !visibleSet.has(key));
-
-      setOverflowSourceKeys((prev) => (areStringArraysEqual(prev, nextOverflowKeys) ? prev : nextOverflowKeys));
-      if (nextOverflowKeys.length === 0) {
-        setIsSourceOverflowMenuOpen(false);
-      }
-    };
-
-    computeOverflowKeys();
-
-    let observer: ResizeObserver | null = null;
-    const handleWindowResize = () => {
-      computeOverflowKeys();
-    };
-
-    if (typeof ResizeObserver !== "undefined") {
-      observer = new ResizeObserver(() => {
-        computeOverflowKeys();
-      });
-
-      if (sourceTabsViewportRef.current) {
-        observer.observe(sourceTabsViewportRef.current);
-      }
-    } else {
-      window.addEventListener("resize", handleWindowResize);
-    }
-
-    return () => {
-      observer?.disconnect();
-      if (!observer) {
-        window.removeEventListener("resize", handleWindowResize);
-      }
-    };
-  }, [isClientReady, sourceOptions, activeSource]);
-
-  useEffect(() => {
-    let nextSelectionBySource: Record<string, string[]> | null = null;
-
-    try {
-      const saved = window.localStorage.getItem(MODEL_SELECTION_BY_SOURCE_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as Record<string, unknown>;
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          const normalizedBySource: Record<string, string[]> = {};
-
-          Object.entries(parsed).forEach(([sourceKey, value]) => {
-            if (!Array.isArray(value)) return;
-
-            const normalized = Array.from(
-              new Set(value.filter((item): item is string => typeof item === "string"))
-            ).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
-
-            normalizedBySource[sourceKey] = normalized;
-          });
-
-          nextSelectionBySource = normalizedBySource;
-        }
-      }
-    } catch {
-      // ignore storage access errors gracefully
-    }
-
-    enqueueStateUpdate(() => {
-      if (nextSelectionBySource) {
-        modelSelectionBySourceRef.current = nextSelectionBySource;
-      }
-      setIsModelSelectionLoaded(true);
-    });
-  }, []);
-
-  useEffect(() => {
-    let nextModelOrderBySource: Record<string, string[]> | null = null;
-
-    try {
-      const saved = window.localStorage.getItem(MODEL_ORDER_BY_SOURCE_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as Record<string, unknown>;
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          const normalizedBySource: Record<string, string[]> = {};
-
-          Object.entries(parsed).forEach(([sourceKey, value]) => {
-            if (!Array.isArray(value)) return;
-
-            normalizedBySource[sourceKey] = Array.from(
-              new Set(value.filter((item): item is string => typeof item === "string"))
-            );
-          });
-
-          nextModelOrderBySource = normalizedBySource;
-        }
-      }
-    } catch {
-      // ignore storage access errors gracefully
-    }
-
-    enqueueStateUpdate(() => {
-      if (nextModelOrderBySource) {
-        setModelOrderBySource(nextModelOrderBySource);
-      }
-      setIsModelOrderLoaded(true);
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!isModelOrderLoaded) return;
-
-    try {
-      window.localStorage.setItem(MODEL_ORDER_BY_SOURCE_STORAGE_KEY, JSON.stringify(modelOrderBySource));
-    } catch {
-      // ignore storage access errors gracefully
-    }
-  }, [modelOrderBySource, isModelOrderLoaded]);
-
-  useEffect(() => {
-    let nextColumnWidthBySource: Record<string, Record<string, number>> | null = null;
-
-    try {
-      const saved = window.localStorage.getItem(COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as unknown;
-        nextColumnWidthBySource = normalizeColumnWidthBySource(parsed);
-      }
-    } catch {
-      // ignore storage access errors gracefully
-    }
-
-    enqueueStateUpdate(() => {
-      if (nextColumnWidthBySource) {
-        columnWidthBySourceRef.current = nextColumnWidthBySource;
-      }
-      setIsColumnWidthLoaded(true);
-    });
-  }, []);
-
-  useEffect(() => {
-    let nextShowCategory: boolean | null = null;
-
-    try {
-      const saved = window.localStorage.getItem(SHOW_CATEGORY_STORAGE_KEY);
-      if (saved === "0" || saved === "1") {
-        nextShowCategory = saved === "1";
-      }
-    } catch {
-      // ignore storage access errors gracefully
-    }
-
-    enqueueStateUpdate(() => {
-      if (nextShowCategory !== null) {
-        setShowCategory(nextShowCategory);
-      }
-      showCategoryLoadedRef.current = true;
-    });
-  }, []);
-
-  useEffect(() => {
-    let nextShowDuplicateRows: boolean | null = null;
-
-    try {
-      const saved = window.localStorage.getItem(SHOW_DUPLICATE_STORAGE_KEY);
-      if (saved === "0" || saved === "1") {
-        nextShowDuplicateRows = saved === "1";
-      }
-    } catch {
-      // ignore storage access errors gracefully
-    }
-
-    enqueueStateUpdate(() => {
-      if (nextShowDuplicateRows !== null) {
-        setShowDuplicateRows(nextShowDuplicateRows);
-      }
-      showDuplicateLoadedRef.current = true;
-    });
-  }, []);
-
-  useEffect(() => {
-    let nextShowSourceValues: boolean | null = null;
-
-    try {
-      const saved = window.localStorage.getItem(SHOW_SOURCE_VALUES_STORAGE_KEY);
-      if (saved === "0" || saved === "1") {
-        nextShowSourceValues = saved === "1";
-      }
-    } catch {
-      // ignore storage access errors gracefully
-    }
-
-    enqueueStateUpdate(() => {
-      if (nextShowSourceValues !== null) {
-        setShowSourceValues(nextShowSourceValues);
-      }
-      showSourceValuesLoadedRef.current = true;
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!showCategoryLoadedRef.current) return;
-
-    try {
-      window.localStorage.setItem(SHOW_CATEGORY_STORAGE_KEY, showCategory ? "1" : "0");
-    } catch {
-      // ignore storage access errors gracefully
-    }
-  }, [showCategory]);
-
-  useEffect(() => {
-    if (!showDuplicateLoadedRef.current) return;
-
-    try {
-      window.localStorage.setItem(SHOW_DUPLICATE_STORAGE_KEY, showDuplicateRows ? "1" : "0");
-    } catch {
-      // ignore storage access errors gracefully
-    }
-  }, [showDuplicateRows]);
-
-  useEffect(() => {
-    if (!showSourceValuesLoadedRef.current) return;
-
-    try {
-      window.localStorage.setItem(SHOW_SOURCE_VALUES_STORAGE_KEY, showSourceValues ? "1" : "0");
-    } catch {
-      // ignore storage access errors gracefully
-    }
-  }, [showSourceValues]);
+  useMatrixPreferenceStorage({
+    modelSelectionBySourceRef,
+    setIsModelSelectionLoaded,
+    modelOrderBySource,
+    setModelOrderBySource,
+    isModelOrderLoaded,
+    setIsModelOrderLoaded,
+    columnWidthBySourceRef,
+    setIsColumnWidthLoaded,
+    showCategoryLoadedRef,
+    showCategory,
+    setShowCategory,
+    showDuplicateLoadedRef,
+    showDuplicateRows,
+    setShowDuplicateRows,
+    showSourceValuesLoadedRef,
+    showSourceValues,
+    setShowSourceValues
+  });
 
   useEffect(() => {
     enqueueStateUpdate(() => {
@@ -794,99 +313,21 @@ export function BenchmarkMatrix({
     }
   }, [availableExportPresetKeys, exportPreset]);
 
-  useEffect(() => {
-    let nextExportPreset: ExportPresetKey | null = null;
+  useExportPresetStorage({
+    exportPresetLoadedRef,
+    exportPreset,
+    setExportPreset
+  });
 
-    try {
-      const saved = window.localStorage.getItem(EXPORT_PRESET_STORAGE_KEY);
-      if (saved && isExportPresetKey(saved)) {
-        nextExportPreset = saved;
-      }
-    } catch {
-      // ignore storage access errors gracefully
-    }
-
-    enqueueStateUpdate(() => {
-      if (nextExportPreset) {
-        setExportPreset(nextExportPreset);
-      }
-      exportPresetLoadedRef.current = true;
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!exportPresetLoadedRef.current) return;
-
-    try {
-      window.localStorage.setItem(EXPORT_PRESET_STORAGE_KEY, exportPreset);
-    } catch {
-      // ignore storage access errors gracefully
-    }
-  }, [exportPreset]);
-
-  useEffect(() => {
-    let nextHeatmapPalette: HeatmapPaletteHex | null = null;
-    let nextHeatmapAlpha = DEFAULT_HEATMAP_ALPHA;
-    let nextHeatmapPresetSelection: HeatmapPresetSelection | null = null;
-
-    try {
-      const saved = window.localStorage.getItem(HEATMAP_PALETTE_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as {
-          low?: unknown;
-          mid?: unknown;
-          high?: unknown;
-          alpha?: unknown;
-          preset?: unknown;
-        };
-
-        const nextPalette: HeatmapPaletteHex = {
-          low: normalizeHexColor(typeof parsed.low === "string" ? parsed.low : "", DEFAULT_HEATMAP_PALETTE_HEX.low),
-          mid: normalizeHexColor(typeof parsed.mid === "string" ? parsed.mid : "", DEFAULT_HEATMAP_PALETTE_HEX.mid),
-          high: normalizeHexColor(typeof parsed.high === "string" ? parsed.high : "", DEFAULT_HEATMAP_PALETTE_HEX.high)
-        };
-
-        const presetRaw = typeof parsed.preset === "string" ? parsed.preset : "";
-        const isKnownPreset = presetRaw in HEATMAP_PRESETS;
-        const nextPresetSelection: HeatmapPresetSelection = isKnownPreset
-          ? (presetRaw as HeatmapPresetKey)
-          : "custom";
-        const parsedAlpha = typeof parsed.alpha === "number" ? parsed.alpha : DEFAULT_HEATMAP_ALPHA;
-
-        nextHeatmapPalette = nextPalette;
-        nextHeatmapAlpha = clampHeatmapAlpha(parsedAlpha);
-        nextHeatmapPresetSelection = nextPresetSelection;
-      }
-    } catch {
-      // ignore storage access errors gracefully
-    }
-
-    enqueueStateUpdate(() => {
-      if (nextHeatmapPalette && nextHeatmapPresetSelection) {
-        setHeatmapPalette(nextHeatmapPalette);
-        setHeatmapAlpha(nextHeatmapAlpha);
-        setHeatmapPresetSelection(nextHeatmapPresetSelection);
-      }
-      heatmapPaletteLoadedRef.current = true;
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!heatmapPaletteLoadedRef.current) return;
-
-    try {
-      window.localStorage.setItem(
-        HEATMAP_PALETTE_STORAGE_KEY,
-        JSON.stringify({
-          ...heatmapPalette,
-          alpha: heatmapAlpha,
-          preset: heatmapPresetSelection
-        })
-      );
-    } catch {
-      // ignore storage access errors gracefully
-    }
-  }, [heatmapPalette, heatmapAlpha, heatmapPresetSelection]);
+  useHeatmapPaletteStorage({
+    heatmapPaletteLoadedRef,
+    heatmapPalette,
+    setHeatmapPalette,
+    heatmapAlpha,
+    setHeatmapAlpha,
+    heatmapPresetSelection,
+    setHeatmapPresetSelection
+  });
 
   useEffect(() => {
     if (!copyNotice) return;
@@ -937,56 +378,30 @@ export function BenchmarkMatrix({
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, [isSourceOverflowMenuOpen]);
 
-  useEffect(() => {
-    const handlePointerMove = (event: PointerEvent) => {
-      const resizeState = columnResizeStateRef.current;
-      if (!resizeState) return;
-
-      const overrideKey = getColumnWidthOverrideKey(activeSourceRef.current, resizeState.columnKey);
-      setColumnWidthOverrideKeys((prev) => (prev.includes(overrideKey) ? prev : [...prev, overrideKey]));
-
-      const nextWidth = clampColumnWidth(
-        resizeState.startWidth + (event.clientX - resizeState.startX),
-        resizeState.minWidth,
-        resizeState.maxWidth
-      );
-
-      setActiveColumnWidthMap((prev) => {
-        if (prev[resizeState.columnKey] === nextWidth) {
-          return prev;
-        }
-        return {
-          ...prev,
-          [resizeState.columnKey]: nextWidth
-        };
-      });
-    };
-
-    const stopResize = () => {
-      if (!columnResizeStateRef.current) return;
-      headerInteractionSuppressUntilRef.current = Math.max(
-        headerInteractionSuppressUntilRef.current,
-        Date.now() + 180
-      );
-      columnResizeStateRef.current = null;
-      setResizingColumnKey(null);
-      document.body.classList.remove("column-resizing");
-    };
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", stopResize);
-    window.addEventListener("pointercancel", stopResize);
-
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", stopResize);
-      window.removeEventListener("pointercancel", stopResize);
-      document.body.classList.remove("column-resizing");
-    };
-  }, []);
+  const { beginColumnResize, shouldSuppressHeaderInteractions } = useMatrixColumnResize({
+    activeSourceRef,
+    columnResizeStateRef,
+    headerInteractionSuppressUntilRef,
+    resizingColumnKey,
+    setActiveColumnWidthMap,
+    setColumnWidthOverrideKeys,
+    setResizingColumnKey
+  });
 
   const isImageActionBusy = isDownloadingTableImage || isCopyingTableImage;
   const showExportMenu = isExportMenuOpen || (!suppressHoverMenu && isExportMenuHovered);
+  const { copyTableImageToClipboard, downloadTableImage } = useMatrixImageActions({
+    tableViewportRef,
+    exportPreset,
+    isImageActionBusy,
+    setIsExportMenuOpen,
+    setSuppressHoverMenu,
+    setIsCopyingTableImage,
+    setIsDownloadingTableImage,
+    setIsExportCaptureMode,
+    setCopyNotice,
+    setCopyNoticeVisible
+  });
   const heatmapPaletteRgb = useMemo<HeatmapPaletteRgb>(() => {
     return {
       low: hexToRgbTuple(heatmapPalette.low),
@@ -1027,41 +442,6 @@ export function BenchmarkMatrix({
     setHeatmapAlpha(DEFAULT_HEATMAP_ALPHA);
   }
 
-  function beginColumnResize(
-    event: ReactPointerEvent<HTMLElement>,
-    columnKey: string,
-    currentWidth: number,
-    minWidth: number,
-    maxWidth: number
-  ) {
-    event.preventDefault();
-    event.stopPropagation();
-
-    columnResizeStateRef.current = {
-      columnKey,
-      startX: event.clientX,
-      startWidth: currentWidth,
-      minWidth,
-      maxWidth
-    };
-
-    setResizingColumnKey(columnKey);
-    document.body.classList.add("column-resizing");
-    suppressHeaderInteractionsFor();
-  }
-
-  function suppressHeaderInteractionsFor(durationMs = 180) {
-    headerInteractionSuppressUntilRef.current = Math.max(
-      headerInteractionSuppressUntilRef.current,
-      Date.now() + durationMs
-    );
-  }
-
-  function shouldSuppressHeaderInteractions(): boolean {
-    if (resizingColumnKey !== null) return true;
-    return Date.now() < headerInteractionSuppressUntilRef.current;
-  }
-
   function resetModelColumnDragState() {
     setDraggingModelName(null);
     setDragOverModelName(null);
@@ -1097,58 +477,18 @@ export function BenchmarkMatrix({
     });
   }
 
-  function setSourceAndUrl(nextSource: string) {
-    setIsSourceOverflowMenuOpen(false);
+  const scopedRowsBySource = useMemo(
+    () => buildRowsBySource(rows),
+    [rows]
+  );
 
-    if (activeSourceRef.current !== nextSource) {
-      skipSelectionPersistenceOnceRef.current = true;
-      pendingSourceSyncRef.current = nextSource;
-      setActiveSource(nextSource);
-      const nextMode: RowSortMode = nextSource === SOURCE_ALL ? "data" : "source";
-      setRowSortState((prev) => (prev.mode === nextMode ? prev : { ...prev, mode: nextMode }));
-    }
-
-    const params = new URLSearchParams(searchParams.toString());
-    if (nextSource === SOURCE_ALL) {
-      params.delete("source");
-    } else {
-      params.set("source", nextSource);
-    }
-
-    const query = params.toString();
-    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
-  }
-
-  const scopedRowsBySource = useMemo(() => {
-    const map = new Map<string, MatrixInputRow[]>();
-
-    rows.forEach((row) => {
-      const sourceKey = getSourceKey(row.source);
-      if (!map.has(sourceKey)) {
-        map.set(sourceKey, []);
-      }
-      map.get(sourceKey)!.push(applySourceMeta(row));
-    });
-
-    return map;
-  }, [rows]);
-
-  const allRowsBySource = useMemo(() => {
-    const map = new Map<string, MatrixInputRow[]>();
-
-    allRows.forEach((row) => {
-      const sourceKey = getSourceKey(row.source);
-      if (!map.has(sourceKey)) {
-        map.set(sourceKey, []);
-      }
-      map.get(sourceKey)!.push(applySourceMeta(row));
-    });
-
-    return map;
-  }, [allRows]);
+  const allRowsBySource = useMemo(
+    () => buildRowsBySource(allRows),
+    [allRows]
+  );
 
   const allRowsWithSourceMeta = useMemo(
-    () => allRows.map((row) => applySourceMeta(row)),
+    () => buildRowsWithSourceMeta(allRows),
     [allRows]
   );
 
@@ -1157,106 +497,30 @@ export function BenchmarkMatrix({
     [allRows, allRowsWithSourceMeta, activeSource]
   );
 
-  const allRowsIndex = useMemo(() => {
-    const modelProviderMap = new Map<string, ProviderIdentity>();
-    const modelProviderBrandColorMap = new Map<string, string | null>();
-    const providerDisplayNameBrandColorMap = new Map<string, string | null>();
-    const rowsByModel = new Map<string, IndexedMatrixInputRow[]>();
-    const rowsByGroupingKey = new Map<string, IndexedMatrixInputRow[]>();
+  const allRowsIndex = useMemo(
+    () => buildAllRowsIndex(indexedSourceRows, showDuplicateRows),
+    [indexedSourceRows, showDuplicateRows]
+  );
 
-    indexedSourceRows.forEach((row) => {
-      if (!modelProviderMap.has(row.modelName)) {
-        const displayName = row.providerDisplayName?.trim() || row.providerName || "Unknown";
-        modelProviderMap.set(row.modelName, {
-          canonicalName: row.providerName || "Unknown",
-          displayName
-        });
-        modelProviderBrandColorMap.set(row.modelName, row.providerBrandColor ?? null);
+  const coveredModelsByGroupingKey = useMemo(
+    () => buildCoveredModelsByGroupingKey(allRowsIndex),
+    [allRowsIndex]
+  );
 
-        if (!providerDisplayNameBrandColorMap.has(displayName)) {
-          providerDisplayNameBrandColorMap.set(displayName, row.providerBrandColor ?? null);
-        }
-      }
+  const baseSourceRows = useMemo(
+    () => resolveBaseSourceRows(allRows, rows, scopedRowsBySource, allRowsBySource, activeSource, showDuplicateRows),
+    [allRows, rows, scopedRowsBySource, allRowsBySource, activeSource, showDuplicateRows]
+  );
 
-      const indexed: IndexedMatrixInputRow = {
-        row,
-        matrixKey: getMatrixGroupingKey(row, showDuplicateRows)
-      };
+  const baseBenchmarkKeySet = useMemo(
+    () => buildBaseBenchmarkKeySet(baseSourceRows, showDuplicateRows),
+    [baseSourceRows, showDuplicateRows]
+  );
 
-      if (!rowsByModel.has(row.modelName)) {
-        rowsByModel.set(row.modelName, []);
-      }
-      rowsByModel.get(row.modelName)!.push(indexed);
-
-      if (!rowsByGroupingKey.has(indexed.matrixKey)) {
-        rowsByGroupingKey.set(indexed.matrixKey, []);
-      }
-      rowsByGroupingKey.get(indexed.matrixKey)!.push(indexed);
-    });
-
-    return {
-      modelProviderMap,
-      modelProviderBrandColorMap,
-      providerDisplayNameBrandColorMap,
-      rowsByModel,
-      rowsByGroupingKey
-    };
-  }, [indexedSourceRows, showDuplicateRows]);
-
-  const coveredModelsByGroupingKey = useMemo(() => {
-    const coveredMap = new Map<string, Set<string>>();
-
-    allRowsIndex.rowsByGroupingKey.forEach((groupedRows, matrixKey) => {
-      const coveredModels = new Set<string>();
-
-      groupedRows.forEach(({ row }) => {
-        if (!hasMeaningfulMatrixRawValue(row.valueRaw)) return;
-        coveredModels.add(row.modelName);
-      });
-
-      if (coveredModels.size > 0) {
-        coveredMap.set(matrixKey, coveredModels);
-      }
-    });
-
-    return coveredMap;
-  }, [allRowsIndex]);
-
-  const baseSourceRows = useMemo(() => {
-    if (activeSource === SOURCE_ALL) {
-      if (rows.length === 0) {
-        return allRows;
-      }
-
-      const sourceCount = new Set(rows.map((row) => getSourceKey(row.source))).size;
-      const benchmarkCount = new Set(rows.map((row) => getMatrixGroupingKey(row, showDuplicateRows))).size;
-
-      if (sourceCount === 1 && benchmarkCount <= 1) {
-        return allRows;
-      }
-
-      return rows;
-    }
-
-    const sourceScopedRows = scopedRowsBySource.get(activeSource) ?? allRowsBySource.get(activeSource) ?? [];
-    if (sourceScopedRows.length > 0) {
-      return sourceScopedRows;
-    }
-
-    return rows;
-  }, [allRows, rows, scopedRowsBySource, allRowsBySource, activeSource, showDuplicateRows]);
-
-  const baseBenchmarkKeySet = useMemo(() => {
-    const keys = new Set<string>();
-    baseSourceRows.forEach((row) => {
-      keys.add(getMatrixGroupingKey(row, showDuplicateRows));
-    });
-    return keys;
-  }, [baseSourceRows, showDuplicateRows]);
-
-  const baseModelNameSet = useMemo(() => {
-    return new Set(baseSourceRows.map((row) => row.modelName));
-  }, [baseSourceRows]);
+  const baseModelNameSet = useMemo(
+    () => buildBaseModelNameSet(baseSourceRows),
+    [baseSourceRows]
+  );
 
   const sourceTabMatchLabel = useMemo(() => {
     if (activeSource === SOURCE_ALL) return "";
@@ -1268,133 +532,30 @@ export function BenchmarkMatrix({
     return normalizeMatchToken(sourceTabMatchLabel);
   }, [sourceTabMatchLabel]);
 
-  const coverageMetaByModel = useMemo(() => {
-    const modelCoveredBenchmarkKeys = new Map<string, Set<string>>();
+  const coverageMetaByModel = useMemo(
+    () => buildCoverageMetaByModel(allRowsIndex, baseBenchmarkKeySet, baseModelNameSet),
+    [allRowsIndex, baseBenchmarkKeySet, baseModelNameSet]
+  );
 
-    baseBenchmarkKeySet.forEach((matrixKey) => {
-      const groupedRows = allRowsIndex.rowsByGroupingKey.get(matrixKey);
-      if (!groupedRows || groupedRows.length === 0) return;
-
-      groupedRows.forEach(({ row }) => {
-        if (!modelCoveredBenchmarkKeys.has(row.modelName)) {
-          modelCoveredBenchmarkKeys.set(row.modelName, new Set<string>());
-        }
-        modelCoveredBenchmarkKeys.get(row.modelName)!.add(matrixKey);
-      });
-    });
-
-    const totalBenchmarkCount = baseBenchmarkKeySet.size;
-    const metaMap = new Map<
-      string,
-      { providerName: string; coveredCount: number; coverageRate: number; isBaseModel: boolean }
-    >();
-
-    for (const [modelName, providerIdentity] of allRowsIndex.modelProviderMap.entries()) {
-      const coveredCount = modelCoveredBenchmarkKeys.get(modelName)?.size ?? 0;
-      if (coveredCount <= 0) continue;
-
-      const providerName = providerIdentity.displayName || "Unknown";
-
-      metaMap.set(modelName, {
-        providerName,
-        coveredCount,
-        coverageRate: totalBenchmarkCount > 0 ? coveredCount / totalBenchmarkCount : 0,
-        isBaseModel: baseModelNameSet.has(modelName)
-      });
-    }
-
-    return metaMap;
-  }, [allRowsIndex, baseBenchmarkKeySet, baseModelNameSet]);
-
-  const providerGroups = useMemo(() => {
-    const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
-    const map = new Map<string, string[]>();
-
-    coverageMetaByModel.forEach((meta, modelName) => {
-      if (!map.has(meta.providerName)) {
-        map.set(meta.providerName, []);
-      }
-      map.get(meta.providerName)!.push(modelName);
-    });
-
-    return Array.from(map.entries())
-      .map(([providerName, modelList]) => {
-        const models = [...modelList].sort((left, right) => {
-          const leftMeta = coverageMetaByModel.get(left);
-          const rightMeta = coverageMetaByModel.get(right);
-
-          const leftIsBase = leftMeta?.isBaseModel ? 1 : 0;
-          const rightIsBase = rightMeta?.isBaseModel ? 1 : 0;
-          if (rightIsBase !== leftIsBase) {
-            return rightIsBase - leftIsBase;
-          }
-
-          const leftCoverage = leftMeta?.coverageRate ?? 0;
-          const rightCoverage = rightMeta?.coverageRate ?? 0;
-          if (rightCoverage !== leftCoverage) {
-            return rightCoverage - leftCoverage;
-          }
-
-          return compareModelNameByColumnOrder(left, right, collator);
-        });
-
-        const providerCoverageAverage = models.length > 0
-          ? models.reduce((acc, modelName) => acc + (coverageMetaByModel.get(modelName)?.coverageRate ?? 0), 0) / models.length
-          : 0;
-
-        const normalizedProvider = normalizeMatchToken(providerName);
-        const isSourceRelated = sourceModelHint.length > 0 && (
-          normalizedProvider.includes(sourceModelHint) ||
-          models.some((modelName) => normalizeMatchToken(modelName).includes(sourceModelHint))
-        );
-
-        return {
-          providerName,
-          models,
-          providerCoverageAverage,
-          isSourceRelated
-        };
-      })
-      .sort((left, right) => {
-        const leftSourceRelated = left.isSourceRelated ? 1 : 0;
-        const rightSourceRelated = right.isSourceRelated ? 1 : 0;
-        if (rightSourceRelated !== leftSourceRelated) {
-          return rightSourceRelated - leftSourceRelated;
-        }
-
-        if (right.providerCoverageAverage !== left.providerCoverageAverage) {
-          return right.providerCoverageAverage - left.providerCoverageAverage;
-        }
-
-        if (right.models.length !== left.models.length) {
-          return right.models.length - left.models.length;
-        }
-
-        return left.providerName.localeCompare(right.providerName, "zh-Hans-CN", { sensitivity: "base" });
-      })
-      .map((item) => ({
-        providerName: item.providerName,
-        models: item.models
-      }));
-  }, [coverageMetaByModel, sourceModelHint]);
+  const providerGroups = useMemo(
+    () => buildProviderGroups(coverageMetaByModel, sourceModelHint),
+    [coverageMetaByModel, sourceModelHint]
+  );
 
   const allModelNames = useMemo(
-    () => providerGroups.flatMap((group) => group.models).sort((a, b) => a.localeCompare(b, "zh-Hans-CN")),
+    () => buildAllModelNames(providerGroups),
     [providerGroups]
   );
 
-  const defaultSelectedModels = useMemo(() => {
-    const selectableSet = new Set(allModelNames);
-    return Array.from(baseModelNameSet)
-      .filter((modelName) => selectableSet.has(modelName))
-      .sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
-  }, [allModelNames, baseModelNameSet]);
+  const defaultSelectedModels = useMemo(
+    () => buildDefaultSelectedModels(allModelNames, baseModelNameSet),
+    [allModelNames, baseModelNameSet]
+  );
 
-  const defaultAllSourceModels = useMemo(() => {
-    return baseModelNameSet.size <= 1
-      ? [...allModelNames]
-      : [...defaultSelectedModels];
-  }, [allModelNames, defaultSelectedModels, baseModelNameSet]);
+  const defaultAllSourceModels = useMemo(
+    () => buildDefaultAllSourceModels(allModelNames, defaultSelectedModels, baseModelNameSet),
+    [allModelNames, defaultSelectedModels, baseModelNameSet]
+  );
 
   const [selectedModalities, setSelectedModalities] = useState<string[]>([...MODALITY_OPTIONS]);
   const [selectedModels, setSelectedModels] = useState<string[]>(defaultAllSourceModels);
@@ -1476,11 +637,7 @@ export function BenchmarkMatrix({
       modelSelectionBySourceRef.current = nextSelectionBySource;
     }
 
-    try {
-      window.localStorage.setItem(MODEL_SELECTION_BY_SOURCE_STORAGE_KEY, JSON.stringify(modelSelectionBySourceRef.current));
-    } catch {
-      // ignore storage access errors gracefully
-    }
+    saveModelSelectionBySource(modelSelectionBySourceRef.current);
   }, [selectedModels, activeSource, isModelSelectionLoaded, allModelNames, defaultSelectedModels, defaultAllSourceModels]);
 
   useEffect(() => {
@@ -1509,265 +666,20 @@ export function BenchmarkMatrix({
   const modelProviderMap = allRowsIndex.modelProviderMap;
   const modelProviderBrandColorMap = allRowsIndex.modelProviderBrandColorMap;
 
-  const filteredRows = useMemo(() => {
-    if (selectedModelSet.size === 0 || baseBenchmarkKeySet.size === 0) {
-      return [];
-    }
+  const filteredRows = useMemo(
+    () => buildFilteredRows(allRowsIndex, selectedModelSet, selectedModels, baseBenchmarkKeySet),
+    [allRowsIndex, selectedModelSet, selectedModels, baseBenchmarkKeySet]
+  );
 
-    const result: MatrixInputRow[] = [];
+  const coveragePrunedRows = useMemo(
+    () => buildCoveragePrunedRows(activeSource, filteredRows, showDuplicateRows, showLowCoverageRows),
+    [activeSource, filteredRows, showDuplicateRows, showLowCoverageRows]
+  );
 
-    selectedModels.forEach((modelName) => {
-      const indexedRows = allRowsIndex.rowsByModel.get(modelName);
-      if (!indexedRows || indexedRows.length === 0) {
-        return;
-      }
-
-      indexedRows.forEach((indexed) => {
-        if (baseBenchmarkKeySet.has(indexed.matrixKey)) {
-          result.push(indexed.row);
-        }
-      });
-    });
-
-    return result;
-  }, [allRowsIndex, selectedModelSet, selectedModels, baseBenchmarkKeySet]);
-
-  const coveragePrunedRows = useMemo(() => {
-    if (activeSource !== SOURCE_ALL || showLowCoverageRows) {
-      return filteredRows;
-    }
-
-    if (filteredRows.length === 0) {
-      return filteredRows;
-    }
-
-    const candidateModels = Array.from(new Set(filteredRows.map((row) => row.modelName)));
-    if (candidateModels.length === 0) {
-      return filteredRows;
-    }
-
-    const rowModelsWithValue = new Map<string, Set<string>>();
-    filteredRows.forEach((row) => {
-      if (!hasMeaningfulMatrixRawValue(row.valueRaw)) return;
-
-      const matrixKey = getMatrixGroupingKey(row, showDuplicateRows);
-      if (!rowModelsWithValue.has(matrixKey)) {
-        rowModelsWithValue.set(matrixKey, new Set<string>());
-      }
-      rowModelsWithValue.get(matrixKey)!.add(row.modelName);
-    });
-
-    if (rowModelsWithValue.size === 0) {
-      return filteredRows;
-    }
-
-    const firstPassRowKeys = new Set<string>();
-    rowModelsWithValue.forEach((modelsWithValue, matrixKey) => {
-      const rowCoverage = modelsWithValue.size / candidateModels.length;
-      if (rowCoverage >= ALL_SOURCE_ROW_COVERAGE_THRESHOLD) {
-        firstPassRowKeys.add(matrixKey);
-      }
-    });
-
-    if (firstPassRowKeys.size === 0) {
-      return filteredRows;
-    }
-
-    const modelCoveredRowCount = new Map<string, number>();
-    firstPassRowKeys.forEach((matrixKey) => {
-      const modelsWithValue = rowModelsWithValue.get(matrixKey);
-      if (!modelsWithValue) return;
-
-      modelsWithValue.forEach((modelName) => {
-        modelCoveredRowCount.set(modelName, (modelCoveredRowCount.get(modelName) ?? 0) + 1);
-      });
-    });
-
-    const keptModels = new Set<string>();
-    modelCoveredRowCount.forEach((coveredRowCount, modelName) => {
-      const columnCoverage = coveredRowCount / firstPassRowKeys.size;
-      if (columnCoverage >= ALL_SOURCE_COLUMN_COVERAGE_THRESHOLD) {
-        keptModels.add(modelName);
-      }
-    });
-
-    if (keptModels.size === 0) {
-      return filteredRows;
-    }
-
-    const secondPassRowKeys = new Set<string>();
-    rowModelsWithValue.forEach((modelsWithValue, matrixKey) => {
-      let keptValueCount = 0;
-      modelsWithValue.forEach((modelName) => {
-        if (keptModels.has(modelName)) {
-          keptValueCount += 1;
-        }
-      });
-
-      const rowCoverage = keptValueCount / keptModels.size;
-      if (rowCoverage >= ALL_SOURCE_ROW_COVERAGE_THRESHOLD) {
-        secondPassRowKeys.add(matrixKey);
-      }
-    });
-
-    if (secondPassRowKeys.size === 0) {
-      return filteredRows;
-    }
-
-    const prunedRows = filteredRows.filter((row) => {
-      if (!keptModels.has(row.modelName)) return false;
-      const matrixKey = getMatrixGroupingKey(row, showDuplicateRows);
-      return secondPassRowKeys.has(matrixKey);
-    });
-
-    return prunedRows.length > 0 ? prunedRows : filteredRows;
-  }, [activeSource, filteredRows, showDuplicateRows, showLowCoverageRows]);
-
-  const modelColumns = useMemo<readonly string[]>(() => {
-    const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
-
-    const modelStats = new Map<string, { providerName: string; numericCount: number; totalCount: number }>();
-
-    coveragePrunedRows.forEach((row) => {
-      const current = modelStats.get(row.modelName) ?? {
-        providerName: row.providerDisplayName?.trim() || row.providerName || "Unknown",
-        numericCount: 0,
-        totalCount: 0
-      };
-
-      current.totalCount += 1;
-      if (row.valueNum !== null) {
-        current.numericCount += 1;
-      }
-
-      if (!current.providerName) {
-        current.providerName = row.providerDisplayName?.trim() || row.providerName || "Unknown";
-      }
-
-      modelStats.set(row.modelName, current);
-    });
-
-    const providerStats = new Map<string, { numericCount: number; totalCount: number; models: string[] }>();
-    for (const [modelName, stats] of modelStats.entries()) {
-      const providerName = stats.providerName || "Unknown";
-      const provider = providerStats.get(providerName) ?? { numericCount: 0, totalCount: 0, models: [] };
-      provider.numericCount += stats.numericCount;
-      provider.totalCount += stats.totalCount;
-      provider.models.push(modelName);
-      providerStats.set(providerName, provider);
-    }
-
-    const orderedProviders = Array.from(providerStats.entries()).sort((a, b) => {
-      const left = a[1];
-      const right = b[1];
-      if (right.numericCount !== left.numericCount) {
-        return right.numericCount - left.numericCount;
-      }
-      if (right.totalCount !== left.totalCount) {
-        return right.totalCount - left.totalCount;
-      }
-      return a[0].localeCompare(b[0], "zh-Hans-CN", { sensitivity: "base" });
-    });
-
-    const groupedModels = orderedProviders.flatMap(([, provider]) => {
-      return [...provider.models].sort((leftModel, rightModel) => {
-        const leftStats = modelStats.get(leftModel);
-        const rightStats = modelStats.get(rightModel);
-        if (!leftStats || !rightStats) return compareModelNameByColumnOrder(leftModel, rightModel, collator);
-
-        const modelNameCompare = compareModelNameByColumnOrder(leftModel, rightModel, collator);
-        if (modelNameCompare !== 0) {
-          return modelNameCompare;
-        }
-
-        if (rightStats.numericCount !== leftStats.numericCount) {
-          return rightStats.numericCount - leftStats.numericCount;
-        }
-        if (rightStats.totalCount !== leftStats.totalCount) {
-          return rightStats.totalCount - leftStats.totalCount;
-        }
-        return 0;
-      });
-    });
-
-    const baseOrderedModels = (() => {
-      if (!sourceModelHint) return groupedModels;
-
-      const matched: string[] = [];
-      const others: string[] = [];
-
-      groupedModels.forEach((modelName) => {
-        const normalizedModel = normalizeMatchToken(modelName);
-        if (normalizedModel.includes(sourceModelHint)) {
-          matched.push(modelName);
-        } else {
-          others.push(modelName);
-        }
-      });
-
-      matched.sort((left, right) => compareModelNameByColumnOrder(left, right, collator));
-      return [...matched, ...others];
-    })();
-
-    const orderedByManual = (() => {
-      const savedOrder = modelOrderBySource[activeSource] ?? [];
-      if (savedOrder.length === 0) return baseOrderedModels;
-
-      const savedIndex = new Map(savedOrder.map((modelName, index) => [modelName, index]));
-      const baseIndex = new Map(baseOrderedModels.map((modelName, index) => [modelName, index]));
-
-      return [...baseOrderedModels].sort((left, right) => {
-        const leftSaved = savedIndex.get(left);
-        const rightSaved = savedIndex.get(right);
-
-        if (leftSaved !== undefined && rightSaved !== undefined) {
-          return leftSaved - rightSaved;
-        }
-        if (leftSaved !== undefined) return -1;
-        if (rightSaved !== undefined) return 1;
-
-        return (baseIndex.get(left) ?? 0) - (baseIndex.get(right) ?? 0);
-      });
-    })();
-
-    if (!columnSortBenchmarkKey) {
-      return orderedByManual;
-    }
-
-    const benchmarkScoreMap = new Map<string, number>();
-    coveragePrunedRows.forEach((row) => {
-      if (getMatrixGroupingKey(row, showDuplicateRows) !== columnSortBenchmarkKey || row.valueNum === null) {
-        return;
-      }
-
-      const comparableScore = getBenchmarkComparableScore(
-        row.benchmarkName,
-        row.valueNum,
-        row.benchmarkType,
-        row.higherIsBetter
-      );
-      const previous = benchmarkScoreMap.get(row.modelName);
-      if (previous === undefined || comparableScore > previous) {
-        benchmarkScoreMap.set(row.modelName, comparableScore);
-      }
-    });
-
-    const baseOrderIndex = new Map(orderedByManual.map((modelName, index) => [modelName, index]));
-
-    return [...orderedByManual].sort((leftModel, rightModel) => {
-      const leftScore = benchmarkScoreMap.get(leftModel);
-      const rightScore = benchmarkScoreMap.get(rightModel);
-
-      if (leftScore === undefined && rightScore === undefined) {
-        return (baseOrderIndex.get(leftModel) ?? 0) - (baseOrderIndex.get(rightModel) ?? 0);
-      }
-      if (leftScore === undefined) return 1;
-      if (rightScore === undefined) return -1;
-      if (rightScore !== leftScore) return rightScore - leftScore;
-
-      return (baseOrderIndex.get(leftModel) ?? 0) - (baseOrderIndex.get(rightModel) ?? 0);
-    });
-  }, [coveragePrunedRows, sourceModelHint, columnSortBenchmarkKey, showDuplicateRows, modelOrderBySource, activeSource]);
+  const modelColumns = useMemo<readonly string[]>(
+    () => buildModelColumns(coveragePrunedRows, sourceModelHint, columnSortBenchmarkKey, showDuplicateRows, modelOrderBySource, activeSource),
+    [coveragePrunedRows, sourceModelHint, columnSortBenchmarkKey, showDuplicateRows, modelOrderBySource, activeSource]
+  );
 
   const compareModelSet = useMemo(() => new Set(compareModelOrder), [compareModelOrder]);
   const compareBaselineModelName = compareModelOrder[0] ?? null;
@@ -1790,543 +702,36 @@ export function BenchmarkMatrix({
     enqueueStateUpdate(() => setRowPresenceFilterModel(null));
   }, [modelColumns, rowPresenceFilterModel]);
 
-  const autoModelWidthMap = useMemo(() => {
-    const map = new Map<string, number>();
-    const valueWidthByModel = new Map<string, number>();
-
-    const measureTextWidth = (() => {
-      if (typeof document === "undefined") {
-        return (text: string) => text.length * 7;
-      }
-
-      const canvas = document.createElement("canvas");
-      const context = canvas.getContext("2d");
-
-      if (!context) {
-        return (text: string) => text.length * 7;
-      }
-
-      return (text: string, font: string) => {
-        context.font = font;
-        return context.measureText(text).width;
-      };
-    })();
-
-    const entriesByGroup = new Map<string, MatrixCellEntry[]>();
-    const preferredEntryByGroup = new Map<string, MatrixCellEntry>();
-    const higherIsBetterByGroup = new Map<string, boolean>();
-    const modelNameByGroup = new Map<string, string>();
-
-    coveragePrunedRows.forEach((row) => {
-      const groupKey = `${getMatrixGroupingKey(row, showDuplicateRows)}::${row.modelName}`;
-
-      const entry: MatrixCellEntry = {
-        valueRaw: row.valueRaw,
-        valueNum: row.valueNum,
-        valueNum2: row.valueNum2 ?? null,
-        valueNote: row.valueNote,
-        source: row.source,
-        benchTime: row.benchTime
-      };
-
-      if (!entriesByGroup.has(groupKey)) {
-        entriesByGroup.set(groupKey, []);
-        const rowHigherIsBetter = typeof row.higherIsBetter === "boolean"
-          ? row.higherIsBetter
-          : !isLowerBetterBenchmark(row.benchmarkName, row.benchmarkType);
-        higherIsBetterByGroup.set(groupKey, rowHigherIsBetter);
-      }
-      entriesByGroup.get(groupKey)!.push(entry);
-
-      const groupHigherIsBetter = higherIsBetterByGroup.get(groupKey) ?? true;
-      const preferred = preferredEntryByGroup.get(groupKey);
-      if (!preferred || (entry.valueNum !== null && (preferred.valueNum === null || (groupHigherIsBetter ? entry.valueNum > preferred.valueNum : entry.valueNum < preferred.valueNum)))) {
-        preferredEntryByGroup.set(groupKey, entry);
-      }
-
-      modelNameByGroup.set(groupKey, row.modelName);
-    });
-
-    entriesByGroup.forEach((entries, groupKey) => {
-      const modelName = modelNameByGroup.get(groupKey);
-      if (!modelName || entries.length === 0) return;
-
-      const preferredEntry = preferredEntryByGroup.get(groupKey) ?? entries[0]!;
-      const displayValue = getMatrixCellDisplayValue(
-        preferredEntry.valueNum,
-        preferredEntry.valueNum2,
-        preferredEntry.valueRaw,
-        preferredEntry.valueNote
-      );
-
-      const uniqueEntriesMap = new Map<string, MatrixCellEntry>();
-      entries.forEach((entry) => {
-        const dedupKey = getMatrixCellSourceValueDedupKey(entry);
-        if (!uniqueEntriesMap.has(dedupKey)) {
-          uniqueEntriesMap.set(dedupKey, entry);
-        }
-      });
-
-      const uniqueEntries = Array.from(uniqueEntriesMap.values());
-      const valueIdentitySet = new Set(uniqueEntries.map((entry) => getMatrixCellValueIdentity(entry)));
-      const noteText = (preferredEntry.valueNote ?? "").trim();
-      const hasMeaningfulMultipleValues = uniqueEntries.length > 1 && valueIdentitySet.size > 1;
-      const questionMarkPadding = hasMeaningfulMultipleValues || noteText.length > 0 ? 16 : 0;
-      const groupHigherIsBetter = higherIsBetterByGroup.get(groupKey) ?? true;
-      const sourceValueItem = hasMeaningfulMultipleValues
-        ? getSourceValueDisplayItem(uniqueEntries, activeSource, groupHigherIsBetter)
-        : null;
-      const sourceDeltaRaw = displaySourceValueDeltasInCells && hasMeaningfulMultipleValues
-        ? getSourceValueDeltaRaw(uniqueEntries, activeSource, groupHigherIsBetter)
-        : null;
-      const sourceDeltaPadding = sourceDeltaRaw !== null
-        ? Math.min(28, 9 + formatComparisonDeltaValue(sourceDeltaRaw).length * 3)
-        : 0;
-
-      const compactDisplayValue = displayValue.replace(/\s*\/\s*/g, "/");
-      const sourceValueWidth = displaySourceValuesInCells && sourceValueItem
-        ? measureTextWidth(sourceValueItem.displayValue, "600 14px Inter, ui-sans-serif, system-ui") + 18 + questionMarkPadding + sourceDeltaPadding
-        : 0;
-      const measured = Math.max(
-        measureTextWidth(compactDisplayValue, "600 14px Inter, ui-sans-serif, system-ui") + 18 + questionMarkPadding,
-        sourceValueWidth
-      );
-      const previous = valueWidthByModel.get(modelName) ?? 0;
-
-      if (measured > previous) {
-        valueWidthByModel.set(modelName, measured);
-      }
-    });
-
-    modelColumns.forEach((modelName) => {
-      const valueWidth = valueWidthByModel.get(modelName) ?? 0;
-      const autoWidth = clampColumnWidth(
-        Math.max(DEFAULT_MODEL_COLUMN_BASELINE_WIDTH, valueWidth),
-        MIN_MODEL_COLUMN_RESIZE_WIDTH,
-        MAX_MODEL_COLUMN_WIDTH
-      );
-
-      map.set(getModelColumnWidthKey(modelName), autoWidth);
-    });
-
-    return map;
-  }, [modelColumns, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, displaySourceValueDeltasInCells, activeSource]);
-
-  useEffect(() => {
-    if (!isColumnWidthLoaded) return;
-
-    const savedForSource = columnWidthBySourceRef.current[activeSource] ?? {};
-    const nextMap: Record<string, number> = {
-      ...savedForSource,
-      [CATEGORY_COLUMN_WIDTH_KEY]: clampColumnWidth(
-        savedForSource[CATEGORY_COLUMN_WIDTH_KEY] ?? DEFAULT_CATEGORY_COLUMN_WIDTH,
-        MIN_CATEGORY_COLUMN_WIDTH,
-        MAX_CATEGORY_COLUMN_WIDTH
-      ),
-      [BENCHMARK_COLUMN_WIDTH_KEY]: clampColumnWidth(
-        savedForSource[BENCHMARK_COLUMN_WIDTH_KEY] ?? DEFAULT_BENCHMARK_COLUMN_WIDTH,
-        MIN_BENCHMARK_COLUMN_WIDTH,
-        MAX_BENCHMARK_COLUMN_WIDTH
-      )
-    };
-
-    autoModelWidthMap.forEach((autoWidth, modelWidthKey) => {
-      const stored = savedForSource[modelWidthKey];
-      nextMap[modelWidthKey] = clampColumnWidth(
-        stored ?? autoWidth,
-        MIN_MODEL_COLUMN_RESIZE_WIDTH,
-        MAX_MODEL_COLUMN_WIDTH
-      );
-    });
-
-    setActiveColumnWidthMap((prev) => (areColumnWidthMapsEqual(prev, nextMap) ? prev : nextMap));
-  }, [activeSource, autoModelWidthMap, isColumnWidthLoaded]);
-
-  useEffect(() => {
-    if (!isColumnWidthLoaded) return;
-
-    const sourceKey = activeSourceRef.current;
-    const previousForSource = columnWidthBySourceRef.current[sourceKey] ?? {};
-
-    if (areColumnWidthMapsEqual(previousForSource, activeColumnWidthMap)) {
-      return;
-    }
-
-    columnWidthBySourceRef.current = {
-      ...columnWidthBySourceRef.current,
-      [sourceKey]: activeColumnWidthMap
-    };
-
-    if (columnWidthPersistTimeoutRef.current !== null) {
-      window.clearTimeout(columnWidthPersistTimeoutRef.current);
-    }
-
-    columnWidthPersistTimeoutRef.current = window.setTimeout(() => {
-      columnWidthPersistTimeoutRef.current = null;
-
-      try {
-        window.localStorage.setItem(COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY, JSON.stringify(columnWidthBySourceRef.current));
-      } catch {
-        // ignore storage access errors gracefully
-      }
-    }, COLUMN_WIDTH_STORAGE_DEBOUNCE_MS);
-  }, [activeColumnWidthMap, isColumnWidthLoaded]);
-
-  useEffect(() => {
-    return () => {
-      if (columnWidthPersistTimeoutRef.current !== null) {
-        window.clearTimeout(columnWidthPersistTimeoutRef.current);
-        columnWidthPersistTimeoutRef.current = null;
-      }
-    };
-  }, []);
-
-  const categoryColumnWidth = useMemo(
-    () => clampColumnWidth(
-      activeColumnWidthMap[CATEGORY_COLUMN_WIDTH_KEY] ?? DEFAULT_CATEGORY_COLUMN_WIDTH,
-      MIN_CATEGORY_COLUMN_WIDTH,
-      MAX_CATEGORY_COLUMN_WIDTH
-    ),
-    [activeColumnWidthMap]
-  );
-
-  const benchmarkColumnWidth = useMemo(
-    () => clampColumnWidth(
-      activeColumnWidthMap[BENCHMARK_COLUMN_WIDTH_KEY] ?? DEFAULT_BENCHMARK_COLUMN_WIDTH,
-      MIN_BENCHMARK_COLUMN_WIDTH,
-      MAX_BENCHMARK_COLUMN_WIDTH
-    ),
-    [activeColumnWidthMap]
-  );
-
-  const sourceMatchedModelSet = useMemo(() => {
-    if (!sourceTabMatchLabel) return new Set<string>();
-
-    return new Set(
-      modelColumns.filter((modelName) => isSourceHeaderPrefixMatch(modelName, sourceTabMatchLabel))
-    );
-  }, [modelColumns, sourceTabMatchLabel]);
-
-  const sourceMatchedGroupBoundaryByModel = useMemo(() => {
-    const firstSet = new Set<string>();
-    const lastSet = new Set<string>();
-
-    modelColumns.forEach((modelName, index) => {
-      if (!sourceMatchedModelSet.has(modelName)) return;
-
-      const previousModel = modelColumns[index - 1];
-      const nextModel = modelColumns[index + 1];
-      const hasPreviousMatched = previousModel ? sourceMatchedModelSet.has(previousModel) : false;
-      const hasNextMatched = nextModel ? sourceMatchedModelSet.has(nextModel) : false;
-
-      if (!hasPreviousMatched) {
-        firstSet.add(modelName);
-      }
-
-      if (!hasNextMatched) {
-        lastSet.add(modelName);
-      }
-    });
-
-    return {
-      firstSet,
-      lastSet
-    };
-  }, [modelColumns, sourceMatchedModelSet]);
-
-  const columnWidthOverrideKeySet = useMemo(() => new Set(columnWidthOverrideKeys), [columnWidthOverrideKeys]);
-
-  const modelColumnMeta = useMemo(() => {
-    return modelColumns.map((modelName) => {
-      const providerIdentity = modelProviderMap.get(modelName);
-      const providerName = providerIdentity?.displayName ?? "Unknown";
-      const canonicalProviderName = providerIdentity?.canonicalName ?? providerName;
-      const columnWidthKey = getModelColumnWidthKey(modelName);
-      const autoWidth = autoModelWidthMap.get(columnWidthKey) ?? DEFAULT_MODEL_COLUMN_BASELINE_WIDTH;
-      const storedWidth = activeColumnWidthMap[columnWidthKey];
-      const isCompareSelected = compareModelSet.has(modelName);
-      const isCompareBaseline = compareBaselineModelName === modelName;
-      const hasManualWidthOverride = columnWidthOverrideKeySet.has(
-        getColumnWidthOverrideKey(activeSource, columnWidthKey)
-      );
-      const compareExpandedDefaultWidth = isCompareBaseline
-        ? COMPARE_BASELINE_DEFAULT_EXPANDED_WIDTH
-        : COMPARE_BADGE_DEFAULT_EXPANDED_WIDTH;
-      const shouldApplyCompareExpandedDefault = isCompareSelected && !hasManualWidthOverride;
-      const preferredWidth = shouldApplyCompareExpandedDefault
-        ? Math.max(storedWidth ?? autoWidth, compareExpandedDefaultWidth)
-        : (storedWidth ?? autoWidth);
-      const columnWidth = clampColumnWidth(
-        preferredWidth,
-        MIN_MODEL_COLUMN_RESIZE_WIDTH,
-        MAX_MODEL_COLUMN_WIDTH
-      );
-
-      return {
-        modelName,
-        columnWidthKey,
-        providerName,
-        color: resolveProviderBrandColor(canonicalProviderName, modelProviderBrandColorMap.get(modelName) ?? null),
-        columnWidth,
-        isSourceMatched: sourceMatchedModelSet.has(modelName),
-        isSourceMatchedFirst: sourceMatchedGroupBoundaryByModel.firstSet.has(modelName),
-        isSourceMatchedLast: sourceMatchedGroupBoundaryByModel.lastSet.has(modelName)
-      };
-    });
-  }, [
+  const {
+    categoryColumnWidth,
+    benchmarkColumnWidth,
+    modelColumnMeta,
+    hiddenResizeHandleKeys
+  } = useMatrixColumnWidths({
     modelColumns,
+    coveragePrunedRows,
+    showDuplicateRows,
+    displaySourceValuesInCells,
+    displaySourceValueDeltasInCells,
+    activeSource,
+    activeSourceRef,
+    activeColumnWidthMap,
+    setActiveColumnWidthMap,
+    columnWidthBySourceRef,
+    columnWidthPersistTimeoutRef,
+    columnWidthOverrideKeys,
+    isColumnWidthLoaded,
+    sourceTabMatchLabel,
     modelProviderMap,
     modelProviderBrandColorMap,
-    sourceMatchedModelSet,
-    sourceMatchedGroupBoundaryByModel,
-    columnWidthOverrideKeySet,
-    autoModelWidthMap,
-    activeColumnWidthMap,
     compareModelSet,
-    compareBaselineModelName,
-    activeSource
-  ]);
+    compareBaselineModelName
+  });
 
-  const hiddenResizeHandleKeys = useMemo(() => {
-    const hidden = new Set<string>();
-
-    modelColumnMeta.forEach((model, index) => {
-      if (model.isSourceMatchedFirst) {
-        if (index === 0) {
-          hidden.add(BENCHMARK_COLUMN_WIDTH_KEY);
-        } else {
-          const previousModel = modelColumnMeta[index - 1];
-          if (previousModel) {
-            hidden.add(previousModel.columnWidthKey);
-          }
-        }
-      }
-
-      if (model.isSourceMatchedLast) {
-        hidden.add(model.columnWidthKey);
-      }
-    });
-
-    return hidden;
-  }, [modelColumnMeta]);
-
-  const matrixRows = useMemo(() => {
-    const matrixMap = new Map<
-      string,
-      MatrixRow & {
-        categoryValues: string[];
-        benchmarkValues: string[];
-      }
-    >();
-
-    baseSourceRows.forEach((row, rowIndex) => {
-      const category = row.benchmarkType || "General";
-      const benchmark = row.benchmarkName;
-      const matrixKey = getMatrixGroupingKey(row, showDuplicateRows);
-      const normalizedModalities = normalizeModalityList(row.modalities, row.benchmarkType);
-      const initialHigherIsBetter = typeof row.higherIsBetter === "boolean"
-        ? row.higherIsBetter
-        : !isLowerBetterBenchmark(row.benchmarkName, row.benchmarkType);
-
-      if (!matrixMap.has(matrixKey)) {
-        matrixMap.set(matrixKey, {
-          rowKey: matrixKey,
-          category,
-          benchmark,
-          higherIsBetter: initialHigherIsBetter,
-          categoryValues: [category],
-          benchmarkValues: [benchmark],
-          modalities: normalizedModalities,
-          cells: new Map<string, MatrixCell>(),
-          firstSeenIndex: rowIndex,
-          sourceOrderKey: typeof row.recordId === "number" ? row.recordId : null,
-          rowDataCount: 0,
-          rowNumericCount: 0,
-          minComparable: null,
-          maxComparable: null,
-          minComparable2: null,
-          maxComparable2: null,
-          minNum: null,
-          maxNum: null,
-          minNum2: null,
-          maxNum2: null
-        });
-      }
-
-      const matrixRow = matrixMap.get(matrixKey)!;
-
-      if (row.higherIsBetter === false) {
-        matrixRow.higherIsBetter = false;
-      }
-
-      if (typeof row.recordId === "number") {
-        if (matrixRow.sourceOrderKey === null || row.recordId < matrixRow.sourceOrderKey) {
-          matrixRow.sourceOrderKey = row.recordId;
-        }
-      }
-
-      if (!matrixRow.categoryValues.includes(category)) {
-        matrixRow.categoryValues.push(category);
-        matrixRow.category = matrixRow.categoryValues.join(" / ");
-      }
-
-      if (!matrixRow.benchmarkValues.includes(benchmark)) {
-        matrixRow.benchmarkValues.push(benchmark);
-        matrixRow.benchmark = showDuplicateRows
-          ? matrixRow.benchmarkValues.join(" / ")
-          : pickPreferredBenchmarkDisplayName(matrixRow.benchmark, benchmark);
-      }
-
-      matrixRow.modalities = normalizeModalityList(
-        [...matrixRow.modalities, ...normalizedModalities],
-        matrixRow.categoryValues[0] ?? "General"
-      );
-    });
-
-    coveragePrunedRows.forEach((row) => {
-      const matrixKey = getMatrixGroupingKey(row, showDuplicateRows);
-      const matrixRow = matrixMap.get(matrixKey);
-      if (!matrixRow) {
-        return;
-      }
-
-      if (!matrixRow.cells.has(row.modelName)) {
-        const initialEntry: MatrixCellEntry = {
-          valueRaw: row.valueRaw,
-          valueNum: row.valueNum,
-          valueNum2: row.valueNum2 ?? null,
-          valueNote: row.valueNote,
-          source: row.source,
-          benchTime: row.benchTime
-        };
-        const noteText = (row.valueNote ?? "").trim();
-
-        matrixRow.cells.set(row.modelName, {
-          valueRaw: row.valueRaw,
-          valueNum: row.valueNum,
-          valueNum2: row.valueNum2 ?? null,
-          valueNote: row.valueNote,
-          source: row.source,
-          benchTime: row.benchTime,
-          allEntries: [initialEntry],
-          hasMultipleValues: false,
-          uniqueEntries: [initialEntry],
-          noteText,
-          displayValue: getMatrixCellDisplayValue(row.valueNum, row.valueNum2 ?? null, row.valueRaw, row.valueNote),
-          hasMeaningfulMultipleValues: false,
-          shouldShowQuestionMark: noteText.length > 0
-        });
-      } else {
-        const existingCell = matrixRow.cells.get(row.modelName)!;
-        existingCell.allEntries.push({
-          valueRaw: row.valueRaw,
-          valueNum: row.valueNum,
-          valueNum2: row.valueNum2 ?? null,
-          valueNote: row.valueNote,
-          source: row.source,
-          benchTime: row.benchTime
-        });
-        existingCell.hasMultipleValues = existingCell.allEntries.length > 1;
-
-        const cellHigherIsBetter = matrixRow.higherIsBetter;
-        const isCellBetter =
-          row.valueNum !== null &&
-          existingCell.valueNum !== null &&
-          (cellHigherIsBetter
-            ? row.valueNum > existingCell.valueNum
-            : row.valueNum < existingCell.valueNum);
-        if (row.valueNum !== null && (existingCell.valueNum === null || isCellBetter)) {
-          existingCell.valueNum = row.valueNum;
-          existingCell.valueNum2 = row.valueNum2 ?? null;
-          existingCell.valueRaw = row.valueRaw;
-          existingCell.valueNote = row.valueNote;
-          existingCell.source = row.source;
-          existingCell.benchTime = row.benchTime;
-        }
-      }
-    });
-
-    return Array.from(matrixMap.values())
-      .map((matrixRow) => {
-        const finalizedCells = new Map<string, MatrixCell>();
-
-        matrixRow.cells.forEach((cell, modelName) => {
-          const uniqueEntriesMap = new Map<string, MatrixCellEntry>();
-          cell.allEntries.forEach((entry) => {
-            const dedupKey = getMatrixCellSourceValueDedupKey(entry);
-            if (!uniqueEntriesMap.has(dedupKey)) {
-              uniqueEntriesMap.set(dedupKey, entry);
-            }
-          });
-
-          const uniqueEntries = Array.from(uniqueEntriesMap.values());
-          const valueIdentitySet = new Set(uniqueEntries.map((entry) => getMatrixCellValueIdentity(entry)));
-          const hasMeaningfulMultipleValues = uniqueEntries.length > 1 && valueIdentitySet.size > 1;
-          // 目前 Source 原值展示并非只认当前 activeSource
-          const sourceEntry = displaySourceValuesInCells && hasMeaningfulMultipleValues
-            ? getSourceValueEntry(uniqueEntries, activeSource, matrixRow.higherIsBetter)
-            : null;
-          const effectiveValueRaw = sourceEntry ? sourceEntry.valueRaw : cell.valueRaw;
-          const effectiveValueNum = sourceEntry ? sourceEntry.valueNum : cell.valueNum;
-          const effectiveValueNum2 = sourceEntry ? sourceEntry.valueNum2 : cell.valueNum2;
-          const effectiveValueNote = sourceEntry ? sourceEntry.valueNote : cell.valueNote;
-          const effectiveSource = sourceEntry ? sourceEntry.source : cell.source;
-          const effectiveBenchTime = sourceEntry ? sourceEntry.benchTime : cell.benchTime;
-          const noteText = (effectiveValueNote ?? "").trim();
-
-          finalizedCells.set(modelName, {
-            ...cell,
-            valueRaw: effectiveValueRaw,
-            valueNum: effectiveValueNum,
-            valueNum2: effectiveValueNum2,
-            valueNote: effectiveValueNote,
-            source: effectiveSource,
-            benchTime: effectiveBenchTime,
-            uniqueEntries,
-            noteText,
-            displayValue: getMatrixCellDisplayValue(effectiveValueNum, effectiveValueNum2, effectiveValueRaw, effectiveValueNote),
-            hasMeaningfulMultipleValues,
-            shouldShowQuestionMark: hasMeaningfulMultipleValues || noteText.length > 0
-          });
-        });
-
-        const numericValues = Array.from(finalizedCells.values())
-          .map((cell) => cell.valueNum)
-          .filter((value): value is number => value !== null && Number.isFinite(value));
-
-        const numericValues2 = Array.from(finalizedCells.values())
-          .map((cell) => cell.valueNum2)
-          .filter((value): value is number => value !== null && Number.isFinite(value));
-
-        const comparableValues = numericValues.map((valueNum) =>
-          getBenchmarkComparableScore(matrixRow.benchmark, valueNum, matrixRow.category, matrixRow.higherIsBetter)
-        );
-
-        const comparableValues2 = numericValues2.map((valueNum) =>
-          getBenchmarkComparableScore(matrixRow.benchmark, valueNum, matrixRow.category, matrixRow.higherIsBetter)
-        );
-
-        const rowDataCount = matrixRow.cells.size;
-        const rowNumericCount = numericValues.length;
-
-        return {
-          ...matrixRow,
-          cells: finalizedCells,
-          rowDataCount,
-          rowNumericCount,
-          minComparable: comparableValues.length > 0 ? Math.min(...comparableValues) : null,
-          maxComparable: comparableValues.length > 0 ? Math.max(...comparableValues) : null,
-          minComparable2: comparableValues2.length > 0 ? Math.min(...comparableValues2) : null,
-          maxComparable2: comparableValues2.length > 0 ? Math.max(...comparableValues2) : null,
-          minNum: numericValues.length > 0 ? Math.min(...numericValues) : null,
-          maxNum: numericValues.length > 0 ? Math.max(...numericValues) : null,
-          minNum2: numericValues2.length > 0 ? Math.min(...numericValues2) : null,
-          maxNum2: numericValues2.length > 0 ? Math.max(...numericValues2) : null
-        };
-      })
-      .filter((row) => row.rowDataCount > 0)
-      .sort((a, b) => a.firstSeenIndex - b.firstSeenIndex);
-  }, [baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource]);
+  const matrixRows = useMemo(
+    () => buildMatrixRows(baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource),
+    [baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource]
+  );
 
   function getRowSortCycle(): RowSortMode[] {
     return activeSource === SOURCE_ALL
@@ -2362,330 +767,59 @@ export function BenchmarkMatrix({
     });
   }
 
-  const modalityFilteredMatrixRows = useMemo(() => {
-    if (selectedModalitySet.size === 0) return [];
+  const modalityFilteredMatrixRows = useMemo(
+    () => filterMatrixRowsByModalities(matrixRows, selectedModalitySet),
+    [matrixRows, selectedModalitySet]
+  );
 
-    return matrixRows.filter((row) => row.modalities.some((modality) => selectedModalitySet.has(modality)));
-  }, [matrixRows, selectedModalitySet]);
+  const presenceFilteredMatrixRows = useMemo(
+    () => filterMatrixRowsByPresence(modalityFilteredMatrixRows, rowPresenceFilterModel),
+    [modalityFilteredMatrixRows, rowPresenceFilterModel]
+  );
 
-  const presenceFilteredMatrixRows = useMemo(() => {
-    if (!rowPresenceFilterModel) return modalityFilteredMatrixRows;
+  const displayedCoverageMetaByModel = useMemo(
+    () => buildDisplayedCoverageMetaByModel(allModelNames, coveredModelsByGroupingKey, presenceFilteredMatrixRows),
+    [allModelNames, coveredModelsByGroupingKey, presenceFilteredMatrixRows]
+  );
 
-    return modalityFilteredMatrixRows.filter((row) => {
-      const cell = row.cells.get(rowPresenceFilterModel);
-      if (!cell) return false;
-      return cell.displayValue.trim() !== "--";
-    });
-  }, [modalityFilteredMatrixRows, rowPresenceFilterModel]);
+  const modelCoveragePercentMap = useMemo(
+    () => buildModelCoveragePercentMap(displayedCoverageMetaByModel),
+    [displayedCoverageMetaByModel]
+  );
 
-  const displayedCoverageMetaByModel = useMemo(() => {
-    const displayedRowKeys = Array.from(new Set(presenceFilteredMatrixRows.map((row) => row.rowKey)));
-    const displayedRowCount = displayedRowKeys.length;
-    const coveredRowCountByModel = new Map<string, number>();
-    const candidateModelSet = new Set(allModelNames);
+  const providerAverageCoveragePercentMap = useMemo(
+    () => buildProviderAverageCoveragePercentMap(providerGroups, displayedCoverageMetaByModel),
+    [providerGroups, displayedCoverageMetaByModel]
+  );
 
-    displayedRowKeys.forEach((rowKey) => {
-      const coveredModels = coveredModelsByGroupingKey.get(rowKey);
-      if (!coveredModels || coveredModels.size === 0) return;
+  const sortedMatrixRows = useMemo(
+    () => sortMatrixRows(presenceFilteredMatrixRows, rowSortState, activeSource),
+    [presenceFilteredMatrixRows, rowSortState, activeSource]
+  );
 
-      coveredModels.forEach((modelName) => {
-        if (!candidateModelSet.has(modelName)) return;
-        coveredRowCountByModel.set(modelName, (coveredRowCountByModel.get(modelName) ?? 0) + 1);
-      });
-    });
+  const headerUniqueCounts = useMemo(
+    () => buildHeaderUniqueCounts(presenceFilteredMatrixRows),
+    [presenceFilteredMatrixRows]
+  );
 
-    const metaMap = new Map<string, { coveredCount: number; coverageRate: number }>();
-    allModelNames.forEach((modelName) => {
-      const coveredCount = coveredRowCountByModel.get(modelName) ?? 0;
-      metaMap.set(modelName, {
-        coveredCount,
-        coverageRate: displayedRowCount > 0 ? coveredCount / displayedRowCount : 0
-      });
-    });
-
-    return {
-      displayedRowCount,
-      metaMap
-    };
-  }, [allModelNames, coveredModelsByGroupingKey, presenceFilteredMatrixRows]);
-
-  const modelCoveragePercentMap = useMemo(() => {
-    const map = new Map<string, number>();
-    displayedCoverageMetaByModel.metaMap.forEach((meta, modelName) => {
-      map.set(modelName, Math.round(meta.coverageRate * 100));
-    });
-    return map;
-  }, [displayedCoverageMetaByModel]);
-
-  const providerAverageCoveragePercentMap = useMemo(() => {
-    const map = new Map<string, number>();
-
-    providerGroups.forEach((group) => {
-      if (group.models.length === 0) {
-        map.set(group.providerName, 0);
-        return;
-      }
-
-      const totalCoverage = group.models.reduce((acc, modelName) => {
-        return acc + (displayedCoverageMetaByModel.metaMap.get(modelName)?.coverageRate ?? 0);
-      }, 0);
-
-      map.set(group.providerName, Math.round((totalCoverage / group.models.length) * 100));
-    });
-
-    return map;
-  }, [providerGroups, displayedCoverageMetaByModel]);
-
-  const sortedMatrixRows = useMemo(() => {
-    const rowsCopy = [...presenceFilteredMatrixRows];
-    const effectiveMode = activeSource === SOURCE_ALL && rowSortState.mode === "source"
-      ? "data"
-      : rowSortState.mode;
-
-    if (effectiveMode === "source") {
-      rowsCopy.sort((a, b) => {
-        const leftSourceOrder = a.sourceOrderKey;
-        const rightSourceOrder = b.sourceOrderKey;
-
-        if (leftSourceOrder !== null && rightSourceOrder !== null && leftSourceOrder !== rightSourceOrder) {
-          return leftSourceOrder - rightSourceOrder;
-        }
-
-        if (leftSourceOrder !== null && rightSourceOrder === null) {
-          return -1;
-        }
-
-        if (leftSourceOrder === null && rightSourceOrder !== null) {
-          return 1;
-        }
-
-        return a.firstSeenIndex - b.firstSeenIndex;
-      });
-      return rowsCopy;
-    }
-
-    if (effectiveMode === "data") {
-      if (rowSortState.column === "category") {
-        const categoryDataTotals = new Map<string, number>();
-        rowsCopy.forEach((row) => {
-          categoryDataTotals.set(row.category, (categoryDataTotals.get(row.category) ?? 0) + row.rowDataCount);
-        });
-
-        rowsCopy.sort((a, b) => {
-          const totalDiff = (categoryDataTotals.get(b.category) ?? 0) - (categoryDataTotals.get(a.category) ?? 0);
-          if (totalDiff !== 0) return totalDiff;
-
-          const categoryCompare = a.category.localeCompare(b.category, "zh-Hans-CN", { sensitivity: "base" });
-          if (categoryCompare !== 0) return categoryCompare;
-
-          if (a.rowDataCount !== b.rowDataCount) {
-            return b.rowDataCount - a.rowDataCount;
-          }
-
-          return a.firstSeenIndex - b.firstSeenIndex;
-        });
-        return rowsCopy;
-      }
-
-      rowsCopy.sort((a, b) => {
-        if (a.rowDataCount !== b.rowDataCount) {
-          return b.rowDataCount - a.rowDataCount;
-        }
-        if (a.rowNumericCount !== b.rowNumericCount) {
-          return b.rowNumericCount - a.rowNumericCount;
-        }
-        return a.firstSeenIndex - b.firstSeenIndex;
-      });
-      return rowsCopy;
-    }
-
-    const sortField: RowSortColumn = rowSortState.column;
-    rowsCopy.sort((a, b) => {
-      const left = sortField === "category" ? a.category : a.benchmark;
-      const right = sortField === "category" ? b.category : b.benchmark;
-      const compare = left.localeCompare(right, "zh-Hans-CN", { sensitivity: "base" });
-      if (compare !== 0) return compare;
-      return a.firstSeenIndex - b.firstSeenIndex;
-    });
-    return rowsCopy;
-  }, [presenceFilteredMatrixRows, rowSortState, activeSource]);
-
-  const headerUniqueCounts = useMemo(() => {
-    const uniqueCategories = new Set<string>();
-    const uniqueBenchmarks = new Set<string>();
-
-    presenceFilteredMatrixRows.forEach((row) => {
-      uniqueCategories.add(row.category);
-      uniqueBenchmarks.add(row.rowKey);
-    });
-
-    return {
-      category: uniqueCategories.size,
-      benchmark: uniqueBenchmarks.size
-    };
-  }, [presenceFilteredMatrixRows]);
-
-  const overallSummaryByModel = useMemo(() => {
-    const aggregateByModel = new Map<string, { sum: number; count: number }>();
-    modelColumns.forEach((modelName) => {
-      aggregateByModel.set(modelName, { sum: 0, count: 0 });
-    });
-
-    let totalComparableRows = 0;
-
-    presenceFilteredMatrixRows.forEach((row) => {
-      const rowEntries: Array<{ modelName: string; original: number; comparable: number }> = [];
-
-      modelColumns.forEach((modelName) => {
-        const cell = row.cells.get(modelName);
-        const valueNum = cell?.valueNum;
-
-        if (valueNum === null || valueNum === undefined || !Number.isFinite(valueNum)) {
-          return;
-        }
-
-        rowEntries.push({
-          modelName,
-          original: valueNum,
-          comparable: getBenchmarkComparableScore(row.benchmark, valueNum, row.category, row.higherIsBetter)
-        });
-      });
-
-      if (rowEntries.length === 0) {
-        return;
-      }
-
-      totalComparableRows += 1;
-
-      const originalValues = rowEntries.map((entry) => entry.original);
-      const minOriginal = Math.min(...originalValues);
-      const maxOriginal = Math.max(...originalValues);
-
-      const isRatioRow = minOriginal >= 0 && maxOriginal <= 1.2;
-      const isPercentRow = !isRatioRow && minOriginal >= 0 && maxOriginal <= 100.000001;
-
-      const transformedByEntry = (() => {
-        if (isRatioRow) {
-          return rowEntries.map((entry) => ({
-            modelName: entry.modelName,
-            transformed: entry.comparable * 100
-          }));
-        }
-
-        if (isPercentRow) {
-          return rowEntries.map((entry) => ({
-            modelName: entry.modelName,
-            transformed: entry.comparable
-          }));
-        }
-
-        const comparableValues = rowEntries.map((entry) => entry.comparable);
-        const sortedComparable = [...comparableValues].sort((a, b) => a - b);
-        const percentile05 = getSortedQuantile(sortedComparable, 0.05);
-        const percentile95 = getSortedQuantile(sortedComparable, 0.95);
-        const clippedComparable = comparableValues.map((value) => Math.min(percentile95, Math.max(percentile05, value)));
-        const clippedMin = Math.min(...clippedComparable);
-        const loggedComparable = clippedComparable.map((value) => Math.log1p(Math.max(0, value - clippedMin)));
-
-        return rowEntries.map((entry, index) => ({
-          modelName: entry.modelName,
-          transformed: loggedComparable[index] ?? 0
-        }));
-      })();
-
-      const transformedValues = transformedByEntry.map((entry) => entry.transformed);
-      const minTransformed = Math.min(...transformedValues);
-      const maxTransformed = Math.max(...transformedValues);
-
-      transformedByEntry.forEach((entry) => {
-        const aggregate = aggregateByModel.get(entry.modelName);
-        if (!aggregate) return;
-
-        const rowScore = maxTransformed === minTransformed
-          ? 50
-          : Math.min(100, Math.max(0, ((entry.transformed - minTransformed) / (maxTransformed - minTransformed)) * 100));
-
-        aggregate.sum += rowScore;
-        aggregate.count += 1;
-      });
-    });
-
-    const rawScoreItems = modelColumns.map((modelName) => {
-      const aggregate = aggregateByModel.get(modelName) ?? { sum: 0, count: 0 };
-      const rawScore = aggregate.count > 0 ? aggregate.sum / aggregate.count : null;
-      const coverage = totalComparableRows > 0 ? aggregate.count / totalComparableRows : 0;
-      const correctionFactor = 0.9 + 0.1 * coverage;
-      const correctedScore = rawScore !== null ? rawScore * correctionFactor : null;
-
-      return {
-        modelName,
-        rawScore,
-        correctedScore,
-        coveredRows: aggregate.count,
-        totalRows: totalComparableRows,
-        coverage,
-        correctionFactor
-      };
-    });
-
-    const rawRankMap = buildDenseRankMap(
-      rawScoreItems.map((item) => ({ modelName: item.modelName, score: item.rawScore }))
-    );
-    const correctedRankMap = buildDenseRankMap(
-      rawScoreItems.map((item) => ({ modelName: item.modelName, score: item.correctedScore }))
-    );
-
-    const summaryMap = new Map<string, OverallModelSummary>();
-    rawScoreItems.forEach((item) => {
-      summaryMap.set(item.modelName, {
-        rawScore: item.rawScore,
-        rawRank: item.rawScore !== null ? (rawRankMap.get(item.modelName) ?? null) : null,
-        correctedScore: item.correctedScore,
-        correctedRank: item.correctedScore !== null ? (correctedRankMap.get(item.modelName) ?? null) : null,
-        coverage: item.coverage,
-        coveredRows: item.coveredRows,
-        totalRows: item.totalRows,
-        correctionFactor: item.correctionFactor
-      });
-    });
-
-    return summaryMap;
-  }, [presenceFilteredMatrixRows, modelColumns]);
+  const overallSummaryByModel = useMemo(
+    () => buildOverallSummaryByModel(presenceFilteredMatrixRows, modelColumns),
+    [presenceFilteredMatrixRows, modelColumns]
+  );
 
   const hasOverallSummary = useMemo(() => {
     return modelColumns.some((modelName) => overallSummaryByModel.get(modelName)?.rawScore !== null);
   }, [modelColumns, overallSummaryByModel]);
 
-  const overallHeatRange = useMemo(() => {
-    const rawScores = modelColumns
-      .map((modelName) => overallSummaryByModel.get(modelName)?.rawScore)
-      .filter((value): value is number => value !== null && value !== undefined && Number.isFinite(value));
+  const overallHeatRange = useMemo(
+    () => buildOverallHeatRange(modelColumns, overallSummaryByModel),
+    [modelColumns, overallSummaryByModel]
+  );
 
-    if (rawScores.length === 0) {
-      return {
-        minRawScore: null,
-        maxRawScore: null
-      };
-    }
-
-    return {
-      minRawScore: Math.min(...rawScores),
-      maxRawScore: Math.max(...rawScores)
-    };
-  }, [modelColumns, overallSummaryByModel]);
-
-  const overallScoreDisplayDecimalsByModel = useMemo(() => {
-    const items: OverallScoreDisplayItem[] = modelColumns.map((modelName) => {
-      const summary = overallSummaryByModel.get(modelName);
-      return {
-        modelName,
-        rawScore: summary?.rawScore ?? null,
-        rawRank: summary?.rawRank ?? null
-      };
-    });
-
-    return buildOverallScoreDisplayDecimalsMap(items);
-  }, [modelColumns, overallSummaryByModel]);
+  const overallScoreDisplayDecimalsByModel = useMemo(
+    () => buildOverallScoreDisplayDecimalsByModel(modelColumns, overallSummaryByModel),
+    [modelColumns, overallSummaryByModel]
+  );
 
   function getSortModeLabel(column: RowSortColumn): string {
     if (rowSortState.column !== column) return "";
@@ -2770,11 +904,7 @@ export function BenchmarkMatrix({
     delete nextSelectionBySource[sourceKey];
     modelSelectionBySourceRef.current = nextSelectionBySource;
 
-    try {
-      window.localStorage.setItem(MODEL_SELECTION_BY_SOURCE_STORAGE_KEY, JSON.stringify(nextSelectionBySource));
-    } catch {
-      // ignore storage access errors gracefully
-    }
+    saveModelSelectionBySource(nextSelectionBySource);
 
     setModelOrderBySource((prev) => {
       if (!(sourceKey in prev)) return prev;
@@ -2782,11 +912,7 @@ export function BenchmarkMatrix({
       const next = { ...prev };
       delete next[sourceKey];
 
-      try {
-        window.localStorage.setItem(MODEL_ORDER_BY_SOURCE_STORAGE_KEY, JSON.stringify(next));
-      } catch {
-        // ignore storage access errors gracefully
-      }
+      saveModelOrderBySource(next);
 
       return next;
     });
@@ -2820,113 +946,6 @@ export function BenchmarkMatrix({
       }
     } catch {
       // ignore fullscreen API errors gracefully
-    }
-  }
-
-  async function copyTableImageToClipboard() {
-    if (!tableViewportRef.current || isImageActionBusy) return;
-
-    setIsExportMenuOpen(false);
-    setSuppressHoverMenu(true);
-    setIsCopyingTableImage(true);
-    setIsExportCaptureMode(true);
-    setCopyNotice(null);
-    setCopyNoticeVisible(false);
-
-    try {
-      await new Promise<void>((resolve) => {
-        window.requestAnimationFrame(() => resolve());
-      });
-
-      const { scale } = EXPORT_PRESET_MAP[exportPreset];
-      const pngBlob = await withTimeout(
-        renderElementToImageBlob(tableViewportRef.current, scale, "image/png"),
-        12000,
-        "导出超时，请稍后重试"
-      );
-
-      if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
-        throw new Error("当前浏览器不支持图片剪贴板");
-      }
-
-      await withTimeout(
-        navigator.clipboard.write([
-          new ClipboardItem({
-            "image/png": pngBlob
-          })
-        ]),
-        5000,
-        "复制超时，请检查剪贴板权限"
-      );
-
-      setCopyNotice({ type: "success", message: "已复制表格 PNG 到剪贴板" });
-    } catch (error) {
-      const rawMessage = error instanceof Error ? error.message : "";
-      const message = rawMessage.includes("Tainted canvases")
-        ? "复制失败：检测到跨域资源，请重试或切换到无扩展干扰窗口"
-        : rawMessage || "复制失败，请检查浏览器剪贴板权限";
-      setCopyNotice({ type: "error", message });
-    } finally {
-      setIsExportCaptureMode(false);
-      setIsCopyingTableImage(false);
-    }
-  }
-
-  async function downloadTableImage() {
-    if (!tableViewportRef.current || isImageActionBusy) return;
-
-    setIsExportMenuOpen(false);
-    setSuppressHoverMenu(true);
-    setIsDownloadingTableImage(true);
-    setIsExportCaptureMode(true);
-    setCopyNotice(null);
-    setCopyNoticeVisible(false);
-
-    try {
-      await new Promise<void>((resolve) => {
-        window.requestAnimationFrame(() => resolve());
-      });
-
-      const preset = EXPORT_PRESET_MAP[exportPreset];
-      const imageBlob = await withTimeout(
-        renderElementToImageBlob(tableViewportRef.current, preset.scale, preset.mimeType),
-        12000,
-        "导出超时，请稍后重试"
-      );
-
-      const outputFormat = mimeTypeToFormat(imageBlob.type);
-      const requestedFormat = preset.format;
-
-      const fileTime = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
-      const fileName = `benchmark-matrix-${fileTime}.${outputFormat}`;
-      const objectUrl = URL.createObjectURL(imageBlob);
-
-      try {
-        const link = document.createElement("a");
-        link.href = objectUrl;
-        link.download = fileName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      } finally {
-        URL.revokeObjectURL(objectUrl);
-      }
-
-      setCopyNotice({
-        type: "success",
-        message: outputFormat === requestedFormat
-          ? `已导出表格 ${outputFormat.toUpperCase()}`
-          : `已自动回退导出 ${outputFormat.toUpperCase()}（原选择 ${requestedFormat.toUpperCase()}）`
-      });
-    } catch (error) {
-      const rawMessage = error instanceof Error ? error.message : "";
-      const message = rawMessage.includes("Tainted canvases")
-        ? "下载失败：检测到跨域资源，请重试或切换到无扩展干扰窗口"
-        : rawMessage || "下载失败，请稍后重试";
-      setCopyNotice({ type: "error", message });
-    } finally {
-      setIsExportCaptureMode(false);
-      setIsDownloadingTableImage(false);
     }
   }
 

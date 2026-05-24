@@ -2499,6 +2499,315 @@ export async function createBenchmarkValue(input: {
   return created;
 }
 
+export type BenchmarkValueOverlapStats = {
+  sourceId: number;
+  targetId: number;
+  sameCount: number;
+  overlapCount: number;
+  sourceValueCount: number;
+  targetValueCount: number;
+  sourceModelCount: number;
+  targetModelCount: number;
+};
+
+export type BenchmarkPreviewValueOverlapInput = {
+  items: Array<{
+    previewBenchmarkKey: string;
+    candidateBenchmarkIds: number[];
+    cells: Array<{
+      modelName: string;
+      rawValue: string;
+    }>;
+  }>;
+};
+
+export type BenchmarkPreviewValueOverlapStats = {
+  previewBenchmarkKey: string;
+  candidateBenchmarkId: number;
+  previewTotal: number;
+  modelOverlapCount: number;
+  exactDuplicateCount: number;
+  conflictCount: number;
+  duplicateRate: number;
+};
+
+function normalizeBenchmarkOverlapNumericValue(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const text = String(value).trim();
+  if (!text) {
+    return null;
+  }
+
+  const match = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(text);
+  if (!match) {
+    return text;
+  }
+
+  const sign = match[1] === "-" ? "-" : "";
+  const integerPart = (match[2] ?? "0").replace(/^0+(?=\d)/, "");
+  const fractionPart = (match[3] ?? "").replace(/0+$/, "");
+  const normalized = fractionPart ? `${integerPart}.${fractionPart}` : integerPart;
+
+  return normalized === "0" ? "0" : `${sign}${normalized}`;
+}
+
+function getBenchmarkOverlapValueKey(row: { valueRaw: string; valueNum: unknown; valueNum2: unknown }): string {
+  const valueNum = normalizeBenchmarkOverlapNumericValue(row.valueNum);
+  const valueNum2 = normalizeBenchmarkOverlapNumericValue(row.valueNum2);
+
+  if (valueNum !== null || valueNum2 !== null) {
+    return `num:${valueNum ?? ""}|${valueNum2 ?? ""}`;
+  }
+
+  return `raw:${row.valueRaw.trim().replace(/\s+/g, " ").toLowerCase()}`;
+}
+
+export async function getBenchmarkValueOverlapStats(input: {
+  sourceId: number;
+  targetId: number;
+}): Promise<BenchmarkValueOverlapStats> {
+  if (input.sourceId === input.targetId) {
+    throw new Error("sourceId and targetId cannot be the same");
+  }
+
+  const rows = await db
+    .select({
+      benchmarkId: benchmarkValues.benchmarkId,
+      modelId: benchmarkValues.modelId,
+      valueRaw: benchmarkValues.valueRaw,
+      valueNum: benchmarkValues.valueNum,
+      valueNum2: benchmarkValues.valueNum2
+    })
+    .from(benchmarkValues)
+    .where(inArray(benchmarkValues.benchmarkId, [input.sourceId, input.targetId]));
+
+  const sourceValuesByModel = new Map<number, Set<string>>();
+  const targetValuesByModel = new Map<number, Set<string>>();
+  let sourceValueCount = 0;
+  let targetValueCount = 0;
+
+  rows.forEach((row) => {
+    const valuesByModel = row.benchmarkId === input.sourceId
+      ? sourceValuesByModel
+      : row.benchmarkId === input.targetId
+        ? targetValuesByModel
+        : null;
+
+    if (!valuesByModel) {
+      return;
+    }
+
+    if (row.benchmarkId === input.sourceId) {
+      sourceValueCount += 1;
+    } else {
+      targetValueCount += 1;
+    }
+
+    const valueKey = getBenchmarkOverlapValueKey(row);
+    const existingValues = valuesByModel.get(row.modelId);
+    if (existingValues) {
+      existingValues.add(valueKey);
+      return;
+    }
+
+    valuesByModel.set(row.modelId, new Set([valueKey]));
+  });
+
+  let sameCount = 0;
+  let overlapCount = 0;
+
+  sourceValuesByModel.forEach((sourceValues, modelId) => {
+    const targetValues = targetValuesByModel.get(modelId);
+    if (!targetValues) {
+      return;
+    }
+
+    overlapCount += 1;
+
+    for (const value of sourceValues) {
+      if (targetValues.has(value)) {
+        sameCount += 1;
+        return;
+      }
+    }
+  });
+
+  return {
+    sourceId: input.sourceId,
+    targetId: input.targetId,
+    sameCount,
+    overlapCount,
+    sourceValueCount,
+    targetValueCount,
+    sourceModelCount: sourceValuesByModel.size,
+    targetModelCount: targetValuesByModel.size
+  };
+}
+
+export async function getBenchmarkPreviewValueOverlapStats(
+  input: BenchmarkPreviewValueOverlapInput
+): Promise<{ stats: BenchmarkPreviewValueOverlapStats[] }> {
+  const items = input.items.slice(0, 200).map((item) => ({
+    previewBenchmarkKey: item.previewBenchmarkKey,
+    candidateBenchmarkIds: Array.from(new Set(item.candidateBenchmarkIds.filter((id) => Number.isInteger(id) && id > 0))).slice(0, 20),
+    cells: item.cells
+      .filter((cell) => cell.modelName.trim().length > 0 && cell.rawValue.trim().length > 0)
+      .slice(0, 200)
+  }));
+
+  const candidateBenchmarkIds = Array.from(
+    new Set(items.flatMap((item) => item.candidateBenchmarkIds))
+  );
+
+  if (items.length === 0 || candidateBenchmarkIds.length === 0) {
+    return { stats: [] };
+  }
+
+  const dedupeRule = await getModelDedupeRule();
+  const canonicalKeyByModelName = new Map<string, string>();
+  for (const item of items) {
+    for (const cell of item.cells) {
+      if (!canonicalKeyByModelName.has(cell.modelName)) {
+        const key = buildModelCanonicalKey(cell.modelName, dedupeRule);
+        if (key) {
+          canonicalKeyByModelName.set(cell.modelName, key);
+        }
+      }
+    }
+  }
+  const modelCanonicalKeys = Array.from(new Set(canonicalKeyByModelName.values()));
+
+  const matchedModels = modelCanonicalKeys.length > 0
+    ? await db
+        .select({
+          id: models.id,
+          canonicalKey: models.canonicalKey
+        })
+        .from(models)
+        .where(inArray(models.canonicalKey, modelCanonicalKeys))
+    : [];
+
+  const matchedModelIds = Array.from(new Set(matchedModels.map((model) => model.id)));
+
+  if (matchedModelIds.length === 0) {
+    return {
+      stats: items.flatMap((item) => {
+        const previewTotal = item.cells.filter((cell) => cell.rawValue.trim().length > 0).length;
+
+        return item.candidateBenchmarkIds.map((candidateBenchmarkId) => ({
+          previewBenchmarkKey: item.previewBenchmarkKey,
+          candidateBenchmarkId,
+          previewTotal,
+          modelOverlapCount: 0,
+          exactDuplicateCount: 0,
+          conflictCount: 0,
+          duplicateRate: 0
+        }));
+      })
+    };
+  }
+
+  const [candidateBenchmarks, existingValues] = await Promise.all([
+    db
+      .select({
+        id: benchmarks.id,
+        benchmarkName: benchmarks.benchmarkName
+      })
+      .from(benchmarks)
+      .where(inArray(benchmarks.id, candidateBenchmarkIds)),
+    db
+      .select({
+        benchmarkId: benchmarkValues.benchmarkId,
+        modelId: benchmarkValues.modelId,
+        valueRaw: benchmarkValues.valueRaw,
+        valueNum: benchmarkValues.valueNum,
+        valueNum2: benchmarkValues.valueNum2
+      })
+      .from(benchmarkValues)
+      .where(
+        and(
+          inArray(benchmarkValues.benchmarkId, candidateBenchmarkIds),
+          inArray(benchmarkValues.modelId, matchedModelIds)
+        )
+      )
+  ]);
+
+  const modelIdByCanonicalKey = new Map<string, number>();
+  matchedModels.forEach((model) => {
+    if (!modelIdByCanonicalKey.has(model.canonicalKey)) {
+      modelIdByCanonicalKey.set(model.canonicalKey, model.id);
+    }
+  });
+
+  const benchmarkNameById = new Map(candidateBenchmarks.map((benchmark) => [benchmark.id, benchmark.benchmarkName]));
+  const existingValuesByBenchmarkModel = new Map<string, Set<string>>();
+
+  existingValues.forEach((value) => {
+    const key = `${value.benchmarkId}:${value.modelId}`;
+    const valueKey = getBenchmarkOverlapValueKey(value);
+    const existingSet = existingValuesByBenchmarkModel.get(key);
+    if (existingSet) {
+      existingSet.add(valueKey);
+      return;
+    }
+
+    existingValuesByBenchmarkModel.set(key, new Set([valueKey]));
+  });
+
+  const stats: BenchmarkPreviewValueOverlapStats[] = [];
+
+  items.forEach((item) => {
+    const previewCells = item.cells.filter((cell) => cell.rawValue.trim().length > 0);
+    const resolvedPreviewCells = previewCells.map((cell) => ({
+      rawValue: cell.rawValue,
+      modelId: modelIdByCanonicalKey.get(canonicalKeyByModelName.get(cell.modelName) ?? "") ?? null
+    }));
+
+    item.candidateBenchmarkIds.forEach((candidateBenchmarkId) => {
+      let modelOverlapCount = 0;
+      let exactDuplicateCount = 0;
+      let conflictCount = 0;
+      const candidateBenchmarkName = benchmarkNameById.get(candidateBenchmarkId) ?? "";
+
+      resolvedPreviewCells.forEach((cell) => {
+        if (cell.modelId === null) {
+          return;
+        }
+
+        const existingValueKeys = existingValuesByBenchmarkModel.get(`${candidateBenchmarkId}:${cell.modelId}`);
+        if (!existingValueKeys) {
+          return;
+        }
+
+        modelOverlapCount += 1;
+
+        const previewValue = normalizeStoredBenchmarkValue(candidateBenchmarkName, parseBenchmarkValue(cell.rawValue));
+        const previewValueKey = getBenchmarkOverlapValueKey(previewValue);
+        if (existingValueKeys.has(previewValueKey)) {
+          exactDuplicateCount += 1;
+        } else {
+          conflictCount += 1;
+        }
+      });
+
+      stats.push({
+        previewBenchmarkKey: item.previewBenchmarkKey,
+        candidateBenchmarkId,
+        previewTotal: previewCells.length,
+        modelOverlapCount,
+        exactDuplicateCount,
+        conflictCount,
+        duplicateRate: previewCells.length > 0 ? exactDuplicateCount / previewCells.length : 0
+      });
+    });
+  });
+
+  return { stats };
+}
+
 export async function mergeEntity(input: {
   entityType: "model" | "benchmark";
   sourceId: number;
@@ -2722,6 +3031,7 @@ export type RenameEntityInput = {
   entityType: "model" | "benchmark";
   entityId: number;
   nextName: string;
+  nextProviderId?: number;
   nextBenchmarkType?: string;
   mergeOnConflict?: boolean;
 };
@@ -2732,6 +3042,8 @@ export type RenameEntityResult = {
   entityId: number;
   previousName: string;
   nextName: string;
+  previousProviderId?: number;
+  nextProviderId?: number;
   previousBenchmarkType?: string;
   nextBenchmarkType?: string;
   action: "renamed" | "merged-and-renamed" | "unchanged";
@@ -2884,6 +3196,23 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
       throw new Error(`model ${input.entityId} 已被合并到 ${current.mergedIntoModelId}，请改名目标实体`);
     }
 
+    const nextProviderId = input.nextProviderId ?? current.providerId;
+    if (!Number.isInteger(nextProviderId) || nextProviderId <= 0) {
+      throw new Error("nextProviderId must be a positive integer");
+    }
+
+    if (nextProviderId !== current.providerId) {
+      const [targetProvider] = await tx
+        .select({ id: providers.id })
+        .from(providers)
+        .where(eq(providers.id, nextProviderId))
+        .limit(1);
+
+      if (!targetProvider) {
+        throw new Error(`provider not found: ${nextProviderId}`);
+      }
+    }
+
     const nextCanonicalKey = buildModelCanonicalKey(nextName, dedupeRule);
 
     const [conflict] = await tx
@@ -2899,7 +3228,7 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
           ne(models.id, input.entityId),
           or(
             eq(models.canonicalKey, nextCanonicalKey),
-            and(eq(models.providerId, current.providerId), eq(models.modelName, nextName))
+            and(eq(models.providerId, nextProviderId), eq(models.modelName, nextName))
           )
         )
       )
@@ -2910,13 +3239,15 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
     let mergedSourceName: string | undefined;
 
     if (!conflict) {
-      if (current.modelName === nextName && current.canonicalKey === nextCanonicalKey) {
+      if (current.modelName === nextName && current.canonicalKey === nextCanonicalKey && current.providerId === nextProviderId) {
         return {
           ok: true,
           entityType: "model" as const,
           entityId: current.id,
           previousName: current.modelName,
           nextName,
+          previousProviderId: current.providerId,
+          nextProviderId,
           action: "unchanged" as const
         };
       }
@@ -2958,6 +3289,7 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
     await tx
       .update(models)
       .set({
+        providerId: nextProviderId,
         modelName: nextName,
         canonicalKey: nextCanonicalKey
       })
@@ -2969,6 +3301,8 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
       entityId: current.id,
       previousName: current.modelName,
       nextName,
+      previousProviderId: current.providerId,
+      nextProviderId,
       action,
       mergedSourceId,
       mergedSourceName

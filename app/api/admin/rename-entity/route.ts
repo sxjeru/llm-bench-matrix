@@ -7,6 +7,7 @@ const schema = z.object({
   entityType: z.enum(["model", "benchmark"]),
   entityId: z.number().int().positive(),
   nextName: z.string().trim().min(1),
+  nextProviderId: z.number().int().positive().optional(),
   nextBenchmarkType: z.string().trim().min(1).optional(),
   mergeOnConflict: z.boolean().optional()
 });
