@@ -254,6 +254,8 @@ export function AdminConsole({
     status: "idle" | "loading" | "success" | "error";
     stats: BenchmarkPreviewValueOverlapStats[];
   }>({ key: "", status: "idle", stats: [] });
+  const [benchmarkPreviewValueOverlapDebouncedTriggerKey, setBenchmarkPreviewValueOverlapDebouncedTriggerKey] = useState("");
+  const benchmarkPreviewValueOverlapLastTriggerKeyRef = useRef("");
   const mergeSubmitResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mergeSubmitButtonRef = useRef<HTMLButtonElement | null>(null);
   const [mergedRecordList, setMergedRecordList] = useState<MergedRecord[]>(mergedRecords);
@@ -622,8 +624,29 @@ export function AdminConsole({
     };
   }, [benchmarkWarnings, matrixPreview.rows, textImportDraftRows]);
 
+  const benchmarkPreviewValueOverlapTriggerKey = useMemo(() => {
+    if (textImportDraftRows.length === 0) {
+      return "";
+    }
+
+    return textImportDraftRows
+      .map((row, rowIndex) => `${rowIndex}:${row.rawValue}`)
+      .join("\u001f");
+  }, [textImportDraftRows]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setBenchmarkPreviewValueOverlapDebouncedTriggerKey(benchmarkPreviewValueOverlapTriggerKey);
+    }, 300);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [benchmarkPreviewValueOverlapTriggerKey]);
+
   useEffect(() => {
     if (!benchmarkPreviewValueOverlapPayload.key) {
+      benchmarkPreviewValueOverlapLastTriggerKeyRef.current = "";
       let cancelled = false;
       queueMicrotask(() => {
         if (!cancelled) {
@@ -635,6 +658,16 @@ export function AdminConsole({
         cancelled = true;
       };
     }
+
+    if (!benchmarkPreviewValueOverlapDebouncedTriggerKey) {
+      return;
+    }
+
+    if (benchmarkPreviewValueOverlapDebouncedTriggerKey === benchmarkPreviewValueOverlapLastTriggerKeyRef.current) {
+      return;
+    }
+
+    benchmarkPreviewValueOverlapLastTriggerKeyRef.current = benchmarkPreviewValueOverlapDebouncedTriggerKey;
 
     const controller = new AbortController();
     queueMicrotask(() => {
@@ -679,7 +712,7 @@ export function AdminConsole({
       });
 
     return () => controller.abort();
-  }, [benchmarkPreviewValueOverlapPayload]);
+  }, [benchmarkPreviewValueOverlapPayload, benchmarkPreviewValueOverlapDebouncedTriggerKey]);
 
   const benchmarkPreviewValueOverlapStatsMap = useMemo(() => {
     const map = new Map<string, BenchmarkPreviewValueOverlapStats>();
