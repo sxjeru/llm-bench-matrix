@@ -2,30 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import { type ClipboardEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Check,
-  ChevronDown,
-  Database,
-  FileSpreadsheet,
-  Layers,
-  Merge as MergeIcon,
-  Palette,
-  PlusCircle,
-  Search,
-  Settings2,
-  Sparkles,
-  ShieldAlert,
-  Table2,
-  Trash2,
-  Upload,
-  X
-} from "lucide-react";
 import { formatDateTimeLocalInputValue } from "@/components/benchmark-matrix/formatters";
-import { isValidHexColor, resolveProviderBrandColor } from "@/lib/provider-config";
+import { isValidHexColor } from "@/lib/provider-config";
 import { getJson, postFormData, postJson } from "./admin-console/api";
 import {
   BENCHMARK_SUSPECT_KEYWORDS,
-  MODALITY_OPTIONS,
   PAIR_NOTE_HISTORY_STORAGE_KEY,
   RENAME_LIST_OVERSCAN,
   RENAME_LIST_ROW_HEIGHT,
@@ -65,23 +46,20 @@ import type {
 import {
   buildBenchmarkCompareKey,
   getBenchmarkExactLookupKey,
-  getOmniDocBenchNormalizeHint,
   getTextImportBenchmarkKey,
   isLowerBetterPreviewBenchmark,
   removeParenthesesContent,
   resolveHardcodedBenchmarkAliasTarget
 } from "./admin-console/utils/benchmark";
 import { buildStructuredCsvText } from "./admin-console/utils/csv";
-import { toDomSafeId } from "./admin-console/utils/dom";
 import {
   composePairRawValue,
   composeStarRawValue,
-  formatPreviewNumericValue,
   parsePairRawValue,
   parseSingleRawValue,
   parseStarSingleRawValue
 } from "./admin-console/utils/import-values";
-import { parseExplicitMergeEntityId, parseMergeEntityId } from "./admin-console/utils/merge";
+import { parseMergeEntityId } from "./admin-console/utils/merge";
 import {
   buildModelCompareKey,
   normalizeModelDedupeRule,
@@ -89,7 +67,6 @@ import {
 } from "./admin-console/utils/model";
 import { normalizeModalityList, normalizeModalityName } from "./admin-console/utils/modality";
 import {
-  createProviderPrefixRuleDraft,
   getProviderDisplayNameById,
   inferProviderNameFromModelName,
   isProviderOption,
@@ -106,9 +83,13 @@ import {
   SheetPickerDialog
 } from "./admin-console/views/confirm-dialogs";
 import { EntryTab } from "./admin-console/views/entry-tab";
+import { ImportTab } from "./admin-console/views/import-tab";
+import { MaintenanceTab } from "./admin-console/views/maintenance-tab";
+import { MergeTab } from "./admin-console/views/merge-tab";
 import { AdminConsoleNotices } from "./admin-console/views/notices";
+import { ProvidersTab } from "./admin-console/views/providers-tab";
+import { RenameTab } from "./admin-console/views/rename-tab";
 import { SettingsTab } from "./admin-console/views/settings-tab";
-import { ModalityBadge } from "./admin-console/views/shared/modality-badge";
 import { AdminConsoleTabNav } from "./admin-console/views/tab-nav";
 
 function getProviderOptionLabel(provider: ProviderOption) {
@@ -915,15 +896,27 @@ export function AdminConsole({
 
   useEffect(() => {
     if (!benchmarkPreviewValueOverlapPayload.key) {
-      setBenchmarkPreviewValueOverlapState({ key: "", status: "idle", stats: [] });
-      return;
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (!cancelled) {
+          setBenchmarkPreviewValueOverlapState({ key: "", status: "idle", stats: [] });
+        }
+      });
+
+      return () => {
+        cancelled = true;
+      };
     }
 
     const controller = new AbortController();
-    setBenchmarkPreviewValueOverlapState({
-      key: benchmarkPreviewValueOverlapPayload.key,
-      status: "loading",
-      stats: []
+    queueMicrotask(() => {
+      if (!controller.signal.aborted) {
+        setBenchmarkPreviewValueOverlapState({
+          key: benchmarkPreviewValueOverlapPayload.key,
+          status: "loading",
+          stats: []
+        });
+      }
     });
 
     fetch("/api/admin/benchmarks/preview-value-overlap", {
@@ -2509,10 +2502,6 @@ export function AdminConsole({
     }
   }
 
-  function renderModalityBadge(modalityInput: string, key: string) {
-    return <ModalityBadge key={key} modalityInput={modalityInput} />;
-  }
-
   async function onPreviewCsvImport() {
     setIsPreviewingTextImport(true);
     try {
@@ -3590,986 +3579,110 @@ export function AdminConsole({
         <AdminConsoleTabNav activeTab={activeTab} onTabChange={setActiveTab} />
 
         {activeTab === "import" ? (
-          <div className="grid grid-cols-1 gap-4">
-            <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
-              <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold">
-                <FileSpreadsheet size={18} />
-                XLSM / XLSX 导入
-              </h3>
-              <p className="mb-4 text-sm opacity-80">
-                导入前会提示不合规值
-              </p>
-
-              <form onSubmit={onPreviewWorkbook} className="grid grid-cols-1 gap-3 md:grid-cols-12">
-                <div className="md:col-span-6">
-                  <input
-                    type="file"
-                    className="file-input file-input-bordered w-full"
-                    accept=".xlsm,.xlsx,.xls"
-                    onChange={(e) => setWorkbookFile(e.target.files?.[0] ?? null)}
-                    required
-                  />
-                </div>
-                <div className="md:col-span-3">
-                  <button type="submit" className="btn btn-primary w-full">
-                    <FileSpreadsheet size={16} />
-                    解析并预览
-                  </button>
-                </div>
-                <div className="md:col-span-3">
-                  <button
-                    type="button"
-                    className="btn btn-outline w-full"
-                    onClick={() => setSheetPickerOpen(true)}
-                    disabled={sheetNames.length <= 1}
-                  >
-                    选择工作表
-                  </button>
-                </div>
-              </form>
-
-              {previewMeta ? (
-                <div className="alert alert-info mt-4">
-                  <div>
-                    <div>当前工作表：{selectedSheet || "-"}</div>
-                    <div>
-                      列识别：Benchmark = {previewMeta.benchmarkColumn}
-                      {previewMeta.categoryColumn ? `，Category = ${previewMeta.categoryColumn}` : "，未检测到 Category"}
-                    </div>
-                    <div>
-                      解析记录：{previewMeta.parsedCount}，警告：{previewMeta.warningCount}
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-
-              {previewMeta ? (
-                <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-[auto_auto_minmax(320px,1fr)] xl:items-center">
-                  <label className="label cursor-pointer gap-2">
-                    <input
-                      type="checkbox"
-                      className="checkbox checkbox-sm"
-                      checked={allowWarningsImport}
-                      onChange={(e) => setAllowWarningsImport(e.target.checked)}
-                    />
-                    <span className="label-text">忽略警告继续导入</span>
-                  </label>
-
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={onImportWorkbook}
-                    disabled={isImportingWorkbook}
-                  >
-                    <Upload size={16} />
-                    {isImportingWorkbook ? "导入中..." : "导入当前工作表"}
-                  </button>
-
-                  {importStatus !== "idle" ? (
-                    <div className="w-full xl:justify-self-end">
-                      <progress
-                        className={`progress w-full ${
-                          importStatus === "error"
-                            ? "progress-error"
-                            : importStatus === "success"
-                              ? "progress-success"
-                              : "progress-primary"
-                        }`}
-                        value={importProgress}
-                        max={100}
-                      />
-                      <div className="mt-1 text-xs opacity-80 xl:text-right">{importStatusText}</div>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {previewWarnings.length > 0 ? (
-                <div className="mt-4">
-                  <h4 className="mb-2 flex items-center gap-2 font-semibold">
-                    <ShieldAlert size={16} />
-                    告警（最多 200 条）
-                  </h4>
-                  <div className="overflow-x-auto rounded-box border border-base-300">
-                    <table className="table table-zebra table-sm">
-                      <thead>
-                        <tr>
-                          <th>Row</th>
-                          <th>Benchmark</th>
-                          <th>Model</th>
-                          <th>Raw</th>
-                          <th>Reason</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {previewWarnings.map((warning, idx) => (
-                          <tr key={`${warning.rowNumber}-${warning.modelName}-${idx}`}>
-                            <td>{warning.rowNumber}</td>
-                            <td>{warning.benchmarkName}</td>
-                            <td>{warning.modelName}</td>
-                            <td>{warning.rawValue}</td>
-                            <td>{warning.reason}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ) : null}
-
-              {previewRows.length > 0 ? (
-                <div className="mt-4">
-                  <h4 className="mb-2 flex items-center gap-2 font-semibold">
-                    <Table2 size={16} />
-                    预览数据
-                  </h4>
-                  <div className="overflow-x-auto rounded-box border border-base-300">
-                    <table className="table table-zebra table-sm">
-                      <thead>
-                        <tr>
-                          <th>Row</th>
-                          <th>Category</th>
-                          <th>Benchmark</th>
-                          <th>Model</th>
-                          <th>Raw</th>
-                          <th>Num</th>
-                          <th>Num2</th>
-                          <th>Note</th>
-                          <th>Valid</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {previewRows.map((row) => (
-                          <tr key={`${row.rowNumber}-${row.benchmarkName}-${row.modelName}-${row.rawValue}`}>
-                            <td>{row.rowNumber}</td>
-                            <td>{row.category || "-"}</td>
-                            <td>{row.benchmarkName}</td>
-                            <td>{row.modelName}</td>
-                            <td>{row.rawValue}</td>
-                            <td>{formatPreviewNumericValue(row.rawValue, row.valueNum, "first")}</td>
-                            <td>{formatPreviewNumericValue(row.rawValue, row.valueNum2, "second")}</td>
-                            <td>{row.valueNote ?? "-"}</td>
-                            <td>{row.valid ? "✅" : "⚠️"}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ) : null}
-            </section>
-
-            <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
-              <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold">
-                <Upload size={18} />
-                表格文本导入（CSV / TSV / 粘贴文本）
-              </h3>
-              <p className="mb-3 text-sm opacity-80">
-                支持两种格式：
-                ① 结构化 CSV（provider/model/benchmark/value...）；
-                ② 矩阵文本（首行模型，首列 benchmark，如从表格直接复制粘贴）。
-              </p>
-              <form onSubmit={onImportCsv} className="space-y-3">
-                <div className="space-y-1">
-                  <input
-                    className="input input-bordered w-full"
-                    value={csvSource}
-                    onChange={(e) => setCsvSource(e.target.value)}
-                    placeholder="source（可选，指明该 benchmark 数据来源）"
-                  />
-                </div>
-                <textarea
-                  id="csv-text-import-input"
-                  aria-label="粘贴 CSV / 文本"
-                  className="textarea textarea-bordered min-h-[180px] w-full"
-                  value={csvText}
-                  onChange={(e) => {
-                    setCsvText(e.target.value);
-                    setCsvHtmlText("");
-                    setHasParsedHtmlTable(false);
-                  }}
-                  onPaste={onCsvTextPaste}
-                  required
-                />
-                <div className="mt-1 grid grid-cols-1 gap-3 xl:grid-cols-[auto_auto_minmax(320px,1fr)] xl:items-center">
-                  <button
-                    type="button"
-                    className="btn btn-outline"
-                    onClick={onPreviewCsvImport}
-                    disabled={isPreviewingTextImport || isImportingTextCsv}
-                  >
-                    {isPreviewingTextImport ? "预览中..." : "预览导入结果"}
-                  </button>
-                  <div className="inline-flex items-center gap-2">
-                    <button type="submit" className="btn btn-primary" disabled={isImportingTextCsv}>
-                      {isImportingTextCsv ? "导入中..." : "执行导入"}
-                    </button>
-                    {hasParsedHtmlTable ? (
-                      <span className="text-xs font-medium text-success">已成功解析 HTML 表格</span>
-                    ) : null}
-                  </div>
-                  {textImportStatus !== "idle" ? (
-                    <div className="w-full xl:justify-self-end">
-                      <progress
-                        className={`progress w-full ${
-                          textImportStatus === "error"
-                            ? "progress-error"
-                            : textImportStatus === "success"
-                              ? "progress-success"
-                              : "progress-primary"
-                        }`}
-                        value={textImportProgress}
-                        max={100}
-                      />
-                      <div className="mt-1 text-xs opacity-80 xl:text-right">{textImportStatusText}</div>
-                    </div>
-                  ) : null}
-                </div>
-              </form>
-
-              {textImportPreviewMeta ? (
-                <div className="alert alert-info mt-4">
-                  <div>
-                    <div>识别格式：{textImportPreviewMeta.format}</div>
-                    <div>可导入：{textImportPreviewMeta.total} 条，跳过：{textImportPreviewMeta.skipped} 条</div>
-                    {textImportDraftRows.length > 0 ? (
-                      <div>
-                        当前草稿：{finalizedTextImportRows.length} 条可提交，忽略/空值 {ignoredTextImportCount} 条
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
-
-              {pairValueRows.length > 0 ? (
-                <div className="mt-4 space-y-2 rounded-box border border-warning/40 bg-warning/5 p-3">
-                  <h4 className="font-semibold">成对数值注释</h4>
-                  {pairRowsMissingNoteCount > 0 ? (
-                    <div className="text-sm text-warning">
-                      检测到 {pairRowsMissingNoteCount} 条成对值暂未注释，可补充（允许留空）
-                    </div>
-                  ) : null}
-
-                  <div className="space-y-2">
-                    {pairValueRows.map((item) => (
-                      <div
-                        key={`pair-note-${item.rowIndex}-${item.modelName}-${item.benchmarkName}`}
-                        className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(280px,1fr)_minmax(220px,1fr)] lg:items-center"
-                      >
-                        <div className="text-xs opacity-80">
-                          {item.benchmarkName} / {item.modelName} ：{item.first} / {item.second}
-                        </div>
-                        <input
-                          className="input input-bordered input-sm"
-                          list="pair-note-history-options"
-                          value={item.note ?? ""}
-                          onChange={(e) => onUpdateTextImportDraftNote(item.rowIndex, e.target.value)}
-                          onBlur={(e) => onPairNoteInputBlur(item.rowIndex, item.benchmarkKey, e.target.value)}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                  <datalist id="pair-note-history-options">
-                    {pairNoteHistory.map((note) => (
-                      <option key={`pair-note-history-${note}`} value={note} />
-                    ))}
-                  </datalist>
-                </div>
-              ) : null}
-
-              {starValueRows.length > 0 ? (
-                <div className="mt-4 space-y-2 rounded-box border border-warning/40 bg-warning/5 p-3">
-                  <h4 className="font-semibold">星号数值注释补充</h4>
-                  {starRowsMissingSupplementCount > 0 ? (
-                    <div className="text-sm text-warning">
-                      检测到 {starRowsMissingSupplementCount} 条含 `*` 数值建议补充注释（可留空）
-                    </div>
-                  ) : null}
-
-                  <div className="flex flex-col gap-2 md:flex-row md:items-center">
-                    <input
-                      className="input input-bordered input-sm w-full md:max-w-md"
-                      value={globalStarSupplement}
-                      onChange={(e) => setGlobalStarSupplement(e.target.value)}
-                      placeholder="为全部 * 数值设置同一注释"
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-outline btn-sm md:shrink-0"
-                      onClick={onApplyGlobalStarSupplement}
-                    >
-                      应用到全部 *
-                    </button>
-                  </div>
-
-                  <div className="space-y-2">
-                    {starValueRows.map((item) => (
-                      <div
-                        key={`star-note-${item.rowIndex}-${item.modelName}-${item.benchmarkName}`}
-                        className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(280px,1fr)_minmax(220px,1fr)] lg:items-center"
-                      >
-                        <div className="text-xs opacity-80">
-                          {item.benchmarkName} / {item.modelName} ：{item.value}*
-                        </div>
-                        <input
-                          className="input input-bordered input-sm"
-                          value={item.supplement}
-                          list="star-note-history-options"
-                          onChange={(e) => onUpdateTextImportDraftStarSupplement(item.rowIndex, e.target.value)}
-                          onBlur={(e) => onStarSupplementInputBlur(item.rowIndex, e.target.value)}
-                          placeholder="可选补充注释"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                  <datalist id="star-note-history-options">
-                    {starNoteHistory.map((note) => (
-                      <option key={`star-note-history-${note}`} value={note} />
-                    ))}
-                  </datalist>
-                </div>
-              ) : null}
-
-              {matrixPreview.rows.length > 0 ? (
-                <div className="mt-4 space-y-2">
-                  <h4 className="font-semibold">矩阵预览（可编辑）</h4>
-                  <div className="overflow-x-auto rounded-box border border-base-300 max-h-[420px]">
-                    <table className="table table-zebra table-sm">
-                      <thead>
-                        <tr>
-                          <th className="w-[56px]">模态</th>
-                          <th className="min-w-[240px]">
-                            Benchmark
-                            <span className="ml-1 text-[11px] opacity-70">
-                              ({matrixPreviewHeaderCounts.benchmarkUniqueCount})
-                            </span>
-                          </th>
-                          <th className="min-w-[120px]">
-                            Type
-                            <span className="ml-1 text-[11px] opacity-70">
-                              ({matrixPreviewHeaderCounts.typeUniqueCount})
-                            </span>
-                          </th>
-                          {matrixPreview.modelNames.map((modelName) => {
-                            const modelWarning = modelWarningMap.get(modelName);
-                            const modelCandidateTargetIds = Array.from(new Set([
-                              ...(modelWarning?.candidateTargetIds ?? []),
-                              ...(modelWarning?.suggestedTargetId ? [modelWarning.suggestedTargetId] : [])
-                            ]));
-                            const modelInputListId = `matrix-model-override-${toDomSafeId(modelName)}`;
-
-                            return (
-                              <th
-                                key={`matrix-model-${modelName}`}
-                                className={modelWarningSet.has(modelName) ? "bg-warning/20 text-warning-content" : ""}
-                              >
-                                <input
-                                  className="input input-bordered input-xs w-full min-w-[120px]"
-                                  list={modelCandidateTargetIds.length > 0 ? modelInputListId : undefined}
-                                  value={matrixModelNameDrafts[modelName] ?? modelName}
-                                  onChange={(e) => {
-                                    const nextInput = e.target.value;
-                                    const parsedTargetId = parseExplicitMergeEntityId(nextInput);
-                                    if (parsedTargetId !== null && applyModelOverwriteByTargetId(modelName, parsedTargetId)) {
-                                      return;
-                                    }
-                                    onMatrixModelNameInputChange(modelName, nextInput);
-                                  }}
-                                  onBlur={(e) => onMatrixModelNameInputBlur(modelName, e.target.value)}
-                                />
-                                {modelCandidateTargetIds.length > 0 ? (
-                                  <datalist id={modelInputListId}>
-                                    {modelCandidateTargetIds.map((targetId) => {
-                                      const target = modelEntityOptions.find((item) => String(item.id) === String(targetId));
-                                      if (!target) {
-                                        return (
-                                          <option
-                                            key={`matrix-model-override-option-${modelName}-${targetId}`}
-                                            value={`#${targetId} [${targetId}]`}
-                                          />
-                                        );
-                                      }
-
-                                      return (
-                                        <option
-                                          key={`matrix-model-override-option-${modelName}-${targetId}`}
-                                          value={`${target.label} [${targetId}]`}
-                                        />
-                                      );
-                                    })}
-                                  </datalist>
-                                ) : null}
-                              </th>
-                            );
-                          })}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {matrixPreview.rows.map((matrixRow) => {
-                          const warning = benchmarkWarningMap.get(matrixRow.key);
-                          const hasParenthesesHighlight = benchmarkParenthesesSet.has(matrixRow.key);
-                          const rowModalities = normalizeModalityList(matrixRow.modalities);
-                          const hasVisibleModality = rowModalities.some(
-                            (modality) => normalizeModalityName(modality) !== "Text"
-                          );
-                          const isLowerBetter = !matrixRow.higherIsBetter;
-
-                          return (
-                            <tr key={matrixRow.key}>
-                              <td>
-                                <details className="dropdown dropdown-bottom" data-modality-dropdown="true">
-                                  <summary className="btn btn-ghost btn-xs h-7 min-h-0 px-1">
-                                    <div className="flex flex-wrap items-center gap-1">
-                                      {hasVisibleModality
-                                        ? rowModalities.map((modality, idx) =>
-                                            renderModalityBadge(modality, `${matrixRow.key}-mod-${modality}-${idx}`)
-                                          )
-                                        : <span className="text-xs opacity-60">Text</span>}
-                                    </div>
-                                  </summary>
-                                  <div className="dropdown-content z-[90] mt-1 w-44 rounded-box border border-base-300 bg-base-100 p-2 shadow-xl">
-                                    <div className="mb-1 text-[11px] opacity-75">选择模态</div>
-                                    <div className="space-y-1">
-                                      {MODALITY_OPTIONS.map((modality) => (
-                                        <label
-                                          key={`${matrixRow.key}-modality-option-${modality}`}
-                                          className="label cursor-pointer justify-start gap-2 py-0.5"
-                                        >
-                                          <input
-                                            type="checkbox"
-                                            className="checkbox checkbox-xs"
-                                            checked={rowModalities.includes(modality)}
-                                            onChange={(e) =>
-                                              onToggleMatrixBenchmarkModality(matrixRow.key, modality, e.target.checked)
-                                            }
-                                          />
-                                          <span className="label-text text-xs">{modality}</span>
-                                        </label>
-                                      ))}
-                                    </div>
-                                  </div>
-                                </details>
-                              </td>
-                              <th
-                                className={`min-w-[240px] ${
-                                  warning?.level === "danger"
-                                    ? "bg-error/15 text-error"
-                                    : warning?.level === "warn"
-                                      ? "bg-warning/15 text-warning-content"
-                                      : warning?.level === "info" || hasParenthesesHighlight
-                                        ? "bg-info/15 text-info-content"
-                                        : ""
-                                }`}
-                              >
-                                <div className="space-y-1">
-                                  {(() => {
-                                    const benchmarkCandidateTargetIds = Array.from(new Set([
-                                      ...(warning?.candidateTargetIds ?? []),
-                                      ...(warning?.suggestedTargetId ? [warning.suggestedTargetId] : [])
-                                    ]));
-                                    const benchmarkCandidateOptions = benchmarkCandidateTargetIds.map((targetId) => {
-                                      const target = benchmarkEntityOptions.find((item) => String(item.id) === String(targetId));
-                                      return {
-                                        targetId,
-                                        label: target?.label ?? `#${targetId}`
-                                      };
-                                    });
-
-                                    return (
-                                      <>
-                                        <div className="relative" data-matrix-benchmark-candidate-container="true">
-                                          <input
-                                            className="input input-bordered input-xs w-full"
-                                            value={matrixBenchmarkNameDrafts[matrixRow.key] ?? matrixRow.benchmarkName}
-                                            onFocus={() => {
-                                              if (benchmarkCandidateOptions.length > 0) {
-                                                setOpenMatrixBenchmarkCandidateFor(matrixRow.key);
-                                              }
-                                            }}
-                                            onChange={(e) => {
-                                              const nextInput = e.target.value;
-                                              const parsedTargetId = parseExplicitMergeEntityId(nextInput);
-                                              if (parsedTargetId !== null && applyBenchmarkOverwriteByTargetId(matrixRow.key, parsedTargetId)) {
-                                                setOpenMatrixBenchmarkCandidateFor(null);
-                                                return;
-                                              }
-                                              onMatrixBenchmarkNameInputChange(matrixRow.key, nextInput);
-                                            }}
-                                            onBlur={(e) => {
-                                              onMatrixBenchmarkNameInputBlur(
-                                                matrixRow.key,
-                                                matrixRow.benchmarkName,
-                                                e.target.value
-                                              );
-                                              setOpenMatrixBenchmarkCandidateFor((current) =>
-                                                current === matrixRow.key ? null : current
-                                              );
-                                            }}
-                                          />
-                                          {benchmarkCandidateOptions.length > 0 && openMatrixBenchmarkCandidateFor === matrixRow.key ? (
-                                            <div
-                                              role="listbox"
-                                              className="absolute left-0 right-0 top-full z-[95] mt-1 max-h-60 overflow-auto rounded-md border border-base-300 bg-base-100/95 p-1 shadow-xl backdrop-blur"
-                                            >
-                                              {benchmarkCandidateOptions.map((option) => {
-                                                const overlapStats = benchmarkPreviewValueOverlapStatsMap.get(
-                                                  getBenchmarkPreviewValueOverlapStatsKey(matrixRow.key, option.targetId)
-                                                );
-                                                const isLoadingOverlapStats =
-                                                  benchmarkPreviewValueOverlapState.key === benchmarkPreviewValueOverlapPayload.key
-                                                  && benchmarkPreviewValueOverlapState.status === "loading";
-
-                                                return (
-                                                  <div
-                                                    key={`matrix-benchmark-override-option-${matrixRow.key}-${option.targetId}`}
-                                                    role="option"
-                                                    aria-selected={false}
-                                                    tabIndex={0}
-                                                    className="cursor-pointer rounded-sm px-2 py-1 text-left text-xs leading-5 text-base-content hover:bg-base-200/90"
-                                                    onMouseDown={(event) => {
-                                                      event.preventDefault();
-                                                      applyBenchmarkOverwriteByTargetId(matrixRow.key, option.targetId);
-                                                      setOpenMatrixBenchmarkCandidateFor(null);
-                                                    }}
-                                                    onKeyDown={(event) => {
-                                                      if (event.key !== "Enter" && event.key !== " ") {
-                                                        return;
-                                                      }
-                                                      event.preventDefault();
-                                                      applyBenchmarkOverwriteByTargetId(matrixRow.key, option.targetId);
-                                                      setOpenMatrixBenchmarkCandidateFor(null);
-                                                    }}
-                                                  >
-                                                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                                                      <span className="font-medium">{`${option.label} [${option.targetId}]`}</span>
-                                                      {overlapStats ? (
-                                                        <span
-                                                          className={`inline-flex shrink-0 whitespace-nowrap text-[11px] font-medium ${getBenchmarkPreviewValueOverlapBadgeClass(overlapStats)}`}
-                                                        >
-                                                          {formatBenchmarkPreviewValueOverlapStats(overlapStats)}
-                                                        </span>
-                                                      ) : isLoadingOverlapStats ? (
-                                                        <span className="inline-flex shrink-0 whitespace-nowrap text-[11px] font-medium text-base-content/60">重复率计算中...</span>
-                                                      ) : null}
-                                                    </div>
-                                                  </div>
-                                                );
-                                              })}
-                                            </div>
-                                          ) : null}
-                                        </div>
-                                      </>
-                                    );
-                                  })()}
-                                </div>
-                              </th>
-                              <td className="whitespace-nowrap text-sm">
-                                <div className="flex min-w-0 items-center gap-1">
-                                  <input
-                                    className="input input-bordered input-xs min-w-[90px] flex-1"
-                                    value={matrixBenchmarkTypeDrafts[matrixRow.key] ?? matrixRow.benchmarkType}
-                                    onChange={(e) => onMatrixBenchmarkTypeInputChange(matrixRow.key, e.target.value)}
-                                    onBlur={(e) =>
-                                      onMatrixBenchmarkTypeInputBlur(
-                                        matrixRow.key,
-                                        matrixRow.benchmarkType,
-                                        e.target.value
-                                      )
-                                    }
-                                  />
-                                  <label className="inline-flex shrink-0 cursor-pointer items-center gap-0.5" title="以小为好">
-                                    <input
-                                      type="checkbox"
-                                      className="checkbox checkbox-xs"
-                                      checked={isLowerBetter}
-                                      onChange={(e) =>
-                                        onToggleMatrixBenchmarkLowerIsBetter(matrixRow.key, e.target.checked)
-                                      }
-                                    />
-                                    {isLowerBetter ? <span className="text-xs opacity-80">↓</span> : null}
-                                  </label>
-                                </div>
-                              </td>
-                              {matrixPreview.modelNames.map((modelName) => {
-                                const rowIndex = matrixRow.cellRowIndexByModel[modelName];
-                                const normalizedHint =
-                                  rowIndex === undefined
-                                    ? null
-                                    : getOmniDocBenchNormalizeHint(
-                                        matrixRow.benchmarkName,
-                                        textImportDraftRows[rowIndex]?.rawValue ?? ""
-                                      );
-                                const noteText =
-                                  rowIndex === undefined
-                                    ? ""
-                                    : (textImportDraftRows[rowIndex]?.valueNote?.trim() ?? "");
-
-                                return (
-                                  <td key={`${matrixRow.key}-${modelName}`}>
-                                    {rowIndex === undefined ? (
-                                      <span className="opacity-40">-</span>
-                                    ) : (
-                                      <div className="space-y-1">
-                                        <div className="relative">
-                                          <input
-                                            className="input input-bordered input-xs w-full min-w-[90px] pr-7"
-                                            value={textImportDraftRows[rowIndex]?.rawValue ?? ""}
-                                            onChange={(e) => onUpdateTextImportDraftValue(rowIndex, e.target.value)}
-                                          />
-                                          {noteText ? (
-                                            <span
-                                              className="pointer-events-auto absolute right-2 top-1/2 inline-flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
-                                              title={noteText}
-                                            >
-                                              ?
-                                            </span>
-                                          ) : null}
-                                        </div>
-                                        {normalizedHint ? (
-                                          <div className="text-[10px] text-warning">入库校对 → {normalizedHint}</div>
-                                        ) : null}
-                                      </div>
-                                    )}
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ) : null}
-
-              {benchmarkWarnings.length > 0 ? (
-                <div className="mt-4 space-y-3">
-                  <h4 className="font-semibold">重复嫌疑与快捷合并</h4>
-                  <div className="space-y-3">
-                    {benchmarkWarnings.map((warning) => {
-                      const benchmarkCandidateTargetIds = Array.from(new Set([
-                        ...warning.candidateTargetIds,
-                        ...(warning.suggestedTargetId ? [warning.suggestedTargetId] : [])
-                      ]));
-                      const benchmarkMergeListId = `benchmark-merge-options-${toDomSafeId(warning.key)}`;
-
-                      return (
-                        <div
-                          key={`warning-${warning.key}`}
-                          className={`rounded-box border p-3 ${
-                            warning.level === "danger"
-                              ? "border-error/40 bg-error/5"
-                              : warning.level === "warn"
-                                ? "border-warning/40 bg-warning/5"
-                                : "border-info/40 bg-info/5"
-                          }`}
-                        >
-                        <div className="mb-2 flex flex-wrap items-center gap-2">
-                          <span className="font-semibold">{warning.benchmarkName}</span>
-                          <span className="text-xs opacity-70">[{warning.benchmarkType}]</span>
-                          <span className="badge badge-sm">{warning.level}</span>
-                        </div>
-                        <ul className="mb-2 list-disc pl-5 text-sm opacity-85">
-                          {warning.reasons.map((reason, idx) => (
-                            <li key={`${warning.key}-reason-${idx}`}>{reason}</li>
-                          ))}
-                        </ul>
-                        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(320px,1fr)_auto] lg:items-center">
-                          <input
-                            className="input input-bordered input-sm"
-                            value={benchmarkMergeFilters[warning.key] ?? ""}
-                            list={benchmarkMergeListId}
-                            onChange={(e) => {
-                              const nextInput = e.target.value;
-                              const parsedTargetId = parseExplicitMergeEntityId(nextInput);
-
-                              if (parsedTargetId !== null && applyBenchmarkOverwriteByTargetId(warning.key, parsedTargetId)) {
-                                return;
-                              }
-
-                              setBenchmarkMergeFilters((prev) => ({
-                                ...prev,
-                                [warning.key]: nextInput
-                              }));
-
-                              setBenchmarkMergeTargets((prev) => ({
-                                ...prev,
-                                [warning.key]: parsedTargetId !== null ? String(parsedTargetId) : ""
-                              }));
-                            }}
-                            placeholder="输入 benchmark 名称并选择候选（即时覆盖预览）"
-                          />
-                          <datalist id={benchmarkMergeListId}>
-                            {benchmarkCandidateTargetIds.map((targetId) => {
-                              const target = benchmarkEntityOptions.find((item) => item.id === targetId);
-                              if (!target) return null;
-                              return (
-                                <option
-                                  key={`warning-target-${warning.key}-${target.id}`}
-                                  value={`${target.label} [${target.id}]`}
-                                />
-                              );
-                            })}
-                          </datalist>
-
-                          <label className="label cursor-pointer justify-start gap-2">
-                            <input
-                              type="checkbox"
-                              className="checkbox checkbox-xs"
-                              checked={Boolean(ignoredBenchmarkKeys[warning.key])}
-                              onChange={(e) =>
-                                setIgnoredBenchmarkKeys((prev) => ({
-                                  ...prev,
-                                  [warning.key]: e.target.checked
-                                }))
-                              }
-                            />
-                            <span className="label-text text-xs">忽略该 benchmark</span>
-                          </label>
-                        </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
-
-              {benchmarksWithParentheses.length > 0 ? (
-                <div className="mt-4 space-y-2 rounded-box border border-base-300 p-3">
-                  <h4 className="font-semibold">Benchmark 括号处理（默认保留）</h4>
-                  <div className="space-y-2">
-                    {benchmarksWithParentheses.map((item) => {
-                      const mode = parenthesesModes[item.key] ?? "keep";
-
-                      return (
-                        <div key={`paren-${item.key}`} className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(260px,1fr)_200px_minmax(220px,1fr)] lg:items-center">
-                          <div className="text-sm">
-                            <span className="font-medium">{item.benchmarkName}</span>
-                            <span className="ml-1 opacity-70">({item.benchmarkType})</span>
-                          </div>
-                          <select
-                            className="select select-bordered select-sm"
-                            value={mode}
-                            onChange={(e) =>
-                              setParenthesesModes((prev) => ({
-                                ...prev,
-                                [item.key]: e.target.value as "keep" | "remove" | "custom"
-                              }))
-                            }
-                          >
-                            <option value="keep">保留括号（默认）</option>
-                            <option value="remove">去掉括号内容</option>
-                            <option value="custom">自定义名称</option>
-                          </select>
-                          {mode === "custom" ? (
-                            <input
-                              className="input input-bordered input-sm"
-                              value={parenthesesCustomNames[item.key] ?? ""}
-                              onChange={(e) =>
-                                setParenthesesCustomNames((prev) => ({
-                                  ...prev,
-                                  [item.key]: e.target.value
-                                }))
-                              }
-                              placeholder="输入自定义 benchmark 名称"
-                            />
-                          ) : (
-                            <div className="text-xs opacity-70">当前模式：{mode === "remove" ? "去括号" : "保留"}</div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
-
-              {modelWarnings.length > 0 ? (
-                <div className="mt-4 space-y-3">
-                  <h4 className="font-semibold">模型重名嫌疑与快捷合并</h4>
-                  <div className="space-y-3">
-                    {modelWarnings.map((warning) => {
-                      const modelMergeListId = `model-merge-options-${toDomSafeId(warning.key)}`;
-
-                      return (
-                        <div
-                          key={`model-warning-${warning.key}`}
-                          className={`rounded-box border p-3 ${
-                            warning.level === "danger"
-                              ? "border-error/40 bg-error/5"
-                              : warning.level === "warn"
-                                ? "border-warning/40 bg-warning/5"
-                                : "border-info/40 bg-info/5"
-                          }`}
-                        >
-                        <div className="mb-2 flex flex-wrap items-center gap-2">
-                          <span className="font-semibold">{warning.modelName}</span>
-                          <span className="badge badge-sm">{warning.level}</span>
-                        </div>
-                        <ul className="mb-2 list-disc pl-5 text-sm opacity-85">
-                          {warning.reasons.map((reason, idx) => (
-                            <li key={`${warning.key}-model-reason-${idx}`}>{reason}</li>
-                          ))}
-                        </ul>
-                        <div className="grid grid-cols-1 gap-2 lg:grid-cols-1 lg:items-center">
-                          <input
-                            className="input input-bordered input-sm"
-                            value={modelMergeFilters[warning.key] ?? ""}
-                            list={modelMergeListId}
-                            onChange={(e) => {
-                              const nextInput = e.target.value;
-                              const parsedTargetId = parseExplicitMergeEntityId(nextInput);
-
-                              if (parsedTargetId !== null && applyModelOverwriteByTargetId(warning.key, parsedTargetId)) {
-                                return;
-                              }
-
-                              setModelMergeFilters((prev) => ({
-                                ...prev,
-                                [warning.key]: nextInput
-                              }));
-
-                              setModelMergeTargets((prev) => ({
-                                ...prev,
-                                [warning.key]: parsedTargetId !== null ? String(parsedTargetId) : ""
-                              }));
-                            }}
-                            placeholder="输入 model 名称并选择候选（即时覆盖预览）"
-                          />
-                          <datalist id={modelMergeListId}>
-                            {modelEntityOptions.map((option) => (
-                              <option key={`model-warning-target-${warning.key}-${option.id}`} value={`${option.label} [${option.id}]`} />
-                            ))}
-                          </datalist>
-
-                        </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
-
-              {modelsWithParentheses.length > 0 ? (
-                <div className="mt-4 space-y-2 rounded-box border border-base-300 p-3">
-                  <h4 className="font-semibold">模型括号处理（默认保留）</h4>
-                  <div className="space-y-2">
-                    {modelsWithParentheses.map((modelName) => {
-                      const mode = modelParenthesesModes[modelName] ?? "keep";
-
-                      return (
-                        <div key={`model-paren-${modelName}`} className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(260px,1fr)_200px_minmax(220px,1fr)] lg:items-center">
-                          <div className="text-sm font-medium">{modelName}</div>
-                          <select
-                            className="select select-bordered select-sm"
-                            value={mode}
-                            onChange={(e) =>
-                              setModelParenthesesModes((prev) => ({
-                                ...prev,
-                                [modelName]: e.target.value as "keep" | "remove" | "custom"
-                              }))
-                            }
-                          >
-                            <option value="keep">保留括号（默认）</option>
-                            <option value="remove">去掉括号内容</option>
-                            <option value="custom">自定义名称</option>
-                          </select>
-                          {mode === "custom" ? (
-                            <input
-                              className="input input-bordered input-sm"
-                              value={modelParenthesesCustomNames[modelName] ?? ""}
-                              onChange={(e) =>
-                                setModelParenthesesCustomNames((prev) => ({
-                                  ...prev,
-                                  [modelName]: e.target.value
-                                }))
-                              }
-                              placeholder="输入自定义 model 名称"
-                            />
-                          ) : (
-                            <div className="text-xs opacity-70">当前模式：{mode === "remove" ? "去括号" : "保留"}</div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
-
-              {textImportPreviewTableRows.length > 0 ? (
-                <div className="mt-4 space-y-2">
-                  <h4 className="flex items-center justify-between gap-3 font-semibold">
-                    <span>文本导入预览</span>
-                    <span className="text-xs opacity-70">
-                      已显示 {visibleResolvedTextImportPreviewRows.length} / {textImportPreviewTableRows.length}
-                    </span>
-                  </h4>
-                  <div className="overflow-x-auto rounded-box border border-base-300 max-h-[420px]">
-                    <table className="table table-zebra table-sm">
-                      <thead>
-                        <tr>
-                          <th>Row</th>
-                          <th>Provider</th>
-                          <th>Model</th>
-                          <th>Benchmark</th>
-                          <th>Type</th>
-                          <th>Raw</th>
-                          <th>Num</th>
-                          <th>Num2</th>
-                          <th>Note</th>
-                          <th>Source</th>
-                          <th>Valid</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {visibleResolvedTextImportPreviewRows.map((row, idx) => {
-                          const noteText = row.valueNote?.trim() ?? "";
-                          const omniHint = getOmniDocBenchNormalizeHint(row.benchmarkName, row.rawValue);
-
-                          return (
-                            <tr key={`${row.rowNumber}-${row.modelName}-${row.benchmarkName}-${idx}`}>
-                              <td>{row.rowNumber}</td>
-                              <td>{row.providerName}</td>
-                              <td>{row.modelName}</td>
-                              <td>{row.benchmarkName}</td>
-                              <td>{row.benchmarkType}</td>
-                              <td>
-                                <span className="inline-flex items-center gap-1">
-                                  <span>{row.rawValue}</span>
-                                  {noteText ? (
-                                    <span
-                                      className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
-                                      title={noteText}
-                                    >
-                                      ?
-                                    </span>
-                                  ) : null}
-                                </span>
-                              </td>
-                              <td>{formatPreviewNumericValue(row.rawValue, row.valueNum, "first")}</td>
-                              <td>{formatPreviewNumericValue(row.rawValue, row.valueNum2, "second")}</td>
-                              <td>{omniHint ? `入库校对 → ${omniHint}` : noteText || "-"}</td>
-                              <td>{row.source ?? "-"}</td>
-                              <td>{row.valid ? "✅" : "⚠️"}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {visibleResolvedTextImportPreviewRows.length < textImportPreviewTableRows.length ? (
-                    <button
-                      type="button"
-                      className="btn btn-outline btn-sm"
-                      onClick={() => setTextImportPreviewVisibleCount((prev) => prev + 200)}
-                    >
-                      加载更多（+200）
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-            </section>
-          </div>
+          <ImportTab
+            onPreviewWorkbook={onPreviewWorkbook}
+            setWorkbookFile={setWorkbookFile}
+            setSheetPickerOpen={setSheetPickerOpen}
+            sheetNames={sheetNames}
+            previewMeta={previewMeta}
+            selectedSheet={selectedSheet}
+            allowWarningsImport={allowWarningsImport}
+            setAllowWarningsImport={setAllowWarningsImport}
+            onImportWorkbook={onImportWorkbook}
+            isImportingWorkbook={isImportingWorkbook}
+            importStatus={importStatus}
+            importProgress={importProgress}
+            importStatusText={importStatusText}
+            previewWarnings={previewWarnings}
+            previewRows={previewRows}
+            onImportCsv={onImportCsv}
+            csvSource={csvSource}
+            setCsvSource={setCsvSource}
+            csvText={csvText}
+            setCsvText={setCsvText}
+            setCsvHtmlText={setCsvHtmlText}
+            setHasParsedHtmlTable={setHasParsedHtmlTable}
+            onCsvTextPaste={onCsvTextPaste}
+            onPreviewCsvImport={onPreviewCsvImport}
+            isPreviewingTextImport={isPreviewingTextImport}
+            isImportingTextCsv={isImportingTextCsv}
+            hasParsedHtmlTable={hasParsedHtmlTable}
+            textImportStatus={textImportStatus}
+            textImportProgress={textImportProgress}
+            textImportStatusText={textImportStatusText}
+            textImportPreviewMeta={textImportPreviewMeta}
+            textImportDraftRows={textImportDraftRows}
+            finalizedTextImportRows={finalizedTextImportRows}
+            ignoredTextImportCount={ignoredTextImportCount}
+            pairValueRows={pairValueRows}
+            pairRowsMissingNoteCount={pairRowsMissingNoteCount}
+            onUpdateTextImportDraftNote={onUpdateTextImportDraftNote}
+            onPairNoteInputBlur={onPairNoteInputBlur}
+            pairNoteHistory={pairNoteHistory}
+            starValueRows={starValueRows}
+            starRowsMissingSupplementCount={starRowsMissingSupplementCount}
+            globalStarSupplement={globalStarSupplement}
+            setGlobalStarSupplement={setGlobalStarSupplement}
+            onApplyGlobalStarSupplement={onApplyGlobalStarSupplement}
+            onUpdateTextImportDraftStarSupplement={onUpdateTextImportDraftStarSupplement}
+            onStarSupplementInputBlur={onStarSupplementInputBlur}
+            starNoteHistory={starNoteHistory}
+            matrixPreview={matrixPreview}
+            matrixPreviewHeaderCounts={matrixPreviewHeaderCounts}
+            modelWarningMap={modelWarningMap}
+            modelWarningSet={modelWarningSet}
+            matrixModelNameDrafts={matrixModelNameDrafts}
+            applyModelOverwriteByTargetId={applyModelOverwriteByTargetId}
+            onMatrixModelNameInputChange={onMatrixModelNameInputChange}
+            onMatrixModelNameInputBlur={onMatrixModelNameInputBlur}
+            modelEntityOptions={modelEntityOptions}
+            benchmarkWarningMap={benchmarkWarningMap}
+            benchmarkParenthesesSet={benchmarkParenthesesSet}
+            benchmarkEntityOptions={benchmarkEntityOptions}
+            matrixBenchmarkNameDrafts={matrixBenchmarkNameDrafts}
+            setOpenMatrixBenchmarkCandidateFor={setOpenMatrixBenchmarkCandidateFor}
+            openMatrixBenchmarkCandidateFor={openMatrixBenchmarkCandidateFor}
+            applyBenchmarkOverwriteByTargetId={applyBenchmarkOverwriteByTargetId}
+            onMatrixBenchmarkNameInputChange={onMatrixBenchmarkNameInputChange}
+            onMatrixBenchmarkNameInputBlur={onMatrixBenchmarkNameInputBlur}
+            benchmarkPreviewValueOverlapStatsMap={benchmarkPreviewValueOverlapStatsMap}
+            getBenchmarkPreviewValueOverlapStatsKey={getBenchmarkPreviewValueOverlapStatsKey}
+            benchmarkPreviewValueOverlapState={benchmarkPreviewValueOverlapState}
+            benchmarkPreviewValueOverlapPayload={benchmarkPreviewValueOverlapPayload}
+            getBenchmarkPreviewValueOverlapBadgeClass={getBenchmarkPreviewValueOverlapBadgeClass}
+            formatBenchmarkPreviewValueOverlapStats={formatBenchmarkPreviewValueOverlapStats}
+            matrixBenchmarkTypeDrafts={matrixBenchmarkTypeDrafts}
+            onMatrixBenchmarkTypeInputChange={onMatrixBenchmarkTypeInputChange}
+            onMatrixBenchmarkTypeInputBlur={onMatrixBenchmarkTypeInputBlur}
+            onToggleMatrixBenchmarkLowerIsBetter={onToggleMatrixBenchmarkLowerIsBetter}
+            onToggleMatrixBenchmarkModality={onToggleMatrixBenchmarkModality}
+            onUpdateTextImportDraftValue={onUpdateTextImportDraftValue}
+            benchmarkWarnings={benchmarkWarnings}
+            benchmarkMergeFilters={benchmarkMergeFilters}
+            setBenchmarkMergeFilters={setBenchmarkMergeFilters}
+            setBenchmarkMergeTargets={setBenchmarkMergeTargets}
+            ignoredBenchmarkKeys={ignoredBenchmarkKeys}
+            setIgnoredBenchmarkKeys={setIgnoredBenchmarkKeys}
+            benchmarksWithParentheses={benchmarksWithParentheses}
+            parenthesesModes={parenthesesModes}
+            setParenthesesModes={setParenthesesModes}
+            parenthesesCustomNames={parenthesesCustomNames}
+            setParenthesesCustomNames={setParenthesesCustomNames}
+            modelWarnings={modelWarnings}
+            modelMergeFilters={modelMergeFilters}
+            setModelMergeFilters={setModelMergeFilters}
+            setModelMergeTargets={setModelMergeTargets}
+            modelsWithParentheses={modelsWithParentheses}
+            modelParenthesesModes={modelParenthesesModes}
+            setModelParenthesesModes={setModelParenthesesModes}
+            modelParenthesesCustomNames={modelParenthesesCustomNames}
+            setModelParenthesesCustomNames={setModelParenthesesCustomNames}
+            textImportPreviewTableRows={textImportPreviewTableRows}
+            visibleResolvedTextImportPreviewRows={visibleResolvedTextImportPreviewRows}
+            setTextImportPreviewVisibleCount={setTextImportPreviewVisibleCount}
+            textImportPreviewVisibleCount={textImportPreviewVisibleCount}
+            benchmarks={benchmarks}
+          />
         ) : null}
 
         {activeTab === "entry" ? (
@@ -4615,1252 +3728,131 @@ export function AdminConsole({
         ) : null}
 
         {activeTab === "providers" ? (
-          <div className="space-y-5">
-            {/* Provider search selector */}
-            <section className="relative z-20 rounded-2xl border border-base-300/80 bg-base-100/95 p-5 shadow-md backdrop-blur">
-              <div className="mb-3 flex items-center gap-2 text-base font-semibold">
-                <Settings2 size={18} className="opacity-70" />
-                Provider
-              </div>
-              <div ref={providerSearchRef} className="relative w-full max-w-md">
-                <div
-                  className={`flex items-center gap-2 rounded-xl border bg-base-200/60 px-3 py-2.5 transition-all duration-200 ${
-                    providerSearchOpen ? "border-primary/60 ring-2 ring-primary/20" : "border-base-300/80 hover:border-base-content/30"
-                  }`}
-                  onClick={() => setProviderSearchOpen(true)}
-                >
-                  <Search size={15} className="shrink-0 opacity-50" />
-                  <input
-                    className="min-w-0 flex-1 border-none bg-transparent p-0 text-sm shadow-none outline-none focus:border-none focus:outline-none focus:ring-0 placeholder:text-base-content/40"
-                    style={{ border: 'none' }}
-                    value={providerSearchQuery}
-                    onChange={(e) => {
-                      setProviderSearchQuery(e.target.value);
-                      setProviderSearchOpen(true);
-                    }}
-                    onFocus={() => setProviderSearchOpen(true)}
-                    placeholder={selectedProviderForConfig ? `${selectedProviderForConfig.name} (${selectedProviderForConfig.slug})` : "搜索或输入新 Provider 名称\u2026"}
-                  />
-                  {selectedProviderConfigId !== null && !providerSearchQuery ? (
-                    <div
-                      role="button"
-                      className="shrink-0 cursor-pointer rounded-md p-0.5 opacity-50 transition-opacity hover:opacity-100"
-                      onClick={(e) => { e.stopPropagation(); setSelectedProviderConfigId(null); setProviderSearchQuery(""); }}
-                    >
-                      <X size={14} />
-                    </div>
-                  ) : null}
-                  <ChevronDown size={15} className={`shrink-0 opacity-40 transition-transform duration-200 ${providerSearchOpen ? "rotate-180" : ""}`} />
-                </div>
-
-                {providerSearchOpen ? (() => {
-                  const trimmedQuery = providerSearchQuery.trim();
-                  const hasExactMatch = trimmedQuery.length > 0 && providers.some(
-                    (p) => p.name.toLowerCase() === trimmedQuery.toLowerCase() || p.slug.toLowerCase() === trimmedQuery.toLowerCase()
-                  );
-                  const showCreateOption = trimmedQuery.length > 0 && !hasExactMatch;
-
-                  return (
-                    <div ref={providerDropdownRef} className="absolute left-0 right-0 top-full z-50 mt-1.5 max-h-72 overflow-auto rounded-xl border border-base-300/80 bg-base-100 py-1 shadow-xl">
-                      {showCreateOption ? (
-                        <div
-                          role="button"
-                          className="flex w-full cursor-pointer items-center gap-3 border-b border-base-300/50 px-4 py-2.5 text-left text-sm font-normal text-primary transition-colors hover:bg-primary/10"
-                          onClick={onCreateProviderFromSearch}
-                        >
-                          <PlusCircle size={15} className="shrink-0" />
-                          <span className="flex-1 truncate">
-                            {"创建新 Provider："}
-                            <span className="font-semibold">{trimmedQuery}</span>
-                          </span>
-                        </div>
-                      ) : null}
-                      {filteredProviderOptions.length === 0 && !showCreateOption ? (
-                        <div className="px-4 py-6 text-center text-sm opacity-50">无匹配结果</div>
-                      ) : (
-                        filteredProviderOptions.map((p) => {
-                          const isActive = p.id === selectedProviderConfigId;
-                          const pColor = resolveProviderBrandColor(p.name, p.config?.branding?.color);
-                          const mergeTargetId = p.config?.displayTargetProviderId;
-                          const mergeTargetProvider = typeof mergeTargetId === "number"
-                            ? providers.find((tp) => tp.id === mergeTargetId)
-                            : null;
-                          return (
-                            <div
-                              key={`provider-search-${p.id}`}
-                              role="button"
-                              data-provider-active={isActive ? "true" : undefined}
-                              className={`flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left text-sm font-normal transition-colors ${
-                                isActive
-                                  ? "bg-primary/10 font-medium text-primary"
-                                  : "hover:bg-base-200/70"
-                              }`}
-                              onClick={() => {
-                                setSelectedProviderConfigId(p.id);
-                                setProviderSearchQuery("");
-                                setProviderSearchOpen(false);
-                              }}
-                            >
-                              <span
-                                className="inline-block h-3 w-3 shrink-0 rounded-full ring-1 ring-black/10"
-                                style={{ backgroundColor: pColor }}
-                              />
-                              <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate">
-                                {p.name}
-                                {mergeTargetProvider ? (
-                                  <span className="inline-flex items-center gap-0.5 rounded bg-base-200/80 px-1 py-0.5 text-[10px] font-normal opacity-60">
-                                    <MergeIcon size={10} className="shrink-0" />
-                                    {mergeTargetProvider.config?.displayName?.trim() || mergeTargetProvider.name}
-                                  </span>
-                                ) : null}
-                              </span>
-                              <span className="shrink-0 rounded-md bg-base-200/80 px-1.5 py-0.5 text-[11px] opacity-60">{p.slug}</span>
-                              {isActive ? <Check size={14} className="shrink-0 text-primary" /> : null}
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  );
-                })() : null}
-              </div>
-            </section>
-
-            {/* Provider edit panel */}
-            {selectedProviderForConfig ? (() => {
-              const provider = selectedProviderForConfig;
-              const draft = providerConfigDrafts[provider.id] ?? toProviderConfigDraft(provider);
-              const previewDisplayName = draft.displayName.trim() || provider.name;
-              const previewBrandColor = resolveProviderBrandColor(provider.name, draft.brandingColor);
-              const isSaving = savingProviderConfigId === provider.id;
-              const isDeleting = deletingProviderId === provider.id;
-              const providerModels = models.filter((m) => m.providerId === provider.id);
-
-              return (
-                <section className="rounded-2xl border border-base-300/80 bg-base-100/95 shadow-md backdrop-blur">
-                  {/* Header */}
-                  <div className="flex items-center justify-between gap-4 px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <span
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-white text-sm font-bold shadow-md transition-colors duration-300"
-                        style={{ backgroundColor: previewBrandColor }}
-                      >
-                        {previewDisplayName.charAt(0).toUpperCase()}
-                      </span>
-                      <div className="flex flex-col justify-center">
-                        <div className="text-lg font-semibold leading-tight">{provider.name}</div>
-                        <span className="mt-1 inline-block rounded-md bg-base-200/80 px-1.5 py-0.5 text-[11px] font-mono opacity-60 w-fit">{provider.slug}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 self-start sm:self-auto">
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm gap-1.5 rounded-xl border border-error/20 text-error shadow-sm hover:border-error/40 hover:bg-error/10 disabled:border-base-300 disabled:text-base-content/40"
-                        onClick={() => openDeleteProviderConfirm(provider.id)}
-                        disabled={isSaving || isDeleting}
-                      >
-                        {isDeleting ? (
-                          <><span className="loading loading-spinner loading-xs" /> 删除中…</>
-                        ) : (
-                          <><Trash2 size={14} /> 删除 Provider</>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm gap-1.5 rounded-xl shadow-sm"
-                        onClick={() => onSaveProviderConfig(provider.id)}
-                        disabled={isSaving || isDeleting}
-                      >
-                        {isSaving ? (
-                          <><span className="loading loading-spinner loading-xs" /> 保存中…</>
-                        ) : (
-                          <><Check size={14} /> 保存配置</>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="border-t border-base-300/50" />
-
-                  {/* Form fields — three-column row */}
-                  <div className="grid grid-cols-1 gap-x-6 gap-y-5 px-6 py-5 lg:grid-cols-[1fr_1fr_280px] lg:items-end">
-                    {/* Display name */}
-                    <label className="form-control w-full">
-                      <span className="label-text mb-1.5 text-xs font-medium opacity-70">展示名</span>
-                      <input
-                        className="input input-bordered w-full rounded-xl bg-base-200/40 transition-colors focus:bg-base-100 focus:border-primary focus:outline-none"
-                        value={draft.displayName}
-                        onChange={(e) =>
-                          updateProviderDraft(provider.id, (current) => ({
-                            ...current,
-                            displayName: e.target.value
-                          }))
-                        }
-                        placeholder={provider.name}
-                      />
-                    </label>
-
-                    {/* Brand color: picker + text */}
-                    <div className="form-control w-full">
-                      <span className="label-text mb-1.5 text-xs font-medium opacity-70">品牌色</span>
-                      <div className="flex items-center gap-2">
-                        <label className="relative shrink-0 cursor-pointer">
-                          <input
-                            type="color"
-                            className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
-                            value={isValidHexColor(draft.brandingColor) ? draft.brandingColor : previewBrandColor}
-                            onClick={() => {
-                              if (!draft.brandingColor) {
-                                updateProviderDraft(provider.id, (current) => ({
-                                  ...current,
-                                  brandingColor: previewBrandColor
-                                }));
-                              }
-                            }}
-                            onChange={(e) =>
-                              updateProviderDraft(provider.id, (current) => ({
-                                ...current,
-                                brandingColor: e.target.value
-                              }))
-                            }
-                          />
-                          <div
-                            className="flex h-[2.75rem] w-[2.75rem] cursor-pointer items-center justify-center rounded-xl border border-base-300 shadow-sm transition-transform hover:scale-105 active:scale-95"
-                            style={{ backgroundColor: previewBrandColor }}
-                          >
-                            <Palette size={16} className="text-white/80 drop-shadow-sm" />
-                          </div>
-                        </label>
-                        <input
-                          className="input input-bordered min-w-0 flex-1 rounded-xl font-mono text-sm uppercase bg-base-200/40 transition-colors focus:bg-base-100 focus:border-primary focus:outline-none"
-                          value={draft.brandingColor}
-                          onChange={(e) => {
-                            let value = e.target.value;
-                            // Auto-add # prefix: if user types/pastes a bare hex like "112233"
-                            if (/^[0-9a-fA-F]{6}$/.test(value)) {
-                              value = `#${value}`;
-                            }
-                            updateProviderDraft(provider.id, (current) => ({
-                              ...current,
-                              brandingColor: value
-                            }));
-                          }}
-                          onPaste={(e: ClipboardEvent<HTMLInputElement>) => {
-                            const pasted = e.clipboardData.getData("text").trim();
-                            if (/^[0-9a-fA-F]{6}$/.test(pasted)) {
-                              e.preventDefault();
-                              updateProviderDraft(provider.id, (current) => ({
-                                ...current,
-                                brandingColor: `#${pasted}`
-                              }));
-                            } else if (/^#[0-9a-fA-F]{6}$/.test(pasted)) {
-                              e.preventDefault();
-                              updateProviderDraft(provider.id, (current) => ({
-                                ...current,
-                                brandingColor: pasted
-                              }));
-                            }
-                          }}
-                          placeholder="#34D399"
-                          maxLength={7}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Live preview */}
-                    <div className="form-control w-full">
-                      <span className="label-text mb-1.5 text-xs font-medium opacity-70">实时预览</span>
-                      <div
-                        className="relative flex h-[2.75rem] items-center overflow-hidden rounded-xl border border-base-300/50 px-4"
-                        style={{ background: `linear-gradient(135deg, ${previewBrandColor}14, ${previewBrandColor}06)` }}
-                      >
-                        <div
-                          className="absolute right-2 top-1/2 h-10 w-10 -translate-y-1/2 rounded-full opacity-10 blur-lg transition-colors duration-500"
-                          style={{ backgroundColor: previewBrandColor }}
-                        />
-                        <span className="relative z-10 truncate text-base font-bold tracking-tight transition-colors duration-200" style={{ color: previewBrandColor }}>
-                          {previewDisplayName}
-                        </span>
-                        <span className="relative z-10 ml-auto flex shrink-0 items-center gap-1.5 pl-3 font-mono text-[11px] opacity-50">
-                          <span
-                            className="inline-block h-2 w-2 rounded-full transition-colors duration-200"
-                            style={{ backgroundColor: previewBrandColor }}
-                          />
-                          {isValidHexColor(draft.brandingColor) ? draft.brandingColor.toLowerCase() : previewBrandColor.toLowerCase()}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-x-6 gap-y-5 px-6 pb-5 lg:grid-cols-[minmax(280px,1fr)_1fr] lg:items-end">
-                    <label className="form-control w-full">
-                      <span className="label-text mb-1.5 text-xs font-medium opacity-70">归并到</span>
-                      <select
-                        className="select select-bordered w-full rounded-xl bg-base-200/40 transition-colors focus:bg-base-100 focus:border-primary focus:outline-none"
-                        value={draft.displayTargetProviderId ?? ""}
-                        onChange={(e) =>
-                          updateProviderDraft(provider.id, (current) => ({
-                            ...current,
-                            displayTargetProviderId: e.target.value ? Number(e.target.value) : null
-                          }))
-                        }
-                      >
-                        <option value="">不归并，独立展示</option>
-                        {availableDisplayTargetProviders.map((targetProvider) => (
-                          <option key={`provider-display-target-${targetProvider.id}`} value={targetProvider.id}>
-                            {targetProvider.config?.displayName?.trim() || targetProvider.name} ({targetProvider.slug})
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <div className="rounded-xl border border-base-300/50 bg-base-200/25 px-4 py-3 text-sm leading-6 opacity-80">
-                      {draft.displayTargetProviderId
-                        ? (() => {
-                            const targetProvider = providers.find((item) => item.id === draft.displayTargetProviderId) ?? null;
-                            const targetDisplayName = targetProvider?.config?.displayName?.trim() || targetProvider?.name;
-                            return (
-                              <>
-                                <div className="font-medium">当前将归并展示到：{targetDisplayName}</div>
-                                <div className="mt-1 text-xs opacity-70">仅影响前台展示分组、名称和品牌色，不修改已有模型所属 provider。</div>
-                              </>
-                            );
-                          })()
-                        : (
-                          <>
-                            <div className="font-medium">当前独立展示</div>
-                            <div className="mt-1 text-xs opacity-70">适合保留该 provider 自己的名称、品牌色和分组。</div>
-                          </>
-                        )}
-                    </div>
-                  </div>
-
-                  <div className="border-t border-base-300/50" />
-
-                  {/* Prefix rules */}
-                  <div className="px-6 py-5">
-                    <div className="mb-3 flex items-center justify-between">
-                      <h4 className="flex items-center gap-1.5 text-sm font-semibold">
-                        <Layers size={14} className="opacity-60" />
-                        前缀规则
-                      </h4>
-                      <button
-                        type="button"
-                        className="btn btn-outline btn-sm gap-1 rounded-lg"
-                        onClick={() =>
-                          updateProviderDraft(provider.id, (current) => ({
-                            ...current,
-                            prefixRules: [...current.prefixRules, createProviderPrefixRuleDraft()]
-                          }))
-                        }
-                      >
-                        <PlusCircle size={13} />
-                        新增一条
-                      </button>
-                    </div>
-
-                    <div className="space-y-2">
-                      {draft.prefixRules.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-base-300/60 px-4 py-6 text-center text-sm opacity-50">
-                          暂无前缀规则，点击上方「新增一条」添加
-                        </div>
-                      ) : (
-                        draft.prefixRules.map((rule, index) => (
-                          <div key={rule.id} className="flex items-center gap-2 rounded-xl border border-base-300/50 bg-base-200/30 px-3 py-2 transition-colors hover:border-base-300">
-                            <input
-                              className="input input-bordered input-sm min-w-0 flex-1 rounded-lg bg-base-200/40 transition-colors focus:bg-base-100 focus:border-primary focus:outline-none"
-                              value={rule.prefix}
-                              onChange={(e) =>
-                                updateProviderDraft(provider.id, (current) => ({
-                                  ...current,
-                                  prefixRules: current.prefixRules.map((item, itemIndex) =>
-                                    itemIndex === index ? { ...item, prefix: e.target.value } : item
-                                  )
-                                }))
-                              }
-                              placeholder="例如 gpt-"
-                            />
-                            <label className="label cursor-pointer gap-1.5">
-                              <input
-                                type="checkbox"
-                                className="checkbox checkbox-sm checkbox-primary"
-                                checked={rule.enabled}
-                                onChange={(e) =>
-                                  updateProviderDraft(provider.id, (current) => ({
-                                    ...current,
-                                    prefixRules: current.prefixRules.map((item, itemIndex) =>
-                                      itemIndex === index ? { ...item, enabled: e.target.checked } : item
-                                    )
-                                  }))
-                                }
-                              />
-                              <span className="label-text text-xs">启用</span>
-                            </label>
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm btn-square rounded-lg text-error/70 hover:bg-error/10 hover:text-error"
-                              onClick={() =>
-                                updateProviderDraft(provider.id, (current) => ({
-                                  ...current,
-                                  prefixRules: current.prefixRules.filter((_, itemIndex) => itemIndex !== index)
-                                }))
-                              }
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="border-t border-base-300/50" />
-
-                  {/* Provider Models */}
-                  <div className="px-6 py-5">
-                    <div className="mb-3 flex items-center justify-between">
-                      <h4 className="flex items-center gap-1.5 text-sm font-semibold">
-                        <Database size={14} className="opacity-60" />
-                        包含模型 ({providerModels.length})
-                      </h4>
-                    </div>
-
-                    {providerModels.length === 0 ? (
-                      <div className="rounded-xl border border-dashed border-base-300/60 px-4 py-6 text-center text-sm opacity-50">
-                        该 Provider 下暂无模型
-                      </div>
-                    ) : (
-                      <div className="overflow-x-auto rounded-xl border border-base-300/50">
-                        <table className="table table-sm table-zebra w-full">
-                          <thead>
-                            <tr className="bg-base-200/50 text-base-content/70">
-                              <th className="font-medium">ID</th>
-                              <th className="font-medium">模型名称</th>
-                              <th className="font-medium">Canonical Key</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {providerModels.map(m => (
-                              <tr key={m.id} className="border-base-300/50">
-                                <td className="font-mono text-xs opacity-60 w-16">{m.id}</td>
-                                <td className="font-medium">{m.modelName}</td>
-                                <td className="font-mono text-xs opacity-70 break-all">{m.canonicalKey}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                </section>
-              );
-            })() : (
-              /* Empty state */
-              <section className="rounded-2xl border border-dashed border-base-300/60 bg-base-100/60 p-10 text-center">
-                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
-                  <Palette size={28} className="text-primary/60" />
-                </div>
-                <h3 className="text-lg font-semibold opacity-80">{"选择一个 Provider 开始配置"}</h3>
-                <p className="mx-auto mt-2 max-w-sm text-sm opacity-50">
-                  {"在上方搜索框中输入 Provider 名称或 slug，选择后即可编辑展示名、品牌色和前缀规则。"}
-                </p>
-              </section>
-            )}
-          </div>
+          <ProvidersTab
+            providerSearchRef={providerSearchRef}
+            providerSearchOpen={providerSearchOpen}
+            setProviderSearchOpen={setProviderSearchOpen}
+            providerSearchQuery={providerSearchQuery}
+            setProviderSearchQuery={setProviderSearchQuery}
+            selectedProviderForConfig={selectedProviderForConfig}
+            selectedProviderConfigId={selectedProviderConfigId}
+            setSelectedProviderConfigId={setSelectedProviderConfigId}
+            providers={providers}
+            filteredProviderOptions={filteredProviderOptions}
+            onCreateProviderFromSearch={onCreateProviderFromSearch}
+            providerDropdownRef={providerDropdownRef}
+            providerConfigDrafts={providerConfigDrafts}
+            savingProviderConfigId={savingProviderConfigId}
+            deletingProviderId={deletingProviderId}
+            models={models}
+            updateProviderDraft={updateProviderDraft}
+            openDeleteProviderConfirm={openDeleteProviderConfirm}
+            onSaveProviderConfig={onSaveProviderConfig}
+            availableDisplayTargetProviders={availableDisplayTargetProviders}
+          />
         ) : null}
 
         {activeTab === "rename" ? (
-          <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
-            <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold">
-              <Search size={18} />
-              实体名称维护
-            </h3>
-            <p className="mb-3 text-sm opacity-80">
-              支持搜索并更改已有 model 名称与 provider / benchmark 名称与 type。若命中重名冲突，可自动合并并保留当前选中实体。
-            </p>
-
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
-              <div className="md:col-span-3">
-                <select
-                  className="select select-bordered w-full"
-                  value={renameEntityType}
-                  onChange={(event) => resetRenameStateForEntityType(event.target.value as "model" | "benchmark")}
-                >
-                  <option value="model">model</option>
-                  <option value="benchmark">benchmark</option>
-                </select>
-              </div>
-              <div className="md:col-span-9">
-                <input
-                  className="input input-bordered w-full"
-                  value={renameSearchKeyword}
-                  onChange={(event) => updateRenameSearchKeyword(event.target.value)}
-                  placeholder="输入名称或 ID 关键字搜索实体"
-                />
-              </div>
-              <div className="md:col-span-12 text-xs opacity-70">
-                匹配 {filteredRenameEntityOptions.length} 条（虚拟列表渲染）
-              </div>
-            </div>
-
-            {filteredRenameEntityOptions.length > 0 ? (
-              <div className="mt-3 rounded-box border border-base-300">
-                <div className="grid grid-cols-[80px_minmax(0,1fr)_180px] border-b border-base-300 bg-base-100/60 px-1 py-2 text-xs font-semibold">
-                  <span className="px-2">ID</span>
-                  <span className="px-2">名称</span>
-                  <span className="px-2">{renameEntityType === "model" ? "Provider" : "Type"}</span>
-                </div>
-                <div
-                  ref={renameListViewportRef}
-                  className="overflow-auto"
-                  style={{ height: `${RENAME_LIST_VIEWPORT_HEIGHT}px` }}
-                  onScroll={(event) => setRenameListScrollTop(event.currentTarget.scrollTop)}
-                >
-                  <div className="relative" style={{ height: `${renameListSpacerHeight}px` }}>
-                    {visibleRenameEntityOptions.map((item, visibleIndex) => {
-                      const index = renameVirtualWindow.start + visibleIndex;
-                      const top = index * RENAME_LIST_ROW_HEIGHT;
-                      const isSelected = renameSelectedEntityId === item.id;
-                      const detailText = renameEntityType === "model"
-                        ? (() => {
-                            const model = modelById.get(item.id);
-                            if (!model) return "-";
-                            return providerById.get(model.providerId)?.config?.displayName?.trim() || providerById.get(model.providerId)?.name || "-";
-                          })()
-                        : (benchmarkById.get(item.id)?.benchmarkType ?? "-");
-
-                      return (
-                        <div
-                          key={`rename-entity-${renameEntityType}-${item.id}`}
-                          role="button"
-                          tabIndex={0}
-                          className={`absolute left-0 right-0 grid cursor-pointer grid-cols-[80px_minmax(0,1fr)_180px] items-center border-b px-1 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 ${
-                            isSelected
-                              ? "z-10 rounded-lg border border-primary/35 bg-primary/15 font-semibold text-base-content shadow-sm ring-1 ring-primary/25 before:absolute before:bottom-1.5 before:left-0 before:top-1.5 before:w-1 before:rounded-r-full before:bg-primary before:content-['']"
-                              : "border-base-300/50 bg-transparent hover:bg-base-200/35"
-                          }`}
-                          style={{
-                            top: `${top}px`,
-                            height: `${RENAME_LIST_ROW_HEIGHT}px`
-                          }}
-                          onClick={() => onPickRenameEntity(item.id)}
-                          onKeyDown={(event) => {
-                            if (event.key !== "Enter" && event.key !== " ") return;
-                            event.preventDefault();
-                            onPickRenameEntity(item.id);
-                          }}
-                        >
-                          <span className="truncate px-2 text-xs opacity-80">{item.id}</span>
-                          <span className="truncate px-2 text-sm">{item.label}</span>
-                          <span className="truncate px-2 text-xs opacity-80">{detailText}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <p className="mt-3 text-sm opacity-70">未匹配到实体，请调整关键词。</p>
-            )}
-
-            <form onSubmit={onRenameEntity} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-12">
-              <div className="md:col-span-4">
-                <div className="mb-1 text-xs opacity-70">当前实体</div>
-                <input
-                  className="input input-bordered w-full"
-                  value={renameSelectedEntityLabel}
-                  readOnly
-                  placeholder="请先在上方列表选中实体"
-                />
-              </div>
-              <div className={renameEntityType === "benchmark" ? "md:col-span-3" : "md:col-span-4"}>
-                <div className="mb-1 text-xs opacity-70">新名称</div>
-                <input
-                  className="input input-bordered w-full"
-                  value={renameNextName}
-                  onChange={(event) => setRenameNextName(event.target.value)}
-                  placeholder={renameEntityType === "model" ? "输入新的 model 名称" : "输入新的 benchmark 名称"}
-                  required
-                />
-              </div>
-              {renameEntityType === "benchmark" ? (
-                <div className="md:col-span-2">
-                  <div className="mb-1 text-xs opacity-70">新 Type</div>
-                  <input
-                    className="input input-bordered w-full"
-                    value={renameNextBenchmarkType}
-                    onChange={(event) => setRenameNextBenchmarkType(event.target.value)}
-                    placeholder="输入新的 benchmark type"
-                    required
-                  />
-                </div>
-              ) : null}
-              {renameEntityType === "model" && renameSelectedEntityId !== null ? (
-                <div className="md:col-span-3">
-                  <div className="mb-1 text-xs opacity-70">Provider</div>
-                  <input
-                    list="rename-provider-options"
-                    className="input input-bordered w-full"
-                    value={renameNextProviderInput}
-                    onChange={(event) => setRenameNextProviderInput(event.target.value)}
-                    placeholder="输入或选择 provider"
-                    required
-                  />
-                  <datalist id="rename-provider-options">
-                    {providerEntityOptions.map((item) => (
-                      <option key={`rename-provider-${item.id}`} value={`${item.label} [${item.id}]`} />
-                    ))}
-                  </datalist>
-                </div>
-              ) : null}
-              <div className={renameEntityType === "benchmark" ? "md:col-span-3 flex items-end" : "md:col-span-2 flex items-end"}>
-                <label className="label cursor-pointer justify-start gap-2">
-                  <input
-                    type="checkbox"
-                    className="checkbox checkbox-sm"
-                    checked={renameMergeOnConflict}
-                    onChange={(event) => setRenameMergeOnConflict(event.target.checked)}
-                  />
-                  <span className="label-text text-xs">重名时自动合并</span>
-                </label>
-              </div>
-              <div className="md:col-span-12 flex flex-wrap items-center gap-3">
-                <button
-                  type="submit"
-                  className={`btn ${renameSubmitState === "success" ? "btn-success" : "btn-primary"}`}
-                  disabled={renameSubmitState === "submitting" || renameSelectedEntityId === null}
-                >
-                  {renameSubmitState === "submitting"
-                    ? "提交中..."
-                    : renameSubmitState === "success"
-                      ? "已提交"
-                      : "保存名称变更"}
-                </button>
-                <span className="text-xs opacity-70">
-                  自动合并开启时：若命中重名冲突，会把冲突实体并入当前选中实体后再完成改名。
-                </span>
-              </div>
-            </form>
-          </section>
+          <RenameTab
+            renameEntityType={renameEntityType}
+            resetRenameStateForEntityType={resetRenameStateForEntityType}
+            renameSearchKeyword={renameSearchKeyword}
+            updateRenameSearchKeyword={updateRenameSearchKeyword}
+            filteredRenameEntityOptions={filteredRenameEntityOptions}
+            renameListViewportRef={renameListViewportRef}
+            setRenameListScrollTop={setRenameListScrollTop}
+            renameListSpacerHeight={renameListSpacerHeight}
+            visibleRenameEntityOptions={visibleRenameEntityOptions}
+            renameVirtualWindow={renameVirtualWindow}
+            renameSelectedEntityId={renameSelectedEntityId}
+            modelById={modelById}
+            providerById={providerById}
+            benchmarkById={benchmarkById}
+            onPickRenameEntity={onPickRenameEntity}
+            onRenameEntity={onRenameEntity}
+            renameSelectedEntityLabel={renameSelectedEntityLabel}
+            renameNextName={renameNextName}
+            setRenameNextName={setRenameNextName}
+            renameNextBenchmarkType={renameNextBenchmarkType}
+            setRenameNextBenchmarkType={setRenameNextBenchmarkType}
+            renameNextProviderInput={renameNextProviderInput}
+            setRenameNextProviderInput={setRenameNextProviderInput}
+            providerEntityOptions={providerEntityOptions}
+            renameMergeOnConflict={renameMergeOnConflict}
+            setRenameMergeOnConflict={setRenameMergeOnConflict}
+            renameSubmitState={renameSubmitState}
+          />
         ) : null}
 
         {activeTab === "merge" ? (
-          <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
-            <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold">
-              <MergeIcon size={18} />
-              实体合并去重
-            </h3>
-            <div className="mb-5 rounded-2xl border border-primary/25 bg-gradient-to-br from-base-200/45 via-base-100/30 to-base-100/70 p-4 shadow-sm">
-              <div className="flex flex-wrap items-center gap-2">
-                <h4 className="flex items-center gap-2 text-base font-semibold">
-                  <Sparkles size={16} className="text-primary" />
-                  重复候选检测
-                </h4>
-                <button
-                  type="button"
-                  className="btn btn-sm btn-primary ml-auto"
-                  onClick={onDetectDuplicateCandidates}
-                  disabled={isDetectingDuplicates}
-                >
-                  <Search size={14} />
-                  {isDetectingDuplicates ? "检测中..." : "检测重复候选"}
-                </button>
-              </div>
-
-              <p className="mt-2 text-xs opacity-75">
-                模型：去噪词（如 high/reasoning）+ 字符重复匹配度；Benchmark：名称归一化 + 字符重复匹配度（不依赖模型重合度）。
-              </p>
-
-              {duplicateDetectionResult ? (
-                <div className="mt-3 space-y-3">
-                  <div className="flex flex-wrap items-center gap-2 text-xs opacity-80">
-                    <span className="opacity-70">生成时间：{new Date(duplicateDetectionResult.generatedAt).toLocaleString()}</span>
-                  </div>
-
-                  <div className="tabs tabs-boxed inline-flex bg-base-200/70 p-1">
-                    <button
-                      type="button"
-                      className={`tab ${duplicateDetectionEntityType === "model" ? "tab-active" : ""}`}
-                      onClick={() => setDuplicateDetectionEntityType("model")}
-                    >
-                      {`Model 候选（${duplicateDetectionResult.modelCandidates.length}）`}
-                    </button>
-                    <button
-                      type="button"
-                      className={`tab ${duplicateDetectionEntityType === "benchmark" ? "tab-active" : ""}`}
-                      onClick={() => setDuplicateDetectionEntityType("benchmark")}
-                    >
-                      {`Benchmark 候选（${duplicateDetectionResult.benchmarkCandidates.length}）`}
-                    </button>
-                  </div>
-
-                  <div className="inline-flex items-center gap-1 rounded-lg border border-base-300/70 bg-base-100/60 p-1 text-xs">
-                    <button
-                      type="button"
-                      className={`btn btn-xs ${duplicateConfidenceFilter === "high-medium" ? "btn-primary" : "btn-ghost"}`}
-                      onClick={() => setDuplicateConfidenceFilter("high-medium")}
-                    >
-                      仅高/中置信
-                    </button>
-                    <button
-                      type="button"
-                      className={`btn btn-xs ${duplicateConfidenceFilter === "all" ? "btn-primary" : "btn-ghost"}`}
-                      onClick={() => setDuplicateConfidenceFilter("all")}
-                    >
-                      显示全部
-                    </button>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2 rounded-xl border border-base-300/70 bg-base-100/60 p-2 text-xs">
-                    <label className="flex cursor-pointer items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="checkbox checkbox-sm"
-                        checked={isAllActiveDuplicateCandidatesSelected}
-                        disabled={activeDuplicateCandidateCount === 0 || isBatchMergingDuplicates}
-                        onChange={(e) => toggleAllVisibleDuplicateCandidates(e.target.checked)}
-                      />
-                      <span>选择当前列表全部候选</span>
-                    </label>
-                    <span className="opacity-70">已选 {selectedActiveDuplicateCandidateCount} / {activeDuplicateCandidateCount}</span>
-                    <button
-                      type="button"
-                      className="btn btn-xs btn-error ml-auto"
-                      disabled={selectedActiveDuplicateCandidateCount === 0 || isBatchMergingDuplicates}
-                      onClick={onBatchMergeDuplicateCandidates}
-                    >
-                      {isBatchMergingDuplicates ? "批量合并中..." : "批量合并已选"}
-                    </button>
-                  </div>
-
-                  {duplicateDetectionEntityType === "model" ? (
-                    visibleModelDuplicateCandidates.length === 0 ? (
-                      <div className="rounded-xl border border-dashed border-base-300 p-3 text-sm opacity-70">
-                        当前筛选条件下未检测到 model 重复候选。
-                      </div>
-                    ) : (
-                      <div className="max-h-[420px] space-y-2 overflow-auto pr-1">
-                        {visibleModelDuplicateCandidates.map((candidate) => (
-                          <div
-                            key={`dup-model-${candidate.sourceId}-${candidate.targetId}`}
-                            className={`rounded-xl border p-3 shadow-sm ${duplicateCandidateCardClass(candidate.confidence)}`}
-                          >
-                            <div className="flex flex-wrap items-start gap-2">
-                              <label className="flex cursor-pointer items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  className="checkbox checkbox-sm"
-                                  checked={Boolean(selectedDuplicateCandidateKeys[getDuplicateCandidateKey("model", candidate)])}
-                                  disabled={isBatchMergingDuplicates}
-                                  onChange={(e) => setDuplicateCandidateSelected("model", candidate, e.target.checked)}
-                                  aria-label={`选择 ${candidate.sourceName} 合并到 ${candidate.targetName}`}
-                                />
-                              </label>
-                              <span className="font-semibold">
-                                {candidate.sourceName} [{candidate.sourceId}] → {candidate.targetName} [{candidate.targetId}]
-                              </span>
-                              <span className={`badge badge-sm font-semibold ${duplicateConfidenceBadgeClass(candidate.confidence)}`}>
-                                {duplicateConfidenceLabel(candidate.confidence)}
-                              </span>
-                              <button
-                                type="button"
-                                className="btn btn-sm btn-outline ml-auto"
-                                onClick={() => applyModelDuplicateCandidate(candidate)}
-                              >
-                                填充到合并表单
-                              </button>
-                            </div>
-
-                            <div className="mt-1 text-xs opacity-80">
-                              {/* 提供方：{candidate.sourceProviderName} → {candidate.targetProviderName} */}
-                              记录数：{candidate.sourceValueCount} → {candidate.targetValueCount}
-                              ・相似度 {(candidate.similarity * 100).toFixed(1)}%
-                              ・字符重复 {(candidate.characterRepeatScore * 100).toFixed(1)}%
-                            </div>
-
-                            <div className="mt-2 flex flex-wrap gap-1">
-                              {candidate.reasons.map((reason) => (
-                                <span
-                                  key={`dup-model-reason-${candidate.sourceId}-${candidate.targetId}-${reason}`}
-                                  className="badge badge-outline badge-xs"
-                                >
-                                  {duplicateReasonLabel(reason)}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )
-                  ) : (
-                    visibleBenchmarkDuplicateCandidates.length === 0 ? (
-                      <div className="rounded-xl border border-dashed border-base-300 p-3 text-sm opacity-70">
-                        当前筛选条件下未检测到 benchmark 重复候选。
-                      </div>
-                    ) : (
-                      <div className="max-h-[420px] space-y-2 overflow-auto pr-1">
-                        {visibleBenchmarkDuplicateCandidates.map((candidate) => (
-                          <div
-                            key={`dup-benchmark-${candidate.sourceId}-${candidate.targetId}`}
-                            className={`rounded-xl border p-3 shadow-sm ${duplicateCandidateCardClass(candidate.confidence)}`}
-                          >
-                            <div className="flex flex-wrap items-start gap-2">
-                              <label className="flex cursor-pointer items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  className="checkbox checkbox-sm"
-                                  checked={Boolean(selectedDuplicateCandidateKeys[getDuplicateCandidateKey("benchmark", candidate)])}
-                                  disabled={isBatchMergingDuplicates}
-                                  onChange={(e) => setDuplicateCandidateSelected("benchmark", candidate, e.target.checked)}
-                                  aria-label={`选择 ${candidate.sourceName} 合并到 ${candidate.targetName}`}
-                                />
-                              </label>
-                              <span className="font-semibold">
-                                {candidate.sourceName} [{candidate.sourceType}] → {candidate.targetName} [{candidate.targetType}]
-                              </span>
-                              <span className={`badge badge-sm font-semibold ${duplicateConfidenceBadgeClass(candidate.confidence)}`}>
-                                {duplicateConfidenceLabel(candidate.confidence)}
-                              </span>
-                              <button
-                                type="button"
-                                className="btn btn-sm btn-outline ml-auto"
-                                onClick={() => applyBenchmarkDuplicateCandidate(candidate)}
-                              >
-                                填充到合并表单
-                              </button>
-                            </div>
-
-                            <div className="mt-1 text-xs opacity-80">
-                              记录数：{candidate.sourceValueCount} → {candidate.targetValueCount}
-                              ・相似度 {(candidate.similarity * 100).toFixed(1)}%
-                              ・字符重复 {(candidate.characterRepeatScore * 100).toFixed(1)}%
-                              {candidate.sourceSourceSummary || candidate.targetSourceSummary
-                                ? `・Source ${candidate.sourceSourceSummary ?? "空 source"} → ${candidate.targetSourceSummary ?? "空 source"}`
-                                : ""}
-                            </div>
-
-                            <div className="mt-2 flex flex-wrap gap-1">
-                              {candidate.reasons.map((reason) => (
-                                <span
-                                  key={`dup-benchmark-reason-${candidate.sourceId}-${candidate.targetId}-${reason}`}
-                                  className="badge badge-outline badge-xs"
-                                >
-                                  {duplicateReasonLabel(reason)}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )
-                  )}
-                </div>
-              ) : (
-                <div className="mt-3 rounded-xl border border-dashed border-base-300 p-3 text-sm opacity-75">
-                  点击“检测重复候选”后，会列出可疑的 model / benchmark，并支持一键填充到下方合并表单。
-                </div>
-              )}
-            </div>
-
-            <form onSubmit={onMerge} className="grid grid-cols-1 gap-3 md:grid-cols-12">
-              <div className="md:col-span-4">
-                <select
-                  className="select select-bordered w-full"
-                  value={mergeType}
-                  onChange={(e) => {
-                    setMergeType(e.target.value as "model" | "benchmark");
-                    setMergeSourceInput("");
-                    setMergeTargetInput("");
-                    setMergeTargetBenchmarkNameInput("");
-                  }}
-                >
-                  <option value="model">model</option>
-                  <option value="benchmark">benchmark</option>
-                </select>
-              </div>
-              <div className="md:col-span-4">
-                <input
-                  list={`merge-options-${mergeType}`}
-                  className="input input-bordered w-full"
-                  value={mergeSourceInput}
-                  onChange={(e) => setMergeSourceInput(e.target.value)}
-                  placeholder="source：输入名称或ID"
-                  required
-                />
-              </div>
-              <div className="md:col-span-4">
-                <input
-                  list={`merge-options-${mergeType}`}
-                  className="input input-bordered w-full"
-                  value={mergeTargetInput}
-                  onChange={(e) => setMergeTargetInput(e.target.value)}
-                  placeholder="target：输入名称或ID"
-                  required
-                />
-                <datalist id={`merge-options-${mergeType}`}>
-                  {mergeEntityOptions.map((item) => (
-                    <option key={`${mergeType}-${item.id}`} value={`${item.label} [${item.id}]`} />
-                  ))}
-                </datalist>
-              </div>
-              <div className="md:col-span-12 flex flex-wrap items-center gap-2 text-xs">
-                <span className="opacity-75">解析结果：source = {resolvedMergeSourceId ?? "-"}，target = {resolvedMergeTargetId ?? "-"}</span>
-                {shouldRenderBenchmarkValueOverlapBadge ? (
-                  <span
-                    className={`badge badge-xs ${benchmarkValueOverlapBadgeClass}`}
-                    style={isLoadingBenchmarkValueOverlap ? undefined : { color: "#0f172a" }}
-                  >
-                    相同值 = {isLoadingBenchmarkValueOverlap
-                      ? "计算中..."
-                      : `${benchmarkValueOverlapStats?.sameCount ?? 0} / ${benchmarkValueOverlapStats?.overlapCount ?? 0}`}
-                  </span>
-                ) : null}
-              </div>
-              {mergeType === "benchmark" ? (
-                <div className="md:col-span-8">
-                  <input
-                    className="input input-bordered w-full"
-                    value={mergeTargetBenchmarkNameInput}
-                    onChange={(e) => setMergeTargetBenchmarkNameInput(e.target.value)}
-                    placeholder="可选：合并时同时修改 target benchmark 显示名称"
-                  />
-                </div>
-              ) : null}
-              <div className={mergeType === "benchmark" ? "md:col-span-4" : "md:col-span-12"}>
-                <button
-                  ref={mergeSubmitButtonRef}
-                  type="submit"
-                  className={`btn ${mergeSubmitState === "success" ? "btn-success" : "btn-error"}`}
-                  disabled={!canSubmitMerge}
-                  style={{ scrollMarginBottom: "72px" }}
-                >
-                  {mergeSubmitState === "submitting"
-                    ? "合并中..."
-                    : mergeSubmitState === "success"
-                      ? "已合并"
-                      : "合并实体"}
-                </button>
-              </div>
-            </form>
-
-            <h4 className="mt-6 mb-2 font-semibold">已有合并去重记录</h4>
-            {mergedRecordList.length === 0 ? (
-              <p className="text-sm opacity-70">暂无已合并记录</p>
-            ) : (
-              <div className="overflow-x-auto rounded-box border border-base-300">
-                <table className="table table-zebra table-sm">
-                  <thead>
-                    <tr>
-                      <th>Type</th>
-                      <th>Source</th>
-                      <th>Target（可编辑）</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {mergedRecordList.map((record) => {
-                      const recordKey = `${record.entityType}:${record.sourceId}`;
-                      const inputValue = mergedRecordTargetInputs[recordKey] ?? `${record.targetName} [${record.targetId}]`;
-
-                      return (
-                        <tr key={recordKey}>
-                          <td>{record.entityType}</td>
-                          <td>{record.sourceName} [{record.sourceId}]</td>
-                          <td>
-                            <input
-                              list={`merge-edit-options-${record.entityType}`}
-                              className="input input-bordered input-sm w-full min-w-[300px]"
-                              value={inputValue}
-                              onChange={(e) =>
-                                setMergedRecordTargetInputs((prev) => ({
-                                  ...prev,
-                                  [recordKey]: e.target.value
-                                }))
-                              }
-                              placeholder="输入名称或ID"
-                            />
-                          </td>
-                          <td>
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                type="button"
-                                className="btn btn-xs btn-outline"
-                                onClick={() => onUpdateMergedRecord(record)}
-                              >
-                                保存修改
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-xs btn-outline btn-error"
-                                onClick={() => onDeleteMergedRecord(record)}
-                              >
-                                删除记录
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            <datalist id="merge-edit-options-model">
-              {modelEntityOptions.map((item) => (
-                <option key={`merge-edit-model-${item.id}`} value={`${item.label} [${item.id}]`} />
-              ))}
-            </datalist>
-            <datalist id="merge-edit-options-benchmark">
-              {benchmarkEntityOptions.map((item) => (
-                <option key={`merge-edit-benchmark-${item.id}`} value={`${item.label} [${item.id}]`} />
-              ))}
-            </datalist>
-          </section>
+          <MergeTab
+            isDetectingDuplicates={isDetectingDuplicates}
+            onDetectDuplicateCandidates={onDetectDuplicateCandidates}
+            duplicateDetectionResult={duplicateDetectionResult}
+            duplicateDetectionEntityType={duplicateDetectionEntityType}
+            setDuplicateDetectionEntityType={setDuplicateDetectionEntityType}
+            duplicateConfidenceFilter={duplicateConfidenceFilter}
+            setDuplicateConfidenceFilter={setDuplicateConfidenceFilter}
+            isAllActiveDuplicateCandidatesSelected={isAllActiveDuplicateCandidatesSelected}
+            activeDuplicateCandidateCount={activeDuplicateCandidateCount}
+            selectedActiveDuplicateCandidateCount={selectedActiveDuplicateCandidateCount}
+            isBatchMergingDuplicates={isBatchMergingDuplicates}
+            toggleAllVisibleDuplicateCandidates={toggleAllVisibleDuplicateCandidates}
+            onBatchMergeDuplicateCandidates={onBatchMergeDuplicateCandidates}
+            visibleModelDuplicateCandidates={visibleModelDuplicateCandidates}
+            visibleBenchmarkDuplicateCandidates={visibleBenchmarkDuplicateCandidates}
+            duplicateCandidateCardClass={duplicateCandidateCardClass}
+            selectedDuplicateCandidateKeys={selectedDuplicateCandidateKeys}
+            getDuplicateCandidateKey={getDuplicateCandidateKey}
+            setDuplicateCandidateSelected={setDuplicateCandidateSelected}
+            duplicateConfidenceBadgeClass={duplicateConfidenceBadgeClass}
+            duplicateConfidenceLabel={duplicateConfidenceLabel}
+            applyModelDuplicateCandidate={applyModelDuplicateCandidate}
+            duplicateReasonLabel={duplicateReasonLabel}
+            applyBenchmarkDuplicateCandidate={applyBenchmarkDuplicateCandidate}
+            onMerge={onMerge}
+            mergeType={mergeType}
+            setMergeType={setMergeType}
+            setMergeSourceInput={setMergeSourceInput}
+            setMergeTargetInput={setMergeTargetInput}
+            setMergeTargetBenchmarkNameInput={setMergeTargetBenchmarkNameInput}
+            mergeSourceInput={mergeSourceInput}
+            mergeTargetInput={mergeTargetInput}
+            mergeEntityOptions={mergeEntityOptions}
+            resolvedMergeSourceId={resolvedMergeSourceId}
+            resolvedMergeTargetId={resolvedMergeTargetId}
+            shouldRenderBenchmarkValueOverlapBadge={shouldRenderBenchmarkValueOverlapBadge}
+            benchmarkValueOverlapBadgeClass={benchmarkValueOverlapBadgeClass}
+            isLoadingBenchmarkValueOverlap={isLoadingBenchmarkValueOverlap}
+            benchmarkValueOverlapStats={benchmarkValueOverlapStats}
+            mergeTargetBenchmarkNameInput={mergeTargetBenchmarkNameInput}
+            mergeSubmitButtonRef={mergeSubmitButtonRef}
+            mergeSubmitState={mergeSubmitState}
+            canSubmitMerge={canSubmitMerge}
+            mergedRecordList={mergedRecordList}
+            mergedRecordTargetInputs={mergedRecordTargetInputs}
+            setMergedRecordTargetInputs={setMergedRecordTargetInputs}
+            onUpdateMergedRecord={onUpdateMergedRecord}
+            onDeleteMergedRecord={onDeleteMergedRecord}
+            modelEntityOptions={modelEntityOptions}
+            benchmarkEntityOptions={benchmarkEntityOptions}
+          />
         ) : null}
 
         {activeTab === "maintenance" ? (
-          <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
-            <div className="relative overflow-hidden rounded-2xl border border-warning/35 bg-gradient-to-br from-warning/10 via-base-100 to-primary/10 p-5">
-              <div className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-warning/20 blur-3xl" />
-              <div className="pointer-events-none absolute -bottom-20 -left-10 h-48 w-48 rounded-full bg-primary/20 blur-3xl" />
-
-              <div className="relative flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <h3 className="flex items-center gap-2 text-lg font-semibold">
-                    <Database size={18} />
-                    数据一致性检测
-                  </h3>
-                  <p className="mt-1 text-sm opacity-80">
-                    检测同一 benchmark 是否同时出现 <code>&lt;1</code> 与 <code>&gt;10</code> 的混合量纲，或同时出现 <code>0-100</code> 与 <code>&gt;100</code> 的 Elo 风格分值，并提供修复动作。
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-warning shadow-md"
-                  onClick={() => onCheckScaleConsistency()}
-                  disabled={isCheckingScaleConsistency || normalizingScaleBenchmarkId !== null || splittingScaleBenchmarkId !== null}
-                >
-                  {isCheckingScaleConsistency ? "检测中..." : "开始一致性检测"}
-                </button>
-              </div>
-
-              <div className="relative mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <div className="rounded-xl border border-base-300/70 bg-base-100/75 px-3 py-2">
-                  <div className="text-xs uppercase tracking-wide opacity-60">最近检测</div>
-                  <div className="mt-1 text-sm font-medium">
-                    {scaleConsistencyCheckedAt
-                      ? new Date(scaleConsistencyCheckedAt).toLocaleString("zh-CN", { hour12: false })
-                      : "尚未检测"}
-                  </div>
-                </div>
-                <div className="rounded-xl border border-base-300/70 bg-base-100/75 px-3 py-2">
-                  <div className="text-xs uppercase tracking-wide opacity-60">异常 benchmark</div>
-                  <div className="mt-1 text-sm font-medium">{scaleConsistencyIssues.length} 个</div>
-                </div>
-                <div className="rounded-xl border border-base-300/70 bg-base-100/75 px-3 py-2">
-                  <div className="text-xs uppercase tracking-wide opacity-60">待处理混合值</div>
-                  <div className="mt-1 text-sm font-medium">{scaleConsistencyAffectedValueCount} 条</div>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-5 space-y-3">
-              {scaleConsistencyIssues.length === 0 ? (
-                <div className="rounded-xl border border-base-300/70 bg-base-200/40 px-4 py-6 text-sm opacity-80">
-                  {scaleConsistencyCheckedAt
-                    ? "最近一次检测未发现混合量纲问题。"
-                    : "点击“开始一致性检测”后将在这里展示异常 benchmark。"}
-                </div>
-              ) : (
-                scaleConsistencyIssues.map((issue) => {
-                  const isNormalizingCurrent = normalizingScaleBenchmarkId === issue.benchmarkId;
-                  const isSplittingCurrent = splittingScaleBenchmarkId === issue.benchmarkId;
-                  const issueValueDetails = issue.valueDetails ?? [];
-                  const hasTtsSource = issueValueDetails.some((detail) =>
-                    (detail.source ?? "").toLowerCase().includes("tts")
-                  );
-                  const belowOneDetails = issueValueDetails.filter((detail) => detail.value < 1);
-                  const hasOnlyZeroInSmallValues =
-                    belowOneDetails.length > 0
-                    && belowOneDetails.every((detail) => Math.abs(detail.value) < 1e-12);
-                  const shouldDefaultCollapse = hasTtsSource || hasOnlyZeroInSmallValues;
-
-                  const splitDraft = scaleSplitNameDrafts[issue.benchmarkId] ?? {
-                    baseName: issue.benchmarkName,
-                    eloName: `${issue.benchmarkName} (Elo)`
-                  };
-
-                  return (
-                    <details
-                      open={!shouldDefaultCollapse}
-                      key={`scale-consistency-${issue.benchmarkId}`}
-                      className="rounded-2xl border border-warning/40 bg-base-100 shadow-sm transition-shadow open:shadow-md"
-                    >
-                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
-                        <div className="flex min-w-0 flex-wrap items-center gap-2">
-                          <span className="badge badge-warning badge-outline">混合量纲告警</span>
-                          <h4 className="truncate text-base font-semibold">{issue.benchmarkName}</h4>
-                          <span className="text-xs opacity-70">[{issue.benchmarkType}]</span>
-                          {shouldDefaultCollapse ? (
-                            <span className="badge badge-ghost badge-sm">默认折叠</span>
-                          ) : null}
-                          {hasTtsSource ? <span className="badge badge-info badge-outline badge-sm">source: tts</span> : null}
-                          {hasOnlyZeroInSmallValues ? <span className="badge badge-outline badge-sm">&lt;1 仅 0 值</span> : null}
-                        </div>
-                        <span className="text-xs opacity-55">点击展开/折叠</span>
-                      </summary>
-
-                      <div className="border-t border-base-300/50 px-4 pb-4 pt-2">
-                        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                          <div>
-                            <p className="text-sm opacity-80">
-                              {issue.issueType === "mixed-scale-0-1-vs-100"
-                                ? <>该 benchmark 同时出现 <code>&lt;1</code> 与 <code>&gt;10</code> 的值，请选择目标量纲进行同化。</>
-                                : <>该 benchmark 同时出现 <code>0-100</code> 与 <code>&gt;100</code> 的值，建议拆分为原 benchmark 与 Elo benchmark。</>}
-                            </p>
-                            <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                              <div className="group relative inline-flex items-center">
-                                <span className="cursor-help rounded-full border border-base-300 bg-base-200/60 px-2 py-1">
-                                  总值 {issue.valueCount}
-                                </span>
-
-                                {issueValueDetails.length > 0 ? (
-                                  <div className="invisible absolute left-0 top-full z-20 mt-2 max-h-64 w-[min(82vw,300px)] overflow-auto rounded-lg border border-base-300/70 bg-base-100 p-1.5 opacity-0 shadow-lg transition-all duration-150 group-hover:visible group-hover:opacity-100">
-                                    <ul className="space-y-1">
-                                      {issueValueDetails.map((detail, index) => {
-                                        const benchTimeText = detail.benchTime
-                                          ? new Date(detail.benchTime).toLocaleString("zh-CN", { hour12: false })
-                                          : "-";
-                                        const sourceText = detail.source?.trim() ? detail.source : "空 source";
-
-                                        return (
-                                          <li
-                                            key={`scale-detail-${issue.benchmarkId}-${index}`}
-                                            className="rounded-md border border-base-300/50 bg-base-200/30 px-2 py-0.5"
-                                          >
-                                            <div className="flex items-center gap-1 text-[11px] text-base-content">
-                                              <span className="font-mono font-semibold">
-                                                {Number(detail.value.toFixed(6)).toString()}
-                                              </span>
-                                              <span className="truncate opacity-75">· {detail.modelName}</span>
-                                            </div>
-                                            <div className="mt-0.5 break-all text-[11px] leading-4 opacity-75">
-                                              {sourceText} · {benchTimeText}
-                                            </div>
-                                          </li>
-                                        );
-                                      })}
-                                    </ul>
-                                  </div>
-                                ) : null}
-                              </div>
-                              {issue.issueType === "mixed-scale-0-1-vs-100" ? (
-                                <>
-                                  <span className="rounded-full border border-info/35 bg-info/10 px-2 py-1">
-                                    &lt;1：{issue.smallValueCount}
-                                  </span>
-                                  <span className="rounded-full border border-warning/35 bg-warning/10 px-2 py-1">
-                                    &gt;10：{issue.largeValueCount}
-                                  </span>
-                                </>
-                              ) : (
-                                <>
-                                  <span className="rounded-full border border-info/35 bg-info/10 px-2 py-1">
-                                    0-100：{issue.zeroToHundredCount}
-                                  </span>
-                                  <span className="rounded-full border border-warning/35 bg-warning/10 px-2 py-1">
-                                    &gt;100：{issue.overHundredCount}
-                                  </span>
-                                </>
-                              )}
-                              <span className="rounded-full border border-base-300 bg-base-200/60 px-2 py-1">
-                                min={Number(issue.minValue.toFixed(6)).toString()}
-                              </span>
-                              <span className="rounded-full border border-base-300 bg-base-200/60 px-2 py-1">
-                                max={Number(issue.maxValue.toFixed(6)).toString()}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-                            {issue.issueType === "mixed-scale-0-1-vs-100" ? (
-                              <>
-                                <button
-                                  type="button"
-                                  className="btn btn-sm btn-outline btn-primary"
-                                  onClick={() => onNormalizeBenchmarkScale(issue, 1)}
-                                  disabled={isCheckingScaleConsistency || normalizingScaleBenchmarkId !== null || splittingScaleBenchmarkId !== null}
-                                >
-                                  {isNormalizingCurrent ? "处理中..." : "同化为 1 量纲"}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="btn btn-sm btn-outline btn-secondary"
-                                  onClick={() => onNormalizeBenchmarkScale(issue, 100)}
-                                  disabled={isCheckingScaleConsistency || normalizingScaleBenchmarkId !== null || splittingScaleBenchmarkId !== null}
-                                >
-                                  {isNormalizingCurrent ? "处理中..." : "同化为 100 量纲"}
-                                </button>
-                              </>
-                            ) : (
-                              <div className="w-full space-y-2 xl:w-[420px]">
-                                <input
-                                  className="input input-bordered input-sm w-full"
-                                  value={splitDraft.baseName}
-                                  onChange={(event) =>
-                                    setScaleSplitNameDrafts((prev) => ({
-                                      ...prev,
-                                      [issue.benchmarkId]: {
-                                        ...(prev[issue.benchmarkId] ?? {
-                                          baseName: issue.benchmarkName,
-                                          eloName: `${issue.benchmarkName} (Elo)`
-                                        }),
-                                        baseName: event.target.value
-                                      }
-                                    }))
-                                  }
-                                  placeholder="原 benchmark 名称"
-                                />
-                                <input
-                                  className="input input-bordered input-sm w-full"
-                                  value={splitDraft.eloName}
-                                  onChange={(event) =>
-                                    setScaleSplitNameDrafts((prev) => ({
-                                      ...prev,
-                                      [issue.benchmarkId]: {
-                                        ...(prev[issue.benchmarkId] ?? {
-                                          baseName: issue.benchmarkName,
-                                          eloName: `${issue.benchmarkName} (Elo)`
-                                        }),
-                                        eloName: event.target.value
-                                      }
-                                    }))
-                                  }
-                                  placeholder="Elo benchmark 名称"
-                                />
-                                <div className="text-[11px] opacity-70">
-                                  type / modality / unit / higherIsBetter 将继承原 benchmark。
-                                </div>
-                                <button
-                                  type="button"
-                                  className="btn btn-sm btn-warning"
-                                  onClick={() => onSplitBenchmarkScale(issue)}
-                                  disabled={isCheckingScaleConsistency || normalizingScaleBenchmarkId !== null || splittingScaleBenchmarkId !== null}
-                                >
-                                  {isSplittingCurrent ? "处理中..." : "拆分为原 benchmark + Elo"}
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </details>
-                  );
-                })
-              )}
-            </div>
-          </section>
+          <MaintenanceTab
+            scaleConsistencyCheckedAt={scaleConsistencyCheckedAt}
+            scaleConsistencyIssues={scaleConsistencyIssues}
+            scaleConsistencyAffectedValueCount={scaleConsistencyAffectedValueCount}
+            isCheckingScaleConsistency={isCheckingScaleConsistency}
+            normalizingScaleBenchmarkId={normalizingScaleBenchmarkId}
+            splittingScaleBenchmarkId={splittingScaleBenchmarkId}
+            scaleSplitNameDrafts={scaleSplitNameDrafts}
+            setScaleSplitNameDrafts={setScaleSplitNameDrafts}
+            onCheckScaleConsistency={onCheckScaleConsistency}
+            onNormalizeBenchmarkScale={onNormalizeBenchmarkScale}
+            onSplitBenchmarkScale={onSplitBenchmarkScale}
+          />
         ) : null}
 
         {activeTab === "settings" ? (
