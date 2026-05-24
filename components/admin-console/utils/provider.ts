@@ -1,5 +1,14 @@
 import type { ProviderConfigDraft, ProviderOption } from "../types";
 
+export function getProviderOptionLabel(provider: ProviderOption) {
+  const displayName = provider.config?.displayName?.trim();
+  if (displayName && displayName.toLowerCase() !== provider.name.toLowerCase()) {
+    return `${displayName} (${provider.name})`;
+  }
+
+  return provider.name;
+}
+
 export function createProviderPrefixRuleDraft(rule?: {
   prefix?: string;
   enabled?: boolean;

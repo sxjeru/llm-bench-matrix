@@ -5,6 +5,8 @@ import { type ClipboardEvent, FormEvent, useEffect, useMemo, useRef, useState } 
 import { formatDateTimeLocalInputValue } from "@/components/benchmark-matrix/formatters";
 import { isValidHexColor } from "@/lib/provider-config";
 import { getJson, postFormData, postJson } from "./admin-console/api";
+import { useEntityLookups } from "./admin-console/hooks/use-entity-lookups";
+import { useAdminNotices } from "./admin-console/hooks/use-notices";
 import {
   BENCHMARK_SUSPECT_KEYWORDS,
   PAIR_NOTE_HISTORY_STORAGE_KEY,
@@ -30,12 +32,9 @@ import type {
   ModelDedupeRule,
   ModelOption,
   ModelWarningItem,
-  NoticeItem,
-  NoticeState,
   PreviewRow,
   Props,
   ProviderConfigDraft,
-  ProviderOption,
   RenameSubmitState,
   ScaleConsistencyCheckResult,
   ScaleConsistencyIssue,
@@ -68,6 +67,7 @@ import {
 import { normalizeModalityList, normalizeModalityName } from "./admin-console/utils/modality";
 import {
   getProviderDisplayNameById,
+  getProviderOptionLabel,
   inferProviderNameFromModelName,
   isProviderOption,
   resolveProviderFromConfig,
@@ -91,15 +91,6 @@ import { ProvidersTab } from "./admin-console/views/providers-tab";
 import { RenameTab } from "./admin-console/views/rename-tab";
 import { SettingsTab } from "./admin-console/views/settings-tab";
 import { AdminConsoleTabNav } from "./admin-console/views/tab-nav";
-
-function getProviderOptionLabel(provider: ProviderOption) {
-  const displayName = provider.config?.displayName?.trim();
-  if (displayName && displayName.toLowerCase() !== provider.name.toLowerCase()) {
-    return `${displayName} (${provider.name})`;
-  }
-
-  return provider.name;
-}
 
 function getBenchmarkPreviewValueOverlapStatsKey(previewBenchmarkKey: string, candidateBenchmarkId: number) {
   return JSON.stringify([previewBenchmarkKey, candidateBenchmarkId]);
@@ -145,7 +136,7 @@ export function AdminConsole({
 }: Props) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabKey>("import");
-  const [noticeList, setNoticeList] = useState<NoticeItem[]>([]);
+  const { noticeList, notifySuccess, notifyError } = useAdminNotices();
 
   const [providerName, setProviderName] = useState("");
   const [providerId, setProviderId] = useState<number | "">(providers[0]?.id ?? "");
@@ -286,10 +277,6 @@ export function AdminConsole({
   const [textImportStatusText, setTextImportStatusText] = useState("等待导入");
   const importProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const textImportProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const noticeTimersRef = useRef<
-    Map<number, { hideTimer: ReturnType<typeof setTimeout>; clearTimer: ReturnType<typeof setTimeout> }>
-  >(new Map());
-  const nextNoticeIdRef = useRef(1);
 
   const [mergeType, setMergeType] = useState<"model" | "benchmark">("model");
   const [mergeSourceInput, setMergeSourceInput] = useState("");
@@ -355,13 +342,22 @@ export function AdminConsole({
     return Object.entries(initialSettings).sort(([a], [b]) => a.localeCompare(b));
   }, [initialSettings]);
 
-  const benchmarkById = useMemo(() => {
-    return new Map(benchmarks.map((item) => [item.id, item]));
-  }, [benchmarks]);
-
-  const providerById = useMemo(() => {
-    return new Map(providers.map((item) => [item.id, item]));
-  }, [providers]);
+  const {
+    benchmarkById,
+    providerById,
+    existingBenchmarkExactMap,
+    existingBenchmarkByNameMap,
+    existingBenchmarkModalitiesMap,
+    deleteSourceOptions,
+    modelById,
+    existingModelExactMap,
+    existingModelByCanonicalKey,
+    existingModelByNameMap,
+    existingModelByCompareKey,
+    modelEntityOptions,
+    providerEntityOptions,
+    benchmarkEntityOptions
+  } = useEntityLookups({ providers, models, benchmarks, sourceOptions });
 
   function updateProviderDraft(providerId: number, updater: (draft: ProviderConfigDraft) => ProviderConfigDraft) {
     setProviderConfigDrafts((prev) => ({
@@ -507,90 +503,6 @@ export function AdminConsole({
       setDeletingProviderId(null);
     }
   }
-
-  const existingBenchmarkExactMap = useMemo(() => {
-    const map = new Map<string, BenchmarkOption>();
-    benchmarks.forEach((item) => {
-      map.set(getBenchmarkExactLookupKey(item.benchmarkName, item.benchmarkType), item);
-    });
-    return map;
-  }, [benchmarks]);
-
-  const existingBenchmarkByNameMap = useMemo(() => {
-    const map = new Map<string, BenchmarkOption[]>();
-    benchmarks.forEach((item) => {
-      const key = item.benchmarkName.trim().toLowerCase();
-      if (!map.has(key)) {
-        map.set(key, []);
-      }
-      map.get(key)?.push(item);
-    });
-    return map;
-  }, [benchmarks]);
-
-  const existingBenchmarkModalitiesMap = useMemo(() => {
-    const map = new Map<string, string[]>();
-    benchmarks.forEach((item) => {
-      map.set(
-        getBenchmarkExactLookupKey(item.benchmarkName, item.benchmarkType),
-        (item.modalities?.length ? item.modalities : ["Text"]).map((modality) => normalizeModalityName(modality))
-      );
-    });
-    return map;
-  }, [benchmarks]);
-
-  const deleteSourceOptions = useMemo(
-    () => Array.from(new Set(sourceOptions.map((item) => item.trim()).filter(Boolean))),
-    [sourceOptions]
-  );
-
-  const modelById = useMemo(() => {
-    return new Map(models.map((item) => [item.id, item]));
-  }, [models]);
-
-  const existingModelExactMap = useMemo(() => {
-    const map = new Map<string, ModelOption>();
-    models.forEach((item) => {
-      map.set(item.modelName.trim().toLowerCase(), item);
-    });
-    return map;
-  }, [models]);
-
-  const existingModelByCanonicalKey = useMemo(() => {
-    const map = new Map<string, ModelOption>();
-    models.forEach((item) => {
-      if (!map.has(item.canonicalKey)) {
-        map.set(item.canonicalKey, item);
-      }
-    });
-    return map;
-  }, [models]);
-
-  const existingModelByNameMap = useMemo(() => {
-    const map = new Map<string, ModelOption[]>();
-    models.forEach((item) => {
-      const key = item.modelName.trim().toLowerCase();
-      if (!map.has(key)) {
-        map.set(key, []);
-      }
-      map.get(key)?.push(item);
-    });
-    return map;
-  }, [models]);
-
-  const existingModelByCompareKey = useMemo(() => {
-    const map = new Map<string, ModelOption[]>();
-    models.forEach((item) => {
-      const compareKey = buildModelCompareKey(item.modelName);
-      if (!compareKey) return;
-
-      if (!map.has(compareKey)) {
-        map.set(compareKey, []);
-      }
-      map.get(compareKey)?.push(item);
-    });
-    return map;
-  }, [models]);
 
   const modelWarnings = useMemo(() => {
     const importedModels = Array.from(new Set(textImportDraftRows.map((item) => item.modelName.trim()).filter(Boolean)));
@@ -1250,33 +1162,6 @@ export function AdminConsole({
     [textImportPreviewTableRows, textImportPreviewVisibleCount]
   );
 
-  const modelEntityOptions = useMemo(
-    () =>
-      models.map((item) => ({
-        id: item.id,
-        label: item.modelName
-      })),
-    [models]
-  );
-
-  const providerEntityOptions = useMemo(
-    () =>
-      providers.map((item) => ({
-        id: item.id,
-        label: getProviderOptionLabel(item)
-      })),
-    [providers]
-  );
-
-  const benchmarkEntityOptions = useMemo(
-    () =>
-      benchmarks.map((item) => ({
-        id: item.id,
-        label: `${item.benchmarkName} [${item.benchmarkType}]`
-      })),
-    [benchmarks]
-  );
-
   const mergeEntityOptions = useMemo(() => {
     if (mergeType === "model") {
       return modelEntityOptions;
@@ -1461,8 +1346,6 @@ export function AdminConsole({
   );
 
   useEffect(() => {
-    const noticeTimers = noticeTimersRef.current;
-
     return () => {
       if (importProgressTimerRef.current) {
         clearInterval(importProgressTimerRef.current);
@@ -1483,12 +1366,6 @@ export function AdminConsole({
         clearTimeout(renameSubmitResetTimerRef.current);
         renameSubmitResetTimerRef.current = null;
       }
-
-      noticeTimers.forEach(({ hideTimer, clearTimer }) => {
-        clearTimeout(hideTimer);
-        clearTimeout(clearTimer);
-      });
-      noticeTimers.clear();
     };
   }, []);
 
@@ -1595,77 +1472,6 @@ export function AdminConsole({
     document.addEventListener("pointerdown", handlePointerDown);
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, []);
-
-  function clearNoticeTimers(noticeId: number) {
-    const timers = noticeTimersRef.current.get(noticeId);
-    if (!timers) return;
-
-    clearTimeout(timers.hideTimer);
-    clearTimeout(timers.clearTimer);
-    noticeTimersRef.current.delete(noticeId);
-  }
-
-  function enqueueNotice(type: NoticeState["type"], message: string, details?: string[]) {
-    const noticeId = nextNoticeIdRef.current;
-    nextNoticeIdRef.current += 1;
-
-    const normalizedDetails = details && details.length > 0 ? details : undefined;
-
-    setNoticeList((prev) => [
-      ...prev,
-      {
-        id: noticeId,
-        type,
-        message,
-        details: normalizedDetails,
-        visible: false
-      }
-    ]);
-
-    window.requestAnimationFrame(() => {
-      setNoticeList((prev) =>
-        prev.map((item) =>
-          item.id === noticeId
-            ? {
-                ...item,
-                visible: true
-              }
-            : item
-        )
-      );
-    });
-
-    const hideDelay = type === "error" ? 30000 : 15000;
-    const clearDelay = hideDelay + 500;
-
-    const hideTimer = setTimeout(() => {
-      setNoticeList((prev) =>
-        prev.map((item) =>
-          item.id === noticeId
-            ? {
-                ...item,
-                visible: false
-              }
-            : item
-        )
-      );
-    }, hideDelay);
-
-    const clearTimer = setTimeout(() => {
-      setNoticeList((prev) => prev.filter((item) => item.id !== noticeId));
-      clearNoticeTimers(noticeId);
-    }, clearDelay);
-
-    noticeTimersRef.current.set(noticeId, { hideTimer, clearTimer });
-  }
-
-  function notifySuccess(message: string, details?: string[]) {
-    enqueueNotice("success", message, details);
-  }
-
-  function notifyError(message: string, details?: string[]) {
-    enqueueNotice("error", message, details);
-  }
 
   function buildWorkbookFormData(sheetName?: string, allowWarnings?: boolean) {
     if (!workbookFile) {
