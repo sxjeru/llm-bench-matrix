@@ -30,7 +30,12 @@ import {
   useMatrixColumnWidths,
   type ColumnResizeState
 } from "./benchmark-matrix/column-width";
+import { HeatmapPanel } from "./benchmark-matrix/heatmap-panel";
 import { useMatrixImageActions } from "./benchmark-matrix/image-actions";
+import {
+  MatrixCellTooltip,
+  OverallScoreTooltip
+} from "./benchmark-matrix/tooltips";
 import {
   saveModelOrderBySource,
   saveModelSelectionBySource,
@@ -93,20 +98,15 @@ import {
   HEATMAP_PRESETS,
   DEFAULT_HEATMAP_PRESET_KEY,
   DEFAULT_HEATMAP_ALPHA,
-  MIN_HEATMAP_ALPHA,
-  MAX_HEATMAP_ALPHA,
   EXPORT_PRESET_MAP,
   DEFAULT_EXPORT_PRESET,
   DEFAULT_HEATMAP_PALETTE_HEX,
   isLowerBetterBenchmark,
   getBenchmarkComparableScore,
   getSortedQuantile,
-  getMatrixCellDisplayValue,
-  formatTooltipTime,
   formatValueNumForDisplay,
   formatComparisonDeltaValue,
   normalizeHexColor,
-  clampHeatmapAlpha,
   hexToRgbTuple,
   rgbaFromHex,
   getHeatCellStyle,
@@ -2435,169 +2435,21 @@ export function BenchmarkMatrix({
         </table>
       </div>
 
-      <div className="heatmap-panel">
-        <div className="heatmap-panel-top">
-          <div className="heatmap-panel-title-wrap">
-            <span className="heatmap-panel-title">热力图渐变设置</span>
-          </div>
+      <HeatmapPanel
+        heatmapPalette={heatmapPalette}
+        heatmapAlpha={heatmapAlpha}
+        heatmapPresetSelection={heatmapPresetSelection}
+        heatmapGradientPreview={heatmapGradientPreview}
+        setHeatmapAlpha={setHeatmapAlpha}
+        setHeatmapPresetSelection={setHeatmapPresetSelection}
+        updateHeatmapPaletteColor={updateHeatmapPaletteColor}
+        applyHeatmapPreset={applyHeatmapPreset}
+        resetHeatmapPaletteToDefault={resetHeatmapPaletteToDefault}
+      />
 
-          <div className="heatmap-panel-actions">
-            <label className="heatmap-preset-group">
-              <span>预设</span>
-              <select
-                className="select select-sm heatmap-preset-select"
-                value={heatmapPresetSelection}
-                onChange={(event) => {
-                  const next = event.target.value;
-                  if (next === "custom") {
-                    setHeatmapPresetSelection("custom");
-                    return;
-                  }
+      <MatrixCellTooltip tooltip={activeCellTooltip} />
 
-                  if (next in HEATMAP_PRESETS) {
-                    applyHeatmapPreset(next as HeatmapPresetKey);
-                  }
-                }}
-              >
-                {(Object.entries(HEATMAP_PRESETS) as [HeatmapPresetKey, (typeof HEATMAP_PRESETS)[HeatmapPresetKey]][]).map(
-                  ([presetKey, preset]) => (
-                    <option key={presetKey} value={presetKey}>{preset.label}</option>
-                  )
-                )}
-                <option value="custom">自定义</option>
-              </select>
-            </label>
-
-            <button type="button" className="btn btn-sm heatmap-reset-btn" onClick={resetHeatmapPaletteToDefault}>
-              恢复默认
-            </button>
-          </div>
-        </div>
-
-        <div className="heatmap-gradient-track" style={{ background: heatmapGradientPreview }} />
-
-        <div className="heatmap-panel-bottom">
-          <span className="heatmap-hex-readout">
-            {heatmapPalette.low.toUpperCase()} · {heatmapPalette.mid.toUpperCase()} · {heatmapPalette.high.toUpperCase()}
-          </span>
-
-          <div className="heatmap-stop-controls">
-            <label className="heatmap-alpha-inline">
-              <span>透明度</span>
-              <input
-                type="range"
-                className="heatmap-alpha-range"
-                min={Math.round(MIN_HEATMAP_ALPHA * 100)}
-                max={Math.round(MAX_HEATMAP_ALPHA * 100)}
-                step={1}
-                value={Math.round(heatmapAlpha * 100)}
-                onChange={(event) => {
-                  const next = Number(event.target.value) / 100;
-                  setHeatmapAlpha(clampHeatmapAlpha(next));
-                }}
-              />
-              <span>{Math.round(heatmapAlpha * 100)}%</span>
-            </label>
-
-            <label className="heatmap-stop-pill">
-              <span>较差</span>
-              <input
-                type="color"
-                className="input heatmap-color-input"
-                value={heatmapPalette.low}
-                onChange={(event) => updateHeatmapPaletteColor("low", event.target.value)}
-              />
-            </label>
-
-            <label className="heatmap-stop-pill">
-              <span>中等</span>
-              <input
-                type="color"
-                className="input heatmap-color-input"
-                value={heatmapPalette.mid}
-                onChange={(event) => updateHeatmapPaletteColor("mid", event.target.value)}
-              />
-            </label>
-
-            <label className="heatmap-stop-pill">
-              <span>优秀</span>
-              <input
-                type="color"
-                className="input heatmap-color-input"
-                value={heatmapPalette.high}
-                onChange={(event) => updateHeatmapPaletteColor("high", event.target.value)}
-              />
-            </label>
-          </div>
-        </div>
-      </div>
-
-      {activeCellTooltip ? (
-        <div
-          className="pointer-events-none fixed z-[2600] w-[320px] max-w-[320px] rounded-xl border border-white/20 bg-slate-900/96 p-2 text-left text-[11px] font-medium text-slate-100 shadow-2xl backdrop-blur-lg"
-          style={{
-            left: activeCellTooltip.x,
-            top: activeCellTooltip.y,
-            transform: "translate(-50%, -100%)"
-          }}
-        >
-          {activeCellTooltip.entries.length > 1 ? (
-            <span className="mb-1 block text-[10px] text-slate-300">该单元格存在多条记录</span>
-          ) : null}
-
-          {activeCellTooltip.note ? (
-            <span className="mb-1 block rounded-md bg-amber-400/10 px-2 py-1 text-[10px] text-amber-200">
-              注释：{activeCellTooltip.note}
-            </span>
-          ) : null}
-
-          <span className="block max-h-[65vh] space-y-1 overflow-auto">
-            {activeCellTooltip.entries.map((entry) => (
-              <span
-                key={`${entry.valueRaw}-${entry.valueNote ?? ""}-${entry.source ?? "-"}-${entry.benchTime}`}
-                className="block rounded-md bg-white/5 px-2 py-1 leading-4"
-              >
-                {getMatrixCellDisplayValue(entry.valueNum, entry.valueNum2, entry.valueRaw, entry.valueNote)}
-                {entry.valueNote ? <span className="opacity-80"> · note: {entry.valueNote}</span> : null}
-                <span className="opacity-80"> · {entry.source ?? "unknown-source"} · {formatTooltipTime(entry.benchTime)}</span>
-              </span>
-            ))}
-          </span>
-        </div>
-      ) : null}
-
-      {activeOverallTooltip ? (
-        <div
-          className="pointer-events-none fixed z-[2600] w-[320px] max-w-[320px] rounded-xl border border-white/20 bg-slate-900/96 p-2 text-left text-[11px] font-medium text-slate-100 shadow-2xl backdrop-blur-lg"
-          style={{
-            left: activeOverallTooltip.x,
-            top: activeOverallTooltip.y,
-            transform: "translate(-50%, -100%)"
-          }}
-        >
-          <span className="mb-1 block text-[10px] text-slate-300">{activeOverallTooltip.modelName} · 总评细节</span>
-
-          <span className="block rounded-md bg-white/5 px-2 py-1 leading-4">
-            原始总评分：{activeOverallTooltip.summary.rawScore !== null ? `${activeOverallTooltip.summary.rawScore.toFixed(1)}%` : "--"}
-          </span>
-          <span className="mt-1 block rounded-md bg-white/5 px-2 py-1 leading-4">
-            原始名次：{activeOverallTooltip.summary.rawRank !== null ? `No.${activeOverallTooltip.summary.rawRank}` : "--"}
-          </span>
-          <span className="mt-1 block rounded-md bg-white/5 px-2 py-1 leading-4">
-            覆盖率：{(activeOverallTooltip.summary.coverage * 100).toFixed(1)}%
-            （{activeOverallTooltip.summary.coveredRows}/{activeOverallTooltip.summary.totalRows}）
-          </span>
-          <span className="mt-1 block rounded-md bg-white/5 px-2 py-1 leading-4">
-            修正后总评：{activeOverallTooltip.summary.correctedScore !== null ? `${activeOverallTooltip.summary.correctedScore.toFixed(1)}%` : "--"}
-            （系数 {activeOverallTooltip.summary.correctionFactor.toFixed(3)}）
-          </span>
-          <span className="mt-1 block rounded-md bg-white/5 px-2 py-1 leading-4">
-            修正后名次：{activeOverallTooltip.summary.correctedRank !== null ? `No.${activeOverallTooltip.summary.correctedRank}` : "--"}
-          </span>
-
-          <span className="mt-1 block text-[10px] text-slate-300">注：表格主展示名次按原始总评分计算</span>
-        </div>
-      ) : null}
+      <OverallScoreTooltip tooltip={activeOverallTooltip} />
 
       {sortedMatrixRows.length === 0 ? (
         <div className="mt-3 text-sm opacity-75">当前筛选条件下暂无数据。</div>
