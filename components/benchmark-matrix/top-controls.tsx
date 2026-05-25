@@ -170,7 +170,7 @@ export function BenchmarkMatrixTopControls({
                 <div
                   role="menu"
                   onMouseEnter={() => setIsSourceOverflowMenuOpen(true)}
-                  className={`grid transition-all duration-180 ${
+                  className={`grid transition-all duration-[180ms] ${
                     isSourceOverflowMenuOpen
                       ? "pointer-events-auto opacity-100"
                       : "pointer-events-none opacity-0"
