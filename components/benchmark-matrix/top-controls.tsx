@@ -126,6 +126,7 @@ export function BenchmarkMatrixTopControls({
                       key={source.key}
                       type="button"
                       role="tab"
+                      aria-selected={activeSource === source.key}
                       className={`tab relative h-9 min-h-0 shrink-0 overflow-visible rounded-xl text-base-content/80 transition-all duration-150 ${
                         activeSource === source.key
                           ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content font-semibold shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
@@ -151,7 +152,7 @@ export function BenchmarkMatrixTopControls({
                       type="button"
                       className="tab h-9 min-h-0 w-7 shrink-0 !rounded-lg bg-transparent px-0 text-xs font-medium text-base-content/65 hover:bg-white/8 hover:text-base-content"
                       aria-label="展开溢出页签"
-                      aria-haspopup="menu"
+                      aria-controls="benchmark-matrix-source-tabs-overflow"
                       aria-expanded={isSourceOverflowMenuOpen}
                       onMouseEnter={() => setIsSourceOverflowMenuOpen(true)}
                       onFocus={() => setIsSourceOverflowMenuOpen(true)}
@@ -168,7 +169,8 @@ export function BenchmarkMatrixTopControls({
 
               {overflowSourceOptions.length > 0 ? (
                 <div
-                  role="menu"
+                  id="benchmark-matrix-source-tabs-overflow"
+                  aria-hidden={!isSourceOverflowMenuOpen}
                   onMouseEnter={() => setIsSourceOverflowMenuOpen(true)}
                   className={`grid transition-all duration-[180ms] ${
                     isSourceOverflowMenuOpen
@@ -186,6 +188,8 @@ export function BenchmarkMatrixTopControls({
                           key={`overflow-${source.key}`}
                           type="button"
                           role="tab"
+                          aria-selected={activeSource === source.key}
+                          tabIndex={isSourceOverflowMenuOpen ? undefined : -1}
                           className={`tab relative h-9 min-h-0 overflow-visible rounded-xl text-base-content/80 transition-all duration-150 ${
                             activeSource === source.key
                               ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content font-semibold shadow-[0_6px_20px_rgba(93,167,255,0.24)]"

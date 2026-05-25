@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
@@ -334,6 +334,115 @@ describe("BenchmarkMatrix source tabs", () => {
     expect(tabB.getAttribute("title") ?? "").not.toContain("最近更新");
 
     nowSpy.mockRestore();
+  });
+
+  test("溢出 source 页签保持 tab 语义，不暴露 menu 角色", async () => {
+    vi.stubGlobal("ResizeObserver", undefined);
+
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const element = this as HTMLElement;
+
+      const makeRect = (width: number, height: number) =>
+        ({
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          right: width,
+          bottom: height,
+          width,
+          height,
+          toJSON: () => ({})
+        }) as DOMRect;
+
+      if (element.dataset.sourceTabMeasure === "item") {
+        return makeRect(100, 36);
+      }
+
+      if (element.dataset.sourceTabMeasure === "more") {
+        return makeRect(28, 36);
+      }
+
+      return makeRect(120, 36);
+    });
+
+    const { container } = render(
+      <BenchmarkMatrix
+        sourceOptions={[
+          "text:S1",
+          "text:S2",
+          "text:S3",
+          "text:S4"
+        ]}
+        rows={[
+          {
+            providerName: "OpenAI",
+            modelName: "Model A",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:S1"
+          },
+          {
+            providerName: "OpenAI",
+            modelName: "Model B",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "79",
+            valueNum: 79,
+            valueNote: null,
+            source: "text:S2"
+          },
+          {
+            providerName: "OpenAI",
+            modelName: "Model C",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "78",
+            valueNum: 78,
+            valueNote: null,
+            source: "text:S3"
+          },
+          {
+            providerName: "OpenAI",
+            modelName: "Model D",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "77",
+            valueNum: 77,
+            valueNote: null,
+            source: "text:S4"
+          }
+        ]}
+      />
+    );
+
+    const viewport = container.querySelector('[data-source-tabs-viewport="1"]') as HTMLElement | null;
+    expect(viewport).not.toBeNull();
+
+    Object.defineProperty(viewport!, "clientWidth", {
+      configurable: true,
+      value: 120
+    });
+
+    window.dispatchEvent(new Event("resize"));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "展开溢出页签" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "展开溢出页签" }));
+
+    const tablist = screen.getByRole("tablist");
+    expect(within(tablist).queryByRole("menu")).toBeNull();
+    expect(screen.getByRole("tab", { name: "S4" })).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByRole("tab", { name: "全部" })).toHaveAttribute("aria-selected", "true");
   });
 
 });
