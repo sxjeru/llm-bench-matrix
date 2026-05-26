@@ -85,8 +85,8 @@ importers:
         specifier: ^8.18.1
         version: 8.18.1
       daisyui:
-        specifier: ^5.4.4
-        version: 5.5.19
+        specifier: ^5.5.20
+        version: 5.5.20
       drizzle-kit:
         specifier: ^0.31.10
         version: 0.31.10
@@ -1831,8 +1831,8 @@ packages:
     resolution: {integrity: sha512-ndfJ/JxxMd3nw31uyKoY2naivF+r29V+Lc0svZxe1JvvIRmi8hUsrMvdOwgS1o6uBHmiz91geQ0ylPP0aj1VUA==}
     engines: {node: '>=12'}
 
-  daisyui@5.5.19:
-    resolution: {integrity: sha512-pbFAkl1VCEh/MPCeclKL61I/MqRIFFhNU7yiXoDDRapXN4/qNCoMxeCCswyxEEhqL5eiTTfwHvucFtOE71C9sA==}
+  daisyui@5.5.20:
+    resolution: {integrity: sha512-HemJcjl0Gk9rQ8BcgofN6p+EURrqftQG9wK1Hkxs98i49xe68+QxpNvry+PyxwkIUgrbMpNmZ5ZWjmtffAjfhQ==}
 
   damerau-levenshtein@1.0.8:
     resolution: {integrity: sha512-sdQSFB7+llfUcQHUQO3+B8ERRj0Oa4w9POWMI/puGtuf7gFywGmkaLCElnudfTiKZV+NvHqL0ifzdrI8Ro7ESA==}
@@ -4854,7 +4854,7 @@ snapshots:
 
   d3-timer@3.0.1: {}
 
-  daisyui@5.5.19: {}
+  daisyui@5.5.20: {}
 
   damerau-levenshtein@1.0.8: {}
 
