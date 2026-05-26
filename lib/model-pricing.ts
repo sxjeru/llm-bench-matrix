@@ -391,11 +391,35 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
     }
 
     if (model.pricingDisabled) {
-      if (existing) {
-        await db
-          .insert(modelPricing)
-          .values({
-            modelId: model.id,
+      await db
+        .insert(modelPricing)
+        .values({
+          modelId: model.id,
+          source: MODELS_DEV_SOURCE,
+          sourceProviderId: null,
+          sourceProviderName: null,
+          sourceModelId: null,
+          sourceModelName: null,
+          inputCost: null,
+          outputCost: null,
+          reasoningCost: null,
+          cacheReadCost: null,
+          cacheWriteCost: null,
+          inputAudioCost: null,
+          outputAudioCost: null,
+          currency: "USD",
+          unit: "per_1m_tokens",
+          matchConfidence: 0,
+          matchStatus: "ignored",
+          manualOverride: false,
+          rawJson: {},
+          note: "provider-pricing-disabled",
+          lastSyncedAt: syncedAt,
+          updatedAt: syncedAt
+        })
+        .onConflictDoUpdate({
+          target: modelPricing.modelId,
+          set: {
             source: MODELS_DEV_SOURCE,
             sourceProviderId: null,
             sourceProviderName: null,
@@ -417,45 +441,43 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
             note: "provider-pricing-disabled",
             lastSyncedAt: syncedAt,
             updatedAt: syncedAt
-          })
-          .onConflictDoUpdate({
-            target: modelPricing.modelId,
-            set: {
-              source: MODELS_DEV_SOURCE,
-              sourceProviderId: null,
-              sourceProviderName: null,
-              sourceModelId: null,
-              sourceModelName: null,
-              inputCost: null,
-              outputCost: null,
-              reasoningCost: null,
-              cacheReadCost: null,
-              cacheWriteCost: null,
-              inputAudioCost: null,
-              outputAudioCost: null,
-              currency: "USD",
-              unit: "per_1m_tokens",
-              matchConfidence: 0,
-              matchStatus: "ignored",
-              manualOverride: false,
-              rawJson: {},
-              note: "provider-pricing-disabled",
-              lastSyncedAt: syncedAt,
-              updatedAt: syncedAt
-            }
-          });
-      }
+          }
+        });
       continue;
     }
 
     const { provider: sourceProvider, confidenceBoost } = resolveProviderMatch(model, sourceProviders);
     const match = resolveModelMatch(model, sourceProvider, sourceProviders);
     if (!match) {
-      if (existing) {
-        await db
-          .insert(modelPricing)
-          .values({
-            modelId: model.id,
+      await db
+        .insert(modelPricing)
+        .values({
+          modelId: model.id,
+          source: MODELS_DEV_SOURCE,
+          sourceProviderId: null,
+          sourceProviderName: null,
+          sourceModelId: null,
+          sourceModelName: null,
+          inputCost: null,
+          outputCost: null,
+          reasoningCost: null,
+          cacheReadCost: null,
+          cacheWriteCost: null,
+          inputAudioCost: null,
+          outputAudioCost: null,
+          currency: "USD",
+          unit: "per_1m_tokens",
+          matchConfidence: 0,
+          matchStatus: "unmatched",
+          manualOverride: false,
+          rawJson: {},
+          note: "no-match",
+          lastSyncedAt: syncedAt,
+          updatedAt: syncedAt
+        })
+        .onConflictDoUpdate({
+          target: modelPricing.modelId,
+          set: {
             source: MODELS_DEV_SOURCE,
             sourceProviderId: null,
             sourceProviderName: null,
@@ -477,45 +499,43 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
             note: "no-match",
             lastSyncedAt: syncedAt,
             updatedAt: syncedAt
-          })
-          .onConflictDoUpdate({
-            target: modelPricing.modelId,
-            set: {
-              source: MODELS_DEV_SOURCE,
-              sourceProviderId: null,
-              sourceProviderName: null,
-              sourceModelId: null,
-              sourceModelName: null,
-              inputCost: null,
-              outputCost: null,
-              reasoningCost: null,
-              cacheReadCost: null,
-              cacheWriteCost: null,
-              inputAudioCost: null,
-              outputAudioCost: null,
-              currency: "USD",
-              unit: "per_1m_tokens",
-              matchConfidence: 0,
-              matchStatus: "unmatched",
-              manualOverride: false,
-              rawJson: {},
-              note: "no-match",
-              lastSyncedAt: syncedAt,
-              updatedAt: syncedAt
-            }
-          });
-      }
+          }
+        });
       unmatchedCount += 1;
       continue;
     }
 
     const confidence = Math.min(100, match.confidence + confidenceBoost);
     if (confidence < 70) {
-      if (existing) {
-        await db
-          .insert(modelPricing)
-          .values({
-            modelId: model.id,
+      await db
+        .insert(modelPricing)
+        .values({
+          modelId: model.id,
+          source: MODELS_DEV_SOURCE,
+          sourceProviderId: null,
+          sourceProviderName: null,
+          sourceModelId: null,
+          sourceModelName: null,
+          inputCost: null,
+          outputCost: null,
+          reasoningCost: null,
+          cacheReadCost: null,
+          cacheWriteCost: null,
+          inputAudioCost: null,
+          outputAudioCost: null,
+          currency: "USD",
+          unit: "per_1m_tokens",
+          matchConfidence: confidence,
+          matchStatus: "unmatched",
+          manualOverride: false,
+          rawJson: {},
+          note: "low-confidence",
+          lastSyncedAt: syncedAt,
+          updatedAt: syncedAt
+        })
+        .onConflictDoUpdate({
+          target: modelPricing.modelId,
+          set: {
             source: MODELS_DEV_SOURCE,
             sourceProviderId: null,
             sourceProviderName: null,
@@ -537,34 +557,8 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
             note: "low-confidence",
             lastSyncedAt: syncedAt,
             updatedAt: syncedAt
-          })
-          .onConflictDoUpdate({
-            target: modelPricing.modelId,
-            set: {
-              source: MODELS_DEV_SOURCE,
-              sourceProviderId: null,
-              sourceProviderName: null,
-              sourceModelId: null,
-              sourceModelName: null,
-              inputCost: null,
-              outputCost: null,
-              reasoningCost: null,
-              cacheReadCost: null,
-              cacheWriteCost: null,
-              inputAudioCost: null,
-              outputAudioCost: null,
-              currency: "USD",
-              unit: "per_1m_tokens",
-              matchConfidence: confidence,
-              matchStatus: "unmatched",
-              manualOverride: false,
-              rawJson: {},
-              note: "low-confidence",
-              lastSyncedAt: syncedAt,
-              updatedAt: syncedAt
-            }
-          });
-      }
+          }
+        });
       unmatchedCount += 1;
       continue;
     }

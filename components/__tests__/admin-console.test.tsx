@@ -207,6 +207,30 @@ if (typeof Element !== "undefined") {
 }
 
 describe("AdminConsole text import", () => {
+  test("价格管理在空结果已加载后不应因重复切换标签再次请求", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetchSequence({ prices: [] });
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await user.click(screen.getByRole("tab", { name: "价格管理" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "刷新" })).toBeEnabled();
+    });
+
+    await user.click(screen.getByRole("tab", { name: "导入中心" }));
+    await user.click(screen.getByRole("tab", { name: "价格管理" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
   test("矩阵预览表头显示 Benchmark/Type 计数", async () => {
     const user = userEvent.setup();
 

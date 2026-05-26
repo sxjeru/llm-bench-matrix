@@ -1202,7 +1202,9 @@ export function buildOverallSummaryByModel(
       rowEntries.push({
         modelName,
         original: valueNum,
-        comparable: getBenchmarkComparableScore(row.benchmark, valueNum, row.category, row.higherIsBetter)
+        comparable: row.isPriceRow
+          ? -valueNum
+          : getBenchmarkComparableScore(row.benchmark, valueNum, row.category, row.higherIsBetter)
       });
     });
 

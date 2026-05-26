@@ -292,6 +292,7 @@ export function AdminConsole({
   const [modelPriceRows, setModelPriceRows] = useState<ModelPricingRow[]>([]);
   const [pricingDrafts, setPricingDrafts] = useState<Record<number, ModelPricingDraft>>({});
   const [loadingPrices, setLoadingPrices] = useState(false);
+  const [hasLoadedPrices, setHasLoadedPrices] = useState(false);
   const [syncingPrices, setSyncingPrices] = useState(false);
   const [savingPriceModelId, setSavingPriceModelId] = useState<number | null>(null);
   const [pricingSearchQuery, setPricingSearchQuery] = useState("");
@@ -2651,6 +2652,7 @@ export function AdminConsole({
       const prices = Array.isArray(result?.prices) ? result.prices as ModelPricingRow[] : [];
       setModelPriceRows(prices);
       resetPricingDrafts(prices);
+      setHasLoadedPrices(true);
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "加载模型价格失败");
     } finally {
@@ -2661,7 +2663,7 @@ export function AdminConsole({
   function handleTabChange(tab: TabKey) {
     setActiveTab(tab);
     if (tab !== "pricing") return;
-    if (modelPriceRows.length > 0 || loadingPrices) return;
+    if (hasLoadedPrices || loadingPrices) return;
     void loadModelPrices();
   }
 

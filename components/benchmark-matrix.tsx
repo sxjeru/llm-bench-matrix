@@ -1611,6 +1611,7 @@ export function BenchmarkMatrix({
               return (
                 <tr
                   key={rowKey}
+                  data-metric-type={matrixRow.isPriceRow ? "price" : undefined}
                   className={isSelectedRow ? "matrix-row-selected" : "matrix-row-hover"}
                   onClick={() => {
                     setSelectedRowKey((prev) => (prev === rowKey ? null : rowKey));
@@ -1868,6 +1869,7 @@ export function BenchmarkMatrix({
                     return (
                       <td
                         key={`${rowKey}::${model.modelName}`}
+                        data-model-name={model.modelName}
                         data-source-match={model.isSourceMatched ? "1" : undefined}
                         data-source-match-first={model.isSourceMatchedFirst ? "1" : undefined}
                         data-source-match-last={model.isSourceMatchedLast ? "1" : undefined}
