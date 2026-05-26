@@ -520,6 +520,168 @@ describe("model pricing module", () => {
     expect(result.unmatchedCount).toBe(0);
   });
 
+  test("syncModelsDevPricing 匹配价格时忽略模型末尾变体标记和括号内容", async () => {
+    const { db, values } = createDbMock(
+      [
+        {
+          id: 10,
+          modelName: "Foo Bar-think",
+          sourceModelId: null,
+          providerName: "Test",
+          providerSlug: "test",
+          providerConfig: {}
+        },
+        {
+          id: 11,
+          modelName: "Foo Bar-no-think",
+          sourceModelId: null,
+          providerName: "Test",
+          providerSlug: "test",
+          providerConfig: {}
+        },
+        {
+          id: 12,
+          modelName: "Foo Bar-non-think",
+          sourceModelId: null,
+          providerName: "Test",
+          providerSlug: "test",
+          providerConfig: {}
+        },
+        {
+          id: 13,
+          modelName: "Foo Bar high",
+          sourceModelId: null,
+          providerName: "Test",
+          providerSlug: "test",
+          providerConfig: {}
+        },
+        {
+          id: 14,
+          modelName: "Foo Bar max (preview)",
+          sourceModelId: null,
+          providerName: "Test",
+          providerSlug: "test",
+          providerConfig: {}
+        },
+        {
+          id: 15,
+          modelName: "Foo Bar（fast）",
+          sourceModelId: null,
+          providerName: "Test",
+          providerSlug: "test",
+          providerConfig: {}
+        }
+      ],
+      []
+    );
+
+    mockModelsDevResponse({
+      test: {
+        id: "test",
+        name: "Test",
+        models: {
+          "foo-bar": {
+            id: "foo-bar",
+            name: "Foo Bar",
+            cost: { input: 1, output: 2 }
+          }
+        }
+      }
+    });
+
+    const pricingModule = await importPricingModule(db);
+    const result = await pricingModule.syncModelsDevPricing();
+
+    expect(values).toHaveBeenCalledWith([
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ].map((modelId) => expect.objectContaining({
+      modelId,
+      sourceProviderId: "test",
+      sourceModelId: "foo-bar",
+      inputCost: "1",
+      outputCost: "2",
+      matchStatus: "matched",
+      note: "normalized-model-variant"
+    })));
+    expect(result.matchedCount).toBe(6);
+    expect(result.unmatchedCount).toBe(0);
+  });
+
+  test("syncModelsDevPricing 在无匹配 provider 时使用其他 provider 的众数价格", async () => {
+    const { db, values } = createDbMock(
+      [
+        {
+          id: 10,
+          modelName: "Shared Model",
+          sourceModelId: "shared-model",
+          providerName: "Unknown Proxy",
+          providerSlug: "unknown-proxy",
+          providerConfig: {}
+        }
+      ],
+      []
+    );
+
+    mockModelsDevResponse({
+      providerA: {
+        id: "provider-a",
+        name: "Provider A",
+        models: {
+          "shared-model": {
+            id: "shared-model",
+            name: "Shared Model",
+            cost: { input: 1, output: 2, cache_read: 0.1 }
+          }
+        }
+      },
+      providerB: {
+        id: "provider-b",
+        name: "Provider B",
+        models: {
+          "shared-model": {
+            id: "shared-model",
+            name: "Shared Model",
+            cost: { input: 1, output: 2, cache_read: 0.1 }
+          }
+        }
+      },
+      providerC: {
+        id: "provider-c",
+        name: "Provider C",
+        models: {
+          "shared-model": {
+            id: "shared-model",
+            name: "Shared Model",
+            cost: { input: 3, output: 6, cache_read: 0.3 }
+          }
+        }
+      }
+    });
+
+    const pricingModule = await importPricingModule(db);
+    const result = await pricingModule.syncModelsDevPricing();
+
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({
+        modelId: 10,
+        sourceProviderId: "provider-a",
+        sourceModelId: "shared-model",
+        inputCost: "1",
+        outputCost: "2",
+        cacheReadCost: "0.1",
+        matchStatus: "matched",
+        note: "global-price-mode"
+      })
+    ]);
+    expect(result.matchedCount).toBe(1);
+    expect(result.unmatchedCount).toBe(0);
+  });
+
   test("syncModelsDevPricing 在无 content-length 的流式响应超限时取消读取", async () => {
     const { db } = createDbMock([], []);
     const cancel = vi.fn();

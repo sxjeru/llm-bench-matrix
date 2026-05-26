@@ -51,6 +51,16 @@ type ModelMatch = {
   reason: string;
 };
 
+const COST_KEYS = [
+  "input",
+  "output",
+  "reasoning",
+  "cache_read",
+  "cache_write",
+  "input_audio",
+  "output_audio"
+] as const;
+
 export type ModelPricingRow = {
   modelId: number;
   modelName: string;
@@ -126,6 +136,52 @@ function normalizeToken(value: string): string {
     .toLowerCase()
     .replace(/[\-\u2010-\u2015\u2212\uFE58\uFE63\uFF0D_\s.\/\\:]+/g, "")
     .replace(/[^a-z0-9]+/g, "");
+}
+
+const MODEL_VARIANT_SEPARATOR = String.raw`[\s._/\\:\-\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]+`;
+const TRAILING_MODEL_BRACKET_PATTERN = /\s*(?:\([^()]*\)|（[^（）]*）|\[[^\[\]]*\]|【[^【】]*】)\s*$/;
+const TRAILING_MODEL_VARIANT_PATTERN = new RegExp(
+  `${MODEL_VARIANT_SEPARATOR}(?:non${MODEL_VARIANT_SEPARATOR}think|no${MODEL_VARIANT_SEPARATOR}think|think|high|max)$`,
+  "i"
+);
+
+function stripModelVariantSuffix(value: string): string {
+  let normalized = value.trim();
+  let previous = "";
+
+  while (normalized && normalized !== previous) {
+    previous = normalized;
+    normalized = normalized
+      .replace(TRAILING_MODEL_BRACKET_PATTERN, "")
+      .trim()
+      .replace(TRAILING_MODEL_VARIANT_PATTERN, "")
+      .trim();
+  }
+
+  return normalized;
+}
+
+function getModelMatchTokens(values: string[]): { exact: Set<string>; variant: Set<string> } {
+  const exact = new Set<string>();
+  const variant = new Set<string>();
+
+  for (const value of values) {
+    const exactToken = normalizeToken(value);
+    if (exactToken) exact.add(exactToken);
+
+    const variantToken = normalizeToken(stripModelVariantSuffix(value));
+    if (variantToken) variant.add(variantToken);
+  }
+
+  return { exact, variant };
+}
+
+function hasTokenIntersection(left: Set<string>, right: Set<string>) {
+  for (const token of left) {
+    if (right.has(token)) return true;
+  }
+
+  return false;
 }
 
 function normalizeProviderCandidate(value: string): string {
@@ -237,9 +293,37 @@ function scoreProviderDisambiguation(model: DbModel, match: ModelMatch) {
   return score;
 }
 
+function resolvePriceModeMatch(matches: ModelMatch[]): ModelMatch | null {
+  const groups = new Map<string, { match: ModelMatch; count: number }>();
+
+  for (const match of matches) {
+    const cost = match.model.cost;
+    if (!cost || !COST_KEYS.some((key) => typeof cost[key] === "number")) continue;
+
+    const key = JSON.stringify(COST_KEYS.map((costKey) => cost[costKey] ?? null));
+    const group = groups.get(key);
+    if (group) {
+      group.count += 1;
+    } else {
+      groups.set(key, { match, count: 1 });
+    }
+  }
+
+  const sortedGroups = Array.from(groups.values()).sort((a, b) => b.count - a.count);
+  const bestGroup = sortedGroups[0];
+  if (!bestGroup || bestGroup.count <= 1 || sortedGroups[1]?.count === bestGroup.count) return null;
+
+  return {
+    ...bestGroup.match,
+    confidence: Math.min(bestGroup.match.confidence, 74),
+    reason: "global-price-mode"
+  };
+}
+
 function resolveModelMatch(model: DbModel, sourceProvider: ModelsDevProvider | null, providersById: Map<string, ModelsDevProvider>) {
   const sourceModelId = model.sourceModelId?.trim();
   const modelName = model.modelName.trim();
+  const modelTokens = getModelMatchTokens([sourceModelId ?? "", modelName]);
 
   const findInProvider = (provider: ModelsDevProvider): ModelMatch | null => {
     if (sourceModelId) {
@@ -250,14 +334,16 @@ function resolveModelMatch(model: DbModel, sourceProvider: ModelsDevProvider | n
     const direct = provider.models[modelName];
     if (direct) return { provider, modelKey: modelName, model: direct, confidence: 96, reason: "model-name" };
 
-    const normalizedModelName = normalizeToken(modelName);
     for (const [modelKey, sourceModel] of Object.entries(provider.models)) {
       const sourceModelName = sourceModel.name ?? sourceModel.id ?? modelKey;
-      if (
-        normalizeToken(modelKey) === normalizedModelName ||
-        normalizeToken(sourceModelName) === normalizedModelName
-      ) {
+      const sourceTokens = getModelMatchTokens([modelKey, sourceModelName, sourceModel.id ?? ""]);
+
+      if (hasTokenIntersection(modelTokens.exact, sourceTokens.exact)) {
         return { provider, modelKey, model: sourceModel, confidence: 92, reason: "normalized-model-name" };
+      }
+
+      if (hasTokenIntersection(modelTokens.variant, sourceTokens.variant)) {
+        return { provider, modelKey, model: sourceModel, confidence: 90, reason: "normalized-model-variant" };
       }
     }
 
@@ -274,6 +360,13 @@ function resolveModelMatch(model: DbModel, sourceProvider: ModelsDevProvider | n
     const providerMatch = globalMatches.find((match) => match.provider.id === sourceProvider.id);
     if (providerMatch) return providerMatch;
   }
+
+  const priceModeMatch = resolvePriceModeMatch(
+    sourceProvider
+      ? globalMatches.filter((match) => match.provider.id !== sourceProvider.id)
+      : globalMatches
+  );
+  if (priceModeMatch) return priceModeMatch;
 
   if (globalMatches.length === 1) {
     return { ...globalMatches[0]!, confidence: Math.min(globalMatches[0]!.confidence, 72), reason: `global-${globalMatches[0]!.reason}` };
