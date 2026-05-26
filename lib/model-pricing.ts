@@ -411,7 +411,7 @@ function resolveModelMatch(model: DbModel, sourceProvider: ModelsDevProvider | n
   const collectInProvider = (provider: ModelsDevProvider): ModelMatch[] => {
     const matches: ModelMatch[] = [];
     const seenModelKeys = new Set<string>();
-    let fuzzyMatch: (ModelMatch & { fuzzyScore: number }) | null = null;
+    const fuzzyMatches: ModelMatch[] = [];
 
     const addMatch = (modelKey: string, sourceModel: ModelsDevModel, confidence: number, reason: string) => {
       if (seenModelKeys.has(modelKey)) return;
@@ -421,9 +421,7 @@ function resolveModelMatch(model: DbModel, sourceProvider: ModelsDevProvider | n
 
     const addFuzzyCandidate = (modelKey: string, sourceModel: ModelsDevModel, fuzzyScore: number) => {
       if (seenModelKeys.has(modelKey) || fuzzyScore <= 0) return;
-      if (!fuzzyMatch || fuzzyScore > fuzzyMatch.fuzzyScore) {
-        fuzzyMatch = { provider, modelKey, model: sourceModel, confidence: 70, reason: "fuzzy-model-name", fuzzyScore };
-      }
+      fuzzyMatches.push({ provider, modelKey, model: sourceModel, confidence: 70, reason: "fuzzy-model-name", fuzzyScore });
     };
 
     if (sourceModelId) {
@@ -450,8 +448,8 @@ function resolveModelMatch(model: DbModel, sourceProvider: ModelsDevProvider | n
       addFuzzyCandidate(modelKey, sourceModel, getFuzzyMatchScore(modelTokens, sourceTokens));
     }
 
-    if (fuzzyMatch) {
-      matches.push(fuzzyMatch);
+    if (fuzzyMatches.length > 0) {
+      matches.push(...fuzzyMatches);
     }
 
     return matches;
@@ -467,7 +465,8 @@ function resolveModelMatch(model: DbModel, sourceProvider: ModelsDevProvider | n
 
   const exactMatches = collectedMatches.filter((match) => !isFuzzyMatch(match));
   const fuzzyMatches = collectedMatches.filter(isFuzzyMatch);
-  const globalMatches = exactMatches.length > 0 ? exactMatches : getBestFuzzyMatches(fuzzyMatches);
+  const hasExactMatches = exactMatches.length > 0;
+  const globalMatches = hasExactMatches ? exactMatches : getBestFuzzyMatches(fuzzyMatches);
   const providerMatches = groupMatchesByProvider(globalMatches);
 
   if (sourceProvider) {
@@ -496,6 +495,9 @@ function resolveModelMatch(model: DbModel, sourceProvider: ModelsDevProvider | n
       };
     }
   }
+
+  const fuzzyPriceModeMatch = resolvePriceModeMatch(fuzzyMatches);
+  if (fuzzyPriceModeMatch) return fuzzyPriceModeMatch;
 
   return null;
 }

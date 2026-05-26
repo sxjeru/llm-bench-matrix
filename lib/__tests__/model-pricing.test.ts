@@ -890,6 +890,159 @@ describe("model pricing module", () => {
     expect(result.unmatchedCount).toBe(0);
   });
 
+  test("syncModelsDevPricing 模糊候选无法唯一消歧时使用所有模糊候选的众数价格", async () => {
+    const { db, values } = createDbMock(
+      [
+        {
+          id: 25,
+          modelName: "Gemini-3-Pro",
+          sourceModelId: null,
+          providerName: "Unknown Proxy",
+          providerSlug: "unknown-proxy",
+          providerConfig: {}
+        }
+      ],
+      []
+    );
+
+    mockModelsDevResponse({
+      providerA: {
+        id: "provider-a",
+        name: "Provider A",
+        models: {
+          "google/gemini-3-pro-preview": {
+            id: "google/gemini-3-pro-preview",
+            name: "Gemini 3 Pro Preview",
+            cost: { input: 2, output: 12, cache_read: 0.2 }
+          }
+        }
+      },
+      providerB: {
+        id: "provider-b",
+        name: "Provider B",
+        models: {
+          "google/gemini-3-pro-preview": {
+            id: "google/gemini-3-pro-preview",
+            name: "Gemini 3 Pro Preview",
+            cost: { input: 3, output: 15, cache_read: 0.3 }
+          }
+        }
+      },
+      providerC: {
+        id: "provider-c",
+        name: "Provider C",
+        models: {
+          "google/gemini-3-pro-image-preview": {
+            id: "google/gemini-3-pro-image-preview",
+            name: "Gemini 3 Pro Image Preview",
+            cost: { input: 2, output: 12, cache_read: 0.2 }
+          }
+        }
+      }
+    });
+
+    const pricingModule = await importPricingModule(db);
+    const result = await pricingModule.syncModelsDevPricing();
+
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({
+        modelId: 25,
+        sourceProviderId: "provider-a",
+        sourceModelId: "google/gemini-3-pro-preview",
+        inputCost: "2",
+        outputCost: "12",
+        cacheReadCost: "0.2",
+        matchStatus: "matched",
+        matchConfidence: 70,
+        note: "global-price-mode"
+      })
+    ]);
+    expect(result.matchedCount).toBe(1);
+    expect(result.unmatchedCount).toBe(0);
+  });
+
+  test("syncModelsDevPricing 精确候选无法消歧时仍使用模糊候选众数价格", async () => {
+    const { db, values } = createDbMock(
+      [
+        {
+          id: 26,
+          modelName: "Gemini-3-Pro",
+          sourceModelId: null,
+          providerName: "Unknown Proxy",
+          providerSlug: "unknown-proxy",
+          providerConfig: {}
+        }
+      ],
+      []
+    );
+
+    mockModelsDevResponse({
+      providerA: {
+        id: "provider-a",
+        name: "Provider A",
+        models: {
+          "legacy/gemini-3-pro": {
+            id: "legacy/gemini-3-pro",
+            name: "Gemini 3 Pro Legacy",
+            cost: { input: 7, output: 8 }
+          }
+        }
+      },
+      providerB: {
+        id: "provider-b",
+        name: "Provider B",
+        models: {
+          "alt/gemini-3-pro": {
+            id: "alt/gemini-3-pro",
+            name: "Gemini 3 Pro Alternate",
+            cost: { input: 9, output: 10 }
+          }
+        }
+      },
+      providerC: {
+        id: "provider-c",
+        name: "Provider C",
+        models: {
+          "google/gemini-3-pro-preview": {
+            id: "google/gemini-3-pro-preview",
+            name: "Gemini 3 Pro Preview",
+            cost: { input: 2, output: 12, cache_read: 0.2 }
+          }
+        }
+      },
+      providerD: {
+        id: "provider-d",
+        name: "Provider D",
+        models: {
+          "google/gemini-3-pro-preview-thinking": {
+            id: "google/gemini-3-pro-preview-thinking",
+            name: "Gemini 3 Pro Thinking",
+            cost: { input: 2, output: 12, cache_read: 0.2 }
+          }
+        }
+      }
+    });
+
+    const pricingModule = await importPricingModule(db);
+    const result = await pricingModule.syncModelsDevPricing();
+
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({
+        modelId: 26,
+        sourceProviderId: "provider-c",
+        sourceModelId: "google/gemini-3-pro-preview",
+        inputCost: "2",
+        outputCost: "12",
+        cacheReadCost: "0.2",
+        matchStatus: "matched",
+        matchConfidence: 70,
+        note: "global-price-mode"
+      })
+    ]);
+    expect(result.matchedCount).toBe(1);
+    expect(result.unmatchedCount).toBe(0);
+  });
+
   test("syncModelsDevPricing 在无匹配 provider 时使用其他 provider 的众数价格", async () => {
     const { db, values } = createDbMock(
       [
