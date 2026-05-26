@@ -102,6 +102,15 @@ const rows = [
   }
 ] as const;
 
+function getModelHeaderOrder(): string[] {
+  const headerTexts = screen
+    .getAllByRole("columnheader")
+    .map((header) => header.textContent?.replace(/\s+/g, " ").trim() ?? "");
+
+  const benchmarkIndex = headerTexts.findIndex((text) => text.includes("Benchmark"));
+  return headerTexts.slice(benchmarkIndex + 1).filter(Boolean);
+}
+
 describe("BenchmarkMatrix 总评行", () => {
   test("同一位小数但名次不同时显示两位小数", () => {
     const decimalsMap = __buildOverallScoreDisplayDecimalsMapForTest([
@@ -136,6 +145,42 @@ describe("BenchmarkMatrix 总评行", () => {
     expect(modelACell!.textContent ?? "").toMatch(/\d+(?:\.\d+)?\s*\(\d+\)/);
     expect(modelBCell!.textContent ?? "").toMatch(/\d+(?:\.\d+)?\s*\(\d+\)/);
   });
+
+  test("点击总评行后按总评排名排序列，再次点击可恢复", () => {
+    const { container } = render(<BenchmarkMatrix rows={[...rows]} />);
+
+    const initialOrder = getModelHeaderOrder();
+    expect(initialOrder.length).toBe(3);
+
+    const overallRow = container.querySelector('tr[data-overall-row="1"]');
+    expect(overallRow).not.toBeNull();
+
+    fireEvent.click(overallRow!);
+    expect(getModelHeaderOrder()).toEqual(["Model A", "Model C", "Model B"]);
+
+    fireEvent.click(overallRow!);
+    expect(getModelHeaderOrder()).toEqual(initialOrder);
+  });
+
+  test("点击总评行 tooltip 图标不会触发排序", () => {
+    const { container } = render(<BenchmarkMatrix rows={[...rows]} />);
+    const initialOrder = getModelHeaderOrder();
+
+    const overallRow = container.querySelector('tr[data-overall-row="1"]');
+    expect(overallRow).not.toBeNull();
+    expect(overallRow!.className).not.toContain("matrix-row-selected");
+
+    // 点击总评行上的问号 tooltip 触发元素
+    const tooltipTrigger = overallRow!.querySelector('[data-overall-tooltip-trigger="Model C"]') as HTMLElement | null;
+    expect(tooltipTrigger).not.toBeNull();
+
+    fireEvent.click(tooltipTrigger!);
+
+    // 断言点击 tooltip 不会改变列头顺序（即不会触发排序）
+    expect(getModelHeaderOrder()).toEqual(initialOrder);
+    expect(overallRow!.className).not.toContain("matrix-row-selected");
+  });
+
 
   test("问号 tooltip 展示覆盖率修正后的分数与名次", async () => {
     const { container } = render(<BenchmarkMatrix rows={[...rows]} />);

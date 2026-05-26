@@ -76,6 +76,7 @@ import {
   type CompareDirection,
   type ExportPresetKey,
   SOURCE_ALL,
+  OVERALL_ROW_KEY,
   MODALITY_OPTIONS,
   CATEGORY_COLUMN_WIDTH_KEY,
   BENCHMARK_COLUMN_WIDTH_KEY,
@@ -664,57 +665,17 @@ export function BenchmarkMatrix({
     [activeSource, filteredRows, showDuplicateRows, showLowCoverageRows]
   );
 
-  const modelColumns = useMemo<readonly string[]>(
-    () => buildModelColumns(coveragePrunedRows, sourceModelHint, columnSortBenchmarkKey, showDuplicateRows, modelOrderBySource, activeSource),
+  const baseModelColumns = useMemo<readonly string[]>(
+    () => buildModelColumns(
+      coveragePrunedRows,
+      sourceModelHint,
+      columnSortBenchmarkKey === OVERALL_ROW_KEY ? null : columnSortBenchmarkKey,
+      showDuplicateRows,
+      modelOrderBySource,
+      activeSource
+    ),
     [coveragePrunedRows, sourceModelHint, columnSortBenchmarkKey, showDuplicateRows, modelOrderBySource, activeSource]
   );
-
-  const compareModelSet = useMemo(() => new Set(compareModelOrder), [compareModelOrder]);
-  const compareBaselineModelName = compareModelOrder[0] ?? null;
-  const isCompareActive = compareModelOrder.length >= 2;
-
-  useEffect(() => {
-    const visibleModelSet = new Set(modelColumns);
-
-    enqueueStateUpdate(() => {
-      setCompareModelOrder((prev) => {
-        const next = prev.filter((modelName) => visibleModelSet.has(modelName));
-        return areStringArraysEqual(prev, next) ? prev : next;
-      });
-    });
-  }, [modelColumns]);
-
-  useEffect(() => {
-    if (!rowPresenceFilterModel) return;
-    if (modelColumns.includes(rowPresenceFilterModel)) return;
-    enqueueStateUpdate(() => setRowPresenceFilterModel(null));
-  }, [modelColumns, rowPresenceFilterModel]);
-
-  const {
-    categoryColumnWidth,
-    benchmarkColumnWidth,
-    modelColumnMeta,
-    hiddenResizeHandleKeys
-  } = useMatrixColumnWidths({
-    modelColumns,
-    coveragePrunedRows,
-    showDuplicateRows,
-    displaySourceValuesInCells,
-    displaySourceValueDeltasInCells,
-    activeSource,
-    activeSourceRef,
-    activeColumnWidthMap,
-    setActiveColumnWidthMap,
-    columnWidthBySourceRef,
-    columnWidthPersistTimeoutRef,
-    columnWidthOverrideKeys,
-    isColumnWidthLoaded,
-    sourceTabMatchLabel,
-    modelProviderMap,
-    modelProviderBrandColorMap,
-    compareModelSet,
-    compareBaselineModelName
-  });
 
   const matrixRows = useMemo(
     () => buildMatrixRows(baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource),
@@ -791,9 +752,87 @@ export function BenchmarkMatrix({
   );
 
   const overallSummaryByModel = useMemo(
-    () => buildOverallSummaryByModel(presenceFilteredMatrixRows, modelColumns),
-    [presenceFilteredMatrixRows, modelColumns]
+    () => buildOverallSummaryByModel(presenceFilteredMatrixRows, baseModelColumns),
+    [presenceFilteredMatrixRows, baseModelColumns]
   );
+
+  const modelColumns = useMemo<readonly string[]>(() => {
+    if (columnSortBenchmarkKey !== OVERALL_ROW_KEY) {
+      return baseModelColumns;
+    }
+
+    const baseOrderIndex = new Map(baseModelColumns.map((modelName, index) => [modelName, index]));
+
+    return [...baseModelColumns].sort((leftModel, rightModel) => {
+      const leftScore = overallSummaryByModel.get(leftModel)?.rawScore;
+      const rightScore = overallSummaryByModel.get(rightModel)?.rawScore;
+
+      if (leftScore === null || leftScore === undefined) {
+        if (rightScore === null || rightScore === undefined) {
+          return (baseOrderIndex.get(leftModel) ?? 0) - (baseOrderIndex.get(rightModel) ?? 0);
+        }
+
+        return 1;
+      }
+
+      if (rightScore === null || rightScore === undefined) {
+        return -1;
+      }
+
+      if (rightScore !== leftScore) {
+        return rightScore - leftScore;
+      }
+
+      return (baseOrderIndex.get(leftModel) ?? 0) - (baseOrderIndex.get(rightModel) ?? 0);
+    });
+  }, [baseModelColumns, columnSortBenchmarkKey, overallSummaryByModel]);
+
+  const compareModelSet = useMemo(() => new Set(compareModelOrder), [compareModelOrder]);
+  const compareBaselineModelName = compareModelOrder[0] ?? null;
+  const isCompareActive = compareModelOrder.length >= 2;
+
+  useEffect(() => {
+    const visibleModelSet = new Set(modelColumns);
+
+    enqueueStateUpdate(() => {
+      setCompareModelOrder((prev) => {
+        const next = prev.filter((modelName) => visibleModelSet.has(modelName));
+        return areStringArraysEqual(prev, next) ? prev : next;
+      });
+    });
+  }, [modelColumns]);
+
+  useEffect(() => {
+    if (!rowPresenceFilterModel) return;
+    if (modelColumns.includes(rowPresenceFilterModel)) return;
+    enqueueStateUpdate(() => setRowPresenceFilterModel(null));
+  }, [modelColumns, rowPresenceFilterModel]);
+
+  const {
+    categoryColumnWidth,
+    benchmarkColumnWidth,
+    modelColumnMeta,
+    hiddenResizeHandleKeys
+  } = useMatrixColumnWidths({
+    modelColumns,
+    coveragePrunedRows,
+    showDuplicateRows,
+    displaySourceValuesInCells,
+    displaySourceValueDeltasInCells,
+    activeSource,
+    activeSourceRef,
+    activeColumnWidthMap,
+    setActiveColumnWidthMap,
+    columnWidthBySourceRef,
+    columnWidthPersistTimeoutRef,
+    columnWidthOverrideKeys,
+    isColumnWidthLoaded,
+    sourceTabMatchLabel,
+    modelProviderMap,
+    modelProviderBrandColorMap,
+    compareModelSet,
+    compareBaselineModelName
+  });
 
   const hasOverallSummary = useMemo(() => {
     return modelColumns.some((modelName) => overallSummaryByModel.get(modelName)?.rawScore !== null);
@@ -1901,7 +1940,15 @@ export function BenchmarkMatrix({
             })}
 
             {hasOverallSummary ? (
-              <tr data-overall-row="1" className="matrix-row-overall">
+              <tr
+                data-overall-row="1"
+                className={selectedRowKey === OVERALL_ROW_KEY ? "matrix-row-selected" : "matrix-row-hover"}
+                onClick={() => {
+                  setSelectedRowKey((prev) => (prev === OVERALL_ROW_KEY ? null : OVERALL_ROW_KEY));
+                  setColumnSortBenchmarkKey((prev) => (prev === OVERALL_ROW_KEY ? null : OVERALL_ROW_KEY));
+                }}
+                style={{ cursor: "pointer" }}
+              >
                 <td
                   style={{
                     width: 72,
@@ -2006,6 +2053,7 @@ export function BenchmarkMatrix({
                         <span
                           data-overall-tooltip-trigger={model.modelName}
                           className="absolute right-1 top-1/2 inline-flex h-4 w-4 -translate-y-1/2 cursor-help items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
+                          onClick={(event) => event.stopPropagation()}
                           onMouseEnter={(event) => {
                             if (!summary) return;
                             const rect = event.currentTarget.getBoundingClientRect();
