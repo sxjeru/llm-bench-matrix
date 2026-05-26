@@ -692,7 +692,7 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
     db.select().from(modelPricing)
   ]);
 
-  const sourceProviders = new Map(Object.entries(sourceProvidersRaw));
+  const sourceProviders = new Map(Object.values(sourceProvidersRaw).map((provider) => [provider.id, provider]));
   const existingByModelId = new Map(existingRows.map((row) => [row.modelId, row]));
   const syncedAt = new Date();
   let matchedCount = 0;
@@ -856,41 +856,89 @@ const updateSchema = z.object({
 
 export type ModelPricingUpdateInput = z.input<typeof updateSchema>;
 
+const pricingCostFields = [
+  "inputCost",
+  "outputCost",
+  "reasoningCost",
+  "cacheReadCost",
+  "cacheWriteCost",
+  "inputAudioCost",
+  "outputAudioCost"
+] as const;
+
+const pricingNullableTextFields = [
+  "sourceProviderId",
+  "sourceProviderName",
+  "sourceModelId",
+  "sourceModelName",
+  "note"
+] as const;
+
 export async function updateModelPricing(input: ModelPricingUpdateInput) {
   const parsed = updateSchema.parse(input);
   const updatedAt = new Date();
-  const manualOverride = parsed.manualOverride ?? true;
-  const matchStatus = parsed.matchStatus ?? (manualOverride ? "manual" : "matched");
+  const insertManualOverride = parsed.manualOverride ?? (parsed.matchStatus === undefined || parsed.matchStatus === "manual");
+  const insertMatchStatus = parsed.matchStatus ?? (insertManualOverride ? "manual" : "matched");
 
-  const values = {
+  const values: ModelPricingUpsertRow = {
     modelId: parsed.modelId,
-    source: manualOverride ? "manual" : MODELS_DEV_SOURCE,
-    sourceProviderId: parsed.sourceProviderId ?? null,
-    sourceProviderName: parsed.sourceProviderName ?? null,
-    sourceModelId: parsed.sourceModelId ?? null,
-    sourceModelName: parsed.sourceModelName ?? null,
-    inputCost: parsed.inputCost === undefined || parsed.inputCost === null ? null : parsed.inputCost.toString(),
-    outputCost: parsed.outputCost === undefined || parsed.outputCost === null ? null : parsed.outputCost.toString(),
-    reasoningCost: parsed.reasoningCost === undefined || parsed.reasoningCost === null ? null : parsed.reasoningCost.toString(),
-    cacheReadCost: parsed.cacheReadCost === undefined || parsed.cacheReadCost === null ? null : parsed.cacheReadCost.toString(),
-    cacheWriteCost: parsed.cacheWriteCost === undefined || parsed.cacheWriteCost === null ? null : parsed.cacheWriteCost.toString(),
-    inputAudioCost: parsed.inputAudioCost === undefined || parsed.inputAudioCost === null ? null : parsed.inputAudioCost.toString(),
-    outputAudioCost: parsed.outputAudioCost === undefined || parsed.outputAudioCost === null ? null : parsed.outputAudioCost.toString(),
+    source: insertManualOverride ? "manual" : MODELS_DEV_SOURCE,
     currency: "USD",
     unit: "per_1m_tokens",
-    matchConfidence: manualOverride ? 100 : 0,
-    matchStatus,
-    manualOverride,
-    note: parsed.note ?? null,
+    matchConfidence: insertManualOverride ? 100 : 0,
+    matchStatus: insertMatchStatus,
+    manualOverride: insertManualOverride,
     updatedAt
   };
+
+  const updateValues: Partial<ModelPricingUpsertRow> = { updatedAt };
+
+  if (parsed.manualOverride !== undefined) {
+    values.manualOverride = parsed.manualOverride;
+    values.source = parsed.manualOverride ? "manual" : MODELS_DEV_SOURCE;
+    values.matchConfidence = parsed.manualOverride ? 100 : 0;
+    updateValues.manualOverride = parsed.manualOverride;
+    updateValues.source = parsed.manualOverride ? "manual" : MODELS_DEV_SOURCE;
+    updateValues.matchConfidence = parsed.manualOverride ? 100 : 0;
+    if (parsed.matchStatus === undefined) {
+      values.matchStatus = parsed.manualOverride ? "manual" : "matched";
+      updateValues.matchStatus = values.matchStatus;
+    }
+  } else if (parsed.matchStatus === undefined) {
+    updateValues.manualOverride = true;
+    updateValues.source = "manual";
+    updateValues.matchConfidence = 100;
+    updateValues.matchStatus = "manual";
+  }
+
+  if (parsed.matchStatus !== undefined) {
+    values.matchStatus = parsed.matchStatus;
+    updateValues.matchStatus = parsed.matchStatus;
+  }
+
+  for (const field of pricingCostFields) {
+    const value = parsed[field];
+    if (value !== undefined) {
+      const serialized = value === null ? null : value.toString();
+      values[field] = serialized;
+      updateValues[field] = serialized;
+    }
+  }
+
+  for (const field of pricingNullableTextFields) {
+    const value = parsed[field];
+    if (value !== undefined) {
+      values[field] = value;
+      updateValues[field] = value;
+    }
+  }
 
   await db
     .insert(modelPricing)
     .values(values)
     .onConflictDoUpdate({
       target: modelPricing.modelId,
-      set: values
+      set: updateValues
     });
 }
 

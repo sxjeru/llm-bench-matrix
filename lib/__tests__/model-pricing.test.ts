@@ -137,7 +137,6 @@ describe("model pricing module", () => {
 
     expect(set).toEqual(
       expect.objectContaining({
-        modelId: 1,
         sourceModelId: "gpt-4",
         inputCost: "0.1",
         outputCost: "0.2",
@@ -148,6 +147,38 @@ describe("model pricing module", () => {
         manualOverride: true,
       })
     );
+  });
+
+  test("updateModelPricing preserves omitted fields and clears explicit nulls", async () => {
+    const { db, onConflictDoUpdate } = createDbMock([], []);
+    const { updateModelPricing } = await importPricingModule(db);
+
+    await updateModelPricing({
+      modelId: 3,
+      inputCost: undefined,
+      outputCost: null,
+      sourceProviderId: undefined,
+      sourceModelId: "gpt-4.1",
+      note: null,
+      manualOverride: false,
+    });
+
+    const [onConflictArg] = onConflictDoUpdate.mock.calls[0];
+    const set = onConflictArg.set;
+
+    expect(set).toEqual(
+      expect.objectContaining({
+        outputCost: null,
+        sourceModelId: "gpt-4.1",
+        note: null,
+        source: "models.dev",
+        matchStatus: "matched",
+        matchConfidence: 0,
+        manualOverride: false,
+      })
+    );
+    expect(set).not.toHaveProperty("inputCost");
+    expect(set).not.toHaveProperty("sourceProviderId");
   });
 
   test("updateModelPricing rejects invalid inputs with zod errors", async () => {
@@ -195,7 +226,6 @@ describe("model pricing module", () => {
 
     expect(set).toEqual(
       expect.objectContaining({
-        modelId: 2,
         sourceModelId: "gpt-4-32k",
         inputCost: "0.3",
         outputCost: "0.4",
