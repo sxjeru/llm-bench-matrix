@@ -9,6 +9,8 @@ import {
 } from "lucide-react";
 import type { Dispatch, MouseEvent as ReactMouseEvent, RefObject, SetStateAction } from "react";
 import {
+  ALL_SOURCE_COLUMN_COVERAGE_THRESHOLD,
+  ALL_SOURCE_ROW_COVERAGE_THRESHOLD,
   EXPORT_PRESET_MAP,
   SOURCE_ALL
 } from "./constants";
@@ -389,6 +391,7 @@ export function BenchmarkMatrixTopControls({
           <button
             type="button"
             className="btn btn-xs btn-ghost"
+            title={`隐藏时会过滤行覆盖率低于 ${ALL_SOURCE_ROW_COVERAGE_THRESHOLD * 100}% 的 benchmark 行，并基于保留行过滤列覆盖率低于 ${ALL_SOURCE_COLUMN_COVERAGE_THRESHOLD * 100}% 的模型列`}
             onClick={() => setShowLowCoverageRows((prev) => !prev)}
           >
             {showLowCoverageRows ? <Eye size={14} /> : <EyeOff size={14} />}
