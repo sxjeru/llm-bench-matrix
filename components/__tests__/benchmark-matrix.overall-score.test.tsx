@@ -162,6 +162,26 @@ describe("BenchmarkMatrix 总评行", () => {
     expect(getModelHeaderOrder()).toEqual(initialOrder);
   });
 
+  test("点击总评行 tooltip 图标不会触发排序", () => {
+    const { container } = render(<BenchmarkMatrix rows={[...rows]} />);
+    const initialOrder = getModelHeaderOrder();
+
+    const overallRow = container.querySelector('tr[data-overall-row="1"]');
+    expect(overallRow).not.toBeNull();
+    expect(overallRow!.className).not.toContain("matrix-row-selected");
+
+    // 点击总评行上的问号 tooltip 触发元素
+    const tooltipTrigger = overallRow!.querySelector('[data-overall-tooltip-trigger="Model C"]') as HTMLElement | null;
+    expect(tooltipTrigger).not.toBeNull();
+
+    fireEvent.click(tooltipTrigger!);
+
+    // 断言点击 tooltip 不会改变列头顺序（即不会触发排序）
+    expect(getModelHeaderOrder()).toEqual(initialOrder);
+    expect(overallRow!.className).not.toContain("matrix-row-selected");
+  });
+
+
   test("问号 tooltip 展示覆盖率修正后的分数与名次", async () => {
     const { container } = render(<BenchmarkMatrix rows={[...rows]} />);
 

@@ -76,6 +76,7 @@ import {
   type CompareDirection,
   type ExportPresetKey,
   SOURCE_ALL,
+  OVERALL_ROW_KEY,
   MODALITY_OPTIONS,
   CATEGORY_COLUMN_WIDTH_KEY,
   BENCHMARK_COLUMN_WIDTH_KEY,
@@ -115,8 +116,6 @@ import {
   getSourceValueDeltaRaw,
   getSourceValueDisplayItem
 } from "./benchmark-matrix/index";
-
-const OVERALL_COLUMN_SORT_KEY = "__OVERALL__";
 
 export function BenchmarkMatrix({
   rows,
@@ -670,7 +669,7 @@ export function BenchmarkMatrix({
     () => buildModelColumns(
       coveragePrunedRows,
       sourceModelHint,
-      columnSortBenchmarkKey === OVERALL_COLUMN_SORT_KEY ? null : columnSortBenchmarkKey,
+      columnSortBenchmarkKey === OVERALL_ROW_KEY ? null : columnSortBenchmarkKey,
       showDuplicateRows,
       modelOrderBySource,
       activeSource
@@ -758,7 +757,7 @@ export function BenchmarkMatrix({
   );
 
   const modelColumns = useMemo<readonly string[]>(() => {
-    if (columnSortBenchmarkKey !== OVERALL_COLUMN_SORT_KEY) {
+    if (columnSortBenchmarkKey !== OVERALL_ROW_KEY) {
       return baseModelColumns;
     }
 
@@ -1943,10 +1942,10 @@ export function BenchmarkMatrix({
             {hasOverallSummary ? (
               <tr
                 data-overall-row="1"
-                className={selectedRowKey === OVERALL_COLUMN_SORT_KEY ? "matrix-row-selected" : "matrix-row-hover"}
+                className={selectedRowKey === OVERALL_ROW_KEY ? "matrix-row-selected" : "matrix-row-hover"}
                 onClick={() => {
-                  setSelectedRowKey((prev) => (prev === OVERALL_COLUMN_SORT_KEY ? null : OVERALL_COLUMN_SORT_KEY));
-                  setColumnSortBenchmarkKey((prev) => (prev === OVERALL_COLUMN_SORT_KEY ? null : OVERALL_COLUMN_SORT_KEY));
+                  setSelectedRowKey((prev) => (prev === OVERALL_ROW_KEY ? null : OVERALL_ROW_KEY));
+                  setColumnSortBenchmarkKey((prev) => (prev === OVERALL_ROW_KEY ? null : OVERALL_ROW_KEY));
                 }}
                 style={{ cursor: "pointer" }}
               >
