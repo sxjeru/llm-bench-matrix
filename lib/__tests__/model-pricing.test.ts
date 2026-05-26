@@ -549,7 +549,7 @@ describe("model pricing module", () => {
         },
         {
           id: 13,
-          modelName: "Foo Bar high",
+          modelName: "Foo Bar-nothink",
           sourceModelId: null,
           providerName: "Test",
           providerSlug: "test",
@@ -557,7 +557,7 @@ describe("model pricing module", () => {
         },
         {
           id: 14,
-          modelName: "Foo Bar max (preview)",
+          modelName: "Foo Bar-nonthink",
           sourceModelId: null,
           providerName: "Test",
           providerSlug: "test",
@@ -565,6 +565,22 @@ describe("model pricing module", () => {
         },
         {
           id: 15,
+          modelName: "Foo Bar high",
+          sourceModelId: null,
+          providerName: "Test",
+          providerSlug: "test",
+          providerConfig: {}
+        },
+        {
+          id: 16,
+          modelName: "Foo Bar max (preview)",
+          sourceModelId: null,
+          providerName: "Test",
+          providerSlug: "test",
+          providerConfig: {}
+        },
+        {
+          id: 17,
           modelName: "Foo Bar（fast）",
           sourceModelId: null,
           providerName: "Test",
@@ -598,7 +614,9 @@ describe("model pricing module", () => {
       12,
       13,
       14,
-      15
+      15,
+      16,
+      17
     ].map((modelId) => expect.objectContaining({
       modelId,
       sourceProviderId: "test",
@@ -608,7 +626,54 @@ describe("model pricing module", () => {
       matchStatus: "matched",
       note: "normalized-model-variant"
     })));
-    expect(result.matchedCount).toBe(6);
+    expect(result.matchedCount).toBe(8);
+    expect(result.unmatchedCount).toBe(0);
+  });
+
+  test("syncModelsDevPricing 将 DeepSeek-V3.2-nothink 回退匹配到 DeepSeek-V3.2", async () => {
+    const { db, values } = createDbMock(
+      [
+        {
+          id: 18,
+          modelName: "DeepSeek-V3.2-nothink",
+          sourceModelId: null,
+          providerName: "DeepSeek",
+          providerSlug: "deepseek",
+          providerConfig: {}
+        }
+      ],
+      []
+    );
+
+    mockModelsDevResponse({
+      deepseek: {
+        id: "deepseek",
+        name: "DeepSeek",
+        models: {
+          "deepseek-v3.2": {
+            id: "deepseek-v3.2",
+            name: "DeepSeek V3.2",
+            cost: { input: 0.27, output: 0.42 }
+          }
+        }
+      }
+    });
+
+    const pricingModule = await importPricingModule(db);
+    const result = await pricingModule.syncModelsDevPricing();
+
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({
+        modelId: 18,
+        sourceProviderId: "deepseek",
+        sourceModelId: "deepseek-v3.2",
+        inputCost: "0.27",
+        outputCost: "0.42",
+        matchStatus: "matched",
+        note: "normalized-model-variant"
+      })
+    ]);
+    expect(result.matchedCount).toBe(1);
     expect(result.unmatchedCount).toBe(0);
   });
 
@@ -674,6 +739,71 @@ describe("model pricing module", () => {
         inputCost: "1",
         outputCost: "2",
         cacheReadCost: "0.1",
+        matchStatus: "matched",
+        note: "global-price-mode"
+      })
+    ]);
+    expect(result.matchedCount).toBe(1);
+    expect(result.unmatchedCount).toBe(0);
+  });
+
+  test("syncModelsDevPricing 在无合适 provider 时使用所有同名模型的众数价格", async () => {
+    const { db, values } = createDbMock(
+      [
+        {
+          id: 19,
+          modelName: "GLM-4.7",
+          sourceModelId: null,
+          providerName: "GLM",
+          providerSlug: "glm",
+          providerConfig: {}
+        }
+      ],
+      []
+    );
+
+    mockModelsDevResponse({
+      zai: {
+        id: "zai",
+        name: "Z AI",
+        models: {
+          "glm-4.7": {
+            id: "glm-4.7",
+            name: "GLM-4.7",
+            cost: { input: 0.6, output: 2.2, cache_read: 0.11, cache_write: 0 }
+          },
+          "z-ai/glm-4.7": {
+            id: "z-ai/glm-4.7",
+            name: "GLM-4.7",
+            cost: { input: 0.6, output: 2.2, cache_read: 0.11, cache_write: 0 }
+          }
+        }
+      },
+      deepinfra: {
+        id: "deepinfra",
+        name: "DeepInfra",
+        models: {
+          "zai-org/GLM-4.7": {
+            id: "zai-org/GLM-4.7",
+            name: "GLM-4.7",
+            cost: { input: 0.43, output: 1.75, cache_read: 0.08 }
+          }
+        }
+      }
+    });
+
+    const pricingModule = await importPricingModule(db);
+    const result = await pricingModule.syncModelsDevPricing();
+
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({
+        modelId: 19,
+        sourceProviderId: "zai",
+        sourceModelId: "glm-4.7",
+        inputCost: "0.6",
+        outputCost: "2.2",
+        cacheReadCost: "0.11",
+        cacheWriteCost: "0",
         matchStatus: "matched",
         note: "global-price-mode"
       })

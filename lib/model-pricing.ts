@@ -141,7 +141,7 @@ function normalizeToken(value: string): string {
 const MODEL_VARIANT_SEPARATOR = String.raw`[\s._/\\:\-\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]+`;
 const TRAILING_MODEL_BRACKET_PATTERN = /\s*(?:\([^()]*\)|（[^（）]*）|\[[^\[\]]*\]|【[^【】]*】)\s*$/;
 const TRAILING_MODEL_VARIANT_PATTERN = new RegExp(
-  `${MODEL_VARIANT_SEPARATOR}(?:non${MODEL_VARIANT_SEPARATOR}think|no${MODEL_VARIANT_SEPARATOR}think|think|high|max)$`,
+  `${MODEL_VARIANT_SEPARATOR}(?:non(?:${MODEL_VARIANT_SEPARATOR})?think|no(?:${MODEL_VARIANT_SEPARATOR})?think|think|high|max)$`,
   "i"
 );
 
@@ -325,47 +325,57 @@ function resolveModelMatch(model: DbModel, sourceProvider: ModelsDevProvider | n
   const modelName = model.modelName.trim();
   const modelTokens = getModelMatchTokens([sourceModelId ?? "", modelName]);
 
-  const findInProvider = (provider: ModelsDevProvider): ModelMatch | null => {
+  const collectInProvider = (provider: ModelsDevProvider): ModelMatch[] => {
+    const matches: ModelMatch[] = [];
+    const seenModelKeys = new Set<string>();
+
+    const addMatch = (modelKey: string, sourceModel: ModelsDevModel, confidence: number, reason: string) => {
+      if (seenModelKeys.has(modelKey)) return;
+      seenModelKeys.add(modelKey);
+      matches.push({ provider, modelKey, model: sourceModel, confidence, reason });
+    };
+
     if (sourceModelId) {
       const direct = provider.models[sourceModelId];
-      if (direct) return { provider, modelKey: sourceModelId, model: direct, confidence: 100, reason: "source-model-id" };
+      if (direct) addMatch(sourceModelId, direct, 100, "source-model-id");
     }
 
     const direct = provider.models[modelName];
-    if (direct) return { provider, modelKey: modelName, model: direct, confidence: 96, reason: "model-name" };
+    if (direct) addMatch(modelName, direct, 96, "model-name");
 
     for (const [modelKey, sourceModel] of Object.entries(provider.models)) {
       const sourceModelName = sourceModel.name ?? sourceModel.id ?? modelKey;
       const sourceTokens = getModelMatchTokens([modelKey, sourceModelName, sourceModel.id ?? ""]);
 
       if (hasTokenIntersection(modelTokens.exact, sourceTokens.exact)) {
-        return { provider, modelKey, model: sourceModel, confidence: 92, reason: "normalized-model-name" };
+        addMatch(modelKey, sourceModel, 92, "normalized-model-name");
+        continue;
       }
 
       if (hasTokenIntersection(modelTokens.variant, sourceTokens.variant)) {
-        return { provider, modelKey, model: sourceModel, confidence: 90, reason: "normalized-model-variant" };
+        addMatch(modelKey, sourceModel, 90, "normalized-model-variant");
       }
     }
 
-    return null;
+    return matches;
   };
 
   const globalMatches: ModelMatch[] = [];
+  const providerMatches = new Map<string, ModelMatch[]>();
   for (const provider of providersById.values()) {
-    const matched = findInProvider(provider);
-    if (matched) globalMatches.push(matched);
+    const matches = collectInProvider(provider);
+    if (matches.length > 0) {
+      providerMatches.set(provider.id, matches);
+      globalMatches.push(...matches);
+    }
   }
 
   if (sourceProvider) {
-    const providerMatch = globalMatches.find((match) => match.provider.id === sourceProvider.id);
+    const providerMatch = providerMatches.get(sourceProvider.id)?.[0];
     if (providerMatch) return providerMatch;
   }
 
-  const priceModeMatch = resolvePriceModeMatch(
-    sourceProvider
-      ? globalMatches.filter((match) => match.provider.id !== sourceProvider.id)
-      : globalMatches
-  );
+  const priceModeMatch = resolvePriceModeMatch(globalMatches);
   if (priceModeMatch) return priceModeMatch;
 
   if (globalMatches.length === 1) {
