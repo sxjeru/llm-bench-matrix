@@ -22,6 +22,8 @@ type ExistingPricingRow = {
   manualOverride: boolean;
 };
 
+const MODELS_DEV_MAX_BYTES = 8 * 1024 * 1024;
+
 function createDbMock(activeModels: ActiveModelRow[], existingRows: ExistingPricingRow[]) {
   const select = vi.fn((selection?: unknown) => {
     if (selection) {
@@ -69,6 +71,35 @@ function mockModelsDevResponse(body: unknown) {
       text: vi.fn().mockResolvedValue(JSON.stringify(body))
     })
   );
+}
+
+function mockModelsDevStreamResponse(chunks: Uint8Array[], cancel = vi.fn()) {
+  const pendingChunks = [...chunks];
+
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: {
+        get: vi.fn().mockReturnValue(null)
+      },
+      body: new ReadableStream<Uint8Array>({
+        pull(controller) {
+          const chunk = pendingChunks.shift();
+          if (chunk) {
+            controller.enqueue(chunk);
+          } else {
+            controller.close();
+          }
+        },
+        cancel
+      }),
+      text: vi.fn()
+    })
+  );
+
+  return { cancel };
 }
 
 beforeEach(() => {
@@ -377,6 +408,89 @@ describe("model pricing module", () => {
     expect(result.matchedCount).toBe(1);
     expect(result.unmatchedCount).toBe(1);
     expect(result.skippedManualCount).toBe(0);
+  });
+
+  test("syncModelsDevPricing 支持分块读取 models.dev 响应", async () => {
+    const { db, values } = createDbMock(
+      [
+        {
+          id: 8,
+          modelName: "GPT-4",
+          sourceModelId: "gpt-4",
+          providerName: "OpenAI",
+          providerSlug: "openai",
+          providerConfig: {}
+        }
+      ],
+      []
+    );
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode(JSON.stringify({
+      openai: {
+        id: "openai",
+        name: "OpenAI",
+        models: {
+          "gpt-4": {
+            id: "gpt-4",
+            name: "GPT-4",
+            cost: {
+              input: 30,
+              output: 60
+            }
+          }
+        }
+      }
+    }));
+    mockModelsDevStreamResponse([
+      bytes.slice(0, 12),
+      bytes.slice(12, 48),
+      bytes.slice(48)
+    ]);
+
+    const pricingModule = await importPricingModule(db);
+    const result = await pricingModule.syncModelsDevPricing();
+
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({
+        modelId: 8,
+        sourceProviderId: "openai",
+        sourceModelId: "gpt-4",
+        matchStatus: "matched"
+      })
+    ]);
+    expect(result.matchedCount).toBe(1);
+  });
+
+  test("syncModelsDevPricing 在无 content-length 的流式响应超限时取消读取", async () => {
+    const { db } = createDbMock([], []);
+    const cancel = vi.fn();
+    const releaseLock = vi.fn();
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce({ done: false, value: new Uint8Array(MODELS_DEV_MAX_BYTES) })
+      .mockResolvedValueOnce({ done: false, value: new Uint8Array(1) });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: {
+          get: vi.fn().mockReturnValue(null)
+        },
+        body: {
+          getReader: vi.fn().mockReturnValue({ read, cancel, releaseLock })
+        },
+        text: vi.fn()
+      })
+    );
+
+    const pricingModule = await importPricingModule(db);
+
+    await expect(pricingModule.syncModelsDevPricing()).rejects.toThrow("models.dev 响应过大");
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(releaseLock).toHaveBeenCalledTimes(1);
+    expect(db.insert).not.toHaveBeenCalled();
   });
 
   test("syncModelsDevPricing skips manualOverride rows and increments skippedManualCount", async () => {

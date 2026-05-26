@@ -234,9 +234,37 @@ async function fetchModelsDevApi(): Promise<Record<string, ModelsDevProvider>> {
       throw new Error("models.dev 响应过大");
     }
 
-    const text = await response.text();
-    if (text.length > MODELS_DEV_MAX_BYTES) {
-      throw new Error("models.dev 响应过大");
+    let text: string;
+    if (response.body) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const decodedChunks: string[] = [];
+      let receivedLength = 0;
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          receivedLength += value.byteLength;
+          if (receivedLength > MODELS_DEV_MAX_BYTES) {
+            await reader.cancel();
+            throw new Error("models.dev 响应过大");
+          }
+
+          decodedChunks.push(decoder.decode(value, { stream: true }));
+        }
+      } finally {
+        reader.releaseLock();
+      }
+
+      decodedChunks.push(decoder.decode());
+      text = decodedChunks.join("");
+    } else {
+      text = await response.text();
+      if (new TextEncoder().encode(text).byteLength > MODELS_DEV_MAX_BYTES) {
+        throw new Error("models.dev 响应过大");
+      }
     }
 
     const parsedJson = JSON.parse(text) as unknown;
