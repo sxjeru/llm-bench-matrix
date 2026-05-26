@@ -304,6 +304,51 @@ describe("AdminConsole text import", () => {
     expect(screen.queryByText("Auto Model")).not.toBeInTheDocument();
   });
 
+  test("价格管理修改价格后保存应自动开启手动覆盖", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetchSequence({ prices: [buildPriceRow({ modelId: 1, modelName: "Model A", inputCost: 1 })] });
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await user.click(screen.getByRole("tab", { name: "价格管理" }));
+    expect(await screen.findByText("Model A")).toBeInTheDocument();
+
+    const row = screen.getByText("Model A").closest("tr");
+    if (!row) throw new Error("Model A row not found");
+
+    const manualOverrideCheckbox = within(row).getByRole("checkbox");
+    expect(manualOverrideCheckbox).not.toBeChecked();
+
+    const inputCost = within(row).getByPlaceholderText("$1");
+    await user.clear(inputCost);
+    await user.type(inputCost, "1.5");
+
+    expect(manualOverrideCheckbox).toBeChecked();
+
+    await user.click(within(row).getByRole("button", { name: /保存/ }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/admin/model-prices",
+        expect.objectContaining({
+          method: "PATCH",
+          body: expect.any(String)
+        })
+      );
+    });
+
+    const patchCall = fetchMock.mock.calls.find(([input, init]) => input === "/api/admin/model-prices" && init?.method === "PATCH");
+    expect(patchCall).toBeDefined();
+    expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual(
+      expect.objectContaining({
+        modelId: 1,
+        inputCost: 1.5,
+        manualOverride: true,
+        matchStatus: "manual"
+      })
+    );
+  });
+
   test("价格管理保存时应拒绝部分数字字符串", async () => {
     const user = userEvent.setup();
     const fetchMock = mockFetchSequence({ prices: [buildPriceRow({ modelId: 1, modelName: "Model A", inputCost: 1 })] });

@@ -2709,25 +2709,41 @@ export function AdminConsole({
     const draft = pricingDrafts[modelId];
     if (!draft || savingPriceModelId !== null) return;
 
+    const sourceRow = modelPriceRows.find((row) => row.modelId === modelId);
+
     setSavingPriceModelId(modelId);
     try {
+      const parsedCosts = {
+        inputCost: parseOptionalCost(draft.inputCost),
+        outputCost: parseOptionalCost(draft.outputCost),
+        cacheReadCost: parseOptionalCost(draft.cacheReadCost),
+        reasoningCost: parseOptionalCost(draft.reasoningCost),
+        cacheWriteCost: parseOptionalCost(draft.cacheWriteCost),
+        inputAudioCost: parseOptionalCost(draft.inputAudioCost),
+        outputAudioCost: parseOptionalCost(draft.outputAudioCost)
+      };
+      const priceChanged = sourceRow
+        ? parsedCosts.inputCost !== sourceRow.inputCost
+          || parsedCosts.outputCost !== sourceRow.outputCost
+          || parsedCosts.cacheReadCost !== sourceRow.cacheReadCost
+          || parsedCosts.reasoningCost !== sourceRow.reasoningCost
+          || parsedCosts.cacheWriteCost !== sourceRow.cacheWriteCost
+          || parsedCosts.inputAudioCost !== sourceRow.inputAudioCost
+          || parsedCosts.outputAudioCost !== sourceRow.outputAudioCost
+        : false;
+      const manualOverride = draft.manualOverride || priceChanged;
+
       await postJson(
         "/api/admin/model-prices",
         {
           modelId,
-          inputCost: parseOptionalCost(draft.inputCost),
-          outputCost: parseOptionalCost(draft.outputCost),
-          cacheReadCost: parseOptionalCost(draft.cacheReadCost),
-          reasoningCost: parseOptionalCost(draft.reasoningCost),
-          cacheWriteCost: parseOptionalCost(draft.cacheWriteCost),
-          inputAudioCost: parseOptionalCost(draft.inputAudioCost),
-          outputAudioCost: parseOptionalCost(draft.outputAudioCost),
+          ...parsedCosts,
           sourceProviderId: draft.sourceProviderId.trim() || null,
           sourceProviderName: draft.sourceProviderName.trim() || null,
           sourceModelId: draft.sourceModelId.trim() || null,
           sourceModelName: draft.sourceModelName.trim() || null,
-          manualOverride: draft.manualOverride,
-          matchStatus: draft.manualOverride ? "manual" : "matched",
+          manualOverride,
+          matchStatus: manualOverride ? "manual" : "matched",
           note: draft.note.trim() || null
         },
         "PATCH"

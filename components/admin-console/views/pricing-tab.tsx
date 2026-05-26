@@ -37,6 +37,15 @@ export type ModelPricingDraft = {
   note: string;
 };
 
+type ModelPricingCostDraftKey =
+  | "inputCost"
+  | "outputCost"
+  | "cacheReadCost"
+  | "reasoningCost"
+  | "cacheWriteCost"
+  | "inputAudioCost"
+  | "outputAudioCost";
+
 function formatCost(value: number | null) {
   if (value === null || !Number.isFinite(value)) return "--";
   return `$${value.toFixed(value >= 10 ? 2 : 3).replace(/0+$/, "").replace(/\.$/, "")}`;
@@ -79,6 +88,10 @@ export function PricingTab({
   onSavePrice,
   syncResult
 }: PricingTabProps) {
+  function updatePricingCostDraft(modelId: number, field: ModelPricingCostDraftKey, value: string) {
+    updatePricingDraft(modelId, (current) => ({ ...current, [field]: value, manualOverride: true }));
+  }
+
   const filteredPrices = prices.filter((price) => {
     const draft = pricingDrafts[price.modelId];
     const draftAwareStatus = getDraftAwareStatus(price, draft);
@@ -226,7 +239,7 @@ export function PricingTab({
                       <input
                         className="input input-bordered input-xs w-24"
                         value={draft.inputCost}
-                        onChange={(event) => updatePricingDraft(price.modelId, (current) => ({ ...current, inputCost: event.target.value }))}
+                        onChange={(event) => updatePricingCostDraft(price.modelId, "inputCost", event.target.value)}
                         placeholder={formatCost(price.inputCost)}
                       />
                     </td>
@@ -234,7 +247,7 @@ export function PricingTab({
                       <input
                         className="input input-bordered input-xs w-24"
                         value={draft.outputCost}
-                        onChange={(event) => updatePricingDraft(price.modelId, (current) => ({ ...current, outputCost: event.target.value }))}
+                        onChange={(event) => updatePricingCostDraft(price.modelId, "outputCost", event.target.value)}
                         placeholder={formatCost(price.outputCost)}
                       />
                     </td>
@@ -242,16 +255,16 @@ export function PricingTab({
                       <input
                         className="input input-bordered input-xs w-24"
                         value={draft.cacheReadCost}
-                        onChange={(event) => updatePricingDraft(price.modelId, (current) => ({ ...current, cacheReadCost: event.target.value }))}
+                        onChange={(event) => updatePricingCostDraft(price.modelId, "cacheReadCost", event.target.value)}
                         placeholder={formatCost(price.cacheReadCost)}
                       />
                     </td>
                     <td className="min-w-[220px]">
                       <div className="grid grid-cols-2 gap-1">
-                        <input className="input input-bordered input-xs" value={draft.reasoningCost} onChange={(event) => updatePricingDraft(price.modelId, (current) => ({ ...current, reasoningCost: event.target.value }))} placeholder="reasoning" />
-                        <input className="input input-bordered input-xs" value={draft.cacheWriteCost} onChange={(event) => updatePricingDraft(price.modelId, (current) => ({ ...current, cacheWriteCost: event.target.value }))} placeholder="cache write" />
-                        <input className="input input-bordered input-xs" value={draft.inputAudioCost} onChange={(event) => updatePricingDraft(price.modelId, (current) => ({ ...current, inputAudioCost: event.target.value }))} placeholder="audio in" />
-                        <input className="input input-bordered input-xs" value={draft.outputAudioCost} onChange={(event) => updatePricingDraft(price.modelId, (current) => ({ ...current, outputAudioCost: event.target.value }))} placeholder="audio out" />
+                        <input className="input input-bordered input-xs" value={draft.reasoningCost} onChange={(event) => updatePricingCostDraft(price.modelId, "reasoningCost", event.target.value)} placeholder="reasoning" />
+                        <input className="input input-bordered input-xs" value={draft.cacheWriteCost} onChange={(event) => updatePricingCostDraft(price.modelId, "cacheWriteCost", event.target.value)} placeholder="cache write" />
+                        <input className="input input-bordered input-xs" value={draft.inputAudioCost} onChange={(event) => updatePricingCostDraft(price.modelId, "inputAudioCost", event.target.value)} placeholder="audio in" />
+                        <input className="input input-bordered input-xs" value={draft.outputAudioCost} onChange={(event) => updatePricingCostDraft(price.modelId, "outputAudioCost", event.target.value)} placeholder="audio out" />
                       </div>
                     </td>
                     <td>
