@@ -49,6 +49,7 @@ type ModelMatch = {
   model: ModelsDevModel;
   confidence: number;
   reason: string;
+  fuzzyScore?: number;
 };
 
 const COST_KEYS = [
@@ -134,8 +135,8 @@ function normalizeToken(value: string): string {
   return value
     .trim()
     .toLowerCase()
-    .replace(/[\-\u2010-\u2015\u2212\uFE58\uFE63\uFF0D_\s.\/\\:]+/g, "")
-    .replace(/[^a-z0-9]+/g, "");
+    .replace(/[\-\u2010-\u2015\u2212\uFE58\uFE63\uFF0D_\s\/\\:]+/g, "")
+    .replace(/[^a-z0-9.]+/g, "");
 }
 
 const MODEL_VARIANT_SEPARATOR = String.raw`[\s._/\\:\-\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]+`;
@@ -174,6 +175,88 @@ function getModelMatchTokens(values: string[]): { exact: Set<string>; variant: S
   }
 
   return { exact, variant };
+}
+
+function uniqueValues(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+function stripUpstreamModelIdPrefix(value: string) {
+  const slashIndex = value.lastIndexOf("/");
+  return slashIndex >= 0 ? value.slice(slashIndex + 1).trim() : value.trim();
+}
+
+function stripUpstreamModelNamePrefix(value: string) {
+  const prefixIndex = Math.max(value.lastIndexOf(":"), value.lastIndexOf("："), value.lastIndexOf("/"));
+  return prefixIndex >= 0 ? value.slice(prefixIndex + 1).trim() : value.trim();
+}
+
+function getUpstreamModelMatchTokens(modelKey: string, sourceModel: ModelsDevModel) {
+  const sourceModelId = sourceModel.id ?? "";
+  const sourceModelName = sourceModel.name ?? "";
+
+  return getModelMatchTokens(uniqueValues([
+    modelKey,
+    stripUpstreamModelIdPrefix(modelKey),
+    sourceModelId,
+    stripUpstreamModelIdPrefix(sourceModelId),
+    sourceModelName,
+    stripUpstreamModelNamePrefix(sourceModelName)
+  ]));
+}
+
+function getContainmentFuzzyScore(left: Set<string>, right: Set<string>) {
+  let bestScore = 0;
+
+  for (const leftToken of left) {
+    for (const rightToken of right) {
+      if (leftToken === rightToken) continue;
+
+      const shorter = leftToken.length <= rightToken.length ? leftToken : rightToken;
+      const longer = leftToken.length > rightToken.length ? leftToken : rightToken;
+      if (shorter.length < 4 || !longer.includes(shorter)) continue;
+
+      const ratio = shorter.length / longer.length;
+      bestScore = Math.max(bestScore, shorter.length * 1000 + Math.round(ratio * 100));
+    }
+  }
+
+  return bestScore;
+}
+
+function getFuzzyMatchScore(
+  modelTokens: { exact: Set<string>; variant: Set<string> },
+  sourceTokens: { exact: Set<string>; variant: Set<string> }
+) {
+  return Math.max(
+    getContainmentFuzzyScore(modelTokens.exact, sourceTokens.exact),
+    getContainmentFuzzyScore(modelTokens.variant, sourceTokens.variant)
+  );
+}
+
+function isFuzzyMatch(match: ModelMatch) {
+  return match.reason === "fuzzy-model-name";
+}
+
+function getBestFuzzyMatches(matches: ModelMatch[]) {
+  const bestScore = Math.max(0, ...matches.map((match) => match.fuzzyScore ?? 0));
+  if (bestScore <= 0) return [];
+  return matches.filter((match) => match.fuzzyScore === bestScore);
+}
+
+function groupMatchesByProvider(matches: ModelMatch[]) {
+  const providerMatches = new Map<string, ModelMatch[]>();
+
+  for (const match of matches) {
+    const matchesForProvider = providerMatches.get(match.provider.id);
+    if (matchesForProvider) {
+      matchesForProvider.push(match);
+    } else {
+      providerMatches.set(match.provider.id, [match]);
+    }
+  }
+
+  return providerMatches;
 }
 
 function hasTokenIntersection(left: Set<string>, right: Set<string>) {
@@ -328,11 +411,19 @@ function resolveModelMatch(model: DbModel, sourceProvider: ModelsDevProvider | n
   const collectInProvider = (provider: ModelsDevProvider): ModelMatch[] => {
     const matches: ModelMatch[] = [];
     const seenModelKeys = new Set<string>();
+    let fuzzyMatch: (ModelMatch & { fuzzyScore: number }) | null = null;
 
     const addMatch = (modelKey: string, sourceModel: ModelsDevModel, confidence: number, reason: string) => {
       if (seenModelKeys.has(modelKey)) return;
       seenModelKeys.add(modelKey);
       matches.push({ provider, modelKey, model: sourceModel, confidence, reason });
+    };
+
+    const addFuzzyCandidate = (modelKey: string, sourceModel: ModelsDevModel, fuzzyScore: number) => {
+      if (seenModelKeys.has(modelKey) || fuzzyScore <= 0) return;
+      if (!fuzzyMatch || fuzzyScore > fuzzyMatch.fuzzyScore) {
+        fuzzyMatch = { provider, modelKey, model: sourceModel, confidence: 70, reason: "fuzzy-model-name", fuzzyScore };
+      }
     };
 
     if (sourceModelId) {
@@ -344,8 +435,7 @@ function resolveModelMatch(model: DbModel, sourceProvider: ModelsDevProvider | n
     if (direct) addMatch(modelName, direct, 96, "model-name");
 
     for (const [modelKey, sourceModel] of Object.entries(provider.models)) {
-      const sourceModelName = sourceModel.name ?? sourceModel.id ?? modelKey;
-      const sourceTokens = getModelMatchTokens([modelKey, sourceModelName, sourceModel.id ?? ""]);
+      const sourceTokens = getUpstreamModelMatchTokens(modelKey, sourceModel);
 
       if (hasTokenIntersection(modelTokens.exact, sourceTokens.exact)) {
         addMatch(modelKey, sourceModel, 92, "normalized-model-name");
@@ -354,21 +444,31 @@ function resolveModelMatch(model: DbModel, sourceProvider: ModelsDevProvider | n
 
       if (hasTokenIntersection(modelTokens.variant, sourceTokens.variant)) {
         addMatch(modelKey, sourceModel, 90, "normalized-model-variant");
+        continue;
       }
+
+      addFuzzyCandidate(modelKey, sourceModel, getFuzzyMatchScore(modelTokens, sourceTokens));
+    }
+
+    if (fuzzyMatch) {
+      matches.push(fuzzyMatch);
     }
 
     return matches;
   };
 
-  const globalMatches: ModelMatch[] = [];
-  const providerMatches = new Map<string, ModelMatch[]>();
+  const collectedMatches: ModelMatch[] = [];
   for (const provider of providersById.values()) {
     const matches = collectInProvider(provider);
     if (matches.length > 0) {
-      providerMatches.set(provider.id, matches);
-      globalMatches.push(...matches);
+      collectedMatches.push(...matches);
     }
   }
+
+  const exactMatches = collectedMatches.filter((match) => !isFuzzyMatch(match));
+  const fuzzyMatches = collectedMatches.filter(isFuzzyMatch);
+  const globalMatches = exactMatches.length > 0 ? exactMatches : getBestFuzzyMatches(fuzzyMatches);
+  const providerMatches = groupMatchesByProvider(globalMatches);
 
   if (sourceProvider) {
     const providerMatch = providerMatches.get(sourceProvider.id)?.[0];

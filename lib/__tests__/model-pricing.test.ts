@@ -677,6 +677,219 @@ describe("model pricing module", () => {
     expect(result.unmatchedCount).toBe(0);
   });
 
+  test("syncModelsDevPricing 规范化模型名时保留点号", async () => {
+    const { db, values } = createDbMock(
+      [
+        {
+          id: 20,
+          modelName: "Foo-4.1",
+          sourceModelId: null,
+          providerName: "Test",
+          providerSlug: "test",
+          providerConfig: {}
+        }
+      ],
+      []
+    );
+
+    mockModelsDevResponse({
+      test: {
+        id: "test",
+        name: "Test",
+        models: {
+          "foo-4-1": {
+            id: "foo-4-1",
+            name: "Foo 4 1",
+            cost: { input: 1, output: 2 }
+          }
+        }
+      }
+    });
+
+    const pricingModule = await importPricingModule(db);
+    const result = await pricingModule.syncModelsDevPricing();
+
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({
+        modelId: 20,
+        sourceProviderId: null,
+        sourceModelId: null,
+        matchStatus: "unmatched",
+        note: "no-match"
+      })
+    ]);
+    expect(result.matchedCount).toBe(0);
+    expect(result.unmatchedCount).toBe(1);
+  });
+
+  test("syncModelsDevPricing 匹配上游 model id 时忽略斜杠前缀", async () => {
+    const { db, values } = createDbMock(
+      [
+        {
+          id: 21,
+          modelName: "Claude Opus 4.6",
+          sourceModelId: null,
+          providerName: "Anthropic",
+          providerSlug: "anthropic",
+          providerConfig: {}
+        }
+      ],
+      []
+    );
+
+    mockModelsDevResponse({
+      anthropic: {
+        id: "anthropic",
+        name: "Anthropic",
+        models: {
+          "anthropic/claude-opus-4.6": {
+            id: "anthropic/claude-opus-4.6",
+            cost: { input: 5, output: 25 }
+          }
+        }
+      }
+    });
+
+    const pricingModule = await importPricingModule(db);
+    const result = await pricingModule.syncModelsDevPricing();
+
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({
+        modelId: 21,
+        sourceProviderId: "anthropic",
+        sourceModelId: "anthropic/claude-opus-4.6",
+        inputCost: "5",
+        outputCost: "25",
+        matchStatus: "matched",
+        note: "normalized-model-name"
+      })
+    ]);
+    expect(result.matchedCount).toBe(1);
+    expect(result.unmatchedCount).toBe(0);
+  });
+
+  test("syncModelsDevPricing 匹配上游 name 时忽略冒号和斜杠前缀", async () => {
+    const { db, values } = createDbMock(
+      [
+        {
+          id: 22,
+          modelName: "Llama 3.1 8B",
+          sourceModelId: null,
+          providerName: "Meta",
+          providerSlug: "meta",
+          providerConfig: {}
+        },
+        {
+          id: 23,
+          modelName: "Llama 3.2 8B",
+          sourceModelId: null,
+          providerName: "Meta",
+          providerSlug: "meta",
+          providerConfig: {}
+        }
+      ],
+      []
+    );
+
+    mockModelsDevResponse({
+      meta: {
+        id: "meta",
+        name: "Meta",
+        models: {
+          "meta-llama-31-8b": {
+            id: "meta-llama-31-8b",
+            name: "Meta: Llama 3.1 8B",
+            cost: { input: 1, output: 2 }
+          },
+          "meta-llama-32-8b": {
+            id: "meta-llama-32-8b",
+            name: "Meta/Llama 3.2 8B",
+            cost: { input: 3, output: 4 }
+          }
+        }
+      }
+    });
+
+    const pricingModule = await importPricingModule(db);
+    const result = await pricingModule.syncModelsDevPricing();
+
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({
+        modelId: 22,
+        sourceProviderId: "meta",
+        sourceModelId: "meta-llama-31-8b",
+        inputCost: "1",
+        outputCost: "2",
+        matchStatus: "matched",
+        note: "normalized-model-name"
+      }),
+      expect.objectContaining({
+        modelId: 23,
+        sourceProviderId: "meta",
+        sourceModelId: "meta-llama-32-8b",
+        inputCost: "3",
+        outputCost: "4",
+        matchStatus: "matched",
+        note: "normalized-model-name"
+      })
+    ]);
+    expect(result.matchedCount).toBe(2);
+    expect(result.unmatchedCount).toBe(0);
+  });
+
+  test("syncModelsDevPricing 完整匹配无结果时使用最大包含模糊匹配", async () => {
+    const { db, values } = createDbMock(
+      [
+        {
+          id: 24,
+          modelName: "Qwen 3 Coder 480B A35B Instruct",
+          sourceModelId: null,
+          providerName: "Alibaba",
+          providerSlug: "alibaba",
+          providerConfig: {}
+        }
+      ],
+      []
+    );
+
+    mockModelsDevResponse({
+      alibaba: {
+        id: "alibaba",
+        name: "Alibaba",
+        models: {
+          qwen3: {
+            id: "qwen3",
+            name: "Qwen 3",
+            cost: { input: 0.2, output: 0.8 }
+          },
+          "qwen3-coder": {
+            id: "qwen3-coder",
+            name: "Qwen 3 Coder",
+            cost: { input: 0.3, output: 1.2 }
+          }
+        }
+      }
+    });
+
+    const pricingModule = await importPricingModule(db);
+    const result = await pricingModule.syncModelsDevPricing();
+
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({
+        modelId: 24,
+        sourceProviderId: "alibaba",
+        sourceModelId: "qwen3-coder",
+        inputCost: "0.3",
+        outputCost: "1.2",
+        matchStatus: "matched",
+        matchConfidence: 70,
+        note: "fuzzy-model-name"
+      })
+    ]);
+    expect(result.matchedCount).toBe(1);
+    expect(result.unmatchedCount).toBe(0);
+  });
+
   test("syncModelsDevPricing 在无匹配 provider 时使用其他 provider 的众数价格", async () => {
     const { db, values } = createDbMock(
       [
