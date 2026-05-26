@@ -26,7 +26,7 @@ export type MatrixCellEntry = {
   valueNum2: number | null;
   valueNote: string | null;
   source: string | null;
-  benchTime: string;
+  benchTime: string | null;
 };
 
 export type MatrixCell = {
@@ -35,7 +35,7 @@ export type MatrixCell = {
   valueNum2: number | null;
   valueNote: string | null;
   source: string | null;
-  benchTime: string;
+  benchTime: string | null;
   allEntries: MatrixCellEntry[];
   hasMultipleValues: boolean;
   uniqueEntries: MatrixCellEntry[];
@@ -104,6 +104,8 @@ export type ModelPriceInfo = {
   inputCost: number | null;
   outputCost: number | null;
   cacheReadCost: number | null;
+  lastSyncedAt?: string | null;
+  updatedAt?: string | null;
 };
 
 export type HeatmapPresetKey = "classic" | "coolwarm" | "mintsun" | "colorblind";

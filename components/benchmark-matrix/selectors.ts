@@ -975,7 +975,7 @@ export function buildDisplayedCoverageMetaByModel(
   };
 }
 
-function createPriceCell(value: number | null): MatrixCell {
+function createPriceCell(value: number | null, benchTime: string | null): MatrixCell {
   const displayValue = value === null || !Number.isFinite(value)
     ? "--"
     : `$${value.toFixed(value >= 10 ? 2 : 3).replace(/0+$/, "").replace(/\.$/, "")}`;
@@ -986,7 +986,7 @@ function createPriceCell(value: number | null): MatrixCell {
     valueNum2: null,
     valueNote: null,
     source: "models.dev",
-    benchTime: new Date(0).toISOString()
+    benchTime
   };
 
   return {
@@ -995,7 +995,7 @@ function createPriceCell(value: number | null): MatrixCell {
     valueNum2: null,
     valueNote: null,
     source: "models.dev",
-    benchTime: entry.benchTime,
+    benchTime,
     allEntries: [entry],
     hasMultipleValues: false,
     uniqueEntries: [entry],
@@ -1022,7 +1022,7 @@ export function buildPriceMatrixRows(
     modelColumns.forEach((modelName) => {
       const price = priceByModel.get(modelName);
       const value = price ? definition.pick(price) : null;
-      cells.set(modelName, createPriceCell(value));
+      cells.set(modelName, createPriceCell(value, price?.lastSyncedAt ?? price?.updatedAt ?? null));
     });
 
     const numericValues = Array.from(cells.values())

@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix, __buildOverallScoreDisplayDecimalsMapForTest } from "@/components/benchmark-matrix";
-import { buildOverallSummaryByModel } from "@/components/benchmark-matrix/selectors";
+import { buildOverallSummaryByModel, buildPriceMatrixRows } from "@/components/benchmark-matrix/selectors";
 import type { MatrixCell, MatrixRow } from "@/components/benchmark-matrix/types";
 
 vi.mock("next/navigation", () => ({
@@ -162,6 +162,31 @@ describe("BenchmarkMatrix 总评行", () => {
     expect(summary.get("Cheap Model")?.rawRank).toBe(1);
     expect(summary.get("Expensive Model")?.rawScore).toBe(0);
     expect(summary.get("Expensive Model")?.rawRank).toBe(2);
+  });
+
+  test("价格行使用真实价格更新时间且缺失时不回退到 epoch", () => {
+    const syncedAt = "2026-05-26T12:00:00.000Z";
+    const updatedAt = "2026-05-25T08:30:00.000Z";
+    const [inputPriceRow] = buildPriceMatrixRows(
+      ["Model A", "Model B", "Model C"],
+      [
+        { modelName: "Model A", inputCost: 3, outputCost: 15, cacheReadCost: 0.3, lastSyncedAt: syncedAt, updatedAt },
+        { modelName: "Model B", inputCost: 1, outputCost: 5, cacheReadCost: 0.1, updatedAt },
+        { modelName: "Model C", inputCost: null, outputCost: 8, cacheReadCost: null }
+      ]
+    );
+
+    const modelACell = inputPriceRow!.cells.get("Model A");
+    const modelBCell = inputPriceRow!.cells.get("Model B");
+    const modelCCell = inputPriceRow!.cells.get("Model C");
+
+    expect(modelACell?.benchTime).toBe(syncedAt);
+    expect(modelACell?.uniqueEntries[0]?.benchTime).toBe(syncedAt);
+    expect(modelBCell?.benchTime).toBe(updatedAt);
+    expect(modelBCell?.uniqueEntries[0]?.benchTime).toBe(updatedAt);
+    expect(modelCCell?.benchTime).toBeNull();
+    expect(modelCCell?.uniqueEntries[0]?.benchTime).toBeNull();
+    expect(modelCCell?.benchTime).not.toBe(new Date(0).toISOString());
   });
 
   test("同一位小数但名次不同时显示两位小数", () => {

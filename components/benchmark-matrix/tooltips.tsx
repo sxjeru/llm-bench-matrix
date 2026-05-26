@@ -47,16 +47,23 @@ export function MatrixCellTooltip({ tooltip }: MatrixCellTooltipProps) {
       ) : null}
 
       <span className="block max-h-[65vh] space-y-1 overflow-auto">
-        {tooltip.entries.map((entry) => (
-          <span
-            key={`${entry.valueRaw}-${entry.valueNote ?? ""}-${entry.source ?? "-"}-${entry.benchTime}`}
-            className="block rounded-md bg-white/5 px-2 py-1 leading-4"
-          >
-            {getMatrixCellDisplayValue(entry.valueNum, entry.valueNum2, entry.valueRaw, entry.valueNote)}
-            {entry.valueNote ? <span className="opacity-80"> · note: {entry.valueNote}</span> : null}
-            <span className="opacity-80"> · {entry.source ?? "unknown-source"} · {formatTooltipTime(entry.benchTime)}</span>
-          </span>
-        ))}
+        {tooltip.entries.map((entry) => {
+          const formattedTime = entry.benchTime ? formatTooltipTime(entry.benchTime) : null;
+
+          return (
+            <span
+              key={`${entry.valueRaw}-${entry.valueNote ?? ""}-${entry.source ?? "-"}-${entry.benchTime ?? "no-time"}`}
+              className="block rounded-md bg-white/5 px-2 py-1 leading-4"
+            >
+              {getMatrixCellDisplayValue(entry.valueNum, entry.valueNum2, entry.valueRaw, entry.valueNote)}
+              {entry.valueNote ? <span className="opacity-80"> · note: {entry.valueNote}</span> : null}
+              <span className="opacity-80">
+                · {entry.source ?? "unknown-source"}
+                {formattedTime ? ` · ${formattedTime}` : null}
+              </span>
+            </span>
+          );
+        })}
       </span>
     </div>
   );
