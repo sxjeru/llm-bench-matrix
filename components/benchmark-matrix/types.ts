@@ -69,6 +69,7 @@ export type MatrixRow = {
   maxNum: number | null;
   minNum2: number | null;
   maxNum2: number | null;
+  isPriceRow?: boolean;
 };
 
 export type ProviderIdentity = {
@@ -94,6 +95,15 @@ export type Props = {
   rows: MatrixInputRow[];
   allRows?: MatrixInputRow[];
   sourceOptions?: string[];
+  modelPrices?: ModelPriceInfo[];
+};
+
+export type ModelPriceInfo = {
+  modelId?: number;
+  modelName: string;
+  inputCost: number | null;
+  outputCost: number | null;
+  cacheReadCost: number | null;
 };
 
 export type HeatmapPresetKey = "classic" | "coolwarm" | "mintsun" | "colorblind";

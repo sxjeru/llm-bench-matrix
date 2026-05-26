@@ -14,6 +14,11 @@ export type ProviderOption = {
     branding?: {
       color?: string;
     };
+    pricing?: {
+      modelsDevProviderId?: string;
+      modelsDevProviderAliases?: string[];
+      disabled?: boolean;
+    };
   };
 };
 
@@ -93,7 +98,42 @@ export type ModelDedupeRule = {
   removeDot: boolean;
 };
 
-export type TabKey = "import" | "entry" | "providers" | "rename" | "merge" | "maintenance" | "settings";
+export type TabKey = "import" | "entry" | "providers" | "pricing" | "rename" | "merge" | "maintenance" | "settings";
+
+export type ModelPricingRow = {
+  modelId: number;
+  modelName: string;
+  providerName: string;
+  source: string;
+  sourceProviderId: string | null;
+  sourceProviderName: string | null;
+  sourceModelId: string | null;
+  sourceModelName: string | null;
+  inputCost: number | null;
+  outputCost: number | null;
+  reasoningCost: number | null;
+  cacheReadCost: number | null;
+  cacheWriteCost: number | null;
+  inputAudioCost: number | null;
+  outputAudioCost: number | null;
+  currency: string;
+  unit: string;
+  matchConfidence: number;
+  matchStatus: "matched" | "unmatched" | "ignored" | "manual";
+  manualOverride: boolean;
+  note: string | null;
+  lastSyncedAt: string | null;
+  updatedAt: string;
+};
+
+export type ModelPricingSyncResult = {
+  providerCount: number;
+  sourceModelCount: number;
+  matchedCount: number;
+  unmatchedCount: number;
+  skippedManualCount: number;
+  syncedAt: string;
+};
 
 export type ProviderConfigDraft = {
   displayName: string;
@@ -106,6 +146,9 @@ export type ProviderConfigDraft = {
     note?: string;
   }>;
   brandingColor: string;
+  modelsDevProviderId: string;
+  modelsDevProviderAliases: string;
+  pricingDisabled: boolean;
 };
 
 export type BenchmarkWarningLevel = "info" | "warn" | "danger";

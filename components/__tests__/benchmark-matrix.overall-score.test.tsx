@@ -229,4 +229,30 @@ describe("BenchmarkMatrix 总评行", () => {
 
     expect(screen.getByTitle("该项目为低值更优")).toBeInTheDocument();
   });
+
+  test("显示价格后在 benchmark 前插入三行价格并参与总评覆盖率", () => {
+    const { container } = render(
+      <BenchmarkMatrix
+        rows={[...rows]}
+        modelPrices={[
+          { modelName: "Model A", inputCost: 3, outputCost: 15, cacheReadCost: 0.3 },
+          { modelName: "Model B", inputCost: 1, outputCost: 5, cacheReadCost: 0.1 },
+          { modelName: "Model C", inputCost: null, outputCost: 8, cacheReadCost: null }
+        ]}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /显示价格/ }));
+
+    const bodyRows = Array.from(container.querySelectorAll("tbody tr"));
+    expect(bodyRows[0]).toHaveTextContent("Input Price");
+    expect(bodyRows[1]).toHaveTextContent("Output Price");
+    expect(bodyRows[2]).toHaveTextContent("Cache Input Price");
+
+    const trigger = container.querySelector('[data-overall-tooltip-trigger="Model C"]') as HTMLElement | null;
+    expect(trigger).not.toBeNull();
+    fireEvent.mouseEnter(trigger!);
+
+    expect(screen.getByText(/覆盖率：/)).toHaveTextContent("3/6");
+  });
 });

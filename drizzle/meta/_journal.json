@@ -29,6 +29,13 @@
       "when": 1777219200000,
       "tag": "0003_provider_config",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1779753600000,
+      "tag": "0004_model_pricing",
+      "breakpoints": true
     }
   ]
 }

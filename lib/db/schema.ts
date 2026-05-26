@@ -15,6 +15,11 @@ export type ProviderConfig = {
   branding?: {
     color?: string;
   };
+  pricing?: {
+    modelsDevProviderId?: string;
+    modelsDevProviderAliases?: string[];
+    disabled?: boolean;
+  };
 };
 
 export const providers = pgTable(
@@ -129,6 +134,43 @@ export const benchmarkValues = pgTable(
     ),
     benchmarkTimeIdx: index("benchmark_values_benchmark_time_idx").on(table.benchmarkId, table.benchTime),
     sourceIdx: index("benchmark_values_source_idx").on(table.source)
+  })
+);
+
+export const modelPricing = pgTable(
+  "model_pricing",
+  {
+    id: serial("id").primaryKey(),
+    modelId: integer("model_id")
+      .notNull()
+      .references(() => models.id, { onDelete: "cascade" }),
+    source: text("source").notNull().default("models.dev"),
+    sourceProviderId: text("source_provider_id"),
+    sourceProviderName: text("source_provider_name"),
+    sourceModelId: text("source_model_id"),
+    sourceModelName: text("source_model_name"),
+    inputCost: numeric("input_cost", { precision: 14, scale: 6 }),
+    outputCost: numeric("output_cost", { precision: 14, scale: 6 }),
+    reasoningCost: numeric("reasoning_cost", { precision: 14, scale: 6 }),
+    cacheReadCost: numeric("cache_read_cost", { precision: 14, scale: 6 }),
+    cacheWriteCost: numeric("cache_write_cost", { precision: 14, scale: 6 }),
+    inputAudioCost: numeric("input_audio_cost", { precision: 14, scale: 6 }),
+    outputAudioCost: numeric("output_audio_cost", { precision: 14, scale: 6 }),
+    currency: text("currency").notNull().default("USD"),
+    unit: text("unit").notNull().default("per_1m_tokens"),
+    matchConfidence: integer("match_confidence").notNull().default(0),
+    matchStatus: text("match_status").notNull().default("unmatched"),
+    manualOverride: boolean("manual_override").notNull().default(false),
+    rawJson: jsonb("raw_json").notNull().default(sql`'{}'::jsonb`),
+    note: text("note"),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
+  },
+  (table) => ({
+    modelUnique: uniqueIndex("model_pricing_model_id_unique").on(table.modelId),
+    statusIdx: index("model_pricing_match_status_idx").on(table.matchStatus),
+    sourceProviderIdx: index("model_pricing_source_provider_idx").on(table.sourceProviderId)
   })
 );
 

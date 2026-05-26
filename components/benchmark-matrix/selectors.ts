@@ -1,6 +1,10 @@
 import {
   ALL_SOURCE_COLUMN_COVERAGE_THRESHOLD,
   ALL_SOURCE_ROW_COVERAGE_THRESHOLD,
+  PRICE_CACHE_INPUT_ROW_KEY,
+  PRICE_CATEGORY_LABEL,
+  PRICE_INPUT_ROW_KEY,
+  PRICE_OUTPUT_ROW_KEY,
   SOURCE_ALL,
   SOURCE_NEW_WINDOW_MS
 } from "./constants";
@@ -22,6 +26,7 @@ import type {
   MatrixCellEntry,
   MatrixInputRow,
   MatrixRow,
+  ModelPriceInfo,
   OverallModelSummary,
   OverallScoreDisplayItem,
   ProviderIdentity,
@@ -927,10 +932,13 @@ export function filterMatrixRowsByPresence(
 export function buildDisplayedCoverageMetaByModel(
   allModelNames: string[],
   coveredModelsByGroupingKey: Map<string, Set<string>>,
-  presenceFilteredMatrixRows: MatrixRow[]
+  presenceFilteredMatrixRows: MatrixRow[],
+  extraCoverageRows: MatrixRow[] = []
 ): DisplayedCoverageMetaByModel {
-  const displayedRowKeys = Array.from(new Set(presenceFilteredMatrixRows.map((row) => row.rowKey)));
-  const displayedRowCount = displayedRowKeys.length;
+  const displayedRowKeys = Array.from(new Set([
+    ...presenceFilteredMatrixRows.map((row) => row.rowKey)
+  ]));
+  const displayedRowCount = displayedRowKeys.length + extraCoverageRows.length;
   const coveredRowCountByModel = new Map<string, number>();
   const candidateModelSet = new Set(allModelNames);
 
@@ -940,6 +948,14 @@ export function buildDisplayedCoverageMetaByModel(
 
     coveredModels.forEach((modelName) => {
       if (!candidateModelSet.has(modelName)) return;
+      coveredRowCountByModel.set(modelName, (coveredRowCountByModel.get(modelName) ?? 0) + 1);
+    });
+  });
+
+  extraCoverageRows.forEach((row) => {
+    row.cells.forEach((cell, modelName) => {
+      if (!candidateModelSet.has(modelName)) return;
+      if (cell.valueNum === null || !Number.isFinite(cell.valueNum)) return;
       coveredRowCountByModel.set(modelName, (coveredRowCountByModel.get(modelName) ?? 0) + 1);
     });
   });
@@ -957,6 +973,85 @@ export function buildDisplayedCoverageMetaByModel(
     displayedRowCount,
     metaMap
   };
+}
+
+function createPriceCell(value: number | null): MatrixCell {
+  const displayValue = value === null || !Number.isFinite(value)
+    ? "--"
+    : `$${value.toFixed(value >= 10 ? 2 : 3).replace(/0+$/, "").replace(/\.$/, "")}`;
+  const valueRaw = displayValue;
+  const entry: MatrixCellEntry = {
+    valueRaw,
+    valueNum: value,
+    valueNum2: null,
+    valueNote: null,
+    source: "models.dev",
+    benchTime: new Date(0).toISOString()
+  };
+
+  return {
+    valueRaw,
+    valueNum: value,
+    valueNum2: null,
+    valueNote: null,
+    source: "models.dev",
+    benchTime: entry.benchTime,
+    allEntries: [entry],
+    hasMultipleValues: false,
+    uniqueEntries: [entry],
+    noteText: "",
+    displayValue,
+    hasMeaningfulMultipleValues: false,
+    shouldShowQuestionMark: false
+  };
+}
+
+export function buildPriceMatrixRows(
+  modelColumns: readonly string[],
+  modelPrices: readonly ModelPriceInfo[]
+): MatrixRow[] {
+  const priceByModel = new Map(modelPrices.map((price) => [price.modelName, price]));
+  const definitions: Array<{ rowKey: string; benchmark: string; pick: (price: ModelPriceInfo) => number | null }> = [
+    { rowKey: PRICE_INPUT_ROW_KEY, benchmark: "Input Price", pick: (price) => price.inputCost },
+    { rowKey: PRICE_OUTPUT_ROW_KEY, benchmark: "Output Price", pick: (price) => price.outputCost },
+    { rowKey: PRICE_CACHE_INPUT_ROW_KEY, benchmark: "Cache Input Price", pick: (price) => price.cacheReadCost }
+  ];
+
+  return definitions.map((definition, index) => {
+    const cells = new Map<string, MatrixCell>();
+    modelColumns.forEach((modelName) => {
+      const price = priceByModel.get(modelName);
+      const value = price ? definition.pick(price) : null;
+      cells.set(modelName, createPriceCell(value));
+    });
+
+    const numericValues = Array.from(cells.values())
+      .map((cell) => cell.valueNum)
+      .filter((value): value is number => value !== null && Number.isFinite(value));
+    const comparableValues = numericValues.map((value) => -value);
+
+    return {
+      rowKey: definition.rowKey,
+      category: PRICE_CATEGORY_LABEL,
+      benchmark: definition.benchmark,
+      higherIsBetter: false,
+      modalities: ["Text"],
+      cells,
+      firstSeenIndex: -100 + index,
+      sourceOrderKey: null,
+      rowDataCount: cells.size,
+      rowNumericCount: numericValues.length,
+      minComparable: comparableValues.length > 0 ? Math.min(...comparableValues) : null,
+      maxComparable: comparableValues.length > 0 ? Math.max(...comparableValues) : null,
+      minComparable2: null,
+      maxComparable2: null,
+      minNum: numericValues.length > 0 ? Math.min(...numericValues) : null,
+      maxNum: numericValues.length > 0 ? Math.max(...numericValues) : null,
+      minNum2: null,
+      maxNum2: null,
+      isPriceRow: true
+    };
+  });
 }
 
 export function buildModelCoveragePercentMap(displayedCoverageMetaByModel: DisplayedCoverageMetaByModel): Map<string, number> {
@@ -1121,8 +1216,8 @@ export function buildOverallSummaryByModel(
     const minOriginal = Math.min(...originalValues);
     const maxOriginal = Math.max(...originalValues);
 
-    const isRatioRow = minOriginal >= 0 && maxOriginal <= 1.2;
-    const isPercentRow = !isRatioRow && minOriginal >= 0 && maxOriginal <= 100.000001;
+    const isRatioRow = !row.isPriceRow && minOriginal >= 0 && maxOriginal <= 1.2;
+    const isPercentRow = !row.isPriceRow && !isRatioRow && minOriginal >= 0 && maxOriginal <= 100.000001;
 
     const transformedByEntry = (() => {
       if (isRatioRow) {

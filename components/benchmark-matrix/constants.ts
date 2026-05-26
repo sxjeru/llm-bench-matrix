@@ -14,6 +14,7 @@ export const MODALITY_OPTIONS = ["Text", "Vision", "Audio", "Video", "Multimodal
 export const SHOW_CATEGORY_STORAGE_KEY = "benchmark-matrix:show-category";
 export const SHOW_DUPLICATE_STORAGE_KEY = "benchmark-matrix:show-duplicate";
 export const SHOW_SOURCE_VALUES_STORAGE_KEY = "benchmark-matrix:show-source-values";
+export const SHOW_PRICE_ROWS_STORAGE_KEY = "benchmark-matrix:show-price-rows";
 export const MODEL_SELECTION_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:model-selection-by-source";
 export const MODEL_ORDER_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:model-order-by-source";
 export const COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:column-width-by-source";
@@ -41,6 +42,10 @@ export const COMPARE_BASELINE_FRAME_COLOR = "rgba(250, 211, 106, 0.74)";
 export const COMPARE_BASELINE_FRAME_EXPORT_COLOR = "rgba(250, 211, 106, 0.92)";
 export const WEBP_EXPORT_QUALITY = 0.94;
 export const AVIF_EXPORT_QUALITY = 0.9;
+export const PRICE_CATEGORY_LABEL = "Price";
+export const PRICE_INPUT_ROW_KEY = "__PRICE_INPUT__";
+export const PRICE_OUTPUT_ROW_KEY = "__PRICE_OUTPUT__";
+export const PRICE_CACHE_INPUT_ROW_KEY = "__PRICE_CACHE_INPUT__";
 
 export const HEATMAP_PRESETS = {
   classic: {

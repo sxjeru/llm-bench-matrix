@@ -57,6 +57,9 @@ type TopControlsProps = {
   setShowDuplicateRows: Dispatch<SetStateAction<boolean>>;
   showLowCoverageRows: boolean;
   setShowLowCoverageRows: Dispatch<SetStateAction<boolean>>;
+  showPriceRows: boolean;
+  setShowPriceRows: Dispatch<SetStateAction<boolean>>;
+  hasPriceData: boolean;
   hasSourceData: boolean;
   displaySourceValuesInCells: boolean;
   onSourceValuesButtonClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
@@ -101,6 +104,9 @@ export function BenchmarkMatrixTopControls({
   setShowDuplicateRows,
   showLowCoverageRows,
   setShowLowCoverageRows,
+  showPriceRows,
+  setShowPriceRows,
+  hasPriceData,
   hasSourceData,
   displaySourceValuesInCells,
   onSourceValuesButtonClick
@@ -396,6 +402,17 @@ export function BenchmarkMatrixTopControls({
           >
             {showLowCoverageRows ? <Eye size={14} /> : <EyeOff size={14} />}
             {showLowCoverageRows ? "隐藏低覆盖行" : "显示低覆盖行"}
+          </button>
+        ) : null}
+
+        {hasPriceData ? (
+          <button
+            type="button"
+            className="btn btn-xs btn-ghost"
+            onClick={() => setShowPriceRows((prev) => !prev)}
+          >
+            {showPriceRows ? <Eye size={14} /> : <EyeOff size={14} />}
+            显示价格
           </button>
         ) : null}
 

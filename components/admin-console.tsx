@@ -26,6 +26,8 @@ import type {
   MergedRecord,
   ModelDedupeRule,
   ModelOption,
+  ModelPricingRow,
+  ModelPricingSyncResult,
   PreviewRow,
   Props,
   RenameSubmitState,
@@ -70,6 +72,7 @@ import { MaintenanceTab } from "./admin-console/views/maintenance-tab";
 import { MergeTab } from "./admin-console/views/merge-tab";
 import { AdminConsoleNotices } from "./admin-console/views/notices";
 import { ProvidersTab } from "./admin-console/views/providers-tab";
+import { PricingTab, type ModelPricingDraft } from "./admin-console/views/pricing-tab";
 import { RenameTab } from "./admin-console/views/rename-tab";
 import { SettingsTab } from "./admin-console/views/settings-tab";
 import { AdminConsoleTabNav } from "./admin-console/views/tab-nav";
@@ -286,6 +289,14 @@ export function AdminConsole({
   const [modelDedupeRule, setModelDedupeRule] = useState<ModelDedupeRule>(() =>
     normalizeModelDedupeRule(initialSettings.model_dedupe_rule)
   );
+  const [modelPriceRows, setModelPriceRows] = useState<ModelPricingRow[]>([]);
+  const [pricingDrafts, setPricingDrafts] = useState<Record<number, ModelPricingDraft>>({});
+  const [loadingPrices, setLoadingPrices] = useState(false);
+  const [syncingPrices, setSyncingPrices] = useState(false);
+  const [savingPriceModelId, setSavingPriceModelId] = useState<number | null>(null);
+  const [pricingSearchQuery, setPricingSearchQuery] = useState("");
+  const [pricingStatusFilter, setPricingStatusFilter] = useState<"all" | "matched" | "unmatched" | "manual" | "missing">("all");
+  const [pricingSyncResult, setPricingSyncResult] = useState<ModelPricingSyncResult | null>(null);
 
   const sortedSettings = useMemo(() => {
     return Object.entries(initialSettings).sort(([a], [b]) => a.localeCompare(b));
@@ -2605,6 +2616,125 @@ export function AdminConsole({
     && resolvedMergeTargetId !== null
     && resolvedMergeSourceId !== resolvedMergeTargetId;
 
+  function toPricingDraft(row: ModelPricingRow): ModelPricingDraft {
+    const costToString = (value: number | null) => value === null ? "" : String(value);
+    return {
+      inputCost: costToString(row.inputCost),
+      outputCost: costToString(row.outputCost),
+      cacheReadCost: costToString(row.cacheReadCost),
+      reasoningCost: costToString(row.reasoningCost),
+      cacheWriteCost: costToString(row.cacheWriteCost),
+      inputAudioCost: costToString(row.inputAudioCost),
+      outputAudioCost: costToString(row.outputAudioCost),
+      sourceProviderId: row.sourceProviderId ?? "",
+      sourceProviderName: row.sourceProviderName ?? "",
+      sourceModelId: row.sourceModelId ?? "",
+      sourceModelName: row.sourceModelName ?? "",
+      manualOverride: row.manualOverride,
+      note: row.note ?? ""
+    };
+  }
+
+  function resetPricingDrafts(rows: ModelPricingRow[]) {
+    setPricingDrafts(
+      rows.reduce<Record<number, ModelPricingDraft>>((acc, row) => {
+        acc[row.modelId] = toPricingDraft(row);
+        return acc;
+      }, {})
+    );
+  }
+
+  async function loadModelPrices() {
+    setLoadingPrices(true);
+    try {
+      const result = await getJson("/api/admin/model-prices");
+      const prices = Array.isArray(result?.prices) ? result.prices as ModelPricingRow[] : [];
+      setModelPriceRows(prices);
+      resetPricingDrafts(prices);
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "加载模型价格失败");
+    } finally {
+      setLoadingPrices(false);
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab !== "pricing") return;
+    if (modelPriceRows.length > 0 || loadingPrices) return;
+    void loadModelPrices();
+  }, [activeTab, modelPriceRows.length, loadingPrices]);
+
+  function updatePricingDraft(modelId: number, updater: (draft: ModelPricingDraft) => ModelPricingDraft) {
+    const sourceRow = modelPriceRows.find((row) => row.modelId === modelId);
+    if (!sourceRow) return;
+
+    setPricingDrafts((prev) => ({
+      ...prev,
+      [modelId]: updater(prev[modelId] ?? toPricingDraft(sourceRow))
+    }));
+  }
+
+  function parseOptionalCost(raw: string): number | null {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const parsed = Number.parseFloat(trimmed);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      throw new Error("价格必须是非负数字");
+    }
+    return parsed;
+  }
+
+  async function syncModelPrices() {
+    if (syncingPrices) return;
+    setSyncingPrices(true);
+    try {
+      const result = await postJson("/api/admin/model-prices/sync", {});
+      setPricingSyncResult(result as ModelPricingSyncResult);
+      notifySuccess(`价格同步完成：匹配 ${result.matchedCount ?? 0} 个，未匹配 ${result.unmatchedCount ?? 0} 个`);
+      await loadModelPrices();
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "同步模型价格失败");
+    } finally {
+      setSyncingPrices(false);
+    }
+  }
+
+  async function saveModelPrice(modelId: number) {
+    const draft = pricingDrafts[modelId];
+    if (!draft || savingPriceModelId !== null) return;
+
+    setSavingPriceModelId(modelId);
+    try {
+      await postJson(
+        "/api/admin/model-prices",
+        {
+          modelId,
+          inputCost: parseOptionalCost(draft.inputCost),
+          outputCost: parseOptionalCost(draft.outputCost),
+          cacheReadCost: parseOptionalCost(draft.cacheReadCost),
+          reasoningCost: parseOptionalCost(draft.reasoningCost),
+          cacheWriteCost: parseOptionalCost(draft.cacheWriteCost),
+          inputAudioCost: parseOptionalCost(draft.inputAudioCost),
+          outputAudioCost: parseOptionalCost(draft.outputAudioCost),
+          sourceProviderId: draft.sourceProviderId.trim() || null,
+          sourceProviderName: draft.sourceProviderName.trim() || null,
+          sourceModelId: draft.sourceModelId.trim() || null,
+          sourceModelName: draft.sourceModelName.trim() || null,
+          manualOverride: draft.manualOverride,
+          matchStatus: draft.manualOverride ? "manual" : "matched",
+          note: draft.note.trim() || null
+        },
+        "PATCH"
+      );
+      notifySuccess("模型价格已保存");
+      await loadModelPrices();
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "保存模型价格失败");
+    } finally {
+      setSavingPriceModelId(null);
+    }
+  }
+
   return (
     <>
       <AdminConsoleNotices noticeList={noticeList} />
@@ -2832,6 +2962,25 @@ export function AdminConsole({
             openDeleteProviderConfirm={openDeleteProviderConfirm}
             onSaveProviderConfig={onSaveProviderConfig}
             availableDisplayTargetProviders={availableDisplayTargetProviders}
+          />
+        ) : null}
+
+        {activeTab === "pricing" ? (
+          <PricingTab
+            prices={modelPriceRows}
+            loadingPrices={loadingPrices}
+            syncingPrices={syncingPrices}
+            savingPriceModelId={savingPriceModelId}
+            pricingSearchQuery={pricingSearchQuery}
+            setPricingSearchQuery={setPricingSearchQuery}
+            pricingStatusFilter={pricingStatusFilter}
+            setPricingStatusFilter={setPricingStatusFilter}
+            pricingDrafts={pricingDrafts}
+            updatePricingDraft={updatePricingDraft}
+            onLoadPrices={loadModelPrices}
+            onSyncPrices={syncModelPrices}
+            onSavePrice={saveModelPrice}
+            syncResult={pricingSyncResult}
           />
         ) : null}
 

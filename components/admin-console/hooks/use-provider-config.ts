@@ -83,7 +83,10 @@ export function useProviderConfig({ providers, notifySuccess, notifyError }: Use
         displayName: "",
         displayTargetProviderId: null,
         prefixRules: [],
-        brandingColor: ""
+        brandingColor: "",
+        modelsDevProviderId: "",
+        modelsDevProviderAliases: "",
+        pricingDisabled: false
       })
     }));
   }
@@ -119,9 +122,24 @@ export function useProviderConfig({ providers, notifySuccess, notifyError }: Use
   }
 
   async function onSaveProviderConfig(providerId: number) {
-    const draft = providerConfigDrafts[providerId] ?? { displayName: "", displayTargetProviderId: null, prefixRules: [], brandingColor: "" };
+    const draft = providerConfigDrafts[providerId] ?? {
+      displayName: "",
+      displayTargetProviderId: null,
+      prefixRules: [],
+      brandingColor: "",
+      modelsDevProviderId: "",
+      modelsDevProviderAliases: "",
+      pricingDisabled: false
+    };
     const normalizedDisplayName = draft.displayName.trim();
     const normalizedBrandingColor = draft.brandingColor.trim().toLowerCase();
+    const modelsDevProviderId = draft.modelsDevProviderId.trim();
+    const modelsDevProviderAliases = Array.from(new Set(
+      draft.modelsDevProviderAliases
+        .split(/[\n,]/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+    ));
 
     try {
       validateProviderDraft(providerId, draft);
@@ -148,6 +166,11 @@ export function useProviderConfig({ providers, notifySuccess, notifyError }: Use
               .filter((rule) => rule.prefix.length > 0),
             branding: {
               color: normalizedBrandingColor.length > 0 ? normalizedBrandingColor : null
+            },
+            pricing: {
+              modelsDevProviderId: modelsDevProviderId.length > 0 ? modelsDevProviderId : null,
+              modelsDevProviderAliases,
+              disabled: draft.pricingDisabled
             }
           }
         },
