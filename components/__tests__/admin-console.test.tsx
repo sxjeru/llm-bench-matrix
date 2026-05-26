@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 
 import { AdminConsole } from "@/components/admin-console";
+import type { ModelPricingRow } from "@/components/admin-console/types";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -120,6 +121,35 @@ function buildPropsWithDisplayNameAndPrefixRule(): AdminConsoleProps {
   };
 }
 
+function buildPriceRow(overrides: Partial<ModelPricingRow> = {}): ModelPricingRow {
+  return {
+    modelId: 1,
+    modelName: "Model A",
+    providerName: "OpenAI",
+    source: "models.dev",
+    sourceProviderId: "openai",
+    sourceProviderName: "OpenAI",
+    sourceModelId: "model-a",
+    sourceModelName: "Model A",
+    inputCost: 1,
+    outputCost: 2,
+    reasoningCost: null,
+    cacheReadCost: 0.1,
+    cacheWriteCost: null,
+    inputAudioCost: null,
+    outputAudioCost: null,
+    currency: "USD",
+    unit: "per_1m_tokens",
+    matchConfidence: 100,
+    matchStatus: "matched",
+    manualOverride: false,
+    note: null,
+    lastSyncedAt: null,
+    updatedAt: "2026-05-26T00:00:00.000Z",
+    ...overrides
+  };
+}
+
 async function fillCsvText(user: ReturnType<typeof userEvent.setup>, value: string) {
   const textarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
   if (!textarea) {
@@ -225,6 +255,71 @@ describe("AdminConsole text import", () => {
 
     await user.click(screen.getByRole("tab", { name: "导入中心" }));
     await user.click(screen.getByRole("tab", { name: "价格管理" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  test("价格管理状态筛选应响应未保存的手动覆盖草稿", async () => {
+    const user = userEvent.setup();
+    mockFetchSequence({
+      prices: [
+        buildPriceRow({ modelId: 1, modelName: "Auto Model", sourceModelId: "auto-model", manualOverride: false, matchStatus: "matched" }),
+        buildPriceRow({ modelId: 2, modelName: "Manual Model", sourceModelId: "manual-model", manualOverride: true, matchStatus: "manual" })
+      ]
+    });
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await user.click(screen.getByRole("tab", { name: "价格管理" }));
+    expect(await screen.findByText("Auto Model")).toBeInTheDocument();
+    expect(screen.getByText("Manual Model")).toBeInTheDocument();
+
+    const statusFilter = screen.getByDisplayValue("全部");
+    await user.selectOptions(statusFilter, "matched");
+    expect(screen.getByText("Auto Model")).toBeInTheDocument();
+    expect(screen.queryByText("Manual Model")).not.toBeInTheDocument();
+
+    const autoRow = screen.getByText("Auto Model").closest("tr");
+    if (!autoRow) throw new Error("Auto Model row not found");
+    await user.click(within(autoRow).getByRole("checkbox"));
+    await waitFor(() => {
+      expect(screen.queryByText("Auto Model")).not.toBeInTheDocument();
+    });
+
+    await user.selectOptions(statusFilter, "manual");
+    expect(await screen.findByText("Auto Model")).toBeInTheDocument();
+    expect(screen.getByText("Manual Model")).toBeInTheDocument();
+
+    const manualRow = screen.getByText("Manual Model").closest("tr");
+    if (!manualRow) throw new Error("Manual Model row not found");
+    await user.click(within(manualRow).getByRole("checkbox"));
+    await waitFor(() => {
+      expect(screen.queryByText("Manual Model")).not.toBeInTheDocument();
+    });
+
+    await user.selectOptions(statusFilter, "matched");
+    expect(await screen.findByText("Manual Model")).toBeInTheDocument();
+    expect(screen.queryByText("Auto Model")).not.toBeInTheDocument();
+  });
+
+  test("价格管理保存时应拒绝部分数字字符串", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetchSequence({ prices: [buildPriceRow({ modelId: 1, modelName: "Model A", inputCost: 1 })] });
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await user.click(screen.getByRole("tab", { name: "价格管理" }));
+    expect(await screen.findByText("Model A")).toBeInTheDocument();
+
+    const row = screen.getByText("Model A").closest("tr");
+    if (!row) throw new Error("Model A row not found");
+
+    const inputCost = within(row).getByPlaceholderText("$1");
+    await user.clear(inputCost);
+    await user.type(inputCost, "1abc");
+    await user.click(within(row).getByRole("button", { name: /保存/ }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(1);

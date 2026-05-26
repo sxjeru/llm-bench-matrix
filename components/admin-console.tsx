@@ -2680,7 +2680,10 @@ export function AdminConsole({
   function parseOptionalCost(raw: string): number | null {
     const trimmed = raw.trim();
     if (!trimmed) return null;
-    const parsed = Number.parseFloat(trimmed);
+    if (!/^\+?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(trimmed)) {
+      throw new Error("价格必须是非负数字");
+    }
+    const parsed = Number(trimmed);
     if (!Number.isFinite(parsed) || parsed < 0) {
       throw new Error("价格必须是非负数字");
     }

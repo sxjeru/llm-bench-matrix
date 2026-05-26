@@ -56,6 +56,13 @@ function getStatusLabel(status: ModelPricingRow["matchStatus"], manualOverride: 
   return "未匹配";
 }
 
+function getDraftAwareStatus(price: ModelPricingRow, draft: ModelPricingDraft | undefined) {
+  const manualOverride = draft?.manualOverride ?? price.manualOverride;
+  if (manualOverride) return "manual";
+  if (draft && price.matchStatus === "manual") return "matched";
+  return price.matchStatus;
+}
+
 export function PricingTab({
   prices,
   loadingPrices,
@@ -73,6 +80,8 @@ export function PricingTab({
   syncResult
 }: PricingTabProps) {
   const filteredPrices = prices.filter((price) => {
+    const draft = pricingDrafts[price.modelId];
+    const draftAwareStatus = getDraftAwareStatus(price, draft);
     const query = pricingSearchQuery.trim().toLowerCase();
     const matchesQuery = !query
       || price.modelName.toLowerCase().includes(query)
@@ -82,11 +91,11 @@ export function PricingTab({
 
     if (!matchesQuery) return false;
     if (pricingStatusFilter === "all") return true;
-    if (pricingStatusFilter === "manual") return price.manualOverride || price.matchStatus === "manual";
+    if (pricingStatusFilter === "manual") return draftAwareStatus === "manual";
     if (pricingStatusFilter === "missing") {
       return price.inputCost === null || price.outputCost === null || price.cacheReadCost === null;
     }
-    return price.matchStatus === pricingStatusFilter;
+    return draftAwareStatus === pricingStatusFilter;
   });
 
   const matchedCount = prices.filter((item) => item.matchStatus === "matched" || item.matchStatus === "manual").length;
@@ -191,6 +200,7 @@ export function PricingTab({
                 const draft = pricingDrafts[price.modelId];
                 const isSaving = savingPriceModelId === price.modelId;
                 if (!draft) return null;
+                const draftAwareStatus = getDraftAwareStatus(price, draft);
 
                 return (
                   <tr key={price.modelId}>
@@ -245,8 +255,8 @@ export function PricingTab({
                       </div>
                     </td>
                     <td>
-                      <div className={`badge ${getStatusBadgeClass(price.matchStatus, draft.manualOverride)}`}>
-                        {getStatusLabel(price.matchStatus, draft.manualOverride)}
+                      <div className={`badge ${getStatusBadgeClass(draftAwareStatus, draft.manualOverride)}`}>
+                        {getStatusLabel(draftAwareStatus, draft.manualOverride)}
                       </div>
                       <div className="mt-1 text-xs opacity-60">置信 {price.matchConfidence}</div>
                       <label className="label mt-1 cursor-pointer justify-start gap-2 p-0 text-xs">

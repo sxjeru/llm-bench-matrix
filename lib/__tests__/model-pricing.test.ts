@@ -178,7 +178,7 @@ describe("model pricing module", () => {
 
 
   test("syncModelsDevPricing 应将禁用价格匹配的 provider 标记为 ignored 并清空旧匹配", async () => {
-    const { db, onConflictDoUpdate } = createDbMock(
+    const { db, values, onConflictDoUpdate } = createDbMock(
       [
         {
           id: 1,
@@ -197,25 +197,23 @@ describe("model pricing module", () => {
     const result = await pricingModule.syncModelsDevPricing();
 
     expect(onConflictDoUpdate).toHaveBeenCalledTimes(1);
-    expect(onConflictDoUpdate).toHaveBeenCalledWith(
+    expect(values).toHaveBeenCalledWith([
       expect.objectContaining({
-        set: expect.objectContaining({
-          matchStatus: "ignored",
-          sourceProviderId: null,
-          sourceModelId: null,
-          inputCost: null,
-          outputCost: null,
-          note: "provider-pricing-disabled"
-        })
+        matchStatus: "ignored",
+        sourceProviderId: null,
+        sourceModelId: null,
+        inputCost: null,
+        outputCost: null,
+        note: "provider-pricing-disabled"
       })
-    );
+    ]);
     expect(result.matchedCount).toBe(0);
     expect(result.unmatchedCount).toBe(0);
     expect(result.skippedManualCount).toBe(0);
   });
 
   test("syncModelsDevPricing 在找不到匹配时应回写 unmatched 以清理陈旧价格", async () => {
-    const { db, onConflictDoUpdate } = createDbMock(
+    const { db, values, onConflictDoUpdate } = createDbMock(
       [
         {
           id: 2,
@@ -234,26 +232,24 @@ describe("model pricing module", () => {
     const result = await pricingModule.syncModelsDevPricing();
 
     expect(onConflictDoUpdate).toHaveBeenCalledTimes(1);
-    expect(onConflictDoUpdate).toHaveBeenCalledWith(
+    expect(values).toHaveBeenCalledWith([
       expect.objectContaining({
-        set: expect.objectContaining({
-          matchStatus: "unmatched",
-          matchConfidence: 0,
-          sourceProviderId: null,
-          sourceModelId: null,
-          inputCost: null,
-          outputCost: null,
-          note: "no-match"
-        })
+        matchStatus: "unmatched",
+        matchConfidence: 0,
+        sourceProviderId: null,
+        sourceModelId: null,
+        inputCost: null,
+        outputCost: null,
+        note: "no-match"
       })
-    );
+    ]);
     expect(result.matchedCount).toBe(0);
     expect(result.unmatchedCount).toBe(1);
     expect(result.skippedManualCount).toBe(0);
   });
 
   test("syncModelsDevPricing 首次同步禁用价格匹配的 provider 时，即使没有 prior data 也应写入 ignored", async () => {
-    const { db, onConflictDoUpdate } = createDbMock(
+    const { db, values, onConflictDoUpdate } = createDbMock(
       [
         {
           id: 3,
@@ -272,20 +268,18 @@ describe("model pricing module", () => {
     const result = await pricingModule.syncModelsDevPricing();
 
     expect(onConflictDoUpdate).toHaveBeenCalledTimes(1);
-    expect(onConflictDoUpdate).toHaveBeenCalledWith(
+    expect(values).toHaveBeenCalledWith([
       expect.objectContaining({
-        set: expect.objectContaining({
-          matchStatus: "ignored",
-          note: "provider-pricing-disabled"
-        })
+        matchStatus: "ignored",
+        note: "provider-pricing-disabled"
       })
-    );
+    ]);
     expect(result.matchedCount).toBe(0);
     expect(result.unmatchedCount).toBe(0);
   });
 
   test("syncModelsDevPricing 首次同步找不到匹配时，即使没有 prior data 也应写入 unmatched", async () => {
-    const { db, onConflictDoUpdate } = createDbMock(
+    const { db, values, onConflictDoUpdate } = createDbMock(
       [
         {
           id: 4,
@@ -304,16 +298,85 @@ describe("model pricing module", () => {
     const result = await pricingModule.syncModelsDevPricing();
 
     expect(onConflictDoUpdate).toHaveBeenCalledTimes(1);
-    expect(onConflictDoUpdate).toHaveBeenCalledWith(
+    expect(values).toHaveBeenCalledWith([
       expect.objectContaining({
-        set: expect.objectContaining({
-          matchStatus: "unmatched",
-          note: "no-match"
-        })
+        matchStatus: "unmatched",
+        note: "no-match"
       })
-    );
+    ]);
     expect(result.matchedCount).toBe(0);
     expect(result.unmatchedCount).toBe(1);
+  });
+
+  test("syncModelsDevPricing 批量 upsert 非手动覆盖的同步结果", async () => {
+    const { db, values, onConflictDoUpdate } = createDbMock(
+      [
+        {
+          id: 6,
+          modelName: "GPT-4",
+          sourceModelId: "gpt-4",
+          providerName: "OpenAI",
+          providerSlug: "openai",
+          providerConfig: {}
+        },
+        {
+          id: 7,
+          modelName: "Unknown Model",
+          sourceModelId: null,
+          providerName: "OpenAI",
+          providerSlug: "openai",
+          providerConfig: {}
+        }
+      ],
+      []
+    );
+
+    mockModelsDevResponse({
+      openai: {
+        id: "openai",
+        name: "OpenAI",
+        models: {
+          "gpt-4": {
+            id: "gpt-4",
+            name: "GPT-4",
+            cost: {
+              input: 30,
+              output: 60,
+              cache_read: 3
+            }
+          }
+        }
+      }
+    });
+
+    const pricingModule = await importPricingModule(db);
+    const result = await pricingModule.syncModelsDevPricing();
+
+    expect(db.insert).toHaveBeenCalledTimes(1);
+    expect(onConflictDoUpdate).toHaveBeenCalledTimes(1);
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({
+        modelId: 6,
+        sourceProviderId: "openai",
+        sourceModelId: "gpt-4",
+        inputCost: "30",
+        outputCost: "60",
+        cacheReadCost: "3",
+        matchStatus: "matched"
+      }),
+      expect.objectContaining({
+        modelId: 7,
+        sourceProviderId: null,
+        sourceModelId: null,
+        inputCost: null,
+        outputCost: null,
+        matchStatus: "unmatched",
+        note: "no-match"
+      })
+    ]);
+    expect(result.matchedCount).toBe(1);
+    expect(result.unmatchedCount).toBe(1);
+    expect(result.skippedManualCount).toBe(0);
   });
 
   test("syncModelsDevPricing skips manualOverride rows and increments skippedManualCount", async () => {

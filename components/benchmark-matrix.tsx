@@ -78,6 +78,9 @@ import {
   type ExportPresetKey,
   SOURCE_ALL,
   OVERALL_ROW_KEY,
+  PRICE_CACHE_INPUT_ROW_KEY,
+  PRICE_INPUT_ROW_KEY,
+  PRICE_OUTPUT_ROW_KEY,
   MODALITY_OPTIONS,
   CATEGORY_COLUMN_WIDTH_KEY,
   BENCHMARK_COLUMN_WIDTH_KEY,
@@ -117,6 +120,12 @@ import {
   getSourceValueDeltaRaw,
   getSourceValueDisplayItem
 } from "./benchmark-matrix/index";
+
+const PRICE_ROW_KEY_SET = new Set([
+  PRICE_INPUT_ROW_KEY,
+  PRICE_OUTPUT_ROW_KEY,
+  PRICE_CACHE_INPUT_ROW_KEY
+]);
 
 export function BenchmarkMatrix({
   rows,
@@ -235,6 +244,7 @@ export function BenchmarkMatrix({
 
   const displaySourceValuesInCells = showSourceValues && hasSourceData && activeSource !== SOURCE_ALL;
   const displaySourceValueDeltasInCells = displaySourceValuesInCells && showSourceValueDeltas;
+  const effectiveShowPriceRows = showPriceRows && modelPrices.length > 0;
 
   useEffect(() => {
     enqueueStateUpdate(() => setIsClientReady(true));
@@ -672,16 +682,18 @@ export function BenchmarkMatrix({
     [activeSource, filteredRows, showDuplicateRows, showLowCoverageRows]
   );
 
+  const isPriceRowSortKey = columnSortBenchmarkKey !== null && PRICE_ROW_KEY_SET.has(columnSortBenchmarkKey);
+
   const baseModelColumns = useMemo<readonly string[]>(
     () => buildModelColumns(
       coveragePrunedRows,
       sourceModelHint,
-      columnSortBenchmarkKey === OVERALL_ROW_KEY ? null : columnSortBenchmarkKey,
+      columnSortBenchmarkKey === OVERALL_ROW_KEY || isPriceRowSortKey ? null : columnSortBenchmarkKey,
       showDuplicateRows,
       modelOrderBySource,
       activeSource
     ),
-    [coveragePrunedRows, sourceModelHint, columnSortBenchmarkKey, showDuplicateRows, modelOrderBySource, activeSource]
+    [coveragePrunedRows, sourceModelHint, columnSortBenchmarkKey, isPriceRowSortKey, showDuplicateRows, modelOrderBySource, activeSource]
   );
 
   const matrixRows = useMemo(
@@ -734,13 +746,13 @@ export function BenchmarkMatrix({
   );
 
   const priceMatrixRows = useMemo(
-    () => showPriceRows ? buildPriceMatrixRows(baseModelColumns, modelPrices) : [],
-    [showPriceRows, baseModelColumns, modelPrices]
+    () => effectiveShowPriceRows ? buildPriceMatrixRows(baseModelColumns, modelPrices) : [],
+    [effectiveShowPriceRows, baseModelColumns, modelPrices]
   );
 
   const summaryMatrixRows = useMemo(
-    () => showPriceRows ? [...priceMatrixRows, ...presenceFilteredMatrixRows] : presenceFilteredMatrixRows,
-    [showPriceRows, priceMatrixRows, presenceFilteredMatrixRows]
+    () => effectiveShowPriceRows ? [...priceMatrixRows, ...presenceFilteredMatrixRows] : presenceFilteredMatrixRows,
+    [effectiveShowPriceRows, priceMatrixRows, presenceFilteredMatrixRows]
   );
 
   const displayedCoverageMetaByModel = useMemo(
@@ -764,8 +776,8 @@ export function BenchmarkMatrix({
   );
 
   const displayMatrixRows = useMemo(
-    () => showPriceRows ? [...priceMatrixRows, ...sortedMatrixRows] : sortedMatrixRows,
-    [showPriceRows, priceMatrixRows, sortedMatrixRows]
+    () => effectiveShowPriceRows ? [...priceMatrixRows, ...sortedMatrixRows] : sortedMatrixRows,
+    [effectiveShowPriceRows, priceMatrixRows, sortedMatrixRows]
   );
 
   const headerUniqueCounts = useMemo(
@@ -779,6 +791,36 @@ export function BenchmarkMatrix({
   );
 
   const modelColumns = useMemo<readonly string[]>(() => {
+    if (isPriceRowSortKey) {
+      const priceRow = priceMatrixRows.find((row) => row.rowKey === columnSortBenchmarkKey);
+      if (!priceRow) return baseModelColumns;
+
+      const baseOrderIndex = new Map(baseModelColumns.map((modelName, index) => [modelName, index]));
+
+      return [...baseModelColumns].sort((leftModel, rightModel) => {
+        const leftValue = priceRow.cells.get(leftModel)?.valueNum;
+        const rightValue = priceRow.cells.get(rightModel)?.valueNum;
+
+        if (leftValue === null || leftValue === undefined) {
+          if (rightValue === null || rightValue === undefined) {
+            return (baseOrderIndex.get(leftModel) ?? 0) - (baseOrderIndex.get(rightModel) ?? 0);
+          }
+
+          return 1;
+        }
+
+        if (rightValue === null || rightValue === undefined) {
+          return -1;
+        }
+
+        if (rightValue !== leftValue) {
+          return leftValue - rightValue;
+        }
+
+        return (baseOrderIndex.get(leftModel) ?? 0) - (baseOrderIndex.get(rightModel) ?? 0);
+      });
+    }
+
     if (columnSortBenchmarkKey !== OVERALL_ROW_KEY) {
       return baseModelColumns;
     }
@@ -807,7 +849,7 @@ export function BenchmarkMatrix({
 
       return (baseOrderIndex.get(leftModel) ?? 0) - (baseOrderIndex.get(rightModel) ?? 0);
     });
-  }, [baseModelColumns, columnSortBenchmarkKey, overallSummaryByModel]);
+  }, [baseModelColumns, columnSortBenchmarkKey, isPriceRowSortKey, overallSummaryByModel, priceMatrixRows]);
 
   const compareModelSet = useMemo(() => new Set(compareModelOrder), [compareModelOrder]);
   const compareBaselineModelName = compareModelOrder[0] ?? null;

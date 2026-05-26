@@ -337,10 +337,22 @@ describe("BenchmarkMatrix 总评行", () => {
     // The cheaper model (Model B) should have a different background color (i.e. better heat blending) from the expensive model (Model A).
     expect(modelBCell!.style.backgroundColor).not.toBe(modelACell!.style.backgroundColor);
 
+    fireEvent.click(inputPriceRow);
+    expect(getModelHeaderOrder()).toEqual(["Model B", "Model A", "Model C"]);
+
     const trigger = container.querySelector('[data-overall-tooltip-trigger="Model C"]') as HTMLElement | null;
     expect(trigger).not.toBeNull();
     fireEvent.mouseEnter(trigger!);
 
     expect(screen.getByText(/覆盖率：/)).toHaveTextContent("3/6");
+  });
+
+  test("无价格数据时不会因持久化开关渲染空价格行", async () => {
+    window.localStorage.setItem("benchmark-matrix:show-price-rows", "1");
+
+    const { container } = render(<BenchmarkMatrix rows={[...rows]} />);
+
+    expect(container.querySelectorAll('[data-metric-type="price"]')).toHaveLength(0);
+    expect(screen.queryByText("Input Price")).not.toBeInTheDocument();
   });
 });
