@@ -461,6 +461,65 @@ describe("model pricing module", () => {
     expect(result.matchedCount).toBe(1);
   });
 
+  test("syncModelsDevPricing 在多个全局模型候选时使用 provider 信息消歧", async () => {
+    const { db, values } = createDbMock(
+      [
+        {
+          id: 9,
+          modelName: "Claude Opus 4.6",
+          sourceModelId: null,
+          providerName: "Claude",
+          providerSlug: "claude",
+          providerConfig: {}
+        }
+      ],
+      []
+    );
+
+    mockModelsDevResponse({
+      openrouter: {
+        id: "openrouter",
+        name: "OpenRouter",
+        models: {
+          "anthropic/claude-opus-4.6": {
+            id: "anthropic/claude-opus-4.6",
+            name: "Claude Opus 4.6",
+            cost: { input: 5.5, output: 27.5 }
+          }
+        }
+      },
+      anthropic: {
+        id: "anthropic",
+        name: "Anthropic",
+        models: {
+          "claude-opus-4-6": {
+            id: "claude-opus-4-6",
+            name: "Claude Opus 4.6",
+            cost: { input: 5, output: 25, cache_read: 0.5 }
+          }
+        }
+      }
+    });
+
+    const pricingModule = await importPricingModule(db);
+    const result = await pricingModule.syncModelsDevPricing();
+
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({
+        modelId: 9,
+        sourceProviderId: "anthropic",
+        sourceModelId: "claude-opus-4-6",
+        inputCost: "5",
+        outputCost: "25",
+        cacheReadCost: "0.5",
+        matchStatus: "matched",
+        note: "normalized-model-name-provider-disambiguated"
+      })
+    ]);
+    expect(result.matchedCount).toBe(1);
+    expect(result.unmatchedCount).toBe(0);
+  });
+
   test("syncModelsDevPricing 在无 content-length 的流式响应超限时取消读取", async () => {
     const { db } = createDbMock([], []);
     const cancel = vi.fn();

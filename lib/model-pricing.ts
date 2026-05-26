@@ -43,6 +43,14 @@ type ModelsDevModel = {
 
 type ModelPricingUpsertRow = typeof modelPricing.$inferInsert;
 
+type ModelMatch = {
+  provider: ModelsDevProvider;
+  modelKey: string;
+  model: ModelsDevModel;
+  confidence: number;
+  reason: string;
+};
+
 export type ModelPricingRow = {
   modelId: number;
   modelName: string;
@@ -124,6 +132,26 @@ function normalizeProviderCandidate(value: string): string {
   return normalizeToken(value.replace(/\.ai$/i, "ai"));
 }
 
+function inferProviderAliases(model: DbModel): string[] {
+  const normalized = [model.sourceModelId ?? "", model.modelName]
+    .map(normalizeToken)
+    .filter(Boolean);
+
+  const hasPrefix = (prefixes: string[]) => normalized.some((value) => prefixes.some((prefix) => value.startsWith(prefix)));
+
+  if (hasPrefix(["claude"])) return ["anthropic"];
+  if (hasPrefix(["gemini", "gemma"])) return ["google"];
+  if (hasPrefix(["gpt", "chatgpt", "codex", "o1", "o3", "o4"])) return ["openai"];
+  if (hasPrefix(["deepseek"])) return ["deepseek"];
+  if (hasPrefix(["grok"])) return ["xai"];
+  if (hasPrefix(["kimi"])) return ["moonshot"];
+  if (hasPrefix(["mistral", "mixtral", "codestral", "devstral", "ministral"])) return ["mistral"];
+  if (hasPrefix(["llama"])) return ["llama", "meta"];
+  if (hasPrefix(["qwen"])) return ["alibaba", "qwen"];
+
+  return [];
+}
+
 function getProviderPricingConfig(config: unknown): { modelsDevProviderId?: string; modelsDevProviderAliases: string[]; disabled: boolean } {
   const normalized = normalizeProviderConfig(config);
   const pricing = (normalized as { pricing?: unknown }).pricing;
@@ -171,11 +199,49 @@ function resolveProviderMatch(model: DbModel, providersById: Map<string, ModelsD
   return { provider: null, confidenceBoost: 0 };
 }
 
+function scoreProviderDisambiguation(model: DbModel, match: ModelMatch) {
+  const providerTokens = [match.provider.id, match.provider.name].map(normalizeProviderCandidate);
+  const candidates = [
+    model.providerModelsDevId ?? "",
+    model.providerSlug,
+    model.providerName,
+    model.providerDisplayName ?? "",
+    ...model.providerModelsDevAliases,
+    ...inferProviderAliases(model)
+  ].filter(Boolean);
+
+  let score = 0;
+  for (const candidate of candidates) {
+    const normalizedCandidate = normalizeProviderCandidate(candidate);
+    if (providerTokens.some((token) => token === normalizedCandidate)) {
+      score = Math.max(score, candidate === model.providerModelsDevId ? 100 : 80);
+      continue;
+    }
+
+    if (providerTokens.some((token) => token.includes(normalizedCandidate) || normalizedCandidate.includes(token))) {
+      score = Math.max(score, 40);
+    }
+  }
+
+  const sourceModelId = match.model.id ?? match.modelKey;
+  const sourceNamespace = sourceModelId.split(/[/:@]/)[0] ?? "";
+  const sourceNamePrefix = (match.model.name ?? "").split(":")[0] ?? "";
+  const sourceHints = [sourceNamespace, sourceNamePrefix].map(normalizeProviderCandidate);
+  for (const alias of inferProviderAliases(model)) {
+    const normalizedAlias = normalizeProviderCandidate(alias);
+    if (sourceHints.some((hint) => hint === normalizedAlias)) {
+      score = Math.max(score, 35);
+    }
+  }
+
+  return score;
+}
+
 function resolveModelMatch(model: DbModel, sourceProvider: ModelsDevProvider | null, providersById: Map<string, ModelsDevProvider>) {
   const sourceModelId = model.sourceModelId?.trim();
   const modelName = model.modelName.trim();
 
-  const findInProvider = (provider: ModelsDevProvider) => {
+  const findInProvider = (provider: ModelsDevProvider): ModelMatch | null => {
     if (sourceModelId) {
       const direct = provider.models[sourceModelId];
       if (direct) return { provider, modelKey: sourceModelId, model: direct, confidence: 100, reason: "source-model-id" };
@@ -198,19 +264,34 @@ function resolveModelMatch(model: DbModel, sourceProvider: ModelsDevProvider | n
     return null;
   };
 
-  if (sourceProvider) {
-    const matched = findInProvider(sourceProvider);
-    if (matched) return matched;
-  }
-
-  const globalMatches: Array<ReturnType<typeof findInProvider> & object> = [];
+  const globalMatches: ModelMatch[] = [];
   for (const provider of providersById.values()) {
     const matched = findInProvider(provider);
     if (matched) globalMatches.push(matched);
   }
 
+  if (sourceProvider) {
+    const providerMatch = globalMatches.find((match) => match.provider.id === sourceProvider.id);
+    if (providerMatch) return providerMatch;
+  }
+
   if (globalMatches.length === 1) {
     return { ...globalMatches[0]!, confidence: Math.min(globalMatches[0]!.confidence, 72), reason: `global-${globalMatches[0]!.reason}` };
+  }
+
+  if (globalMatches.length > 1) {
+    const scoredMatches = globalMatches.map((match) => ({ match, score: scoreProviderDisambiguation(model, match) }));
+    const bestScore = Math.max(...scoredMatches.map((item) => item.score));
+    const bestMatches = scoredMatches.filter((item) => item.score === bestScore);
+
+    if (bestScore > 0 && bestMatches.length === 1) {
+      const bestMatch = bestMatches[0]!.match;
+      return {
+        ...bestMatch,
+        confidence: Math.min(bestMatch.confidence, bestScore >= 80 ? 88 : 78),
+        reason: `${bestMatch.reason}-provider-disambiguated`
+      };
+    }
   }
 
   return null;
