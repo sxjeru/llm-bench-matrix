@@ -35,7 +35,6 @@ type UseMatrixSourceTabsOptions = {
   sourceNewReferenceTime: number | null;
   overflowSourceKeys: string[];
   setOverflowSourceKeys: Dispatch<SetStateAction<string[]>>;
-  isSourceOverflowMenuOpen: boolean;
   setIsSourceOverflowMenuOpen: Dispatch<SetStateAction<boolean>>;
   sourceTabsViewportRef: MutableRefValue<HTMLDivElement | null>;
   sourceTabsMeasureRef: MutableRefValue<HTMLDivElement | null>;
@@ -54,7 +53,6 @@ export function useMatrixSourceTabs({
   sourceNewReferenceTime,
   overflowSourceKeys,
   setOverflowSourceKeys,
-  isSourceOverflowMenuOpen,
   setIsSourceOverflowMenuOpen,
   sourceTabsViewportRef,
   sourceTabsMeasureRef,
@@ -97,7 +95,10 @@ export function useMatrixSourceTabs({
     const newState = sourceNewStateByKey.get(source.key);
     if (!newState) return displayText;
 
-    return `${displayText} · 最近更新 ${formatTooltipTime(new Date(newState.updatedAtMs).toISOString())}`;
+    const formattedTime = formatTooltipTime(new Date(newState.updatedAtMs).toISOString());
+    return newState.isNew
+      ? `${displayText} · ${formattedTime} · 最近更新`
+      : `${displayText} · ${formattedTime}`;
   };
 
   useEffect(() => {
@@ -264,7 +265,15 @@ export function useMatrixSourceTabs({
         window.removeEventListener("resize", handleWindowResize);
       }
     };
-  }, [isClientReady, sourceOptions, activeSource, sourceTabsMeasureRef, sourceTabsViewportRef]);
+  }, [
+    isClientReady,
+    sourceOptions,
+    activeSource,
+    sourceTabsMeasureRef,
+    sourceTabsViewportRef,
+    setIsSourceOverflowMenuOpen,
+    setOverflowSourceKeys
+  ]);
 
   function setSourceAndUrl(nextSource: string) {
     setIsSourceOverflowMenuOpen(false);

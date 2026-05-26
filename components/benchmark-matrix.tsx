@@ -221,7 +221,6 @@ export function BenchmarkMatrix({
     sourceNewReferenceTime,
     overflowSourceKeys,
     setOverflowSourceKeys,
-    isSourceOverflowMenuOpen,
     setIsSourceOverflowMenuOpen,
     sourceTabsViewportRef,
     sourceTabsMeasureRef,

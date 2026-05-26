@@ -93,8 +93,6 @@ export function buildSourceNewStateByKey(
   allRows: MatrixInputRow[],
   sourceNewReferenceTime: number | null
 ): Map<string, { updatedAtMs: number; isNew: boolean }> {
-  if (sourceNewReferenceTime === null) return new Map<string, { updatedAtMs: number; isNew: boolean }>();
-
   const latestTimeStrBySource = new Map<string, string>();
 
   allRows.forEach((row) => {
@@ -118,6 +116,15 @@ export function buildSourceNewStateByKey(
     }
   });
 
+  if (sourceNewReferenceTime === null) {
+    return new Map(
+      Array.from(latestUpdateBySource.entries(), ([sourceKey, updatedAtMs]) => [
+        sourceKey,
+        { updatedAtMs, isNew: false }
+      ])
+    );
+  }
+
   let latestSourceKey: string | null = null;
   let latestSourceUpdatedAt = Number.NEGATIVE_INFINITY;
   latestUpdateBySource.forEach((updatedAtMs, sourceKey) => {
@@ -133,9 +140,7 @@ export function buildSourceNewStateByKey(
     const isRecent = ageMs >= 0 && ageMs <= SOURCE_NEW_WINDOW_MS;
     const isLatest = sourceKey === latestSourceKey;
 
-    if (isRecent || isLatest) {
-      stateByKey.set(sourceKey, { updatedAtMs, isNew: true });
-    }
+    stateByKey.set(sourceKey, { updatedAtMs, isNew: isRecent || isLatest });
   });
 
   return stateByKey;

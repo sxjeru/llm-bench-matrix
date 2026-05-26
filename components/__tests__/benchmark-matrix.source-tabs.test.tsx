@@ -250,7 +250,7 @@ describe("BenchmarkMatrix source tabs", () => {
     nowSpy.mockRestore();
   });
 
-  test("有近期更新时 source 页签 title 包含“最近更新 + 格式化时间”", async () => {
+  test("有近期更新时 source 页签 title 包含“模型名 + 格式化时间 + 最近更新”", async () => {
     const referenceTime = new Date("2026-05-10T12:00:00.000Z");
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(referenceTime.getTime());
 
@@ -280,7 +280,7 @@ describe("BenchmarkMatrix source tabs", () => {
       const deltaTab = screen.getByRole("tab", { name: "Delta" });
       expect(deltaTab).toHaveAttribute(
         "title",
-        `Delta · 最近更新 ${formatTooltipTime(latestUpdatedAt)}`
+        `Delta · ${formatTooltipTime(latestUpdatedAt)} · 最近更新`
       );
     });
 
@@ -332,6 +332,59 @@ describe("BenchmarkMatrix source tabs", () => {
     expect(tabB.querySelector("span.bg-emerald-300")).toBeNull();
     expect(tabA.getAttribute("title") ?? "").not.toContain("最近更新");
     expect(tabB.getAttribute("title") ?? "").not.toContain("最近更新");
+
+    nowSpy.mockRestore();
+  });
+
+  test("非近期更新的 source 页签 title 显示模型名与最后更新时间，但不显示最近更新", async () => {
+    const referenceTime = new Date("2026-05-10T12:00:00.000Z");
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(referenceTime.getTime());
+
+    const olderUpdatedAt = "2026-04-01T08:30:00.000Z";
+    const latestUpdatedAt = "2026-05-09T18:08:00.000Z";
+
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:Epsilon", "text:Zeta"]}
+        rows={[
+          {
+            providerName: "Provider E",
+            modelName: "Model E",
+            benchmarkName: "Bench-E",
+            benchmarkType: "General",
+            benchTime: olderUpdatedAt,
+            valueRaw: "73",
+            valueNum: 73,
+            valueNote: null,
+            source: "text:Epsilon"
+          },
+          {
+            providerName: "Provider Z",
+            modelName: "Model Z",
+            benchmarkName: "Bench-Z",
+            benchmarkType: "General",
+            benchTime: "2026-05-04T00:00:00.000Z",
+            updatedAt: latestUpdatedAt,
+            valueRaw: "88",
+            valueNum: 88,
+            valueNote: null,
+            source: "text:Zeta"
+          }
+        ]}
+      />
+    );
+
+    await waitFor(() => {
+      const epsilonTab = screen.getByRole("tab", { name: "Epsilon" });
+      expect(epsilonTab).toHaveAttribute(
+        "title",
+        `Epsilon · ${formatTooltipTime(olderUpdatedAt)}`
+      );
+    });
+
+    const epsilonTab = screen.getByRole("tab", { name: "Epsilon" });
+    expect(epsilonTab.getAttribute("title") ?? "").not.toContain("最近更新");
+    expect(epsilonTab.querySelector("span.bg-emerald-300")).toBeNull();
 
     nowSpy.mockRestore();
   });

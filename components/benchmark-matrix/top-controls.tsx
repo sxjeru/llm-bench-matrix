@@ -136,7 +136,7 @@ export function BenchmarkMatrixTopControls({
                       title={getSourceTabTitle(source)}
                     >
                       {getSourceTabDisplayText(source)}
-                      {sourceNewStateByKey.has(source.key) ? (
+                      {sourceNewStateByKey.get(source.key)?.isNew ? (
                         <span
                           aria-hidden="true"
                           className="pointer-events-none absolute right-[4px] top-[6px] h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_0_1px_rgba(6,78,59,0.75),0_0_8px_rgba(110,231,183,0.45)]"
@@ -199,7 +199,7 @@ export function BenchmarkMatrixTopControls({
                           title={getSourceTabTitle(source)}
                         >
                           {getSourceTabDisplayText(source)}
-                          {sourceNewStateByKey.has(source.key) ? (
+                          {sourceNewStateByKey.get(source.key)?.isNew ? (
                             <span
                               aria-hidden="true"
                               className="pointer-events-none absolute right-[4px] top-[6px] h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_0_1px_rgba(6,78,59,0.75),0_0_8px_rgba(110,231,183,0.45)]"
@@ -233,7 +233,7 @@ export function BenchmarkMatrixTopControls({
                   }`}
                 >
                   {getSourceTabDisplayText(source)}
-                  {sourceNewStateByKey.has(source.key) ? (
+                  {sourceNewStateByKey.get(source.key)?.isNew ? (
                     <span
                       aria-hidden="true"
                       className="pointer-events-none absolute right-[4px] top-[6px] h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_0_1px_rgba(6,78,59,0.75),0_0_8px_rgba(110,231,183,0.45)]"
