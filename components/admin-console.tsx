@@ -2658,11 +2658,12 @@ export function AdminConsole({
     }
   }
 
-  useEffect(() => {
-    if (activeTab !== "pricing") return;
+  function handleTabChange(tab: TabKey) {
+    setActiveTab(tab);
+    if (tab !== "pricing") return;
     if (modelPriceRows.length > 0 || loadingPrices) return;
     void loadModelPrices();
-  }, [activeTab, modelPriceRows.length, loadingPrices]);
+  }
 
   function updatePricingDraft(modelId: number, updater: (draft: ModelPricingDraft) => ModelPricingDraft) {
     const sourceRow = modelPriceRows.find((row) => row.modelId === modelId);
@@ -2789,7 +2790,7 @@ export function AdminConsole({
       />
 
       <div className="space-y-4">
-        <AdminConsoleTabNav activeTab={activeTab} onTabChange={setActiveTab} />
+        <AdminConsoleTabNav activeTab={activeTab} onTabChange={handleTabChange} />
 
         {activeTab === "import" ? (
           <ImportTab

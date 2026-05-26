@@ -46,6 +46,7 @@ function createJsonResponse(payload: unknown, ok = true, status = 200): Response
 function mockFetchSequence(...payloads: unknown[]) {
   const queuedPayloads = [...payloads];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    void init;
     const url = typeof input === "string"
       ? input
       : input instanceof URL
@@ -1048,6 +1049,7 @@ describe("AdminConsole text import", () => {
 
     const queuedPayloads: unknown[] = [previewResponse];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void init;
       const url = typeof input === "string"
         ? input
         : input instanceof URL
