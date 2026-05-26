@@ -43,10 +43,10 @@ function formatCost(value: number | null) {
 }
 
 function getStatusBadgeClass(status: ModelPricingRow["matchStatus"], manualOverride: boolean) {
-  if (manualOverride || status === "manual") return "badge-warning";
-  if (status === "matched") return "badge-success";
-  if (status === "ignored") return "badge-ghost";
-  return "badge-error";
+  if (manualOverride || status === "manual") return "border-amber-400 text-amber-200";
+  if (status === "matched") return "border-green-500 text-green-300";
+  if (status === "ignored") return "border-base-content/30 text-base-content/60";
+  return "border-red-500 text-red-300";
 }
 
 function getStatusLabel(status: ModelPricingRow["matchStatus"], manualOverride: boolean) {
@@ -192,7 +192,7 @@ export function PricingTab({
                 <th>Cache Input</th>
                 <th>高级价格</th>
                 <th>状态</th>
-                <th>操作</th>
+                <th className="min-w-20">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -255,7 +255,7 @@ export function PricingTab({
                       </div>
                     </td>
                     <td>
-                      <div className={`badge ${getStatusBadgeClass(draftAwareStatus, draft.manualOverride)}`}>
+                      <div className={`inline-flex h-6 items-center rounded-full border-2 bg-transparent px-3 text-xs font-semibold ${getStatusBadgeClass(draftAwareStatus, draft.manualOverride)}`}>
                         {getStatusLabel(draftAwareStatus, draft.manualOverride)}
                       </div>
                       <div className="mt-1 text-xs opacity-60">置信 {price.matchConfidence}</div>
@@ -269,8 +269,8 @@ export function PricingTab({
                         手动覆盖
                       </label>
                     </td>
-                    <td>
-                      <button type="button" className="btn btn-primary btn-xs" onClick={() => onSavePrice(price.modelId)} disabled={isSaving}>
+                    <td className="min-w-20 whitespace-nowrap">
+                      <button type="button" className="btn btn-primary btn-xs min-w-16 whitespace-nowrap px-3" onClick={() => onSavePrice(price.modelId)} disabled={isSaving}>
                         {isSaving ? <span className="loading loading-spinner loading-xs" /> : <Save size={12} />}
                         保存
                       </button>

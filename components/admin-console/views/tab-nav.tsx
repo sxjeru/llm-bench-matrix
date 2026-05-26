@@ -18,7 +18,7 @@ export function AdminConsoleTabNav({ activeTab, onTabChange }: AdminConsoleTabNa
   return (
     <div
       role="tablist"
-      className="inline-flex w-full max-w-3xl flex-wrap items-center gap-1 rounded-2xl border border-base-300/70 bg-base-200/70 p-1.5 shadow-inner backdrop-blur"
+      className="flex w-full flex-wrap items-center gap-1 rounded-2xl border border-base-300/70 bg-base-200/70 p-1.5 shadow-inner backdrop-blur"
     >
       <button
         type="button"
