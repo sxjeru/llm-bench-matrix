@@ -35,7 +35,10 @@ export function toProviderConfigDraft(provider: ProviderOption): ProviderConfigD
     displayName: provider.config?.displayName ?? "",
     displayTargetProviderId: provider.config?.displayTargetProviderId ?? null,
     prefixRules: (provider.config?.prefixRules ?? []).map((rule) => createProviderPrefixRuleDraft(rule)),
-    brandingColor: provider.config?.branding?.color ?? ""
+    brandingColor: provider.config?.branding?.color ?? "",
+    modelsDevProviderId: provider.config?.pricing?.modelsDevProviderId ?? "",
+    modelsDevProviderAliases: (provider.config?.pricing?.modelsDevProviderAliases ?? []).join(", "),
+    pricingDisabled: provider.config?.pricing?.disabled === true
   };
 }
 

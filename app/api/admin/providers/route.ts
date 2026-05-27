@@ -24,6 +24,11 @@ const providerConfigSchema = z.object({
   ).optional(),
   branding: z.object({
     color: nullableHexColor.optional()
+  }).optional(),
+  pricing: z.object({
+    modelsDevProviderId: nullableNonEmptyString.optional(),
+    modelsDevProviderAliases: z.array(z.string().trim().min(1)).optional(),
+    disabled: z.boolean().optional()
   }).optional()
 });
 

@@ -1493,6 +1493,15 @@ function validateProviderConfig(providerId: number, config: ProviderConfig, allP
     throw new Error("branding.color 必须是合法的 #RRGGBB");
   }
 
+  if (config.pricing?.modelsDevProviderId !== undefined && config.pricing.modelsDevProviderId.trim().length === 0) {
+    throw new Error("modelsDevProviderId 不能为空字符串");
+  }
+
+  const pricingAliases = config.pricing?.modelsDevProviderAliases ?? [];
+  if (pricingAliases.some((alias) => alias.trim().length === 0)) {
+    throw new Error("modelsDevProviderAliases 不能包含空字符串");
+  }
+
   if (config.displayTargetProviderId !== undefined) {
     if (!Number.isInteger(config.displayTargetProviderId) || config.displayTargetProviderId <= 0) {
       throw new Error("displayTargetProviderId 必须是合法 provider id");
@@ -1561,6 +1570,24 @@ function mergeProviderConfig(current: unknown, incoming: unknown): ProviderConfi
               : incomingConfig.branding.color !== undefined
                 ? { color: incomingConfig.branding.color }
                 : {})
+          }
+        }
+      : {}),
+    ...(incomingConfig.pricing !== undefined
+      ? {
+          pricing: {
+            ...currentConfig.pricing,
+            ...(incomingConfig.pricing.modelsDevProviderId === null
+              ? { modelsDevProviderId: undefined }
+              : incomingConfig.pricing.modelsDevProviderId !== undefined
+                ? { modelsDevProviderId: incomingConfig.pricing.modelsDevProviderId }
+                : {}),
+            ...(incomingConfig.pricing.modelsDevProviderAliases !== undefined
+              ? { modelsDevProviderAliases: incomingConfig.pricing.modelsDevProviderAliases }
+              : {}),
+            ...(incomingConfig.pricing.disabled !== undefined
+              ? { disabled: incomingConfig.pricing.disabled }
+              : {})
           }
         }
       : {})

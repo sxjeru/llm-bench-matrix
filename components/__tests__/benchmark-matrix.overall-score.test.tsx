@@ -2,6 +2,8 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix, __buildOverallScoreDisplayDecimalsMapForTest } from "@/components/benchmark-matrix";
+import { buildOverallSummaryByModel, buildPriceMatrixRows } from "@/components/benchmark-matrix/selectors";
+import type { MatrixCell, MatrixRow } from "@/components/benchmark-matrix/types";
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/",
@@ -112,6 +114,81 @@ function getModelHeaderOrder(): string[] {
 }
 
 describe("BenchmarkMatrix 总评行", () => {
+  test("价格行参与总评时按低价格更优计算", () => {
+    const createCell = (valueNum: number): MatrixCell => ({
+      valueRaw: String(valueNum),
+      valueNum,
+      valueNum2: null,
+      valueNote: null,
+      source: null,
+      benchTime: "2026-04-06T00:00:00.000Z",
+      allEntries: [],
+      hasMultipleValues: false,
+      uniqueEntries: [],
+      noteText: "",
+      displayValue: String(valueNum),
+      hasMeaningfulMultipleValues: false,
+      shouldShowQuestionMark: false
+    });
+
+    const priceRow: MatrixRow = {
+      rowKey: "__price:input",
+      category: "Price",
+      benchmark: "Input Price",
+      higherIsBetter: true,
+      modalities: ["Text"],
+      cells: new Map([
+        ["Expensive Model", createCell(3)],
+        ["Cheap Model", createCell(1)]
+      ]),
+      firstSeenIndex: 0,
+      sourceOrderKey: null,
+      rowDataCount: 2,
+      rowNumericCount: 2,
+      minComparable: null,
+      maxComparable: null,
+      minComparable2: null,
+      maxComparable2: null,
+      minNum: 1,
+      maxNum: 3,
+      minNum2: null,
+      maxNum2: null,
+      isPriceRow: true
+    };
+
+    const summary = buildOverallSummaryByModel([priceRow], ["Expensive Model", "Cheap Model"]);
+
+    expect(summary.get("Cheap Model")?.rawScore).toBe(100);
+    expect(summary.get("Cheap Model")?.rawRank).toBe(1);
+    expect(summary.get("Expensive Model")?.rawScore).toBe(0);
+    expect(summary.get("Expensive Model")?.rawRank).toBe(2);
+  });
+
+  test("价格行使用真实价格更新时间且缺失时不回退到 epoch", () => {
+    const syncedAt = "2026-05-26T12:00:00.000Z";
+    const updatedAt = "2026-05-25T08:30:00.000Z";
+    const [inputPriceRow] = buildPriceMatrixRows(
+      ["Model A", "Model B", "Model C"],
+      [
+        { modelName: "Model A", inputCost: 3, outputCost: 15, cacheReadCost: 0.3, lastSyncedAt: syncedAt, updatedAt },
+        { modelName: "Model B", inputCost: 1, outputCost: 5, cacheReadCost: 0.1, updatedAt },
+        { modelName: "Model C", inputCost: null, outputCost: 8, cacheReadCost: null }
+      ]
+    );
+
+    const modelACell = inputPriceRow!.cells.get("Model A");
+    const modelBCell = inputPriceRow!.cells.get("Model B");
+    const modelCCell = inputPriceRow!.cells.get("Model C");
+
+    expect(modelACell?.benchTime).toBe(syncedAt);
+    expect(modelACell?.uniqueEntries[0]?.benchTime).toBe(syncedAt);
+    expect(modelBCell?.benchTime).toBe(updatedAt);
+    expect(modelBCell?.uniqueEntries[0]?.benchTime).toBe(updatedAt);
+    expect(modelCCell?.benchTime).toBeNull();
+    expect(modelCCell?.uniqueEntries[0]?.benchTime).toBeNull();
+    expect(modelCCell?.benchTime).not.toBe(new Date(0).toISOString());
+  });
+
   test("同一位小数但名次不同时显示两位小数", () => {
     const decimalsMap = __buildOverallScoreDisplayDecimalsMapForTest([
       { modelName: "Model A", rawScore: 68.24, rawRank: 4 },
@@ -228,5 +305,79 @@ describe("BenchmarkMatrix 总评行", () => {
     );
 
     expect(screen.getByTitle("该项目为低值更优")).toBeInTheDocument();
+  });
+
+  test("显示价格后在 benchmark 前插入三行价格并参与总评覆盖率", () => {
+    const { container } = render(
+      <BenchmarkMatrix
+        rows={[...rows]}
+        modelPrices={[
+          { modelName: "Model A", inputCost: 3, outputCost: 15, cacheReadCost: 0.3 },
+          { modelName: "Model B", inputCost: 1, outputCost: 5, cacheReadCost: 0.1 },
+          { modelName: "Model C", inputCost: null, outputCost: 8, cacheReadCost: null }
+        ]}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /显示价格/ }));
+
+    const bodyRows = Array.from(container.querySelectorAll("tbody tr"));
+    expect(bodyRows[0]).toHaveTextContent("Input Price");
+    expect(bodyRows[1]).toHaveTextContent("Output Price");
+    expect(bodyRows[2]).toHaveTextContent("Cache Input Price");
+
+    // Assert that price rows use price-specific comparison logic instead of benchmark score transforms.
+    const priceRows = Array.from(
+      container.querySelectorAll('[data-metric-type="price"]')
+    ) as HTMLElement[];
+
+    // We still expect three price rows to be rendered.
+    expect(priceRows).toHaveLength(3);
+
+    // Assert individual model cells within a price row show raw prices, not normalized ratios/percents.
+    for (const row of priceRows) {
+      const modelACell = row.querySelector('[data-model-name="Model A"]') as HTMLElement | null;
+      const modelBCell = row.querySelector('[data-model-name="Model B"]') as HTMLElement | null;
+
+      expect(modelACell).not.toBeNull();
+      expect(modelBCell).not.toBeNull();
+
+      // Guard against accidentally applying percent/ratio formatting like "85%" or "0.83x".
+      expect(modelACell!.textContent).not.toMatch(/%|x/);
+      expect(modelBCell!.textContent).not.toMatch(/%|x/);
+    }
+
+    // For price metrics, lower is better: Model B (cheapest, $1) should be highlighted as better than Model A ($3).
+    const inputPriceRow = priceRows[0];
+    const modelACell = inputPriceRow.querySelector('[data-model-name="Model A"]') as HTMLElement | null;
+    const modelBCell = inputPriceRow.querySelector('[data-model-name="Model B"]') as HTMLElement | null;
+
+    expect(modelACell).not.toBeNull();
+    expect(modelBCell).not.toBeNull();
+
+    // Verify raw values are formatted as currency:
+    expect(modelACell!.textContent).toBe("$3");
+    expect(modelBCell!.textContent).toBe("$1");
+
+    // The cheaper model (Model B) should have a different background color (i.e. better heat blending) from the expensive model (Model A).
+    expect(modelBCell!.style.backgroundColor).not.toBe(modelACell!.style.backgroundColor);
+
+    fireEvent.click(inputPriceRow);
+    expect(getModelHeaderOrder()).toEqual(["Model B", "Model A", "Model C"]);
+
+    const trigger = container.querySelector('[data-overall-tooltip-trigger="Model C"]') as HTMLElement | null;
+    expect(trigger).not.toBeNull();
+    fireEvent.mouseEnter(trigger!);
+
+    expect(screen.getByText(/覆盖率：/)).toHaveTextContent("3/6");
+  });
+
+  test("无价格数据时不会因持久化开关渲染空价格行", async () => {
+    window.localStorage.setItem("benchmark-matrix:show-price-rows", "1");
+
+    const { container } = render(<BenchmarkMatrix rows={[...rows]} />);
+
+    expect(container.querySelectorAll('[data-metric-type="price"]')).toHaveLength(0);
+    expect(screen.queryByText("Input Price")).not.toBeInTheDocument();
   });
 });

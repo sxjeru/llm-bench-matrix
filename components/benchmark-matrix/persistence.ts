@@ -10,6 +10,7 @@ import {
   MODEL_SELECTION_BY_SOURCE_STORAGE_KEY,
   SHOW_CATEGORY_STORAGE_KEY,
   SHOW_DUPLICATE_STORAGE_KEY,
+  SHOW_PRICE_ROWS_STORAGE_KEY,
   SHOW_SOURCE_VALUES_STORAGE_KEY
 } from "./constants";
 import { clampHeatmapAlpha, normalizeHexColor } from "./colors";
@@ -47,6 +48,9 @@ type MatrixPreferenceStorageOptions = {
   showSourceValuesLoadedRef: MutableRefValue<boolean>;
   showSourceValues: boolean;
   setShowSourceValues: Dispatch<SetStateAction<boolean>>;
+  showPriceRowsLoadedRef: MutableRefValue<boolean>;
+  showPriceRows: boolean;
+  setShowPriceRows: Dispatch<SetStateAction<boolean>>;
 };
 
 type ExportPresetStorageOptions = {
@@ -250,7 +254,10 @@ export function useMatrixPreferenceStorage({
   setShowDuplicateRows,
   showSourceValuesLoadedRef,
   showSourceValues,
-  setShowSourceValues
+  setShowSourceValues,
+  showPriceRowsLoadedRef,
+  showPriceRows,
+  setShowPriceRows
 }: MatrixPreferenceStorageOptions) {
   useEffect(() => {
     const nextSelectionBySource = loadModelSelectionBySource();
@@ -325,6 +332,17 @@ export function useMatrixPreferenceStorage({
   }, [setShowSourceValues, showSourceValuesLoadedRef]);
 
   useEffect(() => {
+    const nextShowPriceRows = loadStoredBoolean(SHOW_PRICE_ROWS_STORAGE_KEY);
+
+    enqueueStateUpdate(() => {
+      if (nextShowPriceRows !== null) {
+        setShowPriceRows(nextShowPriceRows);
+      }
+      showPriceRowsLoadedRef.current = true;
+    });
+  }, [setShowPriceRows, showPriceRowsLoadedRef]);
+
+  useEffect(() => {
     if (!showCategoryLoadedRef.current) return;
 
     saveStoredBoolean(SHOW_CATEGORY_STORAGE_KEY, showCategory);
@@ -341,6 +359,12 @@ export function useMatrixPreferenceStorage({
 
     saveStoredBoolean(SHOW_SOURCE_VALUES_STORAGE_KEY, showSourceValues);
   }, [showSourceValues, showSourceValuesLoadedRef]);
+
+  useEffect(() => {
+    if (!showPriceRowsLoadedRef.current) return;
+
+    saveStoredBoolean(SHOW_PRICE_ROWS_STORAGE_KEY, showPriceRows);
+  }, [showPriceRows, showPriceRowsLoadedRef]);
 }
 
 export function useExportPresetStorage({

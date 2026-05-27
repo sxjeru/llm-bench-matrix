@@ -68,6 +68,7 @@ export function invalidateAllCaches() {
 
   try {
     revalidatePath("/");
+    revalidatePath("/admin");
   } catch (error) {
     if (error instanceof Error && error.message.includes("static generation store missing")) {
       return;

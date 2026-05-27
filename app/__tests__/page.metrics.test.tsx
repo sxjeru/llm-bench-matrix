@@ -8,6 +8,10 @@ vi.mock("@/components/benchmark-matrix", () => ({
   BenchmarkMatrix: () => <div data-testid="benchmark-matrix" />
 }));
 
+vi.mock("@/lib/model-pricing", () => ({
+  getModelPricingRows: vi.fn(async () => [])
+}));
+
 vi.mock("@/lib/db/queries", () => ({
   getDashboardRows: vi.fn(async () => [
     {

@@ -386,6 +386,55 @@ export function ProvidersTab({
 
             <div className="border-t border-base-300/50" />
 
+            <div className="grid grid-cols-1 gap-x-6 gap-y-5 px-6 py-5 lg:grid-cols-[minmax(240px,1fr)_minmax(260px,1fr)_180px] lg:items-end">
+              <label className="form-control w-full">
+                <span className="label-text mb-1.5 text-xs font-medium opacity-70">models.dev Provider ID</span>
+                <input
+                  className="input input-bordered w-full rounded-xl bg-base-200/40 transition-colors focus:bg-base-100 focus:border-primary focus:outline-none"
+                  value={draft.modelsDevProviderId}
+                  onChange={(e) =>
+                    updateProviderDraft(provider.id, (current) => ({
+                      ...current,
+                      modelsDevProviderId: e.target.value
+                    }))
+                  }
+                  placeholder="例如 openai / anthropic"
+                />
+              </label>
+
+              <label className="form-control w-full">
+                <span className="label-text mb-1.5 text-xs font-medium opacity-70">models.dev 别名</span>
+                <input
+                  className="input input-bordered w-full rounded-xl bg-base-200/40 transition-colors focus:bg-base-100 focus:border-primary focus:outline-none"
+                  value={draft.modelsDevProviderAliases}
+                  onChange={(e) =>
+                    updateProviderDraft(provider.id, (current) => ({
+                      ...current,
+                      modelsDevProviderAliases: e.target.value
+                    }))
+                  }
+                  placeholder="逗号分隔，如 open-ai, open ai"
+                />
+              </label>
+
+              <label className="label flex cursor-pointer justify-start gap-3 rounded-xl border border-base-300/50 bg-base-200/25 px-4 py-3">
+                <input
+                  type="checkbox"
+                  className="checkbox checkbox-sm"
+                  checked={draft.pricingDisabled}
+                  onChange={(e) =>
+                    updateProviderDraft(provider.id, (current) => ({
+                      ...current,
+                      pricingDisabled: e.target.checked
+                    }))
+                  }
+                />
+                <span className="label-text text-sm">禁用价格匹配</span>
+              </label>
+            </div>
+
+            <div className="border-t border-base-300/50" />
+
             {/* Prefix rules */}
             <div className="px-6 py-5">
               <div className="mb-3 flex items-center justify-between">

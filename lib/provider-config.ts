@@ -68,13 +68,36 @@ export function normalizeProviderConfig(raw: unknown): ProviderConfig {
       ? input.branding.color.trim().toLowerCase()
       : undefined;
 
+  const pricingRaw = input.pricing && typeof input.pricing === "object" && !Array.isArray(input.pricing)
+    ? input.pricing
+    : null;
+  const modelsDevProviderId = typeof pricingRaw?.modelsDevProviderId === "string"
+    ? pricingRaw.modelsDevProviderId.trim()
+    : "";
+  const modelsDevProviderAliases = Array.isArray(pricingRaw?.modelsDevProviderAliases)
+    ? Array.from(new Set(
+        pricingRaw.modelsDevProviderAliases
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => item.trim())
+          .filter(Boolean)
+      ))
+    : [];
+  const pricing = pricingRaw
+    ? {
+        ...(modelsDevProviderId ? { modelsDevProviderId } : {}),
+        ...(modelsDevProviderAliases.length > 0 ? { modelsDevProviderAliases } : {}),
+        ...(pricingRaw.disabled === true ? { disabled: true } : {})
+      }
+    : undefined;
+
   return {
     ...(displayName ? { displayName } : {}),
     ...(typeof input.displayTargetProviderId === "number" && Number.isInteger(input.displayTargetProviderId) && input.displayTargetProviderId > 0
       ? { displayTargetProviderId: input.displayTargetProviderId }
       : {}),
     ...(prefixRules.length > 0 ? { prefixRules } : { prefixRules: [] }),
-    ...(color ? { branding: { color } } : {})
+    ...(color ? { branding: { color } } : {}),
+    ...(pricing && Object.keys(pricing).length > 0 ? { pricing } : {})
   };
 }
 

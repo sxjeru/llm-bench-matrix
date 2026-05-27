@@ -53,6 +53,7 @@ import {
   buildOverallHeatRange,
   buildOverallScoreDisplayDecimalsByModel,
   buildOverallSummaryByModel,
+  buildPriceMatrixRows,
   buildProviderAverageCoveragePercentMap,
   buildProviderGroups,
   buildRowsBySource,
@@ -77,6 +78,9 @@ import {
   type ExportPresetKey,
   SOURCE_ALL,
   OVERALL_ROW_KEY,
+  PRICE_CACHE_INPUT_ROW_KEY,
+  PRICE_INPUT_ROW_KEY,
+  PRICE_OUTPUT_ROW_KEY,
   MODALITY_OPTIONS,
   CATEGORY_COLUMN_WIDTH_KEY,
   BENCHMARK_COLUMN_WIDTH_KEY,
@@ -117,10 +121,17 @@ import {
   getSourceValueDisplayItem
 } from "./benchmark-matrix/index";
 
+const PRICE_ROW_KEY_SET = new Set([
+  PRICE_INPUT_ROW_KEY,
+  PRICE_OUTPUT_ROW_KEY,
+  PRICE_CACHE_INPUT_ROW_KEY
+]);
+
 export function BenchmarkMatrix({
   rows,
   allRows = rows,
-  sourceOptions: allSourceOptions = []
+  sourceOptions: allSourceOptions = [],
+  modelPrices = []
 }: Props) {
   const sectionRef = useRef<HTMLElement | null>(null);
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
@@ -131,6 +142,7 @@ export function BenchmarkMatrix({
   const showCategoryLoadedRef = useRef(false);
   const showDuplicateLoadedRef = useRef(false);
   const showSourceValuesLoadedRef = useRef(false);
+  const showPriceRowsLoadedRef = useRef(false);
   const modelSelectionBySourceRef = useRef<Record<string, string[]>>({});
   const isSyncingSelectionFromSourceRef = useRef(false);
   const skipSelectionPersistenceOnceRef = useRef(false);
@@ -149,6 +161,7 @@ export function BenchmarkMatrix({
   const [showDuplicateRows, setShowDuplicateRows] = useState(false);
   const [showSourceValues, setShowSourceValues] = useState(false);
   const [showSourceValueDeltas, setShowSourceValueDeltas] = useState(false);
+  const [showPriceRows, setShowPriceRows] = useState(false);
   const [showLowCoverageRows, setShowLowCoverageRows] = useState(false);
   const [isClientReady, setIsClientReady] = useState(false);
   const [isModelSelectionLoaded, setIsModelSelectionLoaded] = useState(false);
@@ -231,6 +244,7 @@ export function BenchmarkMatrix({
 
   const displaySourceValuesInCells = showSourceValues && hasSourceData && activeSource !== SOURCE_ALL;
   const displaySourceValueDeltasInCells = displaySourceValuesInCells && showSourceValueDeltas;
+  const effectiveShowPriceRows = showPriceRows && modelPrices.length > 0;
 
   useEffect(() => {
     enqueueStateUpdate(() => setIsClientReady(true));
@@ -261,7 +275,10 @@ export function BenchmarkMatrix({
     setShowDuplicateRows,
     showSourceValuesLoadedRef,
     showSourceValues,
-    setShowSourceValues
+    setShowSourceValues,
+    showPriceRowsLoadedRef,
+    showPriceRows,
+    setShowPriceRows
   });
 
   useEffect(() => {
@@ -440,7 +457,7 @@ export function BenchmarkMatrix({
   function commitModelColumnReorder(draggingModel: string, targetModel: string, position: "before" | "after") {
     if (!draggingModel || draggingModel === targetModel) return;
 
-    const visibleModelOrder = [...modelColumns];
+    const visibleModelOrder = [...baseModelColumns];
     if (!visibleModelOrder.includes(draggingModel) || !visibleModelOrder.includes(targetModel)) return;
 
     const withoutDragging = visibleModelOrder.filter((modelName) => modelName !== draggingModel);
@@ -665,16 +682,18 @@ export function BenchmarkMatrix({
     [activeSource, filteredRows, showDuplicateRows, showLowCoverageRows]
   );
 
+  const isPriceRowSortKey = columnSortBenchmarkKey !== null && PRICE_ROW_KEY_SET.has(columnSortBenchmarkKey);
+
   const baseModelColumns = useMemo<readonly string[]>(
     () => buildModelColumns(
       coveragePrunedRows,
       sourceModelHint,
-      columnSortBenchmarkKey === OVERALL_ROW_KEY ? null : columnSortBenchmarkKey,
+      columnSortBenchmarkKey === OVERALL_ROW_KEY || isPriceRowSortKey ? null : columnSortBenchmarkKey,
       showDuplicateRows,
       modelOrderBySource,
       activeSource
     ),
-    [coveragePrunedRows, sourceModelHint, columnSortBenchmarkKey, showDuplicateRows, modelOrderBySource, activeSource]
+    [coveragePrunedRows, sourceModelHint, columnSortBenchmarkKey, isPriceRowSortKey, showDuplicateRows, modelOrderBySource, activeSource]
   );
 
   const matrixRows = useMemo(
@@ -726,9 +745,19 @@ export function BenchmarkMatrix({
     [modalityFilteredMatrixRows, rowPresenceFilterModel]
   );
 
+  const priceMatrixRows = useMemo(
+    () => effectiveShowPriceRows ? buildPriceMatrixRows(baseModelColumns, modelPrices) : [],
+    [effectiveShowPriceRows, baseModelColumns, modelPrices]
+  );
+
+  const summaryMatrixRows = useMemo(
+    () => effectiveShowPriceRows ? [...priceMatrixRows, ...presenceFilteredMatrixRows] : presenceFilteredMatrixRows,
+    [effectiveShowPriceRows, priceMatrixRows, presenceFilteredMatrixRows]
+  );
+
   const displayedCoverageMetaByModel = useMemo(
-    () => buildDisplayedCoverageMetaByModel(allModelNames, coveredModelsByGroupingKey, presenceFilteredMatrixRows),
-    [allModelNames, coveredModelsByGroupingKey, presenceFilteredMatrixRows]
+    () => buildDisplayedCoverageMetaByModel(allModelNames, coveredModelsByGroupingKey, presenceFilteredMatrixRows, priceMatrixRows),
+    [allModelNames, coveredModelsByGroupingKey, presenceFilteredMatrixRows, priceMatrixRows]
   );
 
   const modelCoveragePercentMap = useMemo(
@@ -746,17 +775,52 @@ export function BenchmarkMatrix({
     [presenceFilteredMatrixRows, rowSortState, activeSource]
   );
 
+  const displayMatrixRows = useMemo(
+    () => effectiveShowPriceRows ? [...priceMatrixRows, ...sortedMatrixRows] : sortedMatrixRows,
+    [effectiveShowPriceRows, priceMatrixRows, sortedMatrixRows]
+  );
+
   const headerUniqueCounts = useMemo(
     () => buildHeaderUniqueCounts(presenceFilteredMatrixRows),
     [presenceFilteredMatrixRows]
   );
 
   const overallSummaryByModel = useMemo(
-    () => buildOverallSummaryByModel(presenceFilteredMatrixRows, baseModelColumns),
-    [presenceFilteredMatrixRows, baseModelColumns]
+    () => buildOverallSummaryByModel(summaryMatrixRows, baseModelColumns),
+    [summaryMatrixRows, baseModelColumns]
   );
 
   const modelColumns = useMemo<readonly string[]>(() => {
+    if (isPriceRowSortKey) {
+      const priceRow = priceMatrixRows.find((row) => row.rowKey === columnSortBenchmarkKey);
+      if (!priceRow) return baseModelColumns;
+
+      const baseOrderIndex = new Map(baseModelColumns.map((modelName, index) => [modelName, index]));
+
+      return [...baseModelColumns].sort((leftModel, rightModel) => {
+        const leftValue = priceRow.cells.get(leftModel)?.valueNum;
+        const rightValue = priceRow.cells.get(rightModel)?.valueNum;
+
+        if (leftValue === null || leftValue === undefined) {
+          if (rightValue === null || rightValue === undefined) {
+            return (baseOrderIndex.get(leftModel) ?? 0) - (baseOrderIndex.get(rightModel) ?? 0);
+          }
+
+          return 1;
+        }
+
+        if (rightValue === null || rightValue === undefined) {
+          return -1;
+        }
+
+        if (rightValue !== leftValue) {
+          return leftValue - rightValue;
+        }
+
+        return (baseOrderIndex.get(leftModel) ?? 0) - (baseOrderIndex.get(rightModel) ?? 0);
+      });
+    }
+
     if (columnSortBenchmarkKey !== OVERALL_ROW_KEY) {
       return baseModelColumns;
     }
@@ -785,7 +849,7 @@ export function BenchmarkMatrix({
 
       return (baseOrderIndex.get(leftModel) ?? 0) - (baseOrderIndex.get(rightModel) ?? 0);
     });
-  }, [baseModelColumns, columnSortBenchmarkKey, overallSummaryByModel]);
+  }, [baseModelColumns, columnSortBenchmarkKey, isPriceRowSortKey, overallSummaryByModel, priceMatrixRows]);
 
   const compareModelSet = useMemo(() => new Set(compareModelOrder), [compareModelOrder]);
   const compareBaselineModelName = compareModelOrder[0] ?? null;
@@ -1044,6 +1108,9 @@ export function BenchmarkMatrix({
         setShowDuplicateRows={setShowDuplicateRows}
         showLowCoverageRows={showLowCoverageRows}
         setShowLowCoverageRows={setShowLowCoverageRows}
+        showPriceRows={showPriceRows}
+        setShowPriceRows={setShowPriceRows}
+        hasPriceData={modelPrices.length > 0}
         hasSourceData={hasSourceData}
         displaySourceValuesInCells={displaySourceValuesInCells}
         onSourceValuesButtonClick={(event) => {
@@ -1449,9 +1516,9 @@ export function BenchmarkMatrix({
             </tr>
           </thead>
           <tbody>
-            {sortedMatrixRows.map((matrixRow, rowIndex) => {
+            {displayMatrixRows.map((matrixRow, rowIndex) => {
               const rowKey = matrixRow.rowKey;
-              const isLastMatrixRow = rowIndex === sortedMatrixRows.length - 1;
+              const isLastMatrixRow = rowIndex === displayMatrixRows.length - 1;
               const isRowLowerBetter = isLowerBetterBenchmark(
                 matrixRow.benchmark,
                 matrixRow.category,
@@ -1487,12 +1554,14 @@ export function BenchmarkMatrix({
                     return null;
                   }
 
-                  return getBenchmarkComparableScore(
-                    matrixRow.benchmark,
-                    valueNum,
-                    matrixRow.category,
-                    matrixRow.higherIsBetter
-                  );
+                  return matrixRow.isPriceRow
+                    ? -valueNum
+                    : getBenchmarkComparableScore(
+                        matrixRow.benchmark,
+                        valueNum,
+                        matrixRow.category,
+                        matrixRow.higherIsBetter
+                      );
                 })
                 .filter((value): value is number => value !== null && Number.isFinite(value));
               const secondaryComparableValues = modelColumnMeta
@@ -1502,12 +1571,14 @@ export function BenchmarkMatrix({
                     return null;
                   }
 
-                  return getBenchmarkComparableScore(
-                    matrixRow.benchmark,
-                    valueNum2,
-                    matrixRow.category,
-                    matrixRow.higherIsBetter
-                  );
+                  return matrixRow.isPriceRow
+                    ? -valueNum2
+                    : getBenchmarkComparableScore(
+                        matrixRow.benchmark,
+                        valueNum2,
+                        matrixRow.category,
+                        matrixRow.higherIsBetter
+                      );
                 })
                 .filter((value): value is number => value !== null && Number.isFinite(value));
               const primaryComparableDistinctDesc = Array.from(new Set(primaryComparableValues)).sort((a, b) => b - a);
@@ -1582,6 +1653,7 @@ export function BenchmarkMatrix({
               return (
                 <tr
                   key={rowKey}
+                  data-metric-type={matrixRow.isPriceRow ? "price" : undefined}
                   className={isSelectedRow ? "matrix-row-selected" : "matrix-row-hover"}
                   onClick={() => {
                     setSelectedRowKey((prev) => (prev === rowKey ? null : rowKey));
@@ -1683,10 +1755,14 @@ export function BenchmarkMatrix({
                     const isCompareBaseline = compareBaselineModelName === model.modelName;
                     const isCompareSelected = compareModelSet.has(model.modelName);
                     const comparableCellNum = cellNum !== null
-                      ? getBenchmarkComparableScore(matrixRow.benchmark, cellNum, matrixRow.category, matrixRow.higherIsBetter)
+                      ? matrixRow.isPriceRow
+                        ? -cellNum
+                        : getBenchmarkComparableScore(matrixRow.benchmark, cellNum, matrixRow.category, matrixRow.higherIsBetter)
                       : null;
                     const comparableCellNum2 = cellNum2 !== null
-                      ? getBenchmarkComparableScore(matrixRow.benchmark, cellNum2, matrixRow.category, matrixRow.higherIsBetter)
+                      ? matrixRow.isPriceRow
+                        ? -cellNum2
+                        : getBenchmarkComparableScore(matrixRow.benchmark, cellNum2, matrixRow.category, matrixRow.higherIsBetter)
                       : null;
                     const rawText = cell?.displayValue ?? "--";
                     const noteText = cell?.noteText ?? "";
@@ -1835,6 +1911,7 @@ export function BenchmarkMatrix({
                     return (
                       <td
                         key={`${rowKey}::${model.modelName}`}
+                        data-model-name={model.modelName}
                         data-source-match={model.isSourceMatched ? "1" : undefined}
                         data-source-match-first={model.isSourceMatchedFirst ? "1" : undefined}
                         data-source-match-last={model.isSourceMatchedLast ? "1" : undefined}
@@ -2094,7 +2171,7 @@ export function BenchmarkMatrix({
 
       <OverallScoreTooltip tooltip={activeOverallTooltip} />
 
-      {sortedMatrixRows.length === 0 ? (
+      {displayMatrixRows.length === 0 ? (
         <div className="mt-3 text-sm opacity-75">当前筛选条件下暂无数据。</div>
       ) : null}
     </section>
