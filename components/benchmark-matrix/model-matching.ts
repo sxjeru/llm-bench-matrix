@@ -3,7 +3,9 @@ import type { ModelScaleToken, ModelVariantToken, ModelVersionToken } from "./ty
 import { sourceTabDisplayLabel } from "./utils";
 
 export function extractModelVersionToken(modelName: string): ModelVersionToken | null {
-  const match = MODEL_VERSION_TOKEN_PATTERN.exec(modelName.trim());
+  const trimmed = modelName.trim();
+  const match = MODEL_VERSION_TOKEN_PATTERN.exec(trimmed)
+    ?? /^([A-Za-z][A-Za-z\s_-]*?)(\d+(?:\.\d+)?)(?=\D|$)/.exec(trimmed);
   if (!match) {
     return null;
   }
@@ -14,8 +16,17 @@ export function extractModelVersionToken(modelName: string): ModelVersionToken |
     return null;
   }
 
+  const familyKey = family
+    .replace(/[\s_-]+$/g, "")
+    .replace(/[\s_-]+/g, " ")
+    .trim()
+    .toLowerCase();
+  if (!familyKey) {
+    return null;
+  }
+
   return {
-    familyKey: family.toLowerCase(),
+    familyKey,
     version
   };
 }

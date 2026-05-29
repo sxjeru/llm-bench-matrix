@@ -22,10 +22,17 @@ describe("BenchmarkMatrix source tabs", () => {
     }
   });
 
-  test("同系列 source 页签按新版本优先排序（如 Qwen3.6 在 Qwen3.5 前）", () => {
+  test("同系列 source 页签按新版本优先排序（如 Qwen3.6 在 Qwen3.5 前，Claude Opus 4.8 在 4.7 前）", () => {
     render(
       <BenchmarkMatrix
-        sourceOptions={["text:Qwen3.5", "text:Qwen3.6", "text:Qwen3.4", "text:Gemini-2.5-Pro"]}
+        sourceOptions={[
+          "text:Qwen3.5",
+          "text:Qwen3.6",
+          "text:Qwen3.4",
+          "text:Gemini-2.5-Pro",
+          "text:Claude Opus 4.7",
+          "text:Claude Opus 4.8"
+        ]}
         rows={[
           {
             providerName: "Qwen",
@@ -48,6 +55,13 @@ describe("BenchmarkMatrix source tabs", () => {
       .filter((label) => label.startsWith("Qwen3."));
 
     expect(qwenTabs).toEqual(["Qwen3.6", "Qwen3.5", "Qwen3.4"]);
+
+    const claudeTabs = screen
+      .getAllByRole("tab")
+      .map((tab) => tab.textContent?.trim() ?? "")
+      .filter((label) => label.startsWith("Claude Opus"));
+
+    expect(claudeTabs).toEqual(["Claude Opus 4.8", "Claude Opus 4.7"]);
   });
 
   test("当 rows 仅有单一 source 时，也会按 sourceOptions 展示全部页签", () => {
