@@ -617,6 +617,203 @@ describe("benchmark scale consistency", () => {
     );
   });
 
+  test("splitBenchmarkScaleByMode 会复用已存在的 base 与 Elo benchmark 并迁移到正确实体", async () => {
+    const dbSelectWhere = createSelectWhereMock([
+      [
+        {
+          id: 21,
+          benchmarkName: "GDPval-AA Mixed",
+          benchmarkType: "General",
+          unit: "score",
+          higherIsBetter: true,
+          modalities: ["Text"],
+          sourceBenchmarkId: null
+        }
+      ]
+    ]);
+    const dbSelectFrom = vi.fn(() => ({ where: dbSelectWhere }));
+    vi.spyOn(dbForTest, "select").mockImplementation(() => ({ from: dbSelectFrom }));
+
+    vi.spyOn(dbForTest, "execute")
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            benchmark_id: 21,
+            benchmark_name: "GDPval-AA Mixed",
+            benchmark_type: "General",
+            value_count: "4",
+            small_count: "0",
+            large_count: "4",
+            zero_to_hundred_count: "2",
+            over_hundred_count: "2",
+            min_value: "35",
+            max_value: "1890"
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ rows: [] });
+
+    const txSelectWhere = vi.fn()
+      .mockImplementationOnce(() => createResolvedQueryMock([
+        {
+          id: 41,
+          benchmarkName: "GDPval-AA",
+          benchmarkType: "General",
+          unit: "score",
+          higherIsBetter: true,
+          modalities: ["Text"],
+          sourceBenchmarkId: null
+        }
+      ]))
+      .mockImplementationOnce(() => createResolvedQueryMock([
+        {
+          id: 42,
+          benchmarkName: "GDPval-AA (Elo)",
+          benchmarkType: "General",
+          unit: "score",
+          higherIsBetter: true,
+          modalities: ["Text"],
+          sourceBenchmarkId: null
+        }
+      ]))
+      .mockImplementationOnce(() => createResolvedQueryMock([
+        {
+          id: 101,
+          modelId: 1,
+          benchmarkId: 21,
+          benchTime: new Date("2026-04-18T09:00:00.000Z"),
+          valueRaw: "35",
+          valueNum: "35",
+          valueNum2: null,
+          valueNote: null,
+          source: "text:seed"
+        },
+        {
+          id: 102,
+          modelId: 2,
+          benchmarkId: 21,
+          benchTime: new Date("2026-04-18T09:05:00.000Z"),
+          valueRaw: "1890",
+          valueNum: "1890",
+          valueNum2: null,
+          valueNote: null,
+          source: "text:seed"
+        },
+        {
+          id: 103,
+          modelId: 3,
+          benchmarkId: 21,
+          benchTime: new Date("2026-04-18T09:10:00.000Z"),
+          valueRaw: "86 / 1760",
+          valueNum: "86",
+          valueNum2: "1760",
+          valueNote: "from-report",
+          source: "text:seed"
+        }
+      ]))
+      .mockImplementationOnce(() => Promise.resolve([
+        {
+          source: "text:seed",
+          benchmarkType: "General",
+          modalities: ["Text"]
+        }
+      ]));
+    const txSelectFrom = vi.fn(() => ({ where: txSelectWhere }));
+    const txSelect = vi.fn(() => ({ from: txSelectFrom }));
+
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const splitUpdatePayloads: Array<Record<string, unknown>> = [];
+    const updateSet = vi.fn((payload: Record<string, unknown>) => {
+      if ("benchmarkId" in payload) {
+        splitUpdatePayloads.push(payload);
+      }
+
+      return { where: updateWhere };
+    });
+    const update = vi.fn(() => ({ set: updateSet }));
+
+    const splitInsertPayloads: Array<Record<string, unknown>> = [];
+    const sourceMetaPayloads: Array<Record<string, unknown>> = [];
+    const onConflictDoNothing = vi.fn().mockResolvedValue(undefined);
+    const insertValues = vi.fn((payload: Record<string, unknown> | Array<Record<string, unknown>>) => {
+      const rows = Array.isArray(payload) ? payload : [payload];
+      const firstRow = rows[0];
+
+      if (firstRow && "source" in firstRow && "modalities" in firstRow) {
+        sourceMetaPayloads.push(...rows);
+        return { onConflictDoNothing };
+      }
+
+      if (firstRow && "modelId" in firstRow) {
+        splitInsertPayloads.push(...rows);
+      }
+
+      return Promise.resolve(undefined);
+    });
+    const insert = vi.fn(() => ({ values: insertValues }));
+
+    const tx = { select: txSelect, update, insert };
+    vi.spyOn(dbForTest, "transaction").mockImplementation(async (callback: TransactionCallback) => callback(tx));
+
+    const result = await splitBenchmarkScaleByModeForTest({
+      benchmarkId: 21,
+      splitMode: "hundred-vs-elo",
+      baseBenchmarkName: "GDPval-AA",
+      eloBenchmarkName: "GDPval-AA (Elo)"
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.movedRows).toBe(2);
+    expect(result.splitRows).toBe(1);
+    expect(result.createdRows).toBe(1);
+    expect(result.eloBenchmarkName).toBe("GDPval-AA (Elo)");
+
+    expect(splitUpdatePayloads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          benchmarkId: 41,
+          valueNote: "split-benchmark-base"
+        }),
+        expect.objectContaining({
+          benchmarkId: 42,
+          valueNote: "split-benchmark-elo"
+        }),
+        expect.objectContaining({
+          benchmarkId: 41,
+          valueRaw: "86",
+          valueNum: "86",
+          valueNum2: null,
+          valueNote: "from-report; split-benchmark-base"
+        })
+      ])
+    );
+    expect(splitInsertPayloads).toEqual([
+      expect.objectContaining({
+        benchmarkId: 42,
+        valueRaw: "1760",
+        valueNum: "1760",
+        valueNum2: null,
+        valueNote: "from-report; split-benchmark-elo"
+      })
+    ]);
+    expect(sourceMetaPayloads).toEqual(
+      expect.arrayContaining([
+        {
+          benchmarkId: 41,
+          source: "text:seed",
+          benchmarkType: "General",
+          modalities: ["Text"]
+        },
+        {
+          benchmarkId: 42,
+          source: "text:seed",
+          benchmarkType: "General",
+          modalities: ["Text"]
+        }
+      ])
+    );
+  });
+
   test("splitBenchmarkScaleByMode 会为 Elo benchmark 补齐 source meta 继承", async () => {
     const dbSelectWhere = createSelectWhereMock([
       [

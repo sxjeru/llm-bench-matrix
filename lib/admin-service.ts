@@ -5909,21 +5909,20 @@ export async function splitBenchmarkScaleByMode(input: {
   }
 
   const result = await db.transaction(async (tx: DbTransactionClient) => {
-    let baseBenchmarkId = benchmark.id;
-
-    if (benchmark.benchmarkName !== baseBenchmarkName) {
-      const updatedResult = await tx
-        .update(benchmarks)
-        .set({
-          benchmarkName: baseBenchmarkName,
-          canonicalKey: baseCanonicalKey
-        })
-        .where(eq(benchmarks.id, benchmark.id))
-        .returning({ id: benchmarks.id });
-
-      const updated = firstResultRow<{ id: number }>(updatedResult);
-      baseBenchmarkId = updated?.id ?? benchmark.id;
-    }
+    const baseBenchmark = benchmark.benchmarkName === baseBenchmarkName
+      ? benchmark
+      : await ensureBenchmark(
+          {
+            benchmarkName: baseBenchmarkName,
+            benchmarkType: benchmark.benchmarkType,
+            unit: benchmark.unit,
+            higherIsBetter: benchmark.higherIsBetter,
+            modalities: benchmark.modalities,
+            sourceBenchmarkId: benchmark.sourceBenchmarkId
+          },
+          { dedupeRule, db: tx }
+        );
+    const baseBenchmarkId = baseBenchmark.id;
 
     const eloBenchmark = await ensureBenchmark(
       {
@@ -5976,12 +5975,32 @@ export async function splitBenchmarkScaleByMode(input: {
 
     const fallbackBenchmarkType = benchmark.benchmarkType;
     const fallbackModalities = benchmark.modalities?.length ? benchmark.modalities : ["Text"];
-    const eloSourceMetaUpsertMap = new Map<string, {
+    const sourceMetaUpsertMap = new Map<string, {
       benchmarkId: number;
       source: string;
       benchmarkType: string;
       modalities: string[];
     }>();
+
+    const queueSourceMetaUpsert = (targetBenchmarkId: number, source: string | null | undefined) => {
+      const normalizedSource = source?.trim() ?? "";
+      if (normalizedSource.length === 0) {
+        return;
+      }
+
+      const key = `${targetBenchmarkId}\u0000${normalizedSource}`;
+      if (sourceMetaUpsertMap.has(key)) {
+        return;
+      }
+
+      const sourceMeta = sourceMetaBySource.get(normalizedSource);
+      sourceMetaUpsertMap.set(key, {
+        benchmarkId: targetBenchmarkId,
+        source: normalizedSource,
+        benchmarkType: sourceMeta?.benchmarkType ?? fallbackBenchmarkType,
+        modalities: sourceMeta?.modalities ?? fallbackModalities
+      });
+    };
 
     let movedRows = 0;
     let splitRows = 0;
@@ -5999,20 +6018,25 @@ export async function splitBenchmarkScaleByMode(input: {
       const hasEloValue = valueNumIsElo || valueNum2IsElo;
 
       if (!hasEloValue) {
+        if (baseBenchmarkId !== benchmark.id) {
+          queueSourceMetaUpsert(baseBenchmarkId, row.source);
+
+          await tx
+            .update(benchmarkValues)
+            .set({
+              benchmarkId: baseBenchmarkId,
+              valueNote: appendBenchmarkSplitNote(row.valueNote, "base")
+            })
+            .where(eq(benchmarkValues.id, row.id));
+
+          movedRows += 1;
+        }
+
         continue;
       }
 
       if (!hasBaseValue) {
-        const normalizedSource = row.source?.trim() ?? "";
-        if (normalizedSource.length > 0 && !eloSourceMetaUpsertMap.has(normalizedSource)) {
-          const sourceMeta = sourceMetaBySource.get(normalizedSource);
-          eloSourceMetaUpsertMap.set(normalizedSource, {
-            benchmarkId: eloBenchmark.id,
-            source: normalizedSource,
-            benchmarkType: sourceMeta?.benchmarkType ?? fallbackBenchmarkType,
-            modalities: sourceMeta?.modalities ?? fallbackModalities
-          });
-        }
+        queueSourceMetaUpsert(eloBenchmark.id, row.source);
 
         await tx
           .update(benchmarkValues)
@@ -6063,26 +6087,18 @@ export async function splitBenchmarkScaleByMode(input: {
         source: row.source
       });
 
-      const normalizedSource = row.source?.trim() ?? "";
-      if (normalizedSource.length > 0 && !eloSourceMetaUpsertMap.has(normalizedSource)) {
-        const sourceMeta = sourceMetaBySource.get(normalizedSource);
-        eloSourceMetaUpsertMap.set(normalizedSource, {
-          benchmarkId: eloBenchmark.id,
-          source: normalizedSource,
-          benchmarkType: sourceMeta?.benchmarkType ?? fallbackBenchmarkType,
-          modalities: sourceMeta?.modalities ?? fallbackModalities
-        });
-      }
+      queueSourceMetaUpsert(baseBenchmarkId, row.source);
+      queueSourceMetaUpsert(eloBenchmark.id, row.source);
 
       splitRows += 1;
       createdRows += 1;
     }
 
-    const eloSourceMetaRows = Array.from(eloSourceMetaUpsertMap.values());
-    if (eloSourceMetaRows.length > 0) {
+    const sourceMetaUpsertRows = Array.from(sourceMetaUpsertMap.values());
+    if (sourceMetaUpsertRows.length > 0) {
       await tx
         .insert(benchmarkSourceMeta)
-        .values(eloSourceMetaRows)
+        .values(sourceMetaUpsertRows)
         .onConflictDoNothing({
           target: [benchmarkSourceMeta.benchmarkId, benchmarkSourceMeta.source]
         });
@@ -6090,7 +6106,7 @@ export async function splitBenchmarkScaleByMode(input: {
 
     return {
       baseBenchmarkId,
-      baseBenchmarkName,
+      baseBenchmarkName: baseBenchmark.benchmarkName,
       baseBenchmarkType: benchmark.benchmarkType,
       eloBenchmarkId: eloBenchmark.id,
       eloBenchmarkName: eloBenchmark.benchmarkName,
