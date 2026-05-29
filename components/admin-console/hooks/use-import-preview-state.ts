@@ -153,84 +153,6 @@ export function useImportPreviewState({
     [modelWarnings]
   );
 
-  const benchmarkMergeCandidateMap = useMemo(() => {
-    const existingByCompareKey = new Map<string, BenchmarkOption[]>();
-
-    benchmarks.forEach((item) => {
-      const compareKey = buildBenchmarkCompareKey(item.benchmarkName);
-      if (!compareKey) return;
-
-      if (!existingByCompareKey.has(compareKey)) {
-        existingByCompareKey.set(compareKey, []);
-      }
-
-      existingByCompareKey.get(compareKey)?.push(item);
-    });
-
-    const importedBenchmarks = new Map<string, { benchmarkName: string; benchmarkType: string }>();
-    const importedBenchmarkHasEloValue = new Map<string, boolean>();
-
-    textImportDraftRows.forEach((item) => {
-      const key = getTextImportBenchmarkKey(item.benchmarkName, item.benchmarkType);
-      if (!importedBenchmarks.has(key)) {
-        importedBenchmarks.set(key, {
-          benchmarkName: item.benchmarkName,
-          benchmarkType: item.benchmarkType
-        });
-      }
-
-      if ((item.valueNum !== null && item.valueNum > 100) || (item.valueNum2 !== null && item.valueNum2 > 100)) {
-        importedBenchmarkHasEloValue.set(key, true);
-      }
-    });
-
-    const map = new Map<string, number[]>();
-    const addCandidate = (key: string, targetId: number | null | undefined) => {
-      if (!targetId) return;
-      const current = map.get(key) ?? [];
-      if (!current.includes(targetId)) {
-        map.set(key, [...current, targetId]);
-      }
-    };
-
-    importedBenchmarks.forEach(({ benchmarkName, benchmarkType }, key) => {
-      const exactExisting = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(benchmarkName, benchmarkType));
-      addCandidate(key, exactExisting?.id);
-
-      const sameNameExisting = existingBenchmarkByNameMap.get(benchmarkName.trim().toLowerCase()) ?? [];
-      sameNameExisting.forEach((item) => addCandidate(key, item.id));
-
-      const aliasTargetName = resolveHardcodedBenchmarkAliasTarget(benchmarkName);
-      if (aliasTargetName) {
-        const aliasTarget = benchmarks.find((item) => item.benchmarkName.toLowerCase() === aliasTargetName.toLowerCase());
-        addCandidate(key, aliasTarget?.id);
-      }
-
-      const hasEloSuffix = hasEloBenchmarkSuffix(benchmarkName);
-      const hasEloValue = importedBenchmarkHasEloValue.get(key) === true;
-      if (hasEloValue && !hasEloSuffix) {
-        const eloBenchmarkName = getEloBenchmarkName(benchmarkName);
-        const exactEloExisting = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(eloBenchmarkName, benchmarkType));
-        addCandidate(key, exactEloExisting?.id);
-
-        const sameNameEloExisting = existingBenchmarkByNameMap.get(eloBenchmarkName.trim().toLowerCase()) ?? [];
-        sameNameEloExisting.forEach((item) => addCandidate(key, item.id));
-
-        const eloCompareKey = buildBenchmarkCompareKey(eloBenchmarkName);
-        const eloCompareCandidates = eloCompareKey ? (existingByCompareKey.get(eloCompareKey) ?? []) : [];
-        eloCompareCandidates
-          .filter((item) => hasEloBenchmarkSuffix(item.benchmarkName))
-          .forEach((item) => addCandidate(key, item.id));
-      }
-
-      const compareKey = buildBenchmarkCompareKey(benchmarkName);
-      const candidates = compareKey ? (existingByCompareKey.get(compareKey) ?? []) : [];
-      candidates.forEach((item) => addCandidate(key, item.id));
-    });
-
-    return map;
-  }, [benchmarks, textImportDraftRows, existingBenchmarkExactMap, existingBenchmarkByNameMap]);
-
   const benchmarkWarnings = useMemo(() => {
     const existingByCompareKey = new Map<string, BenchmarkOption[]>();
 
@@ -277,12 +199,7 @@ export function useImportPreviewState({
         const exactEloExisting = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(eloBenchmarkName, benchmarkType));
         const sameNameEloExisting = existingBenchmarkByNameMap.get(eloBenchmarkName.trim().toLowerCase()) ?? [];
 
-        const suggestedEloTarget = exactEloExisting ?? sameNameEloExisting[0] ?? null;
-        if (suggestedEloTarget) {
-          reasons.push(`检测到 >100 Elo 数值，建议合并到 ${suggestedEloTarget.benchmarkName} [${suggestedEloTarget.benchmarkType}]`);
-          suggestedTargetId = suggestedEloTarget.id;
-          level = "warn";
-        } else {
+        if (!exactEloExisting && sameNameEloExisting.length === 0) {
           reasons.push(`检测到 >100 Elo 数值，但库内不存在 ${eloBenchmarkName}`);
           level = "warn";
         }
@@ -290,8 +207,6 @@ export function useImportPreviewState({
 
       const exactExisting = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(benchmarkName, benchmarkType));
       const sameNameExisting = existingBenchmarkByNameMap.get(benchmarkName.trim().toLowerCase()) ?? [];
-      const compareKey = buildBenchmarkCompareKey(benchmarkName);
-      const candidates = compareKey ? (existingByCompareKey.get(compareKey) ?? []) : [];
       if (exactExisting || sameNameExisting.length > 0) {
         if (reasons.length === 0) return;
 
@@ -302,7 +217,7 @@ export function useImportPreviewState({
           level,
           reasons,
           suggestedTargetId,
-          candidateTargetIds: benchmarkMergeCandidateMap.get(key) ?? [],
+          candidateTargetIds: [],
           hasParentheses
         });
         return;
@@ -328,6 +243,8 @@ export function useImportPreviewState({
         }
       }
 
+      const compareKey = buildBenchmarkCompareKey(benchmarkName);
+      const candidates = compareKey ? (existingByCompareKey.get(compareKey) ?? []) : [];
       if (candidates.length > 0) {
         const candidateLabels = candidates
           .slice(0, 3)
@@ -354,18 +271,104 @@ export function useImportPreviewState({
         level,
         reasons,
         suggestedTargetId,
-        candidateTargetIds: benchmarkMergeCandidateMap.get(key) ?? [],
+        candidateTargetIds: Array.from(new Set(candidates.map((item) => item.id))),
         hasParentheses
       });
     });
 
     return warnings;
-  }, [benchmarks, textImportDraftRows, existingBenchmarkExactMap, existingBenchmarkByNameMap, benchmarkMergeCandidateMap]);
+  }, [benchmarks, textImportDraftRows, existingBenchmarkExactMap, existingBenchmarkByNameMap]);
 
   const benchmarkWarningMap = useMemo(
     () => new Map(benchmarkWarnings.map((item) => [item.key, item])),
     [benchmarkWarnings]
   );
+
+  const benchmarkMergeCandidateMap = useMemo(() => {
+    const existingByCompareKey = new Map<string, BenchmarkOption[]>();
+    benchmarks.forEach((item) => {
+      const compareKey = buildBenchmarkCompareKey(item.benchmarkName);
+      if (!compareKey) return;
+      if (!existingByCompareKey.has(compareKey)) {
+        existingByCompareKey.set(compareKey, []);
+      }
+      existingByCompareKey.get(compareKey)?.push(item);
+    });
+
+    const importedBenchmarks = new Map<string, { benchmarkName: string; benchmarkType: string }>();
+    textImportDraftRows.forEach((item) => {
+      const key = getTextImportBenchmarkKey(item.benchmarkName, item.benchmarkType);
+      if (!importedBenchmarks.has(key)) {
+        importedBenchmarks.set(key, {
+          benchmarkName: item.benchmarkName,
+          benchmarkType: item.benchmarkType
+        });
+      }
+    });
+
+    const candidateMap = new Map<string, Set<number>>();
+
+    importedBenchmarks.forEach(({ benchmarkName, benchmarkType }, key) => {
+      const candidates = new Set<number>();
+
+      // 1. 精确匹配
+      const exactExisting = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(benchmarkName, benchmarkType));
+      if (exactExisting) {
+        candidates.add(exactExisting.id);
+      }
+
+      // 2. 同名 benchmark（即使类型不同）
+      const sameNameExisting = existingBenchmarkByNameMap.get(benchmarkName.trim().toLowerCase()) ?? [];
+      sameNameExisting.forEach((item) => candidates.add(item.id));
+
+      // 3. 硬编码别名
+      const aliasTargetName = resolveHardcodedBenchmarkAliasTarget(benchmarkName);
+      if (aliasTargetName) {
+        const aliasTarget = benchmarks.find((item) => item.benchmarkName.toLowerCase() === aliasTargetName.toLowerCase());
+        if (aliasTarget) {
+          candidates.add(aliasTarget.id);
+        }
+      }
+
+      // 4. Elo 目标（检测 >100 值的 Elo 变体）
+      const importedBenchmarkHasEloValue = Array.from(importedBenchmarks.entries()).some(
+        ([k]) => k === key && (
+          textImportDraftRows.some(row => 
+            getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType) === key &&
+            ((row.valueNum !== null && row.valueNum > 100) || (row.valueNum2 !== null && row.valueNum2 > 100))
+          )
+        )
+      );
+
+      if (importedBenchmarkHasEloValue && !hasEloBenchmarkSuffix(benchmarkName)) {
+        const eloBenchmarkName = getEloBenchmarkName(benchmarkName);
+        const eloExact = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(eloBenchmarkName, benchmarkType));
+        if (eloExact) {
+          candidates.add(eloExact.id);
+        }
+        const eloSameName = existingBenchmarkByNameMap.get(eloBenchmarkName.trim().toLowerCase()) ?? [];
+        eloSameName.forEach((item) => candidates.add(item.id));
+      }
+
+      // 5. compare-key 匹配
+      const compareKey = buildBenchmarkCompareKey(benchmarkName);
+      if (compareKey) {
+        const compareKeyCandidates = existingByCompareKey.get(compareKey) ?? [];
+        compareKeyCandidates.forEach((item) => candidates.add(item.id));
+      }
+
+      if (candidates.size > 0) {
+        candidateMap.set(key, candidates);
+      }
+    });
+
+    // 转换为 Map<string, number[]>
+    const result = new Map<string, number[]>();
+    candidateMap.forEach((ids, key) => {
+      result.set(key, Array.from(ids));
+    });
+    return result;
+  }, [benchmarks, textImportDraftRows, existingBenchmarkExactMap, existingBenchmarkByNameMap]);
 
   const benchmarksWithParentheses = useMemo(() => {
     const found = new Map<string, { key: string; benchmarkName: string; benchmarkType: string }>();
@@ -470,10 +473,9 @@ export function useImportPreviewState({
         ...(warning.suggestedTargetId ? [warning.suggestedTargetId] : [])
       ]))
     ] as const);
-    const candidateEntries = Array.from(benchmarkMergeCandidateMap.entries());
     const candidateMap = new Map<string, number[]>();
 
-    [...candidateEntries, ...warningCandidates].forEach(([key, candidateIds]) => {
+    [...Array.from(benchmarkMergeCandidateMap.entries()), ...warningCandidates].forEach(([key, candidateIds]) => {
       candidateMap.set(key, Array.from(new Set([...(candidateMap.get(key) ?? []), ...candidateIds])));
     });
 

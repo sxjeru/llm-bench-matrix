@@ -14,7 +14,7 @@ import type {
   StructuredCsvImportRow,
   TextImportPreviewRow
 } from "../types";
-import { getOmniDocBenchNormalizeHint } from "../utils/benchmark";
+import { buildBenchmarkCompareKey, getOmniDocBenchNormalizeHint } from "../utils/benchmark";
 import { toDomSafeId } from "../utils/dom";
 import { formatPreviewNumericValue } from "../utils/import-values";
 import { parseExplicitMergeEntityId } from "../utils/merge";
@@ -276,10 +276,58 @@ export function ImportTab({
   setModelParenthesesCustomNames,
   textImportPreviewTableRows,
   visibleResolvedTextImportPreviewRows,
-  setTextImportPreviewVisibleCount
+  setTextImportPreviewVisibleCount,
+  benchmarks
 }: ImportTabProps) {
   function renderModalityBadge(modalityInput: string, key: string) {
     return <ModalityBadge key={key} modalityInput={modalityInput} />;
+  }
+
+  function getBenchmarkSearchCandidateIds(inputValue: string, benchmarkType: string) {
+    const normalizedInput = inputValue.trim().toLowerCase();
+    const inputCompareKey = buildBenchmarkCompareKey(inputValue);
+    if (!normalizedInput && !inputCompareKey) return [];
+
+    return benchmarks
+      .map((item, index) => {
+        const nameLower = item.benchmarkName.toLowerCase();
+        const typeLower = item.benchmarkType.toLowerCase();
+        const labelLower = `${item.benchmarkName} [${item.benchmarkType}]`.toLowerCase();
+        const compareKey = buildBenchmarkCompareKey(item.benchmarkName);
+        let score = 0;
+
+        if (nameLower === normalizedInput && item.benchmarkType === benchmarkType) {
+          score += 100;
+        } else if (nameLower === normalizedInput) {
+          score += 90;
+        }
+
+        if (compareKey && inputCompareKey && compareKey === inputCompareKey) {
+          score += 80;
+        }
+
+        if (normalizedInput && labelLower.includes(normalizedInput)) {
+          score += 50;
+        }
+
+        if (normalizedInput && (nameLower.includes(normalizedInput) || typeLower.includes(normalizedInput))) {
+          score += 40;
+        }
+
+        if (compareKey && inputCompareKey && (compareKey.includes(inputCompareKey) || inputCompareKey.includes(compareKey))) {
+          score += 30;
+        }
+
+        if (item.benchmarkType === benchmarkType) {
+          score += 10;
+        }
+
+        return score > 0 ? { id: item.id, score, index } : null;
+      })
+      .filter((item): item is { id: number; score: number; index: number } => item !== null)
+      .sort((a, b) => b.score - a.score || a.index - b.index)
+      .slice(0, 30)
+      .map((item) => item.id);
   }
 
   return (
@@ -756,11 +804,13 @@ export function ImportTab({
                         >
                           <div className="space-y-1">
                             {(() => {
+                              const benchmarkInputValue = matrixBenchmarkNameDrafts[matrixRow.key] ?? matrixRow.benchmarkName;
                               const benchmarkCandidateTargetIds = Array.from(new Set([
                                 ...(benchmarkMergeCandidateMap.get(matrixRow.key) ?? []),
                                 ...(warning?.candidateTargetIds ?? []),
-                                ...(warning?.suggestedTargetId ? [warning.suggestedTargetId] : [])
-                              ]));
+                                ...(warning?.suggestedTargetId ? [warning.suggestedTargetId] : []),
+                                ...getBenchmarkSearchCandidateIds(benchmarkInputValue, matrixRow.benchmarkType)
+                              ])).slice(0, 30);
                               const benchmarkCandidateOptions = benchmarkCandidateTargetIds.map((targetId) => {
                                 const target = benchmarkEntityOptions.find((item) => String(item.id) === String(targetId));
                                 return {
@@ -774,7 +824,7 @@ export function ImportTab({
                                   <div className="relative" data-matrix-benchmark-candidate-container="true">
                                     <input
                                       className="input input-bordered input-xs w-full"
-                                      value={matrixBenchmarkNameDrafts[matrixRow.key] ?? matrixRow.benchmarkName}
+                                      value={benchmarkInputValue}
                                       onFocus={() => {
                                         if (benchmarkCandidateOptions.length > 0) {
                                           setOpenMatrixBenchmarkCandidateFor(matrixRow.key);
@@ -788,6 +838,7 @@ export function ImportTab({
                                           return;
                                         }
                                         onMatrixBenchmarkNameInputChange(matrixRow.key, nextInput);
+                                        setOpenMatrixBenchmarkCandidateFor(matrixRow.key);
                                       }}
                                       onBlur={(e) => {
                                         onMatrixBenchmarkNameInputBlur(

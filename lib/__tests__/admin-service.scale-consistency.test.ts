@@ -662,7 +662,18 @@ describe("benchmark scale consistency", () => {
           unit: "score",
           higherIsBetter: true,
           modalities: ["Text"],
-          sourceBenchmarkId: null
+          sourceBenchmarkId: null,
+          mergedIntoBenchmarkId: null
+        },
+        {
+          id: 40,
+          benchmarkName: "GDPval-AA",
+          benchmarkType: "General",
+          unit: "score",
+          higherIsBetter: true,
+          modalities: ["Text"],
+          sourceBenchmarkId: null,
+          mergedIntoBenchmarkId: 999
         }
       ]))
       .mockImplementationOnce(() => createResolvedQueryMock([
@@ -673,7 +684,18 @@ describe("benchmark scale consistency", () => {
           unit: "score",
           higherIsBetter: true,
           modalities: ["Text"],
-          sourceBenchmarkId: null
+          sourceBenchmarkId: null,
+          mergedIntoBenchmarkId: null
+        },
+        {
+          id: 39,
+          benchmarkName: "GDPval-AA (Elo)",
+          benchmarkType: "General",
+          unit: "score",
+          higherIsBetter: true,
+          modalities: ["Text"],
+          sourceBenchmarkId: null,
+          mergedIntoBenchmarkId: 999
         }
       ]))
       .mockImplementationOnce(() => createResolvedQueryMock([
@@ -785,6 +807,12 @@ describe("benchmark scale consistency", () => {
           valueNum2: null,
           valueNote: "from-report; split-benchmark-base"
         })
+      ])
+    );
+    expect(splitUpdatePayloads).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ benchmarkId: 39 }),
+        expect.objectContaining({ benchmarkId: 40 })
       ])
     );
     expect(splitInsertPayloads).toEqual([

@@ -2429,7 +2429,11 @@ export async function ensureBenchmark(
   const higherIsBetter = forceLowerIsBetter ? false : (input.higherIsBetter ?? true);
   const executor = options?.db ?? db;
 
-  const [existing] = await executor.select().from(benchmarks).where(eq(benchmarks.canonicalKey, canonicalKey)).limit(1);
+  const [existing] = await executor
+    .select()
+    .from(benchmarks)
+    .where(and(eq(benchmarks.canonicalKey, canonicalKey), isNull(benchmarks.mergedIntoBenchmarkId)))
+    .limit(1);
 
   if (existing) {
     if (forceLowerIsBetter && existing.higherIsBetter) {
@@ -2448,7 +2452,11 @@ export async function ensureBenchmark(
   const [existingByNameType] = await executor
     .select()
     .from(benchmarks)
-    .where(and(eq(benchmarks.benchmarkName, cleanName), eq(benchmarks.benchmarkType, cleanType)))
+    .where(and(
+      eq(benchmarks.benchmarkName, cleanName),
+      eq(benchmarks.benchmarkType, cleanType),
+      isNull(benchmarks.mergedIntoBenchmarkId)
+    ))
     .limit(1);
 
   if (existingByNameType) {

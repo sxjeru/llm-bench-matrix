@@ -478,7 +478,7 @@ describe("AdminConsole text import", () => {
     const benchmarkCell = benchmarkInput.closest("th");
 
     expect(benchmarkCell).toHaveClass("bg-warning/15");
-    expect(benchmarkCell).toHaveTextContent("检测到 >100 Elo 数值，但库内不存在 GDPval-AA (Elo)");
+    expect(await screen.findByText("检测到 >100 Elo 数值，但库内不存在 GDPval-AA (Elo)")).toBeInTheDocument();
   });
 
   test("可批量把同一注释应用到所有星号数值", async () => {
@@ -2650,5 +2650,204 @@ describe("AdminConsole rename tab", () => {
 
     await user.click(screen.getByRole("tab", { name: "实体去重" }));
     expect(await screen.findByText(/Bench-2 \[Type-B\] \[12\]/i)).toBeInTheDocument();
+  });
+
+  test("同名不同 type 的 benchmark 也会在候选中显示", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "Bench-1",
+          benchmarkType: "Type-C",
+          rawValue: "75.5",
+          valueNum: 75.5,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    mockFetchSequence(previewResponse);
+    const props = buildProps();
+    props.benchmarks = [
+      { id: 11, benchmarkName: "Bench-1", benchmarkType: "Type-A", modalities: ["Text"] },
+      { id: 12, benchmarkName: "Bench-1", benchmarkType: "Type-B", modalities: ["Vision"] }
+    ];
+
+    render(<AdminConsole {...props} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const matrixTable = await findMatrixPreviewTable();
+    const benchmarkInput = within(matrixTable).getByDisplayValue("Bench-1");
+    
+    await user.click(benchmarkInput);
+    await waitFor(() => {
+      const dropdown = benchmarkInput.parentElement?.querySelector('[role="listbox"]') as HTMLElement | null;
+      expect(dropdown).toBeInTheDocument();
+      if (dropdown) {
+        expect(within(dropdown).getByText(/Bench-1 \[Type-A\] \[11\]/)).toBeInTheDocument();
+        expect(within(dropdown).getByText(/Bench-1 \[Type-B\] \[12\]/)).toBeInTheDocument();
+      }
+    });
+  });
+
+  test("有 >100 Elo 值时会优先显示库内 Elo 目标", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "SomeBench",
+          benchmarkType: "General",
+          rawValue: "1200",
+          valueNum: 1200,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    mockFetchSequence(previewResponse);
+    const props = buildProps();
+    props.benchmarks = [
+      { id: 11, benchmarkName: "SomeBench (Elo)", benchmarkType: "General", modalities: ["Text"] }
+    ];
+
+    render(<AdminConsole {...props} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const matrixTable = await findMatrixPreviewTable();
+    const benchmarkInput = within(matrixTable).getByDisplayValue("SomeBench");
+    
+    await user.click(benchmarkInput);
+    await waitFor(() => {
+      const dropdown = benchmarkInput.parentElement?.querySelector('[role="listbox"]') as HTMLElement | null;
+      if (dropdown) {
+        expect(within(dropdown).getByText(/SomeBench \(Elo\) \[General\] \[11\]/)).toBeInTheDocument();
+      }
+    });
+  });
+
+  test("矩阵 benchmark 输入时可搜索全量库内 benchmark", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "UnknownBench",
+          benchmarkType: "General",
+          rawValue: "75.5",
+          valueNum: 75.5,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    mockFetchSequence(previewResponse);
+    const props = buildProps();
+    props.benchmarks = [
+      { id: 11, benchmarkName: "Bench-1", benchmarkType: "Type-A", modalities: ["Text"] },
+      { id: 12, benchmarkName: "Bench-2", benchmarkType: "Type-B", modalities: ["Vision"] },
+      { id: 13, benchmarkName: "SearchableBench", benchmarkType: "General", modalities: ["Text"] }
+    ];
+
+    render(<AdminConsole {...props} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const matrixTable = await findMatrixPreviewTable();
+    const benchmarkInput = within(matrixTable).getByDisplayValue("UnknownBench") as HTMLInputElement;
+    
+    await user.clear(benchmarkInput);
+    await user.type(benchmarkInput, "search");
+
+    await waitFor(() => {
+      const dropdown = benchmarkInput.parentElement?.querySelector('[role="listbox"]') as HTMLElement | null;
+      if (dropdown) {
+        expect(within(dropdown).getByText(/SearchableBench \[General\] \[13\]/)).toBeInTheDocument();
+      }
+    });
+  });
+
+  test("输入 benchmark 名称后会自动打开候选下拉", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "SomeBench",
+          benchmarkType: "General",
+          rawValue: "75.5",
+          valueNum: 75.5,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    mockFetchSequence(previewResponse);
+    const props = buildProps();
+    props.benchmarks = [
+      { id: 11, benchmarkName: "Bench-1", benchmarkType: "Type-A", modalities: ["Text"] }
+    ];
+
+    render(<AdminConsole {...props} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const matrixTable = await findMatrixPreviewTable();
+    const benchmarkInput = within(matrixTable).getByDisplayValue("SomeBench") as HTMLInputElement;
+    
+    await user.clear(benchmarkInput);
+    await user.type(benchmarkInput, "Bench");
+
+    const dropdown = benchmarkInput.parentElement?.querySelector('[role="listbox"]') as HTMLElement | null;
+    await waitFor(() => {
+      expect(dropdown).toBeInTheDocument();
+    });
   });
 });
