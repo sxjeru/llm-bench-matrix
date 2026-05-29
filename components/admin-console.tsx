@@ -327,6 +327,7 @@ export function AdminConsole({
     modelWarningMap,
     benchmarkWarnings,
     benchmarkWarningMap,
+    benchmarkMergeCandidateMap,
     benchmarksWithParentheses,
     benchmarkParenthesesSet,
     matrixPreview,
@@ -2872,6 +2873,7 @@ export function AdminConsole({
             onMatrixModelNameInputBlur={onMatrixModelNameInputBlur}
             modelEntityOptions={modelEntityOptions}
             benchmarkWarningMap={benchmarkWarningMap}
+            benchmarkMergeCandidateMap={benchmarkMergeCandidateMap}
             benchmarkParenthesesSet={benchmarkParenthesesSet}
             benchmarkEntityOptions={benchmarkEntityOptions}
             matrixBenchmarkNameDrafts={matrixBenchmarkNameDrafts}

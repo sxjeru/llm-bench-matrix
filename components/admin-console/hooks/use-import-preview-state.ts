@@ -153,6 +153,84 @@ export function useImportPreviewState({
     [modelWarnings]
   );
 
+  const benchmarkMergeCandidateMap = useMemo(() => {
+    const existingByCompareKey = new Map<string, BenchmarkOption[]>();
+
+    benchmarks.forEach((item) => {
+      const compareKey = buildBenchmarkCompareKey(item.benchmarkName);
+      if (!compareKey) return;
+
+      if (!existingByCompareKey.has(compareKey)) {
+        existingByCompareKey.set(compareKey, []);
+      }
+
+      existingByCompareKey.get(compareKey)?.push(item);
+    });
+
+    const importedBenchmarks = new Map<string, { benchmarkName: string; benchmarkType: string }>();
+    const importedBenchmarkHasEloValue = new Map<string, boolean>();
+
+    textImportDraftRows.forEach((item) => {
+      const key = getTextImportBenchmarkKey(item.benchmarkName, item.benchmarkType);
+      if (!importedBenchmarks.has(key)) {
+        importedBenchmarks.set(key, {
+          benchmarkName: item.benchmarkName,
+          benchmarkType: item.benchmarkType
+        });
+      }
+
+      if ((item.valueNum !== null && item.valueNum > 100) || (item.valueNum2 !== null && item.valueNum2 > 100)) {
+        importedBenchmarkHasEloValue.set(key, true);
+      }
+    });
+
+    const map = new Map<string, number[]>();
+    const addCandidate = (key: string, targetId: number | null | undefined) => {
+      if (!targetId) return;
+      const current = map.get(key) ?? [];
+      if (!current.includes(targetId)) {
+        map.set(key, [...current, targetId]);
+      }
+    };
+
+    importedBenchmarks.forEach(({ benchmarkName, benchmarkType }, key) => {
+      const exactExisting = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(benchmarkName, benchmarkType));
+      addCandidate(key, exactExisting?.id);
+
+      const sameNameExisting = existingBenchmarkByNameMap.get(benchmarkName.trim().toLowerCase()) ?? [];
+      sameNameExisting.forEach((item) => addCandidate(key, item.id));
+
+      const aliasTargetName = resolveHardcodedBenchmarkAliasTarget(benchmarkName);
+      if (aliasTargetName) {
+        const aliasTarget = benchmarks.find((item) => item.benchmarkName.toLowerCase() === aliasTargetName.toLowerCase());
+        addCandidate(key, aliasTarget?.id);
+      }
+
+      const hasEloSuffix = hasEloBenchmarkSuffix(benchmarkName);
+      const hasEloValue = importedBenchmarkHasEloValue.get(key) === true;
+      if (hasEloValue && !hasEloSuffix) {
+        const eloBenchmarkName = getEloBenchmarkName(benchmarkName);
+        const exactEloExisting = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(eloBenchmarkName, benchmarkType));
+        addCandidate(key, exactEloExisting?.id);
+
+        const sameNameEloExisting = existingBenchmarkByNameMap.get(eloBenchmarkName.trim().toLowerCase()) ?? [];
+        sameNameEloExisting.forEach((item) => addCandidate(key, item.id));
+
+        const eloCompareKey = buildBenchmarkCompareKey(eloBenchmarkName);
+        const eloCompareCandidates = eloCompareKey ? (existingByCompareKey.get(eloCompareKey) ?? []) : [];
+        eloCompareCandidates
+          .filter((item) => hasEloBenchmarkSuffix(item.benchmarkName))
+          .forEach((item) => addCandidate(key, item.id));
+      }
+
+      const compareKey = buildBenchmarkCompareKey(benchmarkName);
+      const candidates = compareKey ? (existingByCompareKey.get(compareKey) ?? []) : [];
+      candidates.forEach((item) => addCandidate(key, item.id));
+    });
+
+    return map;
+  }, [benchmarks, textImportDraftRows, existingBenchmarkExactMap, existingBenchmarkByNameMap]);
+
   const benchmarkWarnings = useMemo(() => {
     const existingByCompareKey = new Map<string, BenchmarkOption[]>();
 
@@ -199,7 +277,12 @@ export function useImportPreviewState({
         const exactEloExisting = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(eloBenchmarkName, benchmarkType));
         const sameNameEloExisting = existingBenchmarkByNameMap.get(eloBenchmarkName.trim().toLowerCase()) ?? [];
 
-        if (!exactEloExisting && sameNameEloExisting.length === 0) {
+        const suggestedEloTarget = exactEloExisting ?? sameNameEloExisting[0] ?? null;
+        if (suggestedEloTarget) {
+          reasons.push(`检测到 >100 Elo 数值，建议合并到 ${suggestedEloTarget.benchmarkName} [${suggestedEloTarget.benchmarkType}]`);
+          suggestedTargetId = suggestedEloTarget.id;
+          level = "warn";
+        } else {
           reasons.push(`检测到 >100 Elo 数值，但库内不存在 ${eloBenchmarkName}`);
           level = "warn";
         }
@@ -207,6 +290,8 @@ export function useImportPreviewState({
 
       const exactExisting = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(benchmarkName, benchmarkType));
       const sameNameExisting = existingBenchmarkByNameMap.get(benchmarkName.trim().toLowerCase()) ?? [];
+      const compareKey = buildBenchmarkCompareKey(benchmarkName);
+      const candidates = compareKey ? (existingByCompareKey.get(compareKey) ?? []) : [];
       if (exactExisting || sameNameExisting.length > 0) {
         if (reasons.length === 0) return;
 
@@ -217,7 +302,7 @@ export function useImportPreviewState({
           level,
           reasons,
           suggestedTargetId,
-          candidateTargetIds: [],
+          candidateTargetIds: benchmarkMergeCandidateMap.get(key) ?? [],
           hasParentheses
         });
         return;
@@ -243,8 +328,6 @@ export function useImportPreviewState({
         }
       }
 
-      const compareKey = buildBenchmarkCompareKey(benchmarkName);
-      const candidates = compareKey ? (existingByCompareKey.get(compareKey) ?? []) : [];
       if (candidates.length > 0) {
         const candidateLabels = candidates
           .slice(0, 3)
@@ -271,13 +354,13 @@ export function useImportPreviewState({
         level,
         reasons,
         suggestedTargetId,
-        candidateTargetIds: Array.from(new Set(candidates.map((item) => item.id))),
+        candidateTargetIds: benchmarkMergeCandidateMap.get(key) ?? [],
         hasParentheses
       });
     });
 
     return warnings;
-  }, [benchmarks, textImportDraftRows, existingBenchmarkExactMap, existingBenchmarkByNameMap]);
+  }, [benchmarks, textImportDraftRows, existingBenchmarkExactMap, existingBenchmarkByNameMap, benchmarkMergeCandidateMap]);
 
   const benchmarkWarningMap = useMemo(
     () => new Map(benchmarkWarnings.map((item) => [item.key, item])),
@@ -380,15 +463,25 @@ export function useImportPreviewState({
   }, [matrixPreview.rows]);
 
   const benchmarkPreviewValueOverlapPayload = useMemo(() => {
-    const items = benchmarkWarnings
-      .map((warning) => {
-        const candidateBenchmarkIds = Array.from(new Set([
-          ...warning.candidateTargetIds,
-          ...(warning.suggestedTargetId ? [warning.suggestedTargetId] : [])
-        ]));
+    const warningCandidates = benchmarkWarnings.map((warning) => [
+      warning.key,
+      Array.from(new Set([
+        ...warning.candidateTargetIds,
+        ...(warning.suggestedTargetId ? [warning.suggestedTargetId] : [])
+      ]))
+    ] as const);
+    const candidateEntries = Array.from(benchmarkMergeCandidateMap.entries());
+    const candidateMap = new Map<string, number[]>();
+
+    [...candidateEntries, ...warningCandidates].forEach(([key, candidateIds]) => {
+      candidateMap.set(key, Array.from(new Set([...(candidateMap.get(key) ?? []), ...candidateIds])));
+    });
+
+    const items = Array.from(candidateMap.entries())
+      .map(([previewBenchmarkKey, candidateBenchmarkIds]) => {
         if (candidateBenchmarkIds.length === 0) return null;
 
-        const matrixRow = matrixPreview.rows.find((row) => row.key === warning.key);
+        const matrixRow = matrixPreview.rows.find((row) => row.key === previewBenchmarkKey);
         if (!matrixRow) return null;
 
         const cells = Object.values(matrixRow.cellRowIndexByModel)
@@ -402,7 +495,7 @@ export function useImportPreviewState({
         if (cells.length === 0) return null;
 
         return {
-          previewBenchmarkKey: warning.key,
+          previewBenchmarkKey,
           candidateBenchmarkIds,
           cells
         };
@@ -417,7 +510,7 @@ export function useImportPreviewState({
       key: items.length > 0 ? JSON.stringify(items) : "",
       items
     };
-  }, [benchmarkWarnings, matrixPreview.rows, textImportDraftRows]);
+  }, [benchmarkWarnings, benchmarkMergeCandidateMap, matrixPreview.rows, textImportDraftRows]);
 
   const benchmarkPreviewValueOverlapTriggerKey = useMemo(() => {
     if (textImportDraftRows.length === 0) {
@@ -714,6 +807,7 @@ export function useImportPreviewState({
     modelWarningMap,
     benchmarkWarnings,
     benchmarkWarningMap,
+    benchmarkMergeCandidateMap,
     benchmarksWithParentheses,
     benchmarkParenthesesSet,
     matrixPreview,

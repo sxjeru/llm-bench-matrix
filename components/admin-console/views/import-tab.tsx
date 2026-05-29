@@ -121,6 +121,7 @@ type ImportTabProps = {
   onMatrixModelNameInputBlur: (modelName: string, inputValue: string) => void;
   modelEntityOptions: EntityOption[];
   benchmarkWarningMap: Map<string, BenchmarkWarningItem>;
+  benchmarkMergeCandidateMap: Map<string, number[]>;
   benchmarkParenthesesSet: Set<string>;
   benchmarkEntityOptions: EntityOption[];
   matrixBenchmarkNameDrafts: Record<string, string>;
@@ -232,6 +233,7 @@ export function ImportTab({
   onMatrixModelNameInputBlur,
   modelEntityOptions,
   benchmarkWarningMap,
+  benchmarkMergeCandidateMap,
   benchmarkParenthesesSet,
   benchmarkEntityOptions,
   matrixBenchmarkNameDrafts,
@@ -755,6 +757,7 @@ export function ImportTab({
                           <div className="space-y-1">
                             {(() => {
                               const benchmarkCandidateTargetIds = Array.from(new Set([
+                                ...(benchmarkMergeCandidateMap.get(matrixRow.key) ?? []),
                                 ...(warning?.candidateTargetIds ?? []),
                                 ...(warning?.suggestedTargetId ? [warning.suggestedTargetId] : [])
                               ]));
