@@ -2703,7 +2703,7 @@ describe("AdminConsole rename tab", () => {
     });
   });
 
-  test("有 >100 Elo 值时会优先显示库内 Elo 目标", async () => {
+  test("有 >100 Elo 值时会自动切换到库内 Elo 目标并显示警告", async () => {
     const user = userEvent.setup();
 
     const previewResponse: PreviewResponse = {
@@ -2740,7 +2740,11 @@ describe("AdminConsole rename tab", () => {
     await triggerPreview(user);
 
     const matrixTable = await findMatrixPreviewTable();
-    const benchmarkInput = within(matrixTable).getByDisplayValue("SomeBench");
+    const benchmarkInput = within(matrixTable).getByDisplayValue("SomeBench (Elo)");
+    const benchmarkCell = benchmarkInput.closest("th");
+
+    expect(benchmarkCell).toHaveClass("bg-warning/15");
+    expect(await screen.findByText("检测到 >100 Elo 数值，已按 SomeBench (Elo) 导入")).toBeInTheDocument();
     
     await user.click(benchmarkInput);
     await waitFor(() => {

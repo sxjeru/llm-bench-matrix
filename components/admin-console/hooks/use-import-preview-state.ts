@@ -194,6 +194,10 @@ export function useImportPreviewState({
 
       const hasEloSuffix = hasEloBenchmarkSuffix(benchmarkName);
       const hasEloValue = importedBenchmarkHasEloValue.get(key) === true;
+      if (hasEloValue && hasEloSuffix) {
+        reasons.push(`检测到 >100 Elo 数值，已按 ${benchmarkName} 导入`);
+        level = "warn";
+      }
       if (hasEloValue && !hasEloSuffix) {
         const eloBenchmarkName = getEloBenchmarkName(benchmarkName);
         const exactEloExisting = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(eloBenchmarkName, benchmarkType));

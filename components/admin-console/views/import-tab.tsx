@@ -674,7 +674,7 @@ export function ImportTab({
         {matrixPreview.rows.length > 0 ? (
           <div className="mt-4 space-y-2">
             <h4 className="font-semibold">矩阵预览（可编辑）</h4>
-            <div className="overflow-x-auto rounded-box border border-base-300 max-h-[420px]">
+            <div className="overflow-x-auto overflow-y-visible rounded-box border border-base-300 max-h-[420px]">
               <table className="table table-zebra table-sm">
                 <thead>
                   <tr>
@@ -854,7 +854,7 @@ export function ImportTab({
                                     {benchmarkCandidateOptions.length > 0 && openMatrixBenchmarkCandidateFor === matrixRow.key ? (
                                       <div
                                         role="listbox"
-                                        className="absolute left-0 right-0 top-full z-[95] mt-1 max-h-60 overflow-auto rounded-md border border-base-300 bg-base-100/95 p-1 shadow-xl backdrop-blur"
+                                        className="absolute bottom-full left-0 right-0 z-[95] mb-1 max-h-60 overflow-auto rounded-md border border-base-300 bg-base-100/95 p-1 shadow-xl backdrop-blur"
                                       >
                                         {benchmarkCandidateOptions.map((option) => {
                                           const overlapStats = benchmarkPreviewValueOverlapStatsMap.get(

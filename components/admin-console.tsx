@@ -42,6 +42,7 @@ import {
 } from "./admin-console/utils/benchmark";
 import { buildStructuredCsvText } from "./admin-console/utils/csv";
 import {
+  parseSingleRawValue,
   parsePairRawValue,
   parseStarSingleRawValue
 } from "./admin-console/utils/import-values";
@@ -79,6 +80,11 @@ import { AdminConsoleTabNav } from "./admin-console/views/tab-nav";
 
 function getBenchmarkPreviewValueOverlapStatsKey(previewBenchmarkKey: string, candidateBenchmarkId: number) {
   return JSON.stringify([previewBenchmarkKey, candidateBenchmarkId]);
+}
+
+function parseImportDraftNumericToken(input: string): number | null {
+  const parsed = Number.parseFloat(input.replace(/[$¥€£,#＃\s]/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function formatBenchmarkPreviewValueOverlapStats(stats: BenchmarkPreviewValueOverlapStats) {
@@ -377,6 +383,38 @@ export function AdminConsole({
       clearTimeout(timer);
     };
   }, [benchmarkPreviewValueOverlapTriggerKey]);
+
+  function hasBenchmarkEloSuffix(benchmarkName: string): boolean {
+    return /\s*[（(]\s*elo\s*[)）]\s*$/i.test(benchmarkName.trim());
+  }
+
+  function toBenchmarkEloName(benchmarkName: string): string {
+    const cleanName = benchmarkName.trim();
+    return hasBenchmarkEloSuffix(cleanName) ? cleanName : `${cleanName} (Elo)`;
+  }
+
+  function resolveExistingEloBenchmark(row: TextImportPreviewRow) {
+    if (hasBenchmarkEloSuffix(row.benchmarkName)) return null;
+    if (!((row.valueNum !== null && row.valueNum > 100) || (row.valueNum2 !== null && row.valueNum2 > 100))) return null;
+
+    const eloBenchmarkName = toBenchmarkEloName(row.benchmarkName);
+    const sameNameBenchmarks = existingBenchmarkByNameMap.get(eloBenchmarkName.trim().toLowerCase()) ?? [];
+    return sameNameBenchmarks.find((item) => item.benchmarkType === row.benchmarkType) ?? sameNameBenchmarks[0] ?? null;
+  }
+
+  function applyExistingEloBenchmarkToPreviewRows(rows: TextImportPreviewRow[]) {
+    return rows.map((row) => {
+      const eloBenchmark = resolveExistingEloBenchmark(row);
+      if (!eloBenchmark) return row;
+
+      return {
+        ...row,
+        benchmarkName: eloBenchmark.benchmarkName,
+        benchmarkType: eloBenchmark.benchmarkType,
+        modalities: eloBenchmark.modalities?.length ? eloBenchmark.modalities : row.modalities
+      };
+    });
+  }
 
   useEffect(() => {
     if (!benchmarkPreviewValueOverlapPayload.key) {
@@ -848,9 +886,10 @@ export function AdminConsole({
       };
     });
 
-    const parsedCount = Number(result.parsedCount ?? unifiedPreviewRows.length);
+    const resolvedPreviewRows = applyExistingEloBenchmarkToPreviewRows(unifiedPreviewRows);
+    const parsedCount = Number(result.parsedCount ?? resolvedPreviewRows.length);
     const warningCount = Number(result.warningCount ?? warningRows.length);
-    const skippedCount = Math.max(0, parsedCount - unifiedPreviewRows.length);
+    const skippedCount = Math.max(0, parsedCount - resolvedPreviewRows.length);
 
     setSheetNames(result.sheetNames ?? []);
     setSelectedSheet(normalizedSelectedSheet);
@@ -863,8 +902,8 @@ export function AdminConsole({
       warningCount
     });
 
-    setTextImportPreviewRows(unifiedPreviewRows);
-    setTextImportDraftRows(unifiedPreviewRows.map((row) => ({ ...row })));
+    setTextImportPreviewRows(resolvedPreviewRows);
+    setTextImportDraftRows(resolvedPreviewRows.map((row) => ({ ...row })));
     setGlobalStarSupplement("");
     setBenchmarkMergeTargets({});
     setBenchmarkMergeFilters({});
@@ -882,7 +921,7 @@ export function AdminConsole({
     setOpenMatrixBenchmarkCandidateFor(null);
     setTextImportPreviewMeta({
       format: "workbook-table",
-      total: unifiedPreviewRows.length,
+      total: resolvedPreviewRows.length,
       skipped: skippedCount
     });
     setTextImportPreviewVisibleCount(200);
@@ -1082,6 +1121,7 @@ export function AdminConsole({
           ? (() => {
               const pair = parsePairRawValue(rawValue);
               const starSingle = parseStarSingleRawValue(rawValue);
+              const single = parseSingleRawValue(rawValue);
 
               let nextValueNote: string | null;
               if (pair) {
@@ -1095,6 +1135,12 @@ export function AdminConsole({
               return {
                 ...row,
                 rawValue,
+                valueNum: pair
+                  ? parseImportDraftNumericToken(pair.first)
+                  : single
+                    ? parseImportDraftNumericToken(single.value)
+                    : null,
+                valueNum2: pair ? parseImportDraftNumericToken(pair.second) : null,
                 valueNote: nextValueNote
               };
             })()
@@ -1607,7 +1653,7 @@ export function AdminConsole({
         source: csvSource || undefined
       });
       setHasParsedHtmlTable(result.parseSource === "html");
-      const previewRows = (result.previewRows ?? []) as TextImportPreviewRow[];
+      const previewRows = applyExistingEloBenchmarkToPreviewRows((result.previewRows ?? []) as TextImportPreviewRow[]);
       setTextImportPreviewRows(previewRows);
       setTextImportDraftRows(previewRows.map((row) => ({ ...row })));
       setGlobalStarSupplement("");
