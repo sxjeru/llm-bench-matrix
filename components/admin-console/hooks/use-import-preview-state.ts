@@ -57,6 +57,15 @@ type UseImportPreviewStateOptions = {
   existingBenchmarkModalitiesMap: Map<string, string[]>;
 };
 
+function hasEloBenchmarkSuffix(benchmarkName: string): boolean {
+  return /\s*[（(]\s*elo\s*[)）]\s*$/i.test(benchmarkName.trim());
+}
+
+function getEloBenchmarkName(benchmarkName: string): string {
+  const cleanName = benchmarkName.trim();
+  return hasEloBenchmarkSuffix(cleanName) ? cleanName : `${cleanName} (Elo)`;
+}
+
 export function useImportPreviewState({
   benchmarks,
   textImportDraftRows,
@@ -159,6 +168,7 @@ export function useImportPreviewState({
     });
 
     const importedBenchmarks = new Map<string, { benchmarkName: string; benchmarkType: string }>();
+    const importedBenchmarkHasEloValue = new Map<string, boolean>();
     textImportDraftRows.forEach((item) => {
       const key = getTextImportBenchmarkKey(item.benchmarkName, item.benchmarkType);
       if (!importedBenchmarks.has(key)) {
@@ -167,26 +177,51 @@ export function useImportPreviewState({
           benchmarkType: item.benchmarkType
         });
       }
+
+      if ((item.valueNum !== null && item.valueNum > 100) || (item.valueNum2 !== null && item.valueNum2 > 100)) {
+        importedBenchmarkHasEloValue.set(key, true);
+      }
     });
 
     const warnings: BenchmarkWarningItem[] = [];
 
     importedBenchmarks.forEach(({ benchmarkName, benchmarkType }, key) => {
-      const exactExisting = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(benchmarkName, benchmarkType));
-      if (exactExisting) {
-        return;
-      }
-
-      const sameNameExisting = existingBenchmarkByNameMap.get(benchmarkName.trim().toLowerCase()) ?? [];
-      if (sameNameExisting.length > 0) {
-        return;
-      }
-
       const reasons: string[] = [];
       let level: BenchmarkWarningLevel = "info";
       let suggestedTargetId: number | null = null;
 
       const hasParentheses = /[（(][^()（）]+[)）]/.test(benchmarkName);
+
+      const hasEloSuffix = hasEloBenchmarkSuffix(benchmarkName);
+      const hasEloValue = importedBenchmarkHasEloValue.get(key) === true;
+      if (hasEloValue && !hasEloSuffix) {
+        const eloBenchmarkName = getEloBenchmarkName(benchmarkName);
+        const exactEloExisting = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(eloBenchmarkName, benchmarkType));
+        const sameNameEloExisting = existingBenchmarkByNameMap.get(eloBenchmarkName.trim().toLowerCase()) ?? [];
+
+        if (!exactEloExisting && sameNameEloExisting.length === 0) {
+          reasons.push(`检测到 >100 Elo 数值，但库内不存在 ${eloBenchmarkName}`);
+          level = "warn";
+        }
+      }
+
+      const exactExisting = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(benchmarkName, benchmarkType));
+      const sameNameExisting = existingBenchmarkByNameMap.get(benchmarkName.trim().toLowerCase()) ?? [];
+      if (exactExisting || sameNameExisting.length > 0) {
+        if (reasons.length === 0) return;
+
+        warnings.push({
+          key,
+          benchmarkName,
+          benchmarkType,
+          level,
+          reasons,
+          suggestedTargetId,
+          candidateTargetIds: [],
+          hasParentheses
+        });
+        return;
+      }
 
       const matchedKeyword = BENCHMARK_SUSPECT_KEYWORDS.find((keyword) =>
         benchmarkName.toLowerCase().includes(keyword)

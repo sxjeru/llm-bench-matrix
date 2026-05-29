@@ -442,6 +442,45 @@ describe("AdminConsole text import", () => {
     expect(typeHeader).not.toHaveTextContent("Type 2");
   });
 
+  test("导入 >100 数值且缺少同名 Elo benchmark 时高亮告警", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "GDPval-AA",
+          benchmarkType: "General",
+          rawValue: "1215",
+          valueNum: 1215,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    mockFetchSequence(previewResponse);
+    render(<AdminConsole {...buildProps()} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const matrixTable = await findMatrixPreviewTable();
+    const benchmarkInput = within(matrixTable).getByDisplayValue("GDPval-AA");
+    const benchmarkCell = benchmarkInput.closest("th");
+
+    expect(benchmarkCell).toHaveClass("bg-warning/15");
+    expect(benchmarkCell).toHaveTextContent("检测到 >100 Elo 数值，但库内不存在 GDPval-AA (Elo)");
+  });
+
   test("可批量把同一注释应用到所有星号数值", async () => {
     const user = userEvent.setup();
 

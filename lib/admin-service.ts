@@ -2048,6 +2048,23 @@ function isEloScaleValue(value: number | null): boolean {
   return value !== null && Number.isFinite(value) && value > 100;
 }
 
+function hasBenchmarkEloSuffix(benchmarkName: string): boolean {
+  return /\s*[（(]\s*elo\s*[)）]\s*$/i.test(benchmarkName.trim());
+}
+
+function toBenchmarkEloName(benchmarkName: string): string {
+  const cleanName = normalizeNameParenthesisSpacing(benchmarkName).trim();
+  return hasBenchmarkEloSuffix(cleanName) ? cleanName : `${cleanName} (Elo)`;
+}
+
+function shouldPreferExistingEloBenchmarkForImport(benchmarkName: string, parsedValue: ParsedBenchmarkValue): boolean {
+  if (hasBenchmarkEloSuffix(benchmarkName)) {
+    return false;
+  }
+
+  return isEloScaleValue(parsedValue.valueNum) || isEloScaleValue(parsedValue.valueNum2);
+}
+
 function mergeNumericBounds(values: number[]): { minValue: number | null; maxValue: number | null } {
   if (values.length === 0) {
     return { minValue: null, maxValue: null };
@@ -3489,6 +3506,16 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
       return candidates.find((item) => item.benchmarkType.trim().toLowerCase() === normalizedType) ?? candidates[0] ?? null;
     };
 
+    const pickExistingEloBenchmark = (benchmarkName: string, benchmarkType: string) => {
+      const eloBenchmarkName = toBenchmarkEloName(benchmarkName);
+      const eloBenchmark = pickSharedBenchmark(eloBenchmarkName, benchmarkType);
+      if (eloBenchmark) return eloBenchmark;
+
+      const normalizedType = benchmarkType.trim().toLowerCase();
+      const candidates = benchmarkByNameCache.get(eloBenchmarkName.trim().toLowerCase()) ?? [];
+      return candidates.find((item) => item.benchmarkType.trim().toLowerCase() === normalizedType) ?? null;
+    };
+
     for (const row of rows) {
       try {
         const providerName = row.providerName.trim() || "Unknown";
@@ -3520,7 +3547,12 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
         const benchmarkTypeForSelection = (hasImportedBenchmarkType || hasNonGeneralParsedBenchmarkType)
           ? benchmarkType
           : "general";
+        const parsedValue = parseBenchmarkValue(row.valueRaw);
         let benchmark = pickSharedBenchmark(row.benchmarkName, benchmarkTypeForSelection);
+
+        if (shouldPreferExistingEloBenchmarkForImport(row.benchmarkName, parsedValue)) {
+          benchmark = pickExistingEloBenchmark(row.benchmarkName, benchmarkTypeForSelection) ?? benchmark;
+        }
 
         if (!benchmark) {
           const createdBenchmark = await ensureBenchmark(
@@ -3580,7 +3612,6 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
           });
         }
 
-        const parsedValue = parseBenchmarkValue(row.valueRaw);
         const normalizedValue = normalizeStoredBenchmarkValue(benchmark.benchmarkName, parsedValue);
         const mergedValueNote = mergeImportValueNotes(row.valueNote, normalizedValue.valueNote);
         valueRows.push({
