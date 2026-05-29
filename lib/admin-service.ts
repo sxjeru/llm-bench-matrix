@@ -3482,6 +3482,7 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
       .where(isNull(benchmarks.mergedIntoBenchmarkId)) as Array<typeof benchmarks.$inferSelect>;
 
     existingActiveBenchmarks
+      .filter((benchmark) => benchmark.mergedIntoBenchmarkId === null)
       .sort((left, right) => left.id - right.id)
       .forEach((benchmark) => {
         const benchmarkNameKey = benchmark.benchmarkName.trim().toLowerCase();
