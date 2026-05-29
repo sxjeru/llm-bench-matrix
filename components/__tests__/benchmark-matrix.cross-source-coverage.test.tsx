@@ -242,6 +242,57 @@ const qwenSortRows = [
   }
 ] as const;
 
+const variantGroupSortRows = [
+  {
+    providerName: "StepFun",
+    modelName: "Step 3.7 Flash",
+    benchmarkName: "Bench-Step",
+    benchmarkType: "General",
+    benchmarkCanonicalKey: "bench-step:general",
+    benchTime: "2026-04-06T00:00:00.000Z",
+    valueRaw: "78",
+    valueNum: 78,
+    valueNote: null,
+    source: "text:Step"
+  },
+  {
+    providerName: "StepFun",
+    modelName: "Step 3.5 Pro",
+    benchmarkName: "Bench-Step",
+    benchmarkType: "General",
+    benchmarkCanonicalKey: "bench-step:general",
+    benchTime: "2026-04-06T00:00:00.000Z",
+    valueRaw: "80",
+    valueNum: 80,
+    valueNote: null,
+    source: "text:Step"
+  },
+  {
+    providerName: "StepFun",
+    modelName: "Step 3.7 Pro",
+    benchmarkName: "Bench-Step",
+    benchmarkType: "General",
+    benchmarkCanonicalKey: "bench-step:general",
+    benchTime: "2026-04-06T00:00:00.000Z",
+    valueRaw: "82",
+    valueNum: 82,
+    valueNote: null,
+    source: "text:Step"
+  },
+  {
+    providerName: "StepFun",
+    modelName: "Step 3.5 Flash",
+    benchmarkName: "Bench-Step",
+    benchmarkType: "General",
+    benchmarkCanonicalKey: "bench-step:general",
+    benchTime: "2026-04-06T00:00:00.000Z",
+    valueRaw: "76",
+    valueNum: 76,
+    valueNote: null,
+    source: "text:Step"
+  }
+] as const;
+
 const pairMaxSplitRows = [
   {
     providerName: "Pair",
@@ -814,6 +865,31 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
       "Qwen3.6-Plus",
       "Qwen3.5-397B-A17B",
       "Qwen3.5-122B-A10B"
+    ]);
+  });
+
+  test("同 provider 列排序优先同变体分组：Pro 放一起后再是 Flash", () => {
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:Step"]}
+        rows={[...variantGroupSortRows]}
+        allRows={[...variantGroupSortRows]}
+      />
+    );
+
+    const headerTexts = screen
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent?.replace(/\s+/g, " ").trim() ?? "");
+
+    const benchmarkIndex = headerTexts.findIndex((text) => text.includes("Benchmark"));
+    expect(benchmarkIndex).toBeGreaterThanOrEqual(0);
+
+    const modelHeaders = headerTexts.slice(benchmarkIndex + 1).filter((text) => text.length > 0);
+    expect(modelHeaders.slice(0, 4)).toEqual([
+      "Step 3.7 Pro",
+      "Step 3.5 Pro",
+      "Step 3.7 Flash",
+      "Step 3.5 Flash"
     ]);
   });
 

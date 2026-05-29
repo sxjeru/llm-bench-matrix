@@ -86,9 +86,11 @@ export function extractModelVariantToken(modelName: string): ModelVariantToken |
     return "base";
   })();
 
+  const variantMatch = normalized.match(MODEL_FLASH_LITE_PATTERN) ?? normalized.match(/\b(?:pro|flash|mini|nano)\b/);
+
   const familyKey = normalized
-    .replace(MODEL_FLASH_LITE_PATTERN, " ")
-    .replace(/\b(?:pro|flash|lite|mini|nano)\b/g, " ")
+    .slice(0, variantMatch?.index ?? normalized.length)
+    .replace(/\b\d+(?:\.\d+)+\b/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -117,18 +119,6 @@ export function compareModelVariantPriority(
 }
 
 export function compareModelNameByColumnOrder(left: string, right: string, collator: Intl.Collator): number {
-  const leftVersionToken = extractModelVersionToken(left);
-  const rightVersionToken = extractModelVersionToken(right);
-
-  if (
-    leftVersionToken &&
-    rightVersionToken &&
-    leftVersionToken.familyKey === rightVersionToken.familyKey &&
-    rightVersionToken.version !== leftVersionToken.version
-  ) {
-    return rightVersionToken.version - leftVersionToken.version;
-  }
-
   const leftVariantToken = extractModelVariantToken(left);
   const rightVariantToken = extractModelVariantToken(right);
 
@@ -142,6 +132,18 @@ export function compareModelNameByColumnOrder(left: string, right: string, colla
     if (variantCompare !== 0) {
       return variantCompare;
     }
+  }
+
+  const leftVersionToken = extractModelVersionToken(left);
+  const rightVersionToken = extractModelVersionToken(right);
+
+  if (
+    leftVersionToken &&
+    rightVersionToken &&
+    leftVersionToken.familyKey === rightVersionToken.familyKey &&
+    rightVersionToken.version !== leftVersionToken.version
+  ) {
+    return rightVersionToken.version - leftVersionToken.version;
   }
 
   const leftScaleToken = extractModelScaleToken(left);
