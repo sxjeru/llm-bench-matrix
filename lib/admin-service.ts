@@ -2249,6 +2249,7 @@ export async function rebuildBenchmarkCanonicalKeysByRule(rawRule: unknown) {
       id: benchmarks.id,
       benchmarkName: benchmarks.benchmarkName,
       benchmarkType: benchmarks.benchmarkType,
+      modalities: benchmarks.modalities,
       mergedIntoBenchmarkId: benchmarks.mergedIntoBenchmarkId
     })
     .from(benchmarks)
@@ -2256,7 +2257,13 @@ export async function rebuildBenchmarkCanonicalKeysByRule(rawRule: unknown) {
 
   const groupMap = new Map<
     string,
-    Array<{ id: number; benchmarkName: string; benchmarkType: string; mergedIntoBenchmarkId: number | null }>
+    Array<{
+      id: number;
+      benchmarkName: string;
+      benchmarkType: string;
+      modalities: string[] | null;
+      mergedIntoBenchmarkId: number | null;
+    }>
   >();
 
   allBenchmarks.forEach((benchmark) => {
@@ -2291,6 +2298,93 @@ export async function rebuildBenchmarkCanonicalKeysByRule(rawRule: unknown) {
         .map((item) => item.id);
 
       if (duplicateIds.length === 0) continue;
+
+      const duplicateById = new Map(groupedBenchmarks.map((item) => [item.id, item]));
+      const duplicateValueSourceRows = await tx
+        .select({
+          benchmarkId: benchmarkValues.benchmarkId,
+          source: benchmarkValues.source
+        })
+        .from(benchmarkValues)
+        .where(inArray(benchmarkValues.benchmarkId, duplicateIds));
+
+      const duplicateSourceMetaRows = await tx
+        .select({
+          benchmarkId: benchmarkSourceMeta.benchmarkId,
+          source: benchmarkSourceMeta.source,
+          benchmarkType: benchmarkSourceMeta.benchmarkType,
+          modalities: benchmarkSourceMeta.modalities
+        })
+        .from(benchmarkSourceMeta)
+        .where(inArray(benchmarkSourceMeta.benchmarkId, duplicateIds));
+
+      const sourceMetaByDuplicateAndSource = new Map<string, { benchmarkType: string; modalities: string[] | null }>();
+      const duplicateSourceSet = new Map<number, Set<string>>();
+      const addDuplicateSource = (benchmarkId: number, source: string | null | undefined) => {
+        const normalizedSource = source?.trim() ?? "";
+        if (!normalizedSource) return;
+
+        if (!duplicateSourceSet.has(benchmarkId)) {
+          duplicateSourceSet.set(benchmarkId, new Set<string>());
+        }
+        duplicateSourceSet.get(benchmarkId)!.add(normalizedSource);
+      };
+
+      duplicateValueSourceRows.forEach((row: { benchmarkId: number; source: string | null }) => {
+        addDuplicateSource(row.benchmarkId, row.source);
+      });
+
+      duplicateSourceMetaRows.forEach((row: {
+        benchmarkId: number;
+        source: string;
+        benchmarkType: string;
+        modalities: string[] | null;
+      }) => {
+        const normalizedSource = row.source.trim();
+        if (!normalizedSource) return;
+
+        const key = `${row.benchmarkId}::${normalizedSource}`;
+        if (!sourceMetaByDuplicateAndSource.has(key)) {
+          sourceMetaByDuplicateAndSource.set(key, {
+            benchmarkType: row.benchmarkType,
+            modalities: row.modalities
+          });
+        }
+        addDuplicateSource(row.benchmarkId, normalizedSource);
+      });
+
+      const sourceMetaRowsToMigrate = Array.from(duplicateSourceSet.entries()).flatMap(([benchmarkId, sourceSet]) => {
+        const duplicate = duplicateById.get(benchmarkId);
+        if (!duplicate) return [];
+
+        const fallbackModalities = duplicate.modalities?.length ? duplicate.modalities : [duplicate.benchmarkType];
+
+        return Array.from(sourceSet).map((source) => {
+          const sourceMeta = sourceMetaByDuplicateAndSource.get(`${benchmarkId}::${source}`);
+
+          return {
+            benchmarkId: keeper.id,
+            source,
+            benchmarkType: sourceMeta?.benchmarkType ?? duplicate.benchmarkType,
+            modalities: sourceMeta?.modalities ?? fallbackModalities
+          };
+        });
+      });
+
+      if (sourceMetaRowsToMigrate.length > 0) {
+        await tx
+          .insert(benchmarkSourceMeta)
+          .values(sourceMetaRowsToMigrate)
+          .onConflictDoNothing({
+            target: [benchmarkSourceMeta.benchmarkId, benchmarkSourceMeta.source]
+          });
+      }
+
+      if (duplicateSourceMetaRows.length > 0) {
+        await tx
+          .delete(benchmarkSourceMeta)
+          .where(inArray(benchmarkSourceMeta.benchmarkId, duplicateIds));
+      }
 
       // Batch reassign benchmark values from all duplicates to keeper
       await tx

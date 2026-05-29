@@ -16,6 +16,12 @@ type MergeEntityFn = (input: {
   targetId: number;
   targetBenchmarkName?: string;
 }) => Promise<void>;
+type RebuildBenchmarkCanonicalKeysByRuleFn = (rawRule: unknown) => Promise<{
+  ok: true;
+  totalBenchmarks: number;
+  canonicalGroups: number;
+  mergedCount: number;
+}>;
 
 type HasBenchmarkSymbolSemanticMismatchFn = (left: string, right: string) => boolean;
 type GetDashboardRowsFn = (limit?: number | null, sourceFilter?: string | null) => Promise<Array<{
@@ -30,6 +36,7 @@ type GetDashboardRowsFn = (limit?: number | null, sourceFilter?: string | null) 
 type TransactionCallback = (tx: unknown) => Promise<unknown>;
 
 let mergeEntityForTest: MergeEntityFn;
+let rebuildBenchmarkCanonicalKeysByRuleForTest: RebuildBenchmarkCanonicalKeysByRuleFn;
 let importBenchmarkCsvForTest: ImportBenchmarkCsvFn;
 let hasBenchmarkSymbolSemanticMismatchForTest: HasBenchmarkSymbolSemanticMismatchFn;
 let getDashboardRowsForTest: GetDashboardRowsFn;
@@ -43,6 +50,7 @@ beforeAll(async () => {
 
   const adminServiceModule = await import("@/lib/admin-service");
   mergeEntityForTest = adminServiceModule.mergeEntity as MergeEntityFn;
+  rebuildBenchmarkCanonicalKeysByRuleForTest = adminServiceModule.rebuildBenchmarkCanonicalKeysByRule as RebuildBenchmarkCanonicalKeysByRuleFn;
   importBenchmarkCsvForTest = adminServiceModule.importBenchmarkCsv as ImportBenchmarkCsvFn;
   hasBenchmarkSymbolSemanticMismatchForTest = adminServiceModule.__hasBenchmarkSymbolSemanticMismatchForTest as HasBenchmarkSymbolSemanticMismatchFn;
 
@@ -309,6 +317,85 @@ describe("mergeEntity benchmark source meta migration", () => {
     expect(onConflictDoNothing).not.toHaveBeenCalled();
     expect(deleteFn).not.toHaveBeenCalled();
 
+    transactionSpy.mockRestore();
+  });
+
+  test("批量 canonical 重建合并 benchmark 时会迁移 source meta 到 keeper", async () => {
+    const allBenchmarks = [
+      {
+        id: 101,
+        benchmarkName: "Bench A",
+        benchmarkType: "General",
+        modalities: ["Text"],
+        mergedIntoBenchmarkId: null
+      },
+      {
+        id: 202,
+        benchmarkName: "Bench-A",
+        benchmarkType: "General",
+        modalities: ["Vision"],
+        mergedIntoBenchmarkId: null
+      }
+    ];
+
+    const dbSelectOrderBy = vi.fn().mockResolvedValue(allBenchmarks);
+    const dbSelectFrom = vi.fn(() => ({ orderBy: dbSelectOrderBy }));
+    const dbSelectSpy = vi.spyOn(dbForTest, "select").mockImplementation(() => ({ from: dbSelectFrom }));
+
+    const execute = vi.fn().mockResolvedValue(undefined);
+
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const updateSet = vi.fn<(payload: Record<string, unknown>) => { where: typeof updateWhere }>(
+      () => ({ where: updateWhere })
+    );
+    const update = vi.fn(() => ({ set: updateSet }));
+
+    const selectWhere = createSelectWhereMock([
+      [{ benchmarkId: 202, source: "text:A" }],
+      [{ benchmarkId: 202, source: "text:A", benchmarkType: "Imported Vision", modalities: ["Vision"] }]
+    ]);
+    const selectFrom = vi.fn(() => ({ where: selectWhere }));
+    const select = vi.fn(() => ({ from: selectFrom }));
+
+    const onConflictDoNothing = vi.fn().mockResolvedValue(undefined);
+    const values = vi.fn(() => ({ onConflictDoNothing }));
+    const insert = vi.fn(() => ({ values }));
+
+    const deleteWhere = vi.fn().mockResolvedValue(undefined);
+    const deleteFn = vi.fn(() => ({ where: deleteWhere }));
+
+    const tx = {
+      execute,
+      update,
+      select,
+      insert,
+      delete: deleteFn
+    };
+
+    const transactionSpy = vi
+      .spyOn(dbForTest, "transaction")
+      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+
+    const result = await rebuildBenchmarkCanonicalKeysByRuleForTest({
+      lowercase: true,
+      removeHyphen: true,
+      removeSpace: true,
+      removeDot: false
+    });
+
+    expect(result.mergedCount).toBe(1);
+    expect(values).toHaveBeenCalledWith([
+      {
+        benchmarkId: 101,
+        source: "text:A",
+        benchmarkType: "Imported Vision",
+        modalities: ["Vision"]
+      }
+    ]);
+    expect(onConflictDoNothing).toHaveBeenCalledTimes(1);
+    expect(deleteFn).toHaveBeenCalledTimes(1);
+
+    dbSelectSpy.mockRestore();
     transactionSpy.mockRestore();
   });
 
