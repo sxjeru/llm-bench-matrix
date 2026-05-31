@@ -192,7 +192,11 @@ async function loadDashboardRows(limit: number, sourceFilter: string | null): Pr
   });
 }
 
-export async function getDashboardRows(limit: number | null = null, sourceFilter?: string | null): Promise<DashboardRow[]> {
+export async function getDashboardRows(
+  limit: number | null = null,
+  sourceFilter?: string | null,
+  forceVersion?: string
+): Promise<DashboardRow[]> {
   const rawLimit =
     typeof limit === "number" && Number.isFinite(limit) && limit > 0
       ? Math.trunc(limit)
@@ -208,7 +212,8 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
       versionProbeTtlMs: CACHE_VERSION_PROBE_TTL_MS,
       staleIfErrorMs: CACHE_STALE_IF_ERROR_MS,
       getVersion: getDashboardCacheVersion,
-      loader: () => loadDashboardRows(normalizedLimit, normalizedSourceFilter)
+      loader: () => loadDashboardRows(normalizedLimit, normalizedSourceFilter),
+      forceVersion
     }
   );
 }

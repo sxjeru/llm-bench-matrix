@@ -18,7 +18,7 @@ export type VersionedCacheEntry<T> = {
 
 export type VersionedCacheStore<T> = {
   cache: Map<string, VersionedCacheEntry<T>>;
-  inFlight: Map<string, Promise<T>>;
+  inFlight: Map<string, { promise: Promise<T>; version?: string }>;
   generation: number;
 };
 
@@ -33,7 +33,7 @@ export function createTimedCacheStore<T>(): TimedCacheStore<T> {
 export function createVersionedCacheStore<T>(): VersionedCacheStore<T> {
   return {
     cache: new Map<string, VersionedCacheEntry<T>>(),
-    inFlight: new Map<string, Promise<T>>(),
+    inFlight: new Map<string, { promise: Promise<T>; version?: string }>(),
     generation: 0
   };
 }
@@ -97,24 +97,27 @@ export async function withVersionedCache<T>(
     staleIfErrorMs: number;
     getVersion: () => Promise<string>;
     loader: () => Promise<T>;
+    forceVersion?: string;
   }
 ): Promise<T> {
   const now = Date.now();
   const cached = store.cache.get(key);
 
   if (cached && cached.nextVersionCheckAt > now) {
-    return cached.value;
+    if (options.forceVersion === undefined || cached.version === options.forceVersion) {
+      return cached.value;
+    }
   }
 
   const pending = store.inFlight.get(key);
-  if (pending) {
-    return pending;
+  if (pending && (options.forceVersion === undefined || pending.version === options.forceVersion)) {
+    return pending.promise;
   }
 
   const generation = store.generation;
   const promise = (async () => {
     try {
-      const version = await options.getVersion();
+      const version = options.forceVersion ?? (await options.getVersion());
       const latestCached = store.cache.get(key);
 
       if (latestCached && latestCached.version === version) {
@@ -141,17 +144,21 @@ export async function withVersionedCache<T>(
       return value;
     } catch (error) {
       const latestCached = store.cache.get(key);
-      if (latestCached && latestCached.staleUntil > Date.now()) {
+      if (
+        latestCached
+        && latestCached.staleUntil > Date.now()
+        && (options.forceVersion === undefined || latestCached.version === options.forceVersion)
+      ) {
         return latestCached.value;
       }
       throw error;
     }
   })().finally(() => {
-    if (store.inFlight.get(key) === promise) {
+    if (store.inFlight.get(key)?.promise === promise) {
       store.inFlight.delete(key);
     }
   });
 
-  store.inFlight.set(key, promise);
+  store.inFlight.set(key, { promise, version: options.forceVersion });
   return promise;
 }

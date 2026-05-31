@@ -262,5 +262,56 @@ describe("server timed cache", () => {
     // We expect the pending call to throw the error, rather than fallback to "first" (which was invalidated)
     await expect(pending).rejects.toThrow("getVersion error");
   });
+
+  test("versioned cache does not reuse in-flight loads for a different forced version", async () => {
+    const store = createVersionedCacheStore<string>();
+    let resolveFirstLoader: (value: string) => void = () => undefined;
+    const firstLoader = vi.fn(() => new Promise<string>((resolve) => {
+      resolveFirstLoader = resolve;
+    }));
+    const secondLoader = vi.fn(async () => "second");
+
+    const pendingFirst = withVersionedCache(store, "key", {
+      versionProbeTtlMs: 60_000,
+      staleIfErrorMs: 60_000,
+      getVersion: vi.fn(),
+      loader: firstLoader,
+      forceVersion: "v1"
+    });
+
+    await expect(withVersionedCache(store, "key", {
+      versionProbeTtlMs: 60_000,
+      staleIfErrorMs: 60_000,
+      getVersion: vi.fn(),
+      loader: secondLoader,
+      forceVersion: "v2"
+    })).resolves.toBe("second");
+
+    resolveFirstLoader("first");
+    await expect(pendingFirst).resolves.toBe("first");
+    expect(firstLoader).toHaveBeenCalledTimes(1);
+    expect(secondLoader).toHaveBeenCalledTimes(1);
+  });
+
+  test("versioned cache does not serve stale value from a different forced version", async () => {
+    const store = createVersionedCacheStore<string>();
+    const getVersion = vi.fn().mockResolvedValue("v1");
+    const loader = vi.fn().mockResolvedValue("first");
+
+    await withVersionedCache(store, "key", {
+      versionProbeTtlMs: 60_000,
+      staleIfErrorMs: 60_000,
+      getVersion,
+      loader
+    });
+
+    await expect(withVersionedCache(store, "key", {
+      versionProbeTtlMs: 60_000,
+      staleIfErrorMs: 60_000,
+      getVersion: vi.fn(),
+      loader: vi.fn().mockRejectedValue(new Error("db unavailable")),
+      forceVersion: "v2"
+    })).rejects.toThrow("db unavailable");
+  });
 });
 

@@ -26,7 +26,7 @@ describe("GET /api/public/records", () => {
 
     expect(getCacheVersion).toHaveBeenCalledWith("dashboard");
     expect(getCacheVersion).toHaveBeenCalledWith("pricing");
-    expect(getDashboardRows).toHaveBeenCalledWith(300);
+    expect(getDashboardRows).toHaveBeenCalledWith(300, null, "dashboard-version");
     expect(response.headers.get("Cache-Control")).toBe("public, max-age=0, must-revalidate");
     expect(response.headers.get("CDN-Cache-Control")).toBe("public, s-maxage=10, stale-while-revalidate=60");
     expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe("public, s-maxage=30, stale-while-revalidate=120");
@@ -40,7 +40,7 @@ describe("GET /api/public/records", () => {
 
     await GET(new Request("https://example.com/api/public/records?limit=99999"));
 
-    expect(getDashboardRows).toHaveBeenCalledWith(1000);
+    expect(getDashboardRows).toHaveBeenCalledWith(1000, null, "dashboard-version");
   });
 
   test("limit 会收敛到固定缓存档位并按请求值裁剪", async () => {
@@ -53,7 +53,7 @@ describe("GET /api/public/records", () => {
     const response = await GET(new Request("https://example.com/api/public/records?limit=2"));
     const payload = await response.json();
 
-    expect(getDashboardRows).toHaveBeenCalledWith(100);
+    expect(getDashboardRows).toHaveBeenCalledWith(100, null, "dashboard-version");
     expect(payload.rows).toHaveLength(2);
     expect(response.headers.get("ETag")).toBe('"records:dashboard-version:pricing-version:limit:2:730ad87362fcc123"');
   });

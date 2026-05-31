@@ -95,7 +95,7 @@ export async function GET(request: Request) {
     });
   }
 
-  const cachedRows = await getDashboardRows(cachedLimit);
+  const cachedRows = await getDashboardRows(cachedLimit, null, dashboardVersion);
   const rows = cachedRows.slice(0, limit);
 
   return NextResponse.json(
