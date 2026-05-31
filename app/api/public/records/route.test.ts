@@ -55,4 +55,15 @@ describe("GET /api/public/records", () => {
     expect(response.status).toBe(304);
     expect(response.headers.get("ETag")).toBe('"records:300:300:0:0:empty"');
   });
+
+  test("If-None-Match 为弱 ETag（W/ 前缀）时同样返回 304", async () => {
+    vi.mocked(getDashboardRows).mockResolvedValue([]);
+
+    const response = await GET(new Request("https://example.com/api/public/records", {
+      headers: { "If-None-Match": 'W/"records:300:300:0:0:empty"' }
+    }));
+
+    expect(response.status).toBe(304);
+    expect(response.headers.get("ETag")).toBe('"records:300:300:0:0:empty"');
+  });
 });

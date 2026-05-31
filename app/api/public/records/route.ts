@@ -58,7 +58,8 @@ export async function GET(request: Request) {
     "X-RateLimit-Remaining": String(rateLimit.remaining)
   };
 
-  if (request.headers.get("if-none-match") === etag) {
+  const ifNoneMatch = request.headers.get("if-none-match")?.replace(/^W\//, "") ?? "";
+  if (ifNoneMatch === etag) {
     return new NextResponse(null, {
       status: 304,
       headers
