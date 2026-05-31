@@ -3,7 +3,8 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db/client";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 import { normalizeProviderConfig } from "@/lib/provider-config";
-import { createTimedCacheStore, invalidateTimedCacheStore, withTimedCache } from "@/lib/server-cache";
+import { bumpCacheVersions, getCacheVersion } from "@/lib/cache-versions";
+import { createVersionedCacheStore, invalidateVersionedCacheStore, withVersionedCache } from "@/lib/server-cache";
 import { invalidateModelPricingCaches } from "@/lib/model-pricing";
 
 function toNullableNumber(value: unknown): number | null {
@@ -40,22 +41,25 @@ export type DashboardRow = {
 };
 
 const SOURCE_EMPTY_KEY = "__EMPTY__";
-const DASHBOARD_CACHE_TTL_MS = 60_000;
+const CACHE_VERSION_PROBE_TTL_MS = 5_000;
+const CACHE_STALE_IF_ERROR_MS = 30 * 60_000;
 const DEFAULT_MAX_DASHBOARD_ROWS = 50_000;
 
-const dashboardRowsStore = createTimedCacheStore<DashboardRow[]>();
-const dashboardStatsStore = createTimedCacheStore<DashboardStats>();
-const sourceOptionsStore = createTimedCacheStore<string[]>();
+const dashboardRowsStore = createVersionedCacheStore<DashboardRow[]>();
+const dashboardStatsStore = createVersionedCacheStore<DashboardStats>();
+const sourceOptionsStore = createVersionedCacheStore<string[]>();
 
 /**
  * Clear dashboard caches after admin write operations
  * (import, merge, delete, etc.) so subsequent reads reflect updated data.
  */
 export function invalidateAllCaches() {
-  invalidateTimedCacheStore(dashboardRowsStore);
-  invalidateTimedCacheStore(dashboardStatsStore);
-  invalidateTimedCacheStore(sourceOptionsStore);
+  invalidateVersionedCacheStore(dashboardRowsStore);
+  invalidateVersionedCacheStore(dashboardStatsStore);
+  invalidateVersionedCacheStore(sourceOptionsStore);
   invalidateModelPricingCaches();
+
+  void bumpCacheVersions(["dashboard", "pricing", "admin_entities"]);
 
   try {
     revalidatePath("/");
@@ -72,6 +76,10 @@ export function invalidateAllCaches() {
 function normalizeSourceFilterKey(sourceFilter?: string | null): string {
   const normalized = sourceFilter?.trim();
   return normalized && normalized.length > 0 ? normalized : "__ALL__";
+}
+
+function getDashboardCacheVersion() {
+  return getCacheVersion("dashboard");
 }
 
 function resolveDashboardWhereClause(sourceFilter?: string | null) {
@@ -101,11 +109,14 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
   const normalizedSourceFilter = sourceFilter?.trim() || null;
   const cacheKey = `${normalizedLimit ?? "all"}::${normalizeSourceFilterKey(normalizedSourceFilter)}`;
 
-  return withTimedCache(
+  return withVersionedCache(
     dashboardRowsStore,
     cacheKey,
-    DASHBOARD_CACHE_TTL_MS,
-    async () => {
+    {
+      versionProbeTtlMs: CACHE_VERSION_PROBE_TTL_MS,
+      staleIfErrorMs: CACHE_STALE_IF_ERROR_MS,
+      getVersion: getDashboardCacheVersion,
+      loader: async () => {
       const whereClause = resolveDashboardWhereClause(normalizedSourceFilter);
 
       const baseQuery = db
@@ -195,6 +206,7 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
         updatedAt: row.updatedAt.toISOString()
         };
       });
+      }
     }
   );
 }
@@ -210,11 +222,14 @@ export async function getDashboardStats(sourceFilter?: string | null): Promise<D
   const normalizedSourceFilter = sourceFilter?.trim() || null;
   const cacheKey = normalizeSourceFilterKey(normalizedSourceFilter);
 
-  return withTimedCache(
+  return withVersionedCache(
     dashboardStatsStore,
     cacheKey,
-    DASHBOARD_CACHE_TTL_MS,
-    async () => {
+    {
+      versionProbeTtlMs: CACHE_VERSION_PROBE_TTL_MS,
+      staleIfErrorMs: CACHE_STALE_IF_ERROR_MS,
+      getVersion: getDashboardCacheVersion,
+      loader: async () => {
       const whereClause = resolveDashboardWhereClause(normalizedSourceFilter);
 
       const [result] = await db
@@ -236,6 +251,7 @@ export async function getDashboardStats(sourceFilter?: string | null): Promise<D
         benchmarkCount: Number(result?.benchmarkCount ?? 0),
         totalRecords: Number(result?.totalRecords ?? 0)
       };
+      }
     }
   );
 }
@@ -263,11 +279,14 @@ export async function getActiveEntities() {
 }
 
 export async function getSourceOptions(): Promise<string[]> {
-  return withTimedCache(
+  return withVersionedCache(
     sourceOptionsStore,
     "all",
-    DASHBOARD_CACHE_TTL_MS,
-    async () => {
+    {
+      versionProbeTtlMs: CACHE_VERSION_PROBE_TTL_MS,
+      staleIfErrorMs: CACHE_STALE_IF_ERROR_MS,
+      getVersion: getDashboardCacheVersion,
+      loader: async () => {
       const rows = await db
         .selectDistinct({ source: benchmarkValues.source })
         .from(benchmarkValues)
@@ -281,6 +300,7 @@ export async function getSourceOptions(): Promise<string[]> {
       // Keep post-trim uniqueness semantics stable even if DB distinct values differ
       // only by surrounding whitespace.
       return Array.from(new Set(normalized));
+      }
     }
   );
 }

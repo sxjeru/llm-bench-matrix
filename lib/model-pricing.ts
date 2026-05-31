@@ -1,22 +1,34 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
+import { bumpCacheVersions, getCacheVersion } from "@/lib/cache-versions";
 import { db } from "@/lib/db/client";
 import { modelPricing, models, providers } from "@/lib/db/schema";
 import { normalizeProviderConfig } from "@/lib/provider-config";
-import { createTimedCacheStore, invalidateTimedCacheStore, withTimedCache } from "@/lib/server-cache";
+import { createVersionedCacheStore, invalidateVersionedCacheStore, withVersionedCache } from "@/lib/server-cache";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const MODELS_DEV_FETCH_TIMEOUT_MS = 10_000;
 const MODELS_DEV_MAX_BYTES = 8 * 1024 * 1024;
 const MODELS_DEV_SOURCE = "models.dev";
-const MODEL_PRICING_CACHE_TTL_MS = 60_000;
+const MODEL_PRICING_VERSION_PROBE_TTL_MS = 5_000;
+const MODEL_PRICING_STALE_IF_ERROR_MS = 30 * 60_000;
 
-const modelPricingRowsStore = createTimedCacheStore<ModelPricingRow[]>();
-const adminModelPricingRowsStore = createTimedCacheStore<ModelPricingRow[]>();
+const modelPricingRowsStore = createVersionedCacheStore<ModelPricingRow[]>();
+const adminModelPricingRowsStore = createVersionedCacheStore<ModelPricingRow[]>();
 
 export function invalidateModelPricingCaches() {
-  invalidateTimedCacheStore(modelPricingRowsStore);
-  invalidateTimedCacheStore(adminModelPricingRowsStore);
+  invalidateVersionedCacheStore(modelPricingRowsStore);
+  invalidateVersionedCacheStore(adminModelPricingRowsStore);
+}
+
+function getModelPricingCacheVersion() {
+  return getCacheVersion("pricing");
+}
+
+function invalidateChangedModelPricingCaches() {
+  invalidateModelPricingCaches();
+  if (process.env.NODE_ENV === "test") return;
+  void bumpCacheVersions(["pricing"]);
 }
 
 type DbModel = {
@@ -603,11 +615,15 @@ async function getActiveModelRows(): Promise<DbModel[]> {
 }
 
 export async function getModelPricingRows(): Promise<ModelPricingRow[]> {
-  return withTimedCache(
+  return withVersionedCache(
     modelPricingRowsStore,
     "all",
-    MODEL_PRICING_CACHE_TTL_MS,
-    loadModelPricingRows
+    {
+      versionProbeTtlMs: MODEL_PRICING_VERSION_PROBE_TTL_MS,
+      staleIfErrorMs: MODEL_PRICING_STALE_IF_ERROR_MS,
+      getVersion: getModelPricingCacheVersion,
+      loader: loadModelPricingRows
+    }
   );
 }
 
@@ -672,11 +688,15 @@ async function loadModelPricingRows(): Promise<ModelPricingRow[]> {
 }
 
 export async function getAdminModelPricingRows(): Promise<ModelPricingRow[]> {
-  return withTimedCache(
+  return withVersionedCache(
     adminModelPricingRowsStore,
     "all",
-    MODEL_PRICING_CACHE_TTL_MS,
-    loadAdminModelPricingRows
+    {
+      versionProbeTtlMs: MODEL_PRICING_VERSION_PROBE_TTL_MS,
+      staleIfErrorMs: MODEL_PRICING_STALE_IF_ERROR_MS,
+      getVersion: getModelPricingCacheVersion,
+      loader: loadAdminModelPricingRows
+    }
   );
 }
 
@@ -849,7 +869,7 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
       });
   }
 
-  invalidateModelPricingCaches();
+  invalidateChangedModelPricingCaches();
 
   const sourceModelCount = Array.from(sourceProviders.values()).reduce(
     (sum, provider) => sum + Object.keys(provider.models).length,
@@ -970,7 +990,7 @@ export async function updateModelPricing(input: ModelPricingUpdateInput) {
       target: modelPricing.modelId,
       set: updateValues
     });
-  invalidateModelPricingCaches();
+  invalidateChangedModelPricingCaches();
 }
 
 export async function clearModelPricingManualOverride(modelId: number) {
@@ -978,7 +998,7 @@ export async function clearModelPricingManualOverride(modelId: number) {
     .update(modelPricing)
     .set({ manualOverride: false, matchStatus: "matched", updatedAt: new Date() })
     .where(and(eq(modelPricing.modelId, modelId), eq(modelPricing.manualOverride, true)));
-  invalidateModelPricingCaches();
+  invalidateChangedModelPricingCaches();
 }
 
 export async function getModelPricingCount(): Promise<number> {

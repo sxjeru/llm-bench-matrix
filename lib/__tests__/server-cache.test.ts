@@ -1,5 +1,11 @@
 import { describe, expect, test, vi } from "vitest";
-import { createTimedCacheStore, invalidateTimedCacheStore, withTimedCache } from "@/lib/server-cache";
+import {
+  createTimedCacheStore,
+  createVersionedCacheStore,
+  invalidateTimedCacheStore,
+  withTimedCache,
+  withVersionedCache
+} from "@/lib/server-cache";
 
 describe("server timed cache", () => {
   test("dedupes concurrent loads", async () => {
@@ -31,5 +37,64 @@ describe("server timed cache", () => {
     await expect(withTimedCache(store, "key", 60_000, freshLoader)).resolves.toBe("fresh");
 
     expect(freshLoader).toHaveBeenCalledTimes(1);
+  });
+
+  test("versioned cache only reloads when probed version changes", async () => {
+    const store = createVersionedCacheStore<string>();
+    const getVersion = vi.fn()
+      .mockResolvedValueOnce("v1")
+      .mockResolvedValueOnce("v1")
+      .mockResolvedValueOnce("v2");
+    const loader = vi.fn()
+      .mockResolvedValueOnce("first")
+      .mockResolvedValueOnce("second");
+
+    await expect(withVersionedCache(store, "key", {
+      versionProbeTtlMs: 0,
+      staleIfErrorMs: 60_000,
+      getVersion,
+      loader
+    })).resolves.toBe("first");
+
+    await expect(withVersionedCache(store, "key", {
+      versionProbeTtlMs: 0,
+      staleIfErrorMs: 60_000,
+      getVersion,
+      loader
+    })).resolves.toBe("first");
+
+    await expect(withVersionedCache(store, "key", {
+      versionProbeTtlMs: 0,
+      staleIfErrorMs: 60_000,
+      getVersion,
+      loader
+    })).resolves.toBe("second");
+
+    expect(getVersion).toHaveBeenCalledTimes(3);
+    expect(loader).toHaveBeenCalledTimes(2);
+  });
+
+  test("versioned cache serves stale value when reload fails within stale window", async () => {
+    const store = createVersionedCacheStore<string>();
+    const getVersion = vi.fn()
+      .mockResolvedValueOnce("v1")
+      .mockResolvedValueOnce("v2");
+    const loader = vi.fn()
+      .mockResolvedValueOnce("first")
+      .mockRejectedValueOnce(new Error("db unavailable"));
+
+    await withVersionedCache(store, "key", {
+      versionProbeTtlMs: 0,
+      staleIfErrorMs: 60_000,
+      getVersion,
+      loader
+    });
+
+    await expect(withVersionedCache(store, "key", {
+      versionProbeTtlMs: 0,
+      staleIfErrorMs: 60_000,
+      getVersion,
+      loader
+    })).resolves.toBe("first");
   });
 });

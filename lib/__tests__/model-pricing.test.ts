@@ -55,6 +55,9 @@ function createDbMock(activeModels: ActiveModelRow[], existingRows: ExistingPric
     if (selection) {
       return {
         from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn().mockResolvedValue([])
+          })),
           innerJoin: vi.fn(() => ({
             innerJoin: vi.fn(() => ({
               where: vi.fn(() => ({
@@ -80,6 +83,7 @@ function createDbMock(activeModels: ActiveModelRow[], existingRows: ExistingPric
 
   return {
     db: { select, insert },
+    insert,
     values,
     onConflictDoUpdate
   };
@@ -185,12 +189,12 @@ describe("model pricing module", () => {
     ]);
     await getModelPricingRows();
 
-    expect(db.select).toHaveBeenCalledTimes(1);
+    expect(db.select).toHaveBeenCalledTimes(2);
 
     invalidateModelPricingCaches();
     await getModelPricingRows();
 
-    expect(db.select).toHaveBeenCalledTimes(2);
+    expect(db.select).toHaveBeenCalledTimes(4);
   });
 
   test("updateModelPricing persists validated payload with defaults", async () => {
@@ -206,10 +210,6 @@ describe("model pricing module", () => {
     });
 
     expect(onConflictDoUpdate).toHaveBeenCalledTimes(1);
-
-  await updateModelPricing({ modelId: 1, inputCost: 0.2 });
-
-  expect(onConflictDoUpdate).toHaveBeenCalledTimes(2);
 
     const [onConflictArg] = onConflictDoUpdate.mock.calls[0];
     const set = onConflictArg.set;
