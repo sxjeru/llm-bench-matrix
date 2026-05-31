@@ -97,4 +97,29 @@ describe("server timed cache", () => {
       loader
     })).resolves.toBe("first");
   });
+
+  test("versioned cache serves stale value when version probe fails within stale window", async () => {
+    const store = createVersionedCacheStore<string>();
+    const getVersion = vi.fn()
+      .mockResolvedValueOnce("v1")
+      .mockRejectedValueOnce(new Error("db unavailable"));
+    const loader = vi.fn()
+      .mockResolvedValueOnce("first");
+
+    await withVersionedCache(store, "key", {
+      versionProbeTtlMs: 0,
+      staleIfErrorMs: 60_000,
+      getVersion,
+      loader
+    });
+
+    await expect(withVersionedCache(store, "key", {
+      versionProbeTtlMs: 0,
+      staleIfErrorMs: 60_000,
+      getVersion,
+      loader
+    })).resolves.toBe("first");
+
+    expect(loader).toHaveBeenCalledTimes(1);
+  });
 });

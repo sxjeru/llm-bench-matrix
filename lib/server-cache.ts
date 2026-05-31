@@ -113,21 +113,21 @@ export async function withVersionedCache<T>(
 
   const generation = store.generation;
   const promise = (async () => {
-    const version = await options.getVersion();
-    const latestCached = store.cache.get(key);
-
-    if (latestCached && latestCached.version === version) {
-      const nextEntry = {
-        ...latestCached,
-        nextVersionCheckAt: Date.now() + options.versionProbeTtlMs
-      };
-      if (store.generation === generation) {
-        store.cache.set(key, nextEntry);
-      }
-      return latestCached.value;
-    }
-
     try {
+      const version = await options.getVersion();
+      const latestCached = store.cache.get(key);
+
+      if (latestCached && latestCached.version === version) {
+        const nextEntry = {
+          ...latestCached,
+          nextVersionCheckAt: Date.now() + options.versionProbeTtlMs
+        };
+        if (store.generation === generation) {
+          store.cache.set(key, nextEntry);
+        }
+        return latestCached.value;
+      }
+
       const value = await options.loader();
       if (store.generation === generation) {
         store.cache.set(key, {
@@ -139,6 +139,7 @@ export async function withVersionedCache<T>(
       }
       return value;
     } catch (error) {
+      const latestCached = store.cache.get(key);
       if (latestCached && latestCached.staleUntil > Date.now()) {
         return latestCached.value;
       }
