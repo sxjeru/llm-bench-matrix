@@ -41,7 +41,7 @@ export async function POST(request: Request) {
   }
 
   await saveSetting(parsed.data);
-  invalidateAllCaches();
+  await invalidateAllCaches();
 
   if (parsed.data.key === "model_dedupe_rule") {
     const [modelRebuildResult, benchmarkRebuildResult] = await Promise.all([

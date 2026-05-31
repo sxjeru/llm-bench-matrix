@@ -29,6 +29,6 @@ export async function POST(request: Request) {
     sourceModelId: parsed.data.sourceModelId
   });
 
-  invalidateAllCaches();
+  await invalidateAllCaches();
   return NextResponse.json({ model });
 }

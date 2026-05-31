@@ -3,6 +3,9 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db/client";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 import { normalizeProviderConfig } from "@/lib/provider-config";
+import { bumpCacheVersions, getCacheVersion } from "@/lib/cache-versions";
+import { createVersionedCacheStore, invalidateVersionedCacheStore, withVersionedCache } from "@/lib/server-cache";
+import { invalidateModelPricingCaches } from "@/lib/model-pricing";
 
 function toNullableNumber(value: unknown): number | null {
   if (value === null || value === undefined) return null;
@@ -38,33 +41,25 @@ export type DashboardRow = {
 };
 
 const SOURCE_EMPTY_KEY = "__EMPTY__";
-const DASHBOARD_CACHE_TTL_MS = 60_000;
+const CACHE_VERSION_PROBE_TTL_MS = 5_000;
+const CACHE_STALE_IF_ERROR_MS = 30 * 60_000;
 const DEFAULT_MAX_DASHBOARD_ROWS = 50_000;
 
-type TimedCacheEntry<T> = {
-  value: T;
-  expiresAt: number;
-};
-
-const dashboardRowsCache = new Map<string, TimedCacheEntry<DashboardRow[]>>();
-const dashboardRowsInFlight = new Map<string, Promise<DashboardRow[]>>();
-const dashboardStatsCache = new Map<string, TimedCacheEntry<DashboardStats>>();
-const dashboardStatsInFlight = new Map<string, Promise<DashboardStats>>();
-const sourceOptionsCache = new Map<string, TimedCacheEntry<string[]>>();
-const sourceOptionsInFlight = new Map<string, Promise<string[]>>();
+const dashboardRowsStore = createVersionedCacheStore<DashboardRow[]>();
+const dashboardStatsStore = createVersionedCacheStore<DashboardStats>();
+const sourceOptionsStore = createVersionedCacheStore<string[]>();
 
 /**
  * Clear dashboard caches after admin write operations
  * (import, merge, delete, etc.) so subsequent reads reflect updated data.
  */
-export function invalidateAllCaches() {
-  dashboardRowsCache.clear();
-  dashboardStatsCache.clear();
-  sourceOptionsCache.clear();
+export async function invalidateAllCaches() {
+  invalidateVersionedCacheStore(dashboardRowsStore);
+  invalidateVersionedCacheStore(dashboardStatsStore);
+  invalidateVersionedCacheStore(sourceOptionsStore);
+  invalidateModelPricingCaches();
 
-  dashboardRowsInFlight.clear();
-  dashboardStatsInFlight.clear();
-  sourceOptionsInFlight.clear();
+  await bumpCacheVersions(["dashboard", "pricing", "admin_entities"]);
 
   try {
     revalidatePath("/");
@@ -83,39 +78,8 @@ function normalizeSourceFilterKey(sourceFilter?: string | null): string {
   return normalized && normalized.length > 0 ? normalized : "__ALL__";
 }
 
-async function withTimedCache<T>(
-  cache: Map<string, TimedCacheEntry<T>>,
-  inFlight: Map<string, Promise<T>>,
-  key: string,
-  ttlMs: number,
-  loader: () => Promise<T>
-): Promise<T> {
-  const now = Date.now();
-  const cached = cache.get(key);
-
-  if (cached && cached.expiresAt > now) {
-    return cached.value;
-  }
-
-  const pending = inFlight.get(key);
-  if (pending) {
-    return pending;
-  }
-
-  const promise = loader()
-    .then((value) => {
-      cache.set(key, {
-        value,
-        expiresAt: Date.now() + ttlMs
-      });
-      return value;
-    })
-    .finally(() => {
-      inFlight.delete(key);
-    });
-
-  inFlight.set(key, promise);
-  return promise;
+function getDashboardCacheVersion() {
+  return getCacheVersion("dashboard");
 }
 
 function resolveDashboardWhereClause(sourceFilter?: string | null) {
@@ -136,7 +100,103 @@ function resolveDashboardWhereClause(sourceFilter?: string | null) {
   return and(baseFilter, eq(benchmarkValues.source, normalizedSourceFilter));
 }
 
-export async function getDashboardRows(limit: number | null = null, sourceFilter?: string | null): Promise<DashboardRow[]> {
+async function loadDashboardRows(limit: number, sourceFilter: string | null): Promise<DashboardRow[]> {
+  const whereClause = resolveDashboardWhereClause(sourceFilter);
+
+  const baseQuery = db
+    .select({
+      id: benchmarkValues.id,
+      providerId: providers.id,
+      providerName: providers.name,
+      providerConfig: providers.config,
+      modelName: models.modelName,
+      benchmarkName: benchmarks.benchmarkName,
+      benchmarkType: benchmarks.benchmarkType,
+      higherIsBetter: benchmarks.higherIsBetter,
+      benchmarkTypeOverride: benchmarkSourceMeta.benchmarkType,
+      benchmarkCanonicalKey: benchmarks.canonicalKey,
+      modalities: benchmarks.modalities,
+      modalitiesOverride: benchmarkSourceMeta.modalities,
+      benchTime: benchmarkValues.benchTime,
+      valueRaw: benchmarkValues.valueRaw,
+      valueNum: benchmarkValues.valueNum,
+      valueNum2: benchmarkValues.valueNum2,
+      valueNote: benchmarkValues.valueNote,
+      source: benchmarkValues.source,
+      updatedAt: benchmarkValues.createdAt
+    })
+    .from(benchmarkValues)
+    .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+    .innerJoin(providers, eq(models.providerId, providers.id))
+    .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+    .leftJoin(
+      benchmarkSourceMeta,
+      and(
+        eq(benchmarkSourceMeta.benchmarkId, benchmarks.id),
+        eq(benchmarkSourceMeta.source, benchmarkValues.source)
+      )
+    )
+    .where(whereClause)
+    .orderBy(desc(benchmarkValues.benchTime), desc(benchmarkValues.id))
+    .limit(limit);
+
+  const rows = await baseQuery;
+
+  const providerIds = Array.from(new Set(rows.map((row) => {
+    const config = normalizeProviderConfig(row.providerConfig);
+    return typeof config.displayTargetProviderId === "number" ? config.displayTargetProviderId : -1;
+  }).filter((id) => id > 0)));
+
+  const displayTargetProviders = providerIds.length > 0
+    ? await db.select().from(providers).where(inArray(providers.id, providerIds))
+    : [];
+  const displayTargetProviderById = new Map(displayTargetProviders.map((provider) => [provider.id, provider]));
+
+  return rows.map((row) => {
+    const providerConfig = normalizeProviderConfig(row.providerConfig);
+    const displayTargetProvider = typeof providerConfig.displayTargetProviderId === "number"
+      ? displayTargetProviderById.get(providerConfig.displayTargetProviderId) ?? null
+      : null;
+    const displayTargetConfig = displayTargetProvider ? normalizeProviderConfig(displayTargetProvider.config) : null;
+    const resolvedProviderName = displayTargetProvider?.name ?? row.providerName;
+    const resolvedProviderDisplayName = displayTargetConfig?.displayName?.trim()
+      || providerConfig.displayName?.trim()
+      || displayTargetProvider?.name
+      || row.providerName;
+    const resolvedProviderBrandColor = displayTargetConfig?.branding?.color
+      ?? providerConfig.branding?.color
+      ?? null;
+
+    return {
+      id: row.id,
+      providerName: resolvedProviderName,
+      providerDisplayName: resolvedProviderDisplayName,
+      providerBrandColor: resolvedProviderBrandColor,
+      providerEntityId: displayTargetProvider?.id ?? row.providerId,
+      modelName: row.modelName,
+      benchmarkName: row.benchmarkName,
+      benchmarkType: row.benchmarkType,
+      sourceBenchmarkType: row.benchmarkTypeOverride,
+      higherIsBetter: row.higherIsBetter,
+      benchmarkCanonicalKey: row.benchmarkCanonicalKey,
+      modalities: row.modalities ?? [],
+      sourceModalities: row.modalitiesOverride,
+      benchTime: row.benchTime.toISOString(),
+      valueRaw: row.valueRaw,
+      valueNum: toNullableNumber(row.valueNum),
+      valueNum2: toNullableNumber(row.valueNum2),
+      valueNote: row.valueNote,
+      source: row.source,
+      updatedAt: row.updatedAt.toISOString()
+    };
+  });
+}
+
+export async function getDashboardRows(
+  limit: number | null = null,
+  sourceFilter?: string | null,
+  forceVersion?: string
+): Promise<DashboardRow[]> {
   const rawLimit =
     typeof limit === "number" && Number.isFinite(limit) && limit > 0
       ? Math.trunc(limit)
@@ -145,101 +205,15 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
   const normalizedSourceFilter = sourceFilter?.trim() || null;
   const cacheKey = `${normalizedLimit ?? "all"}::${normalizeSourceFilterKey(normalizedSourceFilter)}`;
 
-  return withTimedCache(
-    dashboardRowsCache,
-    dashboardRowsInFlight,
+  return withVersionedCache(
+    dashboardRowsStore,
     cacheKey,
-    DASHBOARD_CACHE_TTL_MS,
-    async () => {
-      const whereClause = resolveDashboardWhereClause(normalizedSourceFilter);
-
-      const baseQuery = db
-        .select({
-          id: benchmarkValues.id,
-          providerId: providers.id,
-          providerName: providers.name,
-          providerConfig: providers.config,
-          modelName: models.modelName,
-          benchmarkName: benchmarks.benchmarkName,
-          benchmarkType: benchmarks.benchmarkType,
-          higherIsBetter: benchmarks.higherIsBetter,
-          benchmarkTypeOverride: benchmarkSourceMeta.benchmarkType,
-          benchmarkCanonicalKey: benchmarks.canonicalKey,
-          modalities: benchmarks.modalities,
-          modalitiesOverride: benchmarkSourceMeta.modalities,
-          benchTime: benchmarkValues.benchTime,
-          valueRaw: benchmarkValues.valueRaw,
-          valueNum: benchmarkValues.valueNum,
-          valueNum2: benchmarkValues.valueNum2,
-          valueNote: benchmarkValues.valueNote,
-          source: benchmarkValues.source,
-          updatedAt: benchmarkValues.createdAt
-        })
-        .from(benchmarkValues)
-        .innerJoin(models, eq(benchmarkValues.modelId, models.id))
-        .innerJoin(providers, eq(models.providerId, providers.id))
-        .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-        .leftJoin(
-          benchmarkSourceMeta,
-          and(
-            eq(benchmarkSourceMeta.benchmarkId, benchmarks.id),
-            eq(benchmarkSourceMeta.source, benchmarkValues.source)
-          )
-        )
-        .where(whereClause)
-        .orderBy(desc(benchmarkValues.benchTime), desc(benchmarkValues.id))
-        .limit(normalizedLimit);
-
-      const rows = await baseQuery;
-
-      const providerIds = Array.from(new Set(rows.map((row) => {
-        const config = normalizeProviderConfig(row.providerConfig);
-        return typeof config.displayTargetProviderId === "number" ? config.displayTargetProviderId : -1;
-      }).filter((id) => id > 0)));
-
-      const displayTargetProviders = providerIds.length > 0
-        ? await db.select().from(providers).where(inArray(providers.id, providerIds))
-        : [];
-      const displayTargetProviderById = new Map(displayTargetProviders.map((provider) => [provider.id, provider]));
-
-      return rows.map((row) => {
-        const providerConfig = normalizeProviderConfig(row.providerConfig);
-        const displayTargetProvider = typeof providerConfig.displayTargetProviderId === "number"
-          ? displayTargetProviderById.get(providerConfig.displayTargetProviderId) ?? null
-          : null;
-        const displayTargetConfig = displayTargetProvider ? normalizeProviderConfig(displayTargetProvider.config) : null;
-        const resolvedProviderName = displayTargetProvider?.name ?? row.providerName;
-        const resolvedProviderDisplayName = displayTargetConfig?.displayName?.trim()
-          || providerConfig.displayName?.trim()
-          || displayTargetProvider?.name
-          || row.providerName;
-        const resolvedProviderBrandColor = displayTargetConfig?.branding?.color
-          ?? providerConfig.branding?.color
-          ?? null;
-
-        return {
-        id: row.id,
-        providerName: resolvedProviderName,
-        providerDisplayName: resolvedProviderDisplayName,
-        providerBrandColor: resolvedProviderBrandColor,
-        providerEntityId: displayTargetProvider?.id ?? row.providerId,
-        modelName: row.modelName,
-        benchmarkName: row.benchmarkName,
-        benchmarkType: row.benchmarkType,
-        sourceBenchmarkType: row.benchmarkTypeOverride,
-        higherIsBetter: row.higherIsBetter,
-        benchmarkCanonicalKey: row.benchmarkCanonicalKey,
-        modalities: row.modalities ?? [],
-        sourceModalities: row.modalitiesOverride,
-        benchTime: row.benchTime.toISOString(),
-        valueRaw: row.valueRaw,
-        valueNum: toNullableNumber(row.valueNum),
-        valueNum2: toNullableNumber(row.valueNum2),
-        valueNote: row.valueNote,
-        source: row.source,
-        updatedAt: row.updatedAt.toISOString()
-        };
-      });
+    {
+      versionProbeTtlMs: CACHE_VERSION_PROBE_TTL_MS,
+      staleIfErrorMs: CACHE_STALE_IF_ERROR_MS,
+      getVersion: getDashboardCacheVersion,
+      loader: () => loadDashboardRows(normalizedLimit, normalizedSourceFilter),
+      forceVersion
     }
   );
 }
@@ -251,37 +225,42 @@ export type DashboardStats = {
   totalRecords: number;
 };
 
+async function loadDashboardStats(sourceFilter: string | null): Promise<DashboardStats> {
+  const whereClause = resolveDashboardWhereClause(sourceFilter);
+
+  const [result] = await db
+    .select({
+      providerCount: countDistinct(providers.id),
+      modelCount: countDistinct(models.id),
+      benchmarkCount: countDistinct(benchmarks.id),
+      totalRecords: count()
+    })
+    .from(benchmarkValues)
+    .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+    .innerJoin(providers, eq(models.providerId, providers.id))
+    .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+    .where(whereClause);
+
+  return {
+    providerCount: Number(result?.providerCount ?? 0),
+    modelCount: Number(result?.modelCount ?? 0),
+    benchmarkCount: Number(result?.benchmarkCount ?? 0),
+    totalRecords: Number(result?.totalRecords ?? 0)
+  };
+}
+
 export async function getDashboardStats(sourceFilter?: string | null): Promise<DashboardStats> {
   const normalizedSourceFilter = sourceFilter?.trim() || null;
   const cacheKey = normalizeSourceFilterKey(normalizedSourceFilter);
 
-  return withTimedCache(
-    dashboardStatsCache,
-    dashboardStatsInFlight,
+  return withVersionedCache(
+    dashboardStatsStore,
     cacheKey,
-    DASHBOARD_CACHE_TTL_MS,
-    async () => {
-      const whereClause = resolveDashboardWhereClause(normalizedSourceFilter);
-
-      const [result] = await db
-        .select({
-          providerCount: countDistinct(providers.id),
-          modelCount: countDistinct(models.id),
-          benchmarkCount: countDistinct(benchmarks.id),
-          totalRecords: count()
-        })
-        .from(benchmarkValues)
-        .innerJoin(models, eq(benchmarkValues.modelId, models.id))
-        .innerJoin(providers, eq(models.providerId, providers.id))
-        .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-        .where(whereClause);
-
-      return {
-        providerCount: Number(result?.providerCount ?? 0),
-        modelCount: Number(result?.modelCount ?? 0),
-        benchmarkCount: Number(result?.benchmarkCount ?? 0),
-        totalRecords: Number(result?.totalRecords ?? 0)
-      };
+    {
+      versionProbeTtlMs: CACHE_VERSION_PROBE_TTL_MS,
+      staleIfErrorMs: CACHE_STALE_IF_ERROR_MS,
+      getVersion: getDashboardCacheVersion,
+      loader: () => loadDashboardStats(normalizedSourceFilter)
     }
   );
 }
@@ -308,26 +287,31 @@ export async function getActiveEntities() {
   };
 }
 
+async function loadSourceOptions(): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ source: benchmarkValues.source })
+    .from(benchmarkValues)
+    .where(isNotNull(benchmarkValues.source))
+    .orderBy(benchmarkValues.source);
+
+  const normalized = rows
+    .map((item) => item.source?.trim() ?? "")
+    .filter((item): item is string => item.length > 0);
+
+  // Keep post-trim uniqueness semantics stable even if DB distinct values differ
+  // only by surrounding whitespace.
+  return Array.from(new Set(normalized));
+}
+
 export async function getSourceOptions(): Promise<string[]> {
-  return withTimedCache(
-    sourceOptionsCache,
-    sourceOptionsInFlight,
+  return withVersionedCache(
+    sourceOptionsStore,
     "all",
-    DASHBOARD_CACHE_TTL_MS,
-    async () => {
-      const rows = await db
-        .selectDistinct({ source: benchmarkValues.source })
-        .from(benchmarkValues)
-        .where(isNotNull(benchmarkValues.source))
-        .orderBy(benchmarkValues.source);
-
-      const normalized = rows
-        .map((item) => item.source?.trim() ?? "")
-        .filter((item): item is string => item.length > 0);
-
-      // Keep post-trim uniqueness semantics stable even if DB distinct values differ
-      // only by surrounding whitespace.
-      return Array.from(new Set(normalized));
+    {
+      versionProbeTtlMs: CACHE_VERSION_PROBE_TTL_MS,
+      staleIfErrorMs: CACHE_STALE_IF_ERROR_MS,
+      getVersion: getDashboardCacheVersion,
+      loader: loadSourceOptions
     }
   );
 }

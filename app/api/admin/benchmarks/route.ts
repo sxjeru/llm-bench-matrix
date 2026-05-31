@@ -25,6 +25,6 @@ export async function POST(request: Request) {
   }
 
   const benchmark = await ensureBenchmark(parsed.data);
-  invalidateAllCaches();
+  await invalidateAllCaches();
   return NextResponse.json({ benchmark });
 }

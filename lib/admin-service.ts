@@ -1781,7 +1781,7 @@ export async function updateProviderConfig(
     throw new Error("failed to update provider config");
   }
 
-  invalidateAllCaches();
+  await invalidateAllCaches();
   return updatedProvider;
 }
 
@@ -1883,7 +1883,7 @@ export async function deleteProviderAndTransferModels(
     throw new Error("failed to delete provider");
   }
 
-  invalidateAllCaches();
+  await invalidateAllCaches();
   return {
     ok: true,
     providerId: deletedResult.deletedProvider.id,
@@ -2232,7 +2232,7 @@ export async function rebuildModelCanonicalKeysByRule(rawRule: unknown) {
     }
   });
 
-  invalidateAllCaches();
+  await invalidateAllCaches();
 
   return {
     ok: true,
@@ -2415,7 +2415,7 @@ export async function rebuildBenchmarkCanonicalKeysByRule(rawRule: unknown) {
     }
   });
 
-  invalidateAllCaches();
+  await invalidateAllCaches();
 
   return {
     ok: true,
@@ -2640,7 +2640,7 @@ export async function createBenchmarkValue(input: {
     throw new Error("failed to create benchmark value");
   }
 
-  invalidateAllCaches();
+  await invalidateAllCaches();
 
   return created;
 }
@@ -3170,7 +3170,7 @@ export async function mergeEntity(input: {
       .where(and(eq(benchmarks.id, input.sourceId), isNull(benchmarks.mergedIntoBenchmarkId)));
   });
 
-  invalidateAllCaches();
+  await invalidateAllCaches();
 }
 
 export type RenameEntityInput = {
@@ -3279,7 +3279,7 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
         })
         .where(eq(benchmarks.id, current.id));
 
-      invalidateAllCaches();
+      await invalidateAllCaches();
 
       return {
         ok: true,
@@ -3455,7 +3455,7 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
     };
   });
 
-  invalidateAllCaches();
+  await invalidateAllCaches();
 
   return result;
 }
@@ -3481,7 +3481,7 @@ export async function updateMergedEntityRecord(input: {
       .where(eq(benchmarks.id, input.sourceId));
   }
 
-  invalidateAllCaches();
+  await invalidateAllCaches();
 
   return { ok: true };
 }
@@ -3502,7 +3502,7 @@ export async function deleteMergedEntityRecord(input: {
       .where(eq(benchmarks.id, input.sourceId));
   }
 
-  invalidateAllCaches();
+  await invalidateAllCaches();
 
   return { ok: true };
 }
@@ -3763,7 +3763,7 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
     return { inserted: valueRows.length };
   });
 
-  invalidateAllCaches();
+  await invalidateAllCaches();
 
   return result;
 }
@@ -4808,7 +4808,7 @@ export async function deleteModelAndAllValues(modelId: number) {
     await tx.delete(models).where(eq(models.id, modelId));
   });
 
-  invalidateAllCaches();
+  await invalidateAllCaches();
 
   return {
     ok: true,
@@ -4825,7 +4825,7 @@ export async function deleteBenchmarkValuesBySource(sourceInput: string) {
       .where(or(isNull(benchmarkValues.source), eq(benchmarkValues.source, "")))
       .returning({ id: benchmarkValues.id });
 
-    invalidateAllCaches();
+    await invalidateAllCaches();
 
     return {
       ok: true,
@@ -4859,7 +4859,7 @@ export async function deleteBenchmarkValuesBySource(sourceInput: string) {
     .where(inArray(benchmarkSourceMeta.source, matchedSources))
     .returning({ id: benchmarkSourceMeta.id });
 
-  invalidateAllCaches();
+  await invalidateAllCaches();
 
   return {
     ok: true,
@@ -5976,7 +5976,7 @@ export async function normalizeBenchmarkScaleByTarget(input: {
     };
   });
 
-  invalidateAllCaches();
+  await invalidateAllCaches();
 
   return {
     ok: true,
@@ -6251,7 +6251,7 @@ export async function splitBenchmarkScaleByMode(input: {
     };
   });
 
-  invalidateAllCaches();
+  await invalidateAllCaches();
 
   return {
     ok: true,
@@ -6272,7 +6272,7 @@ export async function clearNonSettingsData() {
     await tx.delete(providers);
   });
 
-  invalidateAllCaches();
+  await invalidateAllCaches();
 
   return {
     ok: true

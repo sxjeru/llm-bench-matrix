@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+vi.unmock("@/lib/cache-versions");
+
 vi.mock("@/lib/db/client", () => ({
   db: {}
 }));
@@ -22,14 +24,48 @@ type ExistingPricingRow = {
   manualOverride: boolean;
 };
 
+type PricingSelectRow = {
+  modelId: number;
+  modelName: string;
+  providerName: string;
+  source: string;
+  sourceProviderId: string | null;
+  sourceProviderName: string | null;
+  sourceModelId: string | null;
+  sourceModelName: string | null;
+  inputCost: string | number | null;
+  outputCost: string | number | null;
+  reasoningCost: string | number | null;
+  cacheReadCost: string | number | null;
+  cacheWriteCost: string | number | null;
+  inputAudioCost: string | number | null;
+  outputAudioCost: string | number | null;
+  currency: string;
+  unit: string;
+  matchConfidence: number;
+  matchStatus: string;
+  manualOverride: boolean;
+  note: string | null;
+  lastSyncedAt: Date | null;
+  updatedAt: Date;
+};
+
 const MODELS_DEV_MAX_BYTES = 8 * 1024 * 1024;
 
-function createDbMock(activeModels: ActiveModelRow[], existingRows: ExistingPricingRow[]) {
+function createDbMock(activeModels: ActiveModelRow[], existingRows: ExistingPricingRow[], pricingRows: PricingSelectRow[] = []) {
   const select = vi.fn((selection?: unknown) => {
     if (selection) {
       return {
         from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn().mockResolvedValue([])
+          })),
           innerJoin: vi.fn(() => ({
+            innerJoin: vi.fn(() => ({
+              where: vi.fn(() => ({
+                orderBy: vi.fn().mockResolvedValue(pricingRows)
+              }))
+            })),
             where: vi.fn(() => ({
               orderBy: vi.fn().mockResolvedValue(activeModels)
             }))
@@ -49,6 +85,7 @@ function createDbMock(activeModels: ActiveModelRow[], existingRows: ExistingPric
 
   return {
     db: { select, insert },
+    insert,
     values,
     onConflictDoUpdate
   };
@@ -116,6 +153,50 @@ describe("model pricing module", () => {
     expect(typeof pricingModule.getModelPricingRows).toBe("function");
     expect(typeof pricingModule.syncModelsDevPricing).toBe("function");
     expect(typeof pricingModule.updateModelPricing).toBe("function");
+  });
+
+  test("getModelPricingRows 使用进程内缓存并在手动失效后重新读取", async () => {
+    const pricingRows: PricingSelectRow[] = [
+      {
+        modelId: 1,
+        modelName: "GPT-4",
+        providerName: "OpenAI",
+        source: "models.dev",
+        sourceProviderId: "openai",
+        sourceProviderName: "OpenAI",
+        sourceModelId: "gpt-4",
+        sourceModelName: "GPT-4",
+        inputCost: "1.5",
+        outputCost: "2.5",
+        reasoningCost: null,
+        cacheReadCost: null,
+        cacheWriteCost: null,
+        inputAudioCost: null,
+        outputAudioCost: null,
+        currency: "USD",
+        unit: "per_1m_tokens",
+        matchConfidence: 100,
+        matchStatus: "matched",
+        manualOverride: false,
+        note: null,
+        lastSyncedAt: null,
+        updatedAt: new Date("2026-05-01T00:00:00.000Z")
+      }
+    ];
+    const { db } = createDbMock([], [], pricingRows);
+    const { getModelPricingRows, invalidateModelPricingCaches } = await importPricingModule(db);
+
+    await expect(getModelPricingRows()).resolves.toEqual([
+      expect.objectContaining({ modelId: 1, inputCost: 1.5, updatedAt: "2026-05-01T00:00:00.000Z" })
+    ]);
+    await getModelPricingRows();
+
+    expect(db.select).toHaveBeenCalledTimes(2);
+
+    invalidateModelPricingCaches();
+    await getModelPricingRows();
+
+    expect(db.select).toHaveBeenCalledTimes(4);
   });
 
   test("updateModelPricing persists validated payload with defaults", async () => {

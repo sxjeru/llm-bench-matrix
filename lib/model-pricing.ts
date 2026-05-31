@@ -1,13 +1,35 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
+import { bumpCacheVersions, getCacheVersion } from "@/lib/cache-versions";
 import { db } from "@/lib/db/client";
 import { modelPricing, models, providers } from "@/lib/db/schema";
 import { normalizeProviderConfig } from "@/lib/provider-config";
+import { createVersionedCacheStore, invalidateVersionedCacheStore, withVersionedCache } from "@/lib/server-cache";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const MODELS_DEV_FETCH_TIMEOUT_MS = 10_000;
 const MODELS_DEV_MAX_BYTES = 8 * 1024 * 1024;
 const MODELS_DEV_SOURCE = "models.dev";
+const MODEL_PRICING_VERSION_PROBE_TTL_MS = 5_000;
+const MODEL_PRICING_STALE_IF_ERROR_MS = 30 * 60_000;
+
+const modelPricingRowsStore = createVersionedCacheStore<ModelPricingRow[]>();
+const adminModelPricingRowsStore = createVersionedCacheStore<ModelPricingRow[]>();
+
+export function invalidateModelPricingCaches() {
+  invalidateVersionedCacheStore(modelPricingRowsStore);
+  invalidateVersionedCacheStore(adminModelPricingRowsStore);
+}
+
+function getModelPricingCacheVersion() {
+  return getCacheVersion("pricing");
+}
+
+async function invalidateChangedModelPricingCaches() {
+  invalidateModelPricingCaches();
+  if (process.env.NODE_ENV === "test") return;
+  await bumpCacheVersions(["pricing"]);
+}
 
 type DbModel = {
   id: number;
@@ -593,6 +615,19 @@ async function getActiveModelRows(): Promise<DbModel[]> {
 }
 
 export async function getModelPricingRows(): Promise<ModelPricingRow[]> {
+  return withVersionedCache(
+    modelPricingRowsStore,
+    "all",
+    {
+      versionProbeTtlMs: MODEL_PRICING_VERSION_PROBE_TTL_MS,
+      staleIfErrorMs: MODEL_PRICING_STALE_IF_ERROR_MS,
+      getVersion: getModelPricingCacheVersion,
+      loader: loadModelPricingRows
+    }
+  );
+}
+
+async function loadModelPricingRows(): Promise<ModelPricingRow[]> {
   const rows = await db
     .select({
       modelId: models.id,
@@ -653,6 +688,19 @@ export async function getModelPricingRows(): Promise<ModelPricingRow[]> {
 }
 
 export async function getAdminModelPricingRows(): Promise<ModelPricingRow[]> {
+  return withVersionedCache(
+    adminModelPricingRowsStore,
+    "all",
+    {
+      versionProbeTtlMs: MODEL_PRICING_VERSION_PROBE_TTL_MS,
+      staleIfErrorMs: MODEL_PRICING_STALE_IF_ERROR_MS,
+      getVersion: getModelPricingCacheVersion,
+      loader: loadAdminModelPricingRows
+    }
+  );
+}
+
+async function loadAdminModelPricingRows(): Promise<ModelPricingRow[]> {
   const activeModels = await getActiveModelRows();
   const pricingRows = await getModelPricingRows();
   const pricingByModelId = new Map(pricingRows.map((row) => [row.modelId, row]));
@@ -821,6 +869,8 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
       });
   }
 
+  await invalidateChangedModelPricingCaches();
+
   const sourceModelCount = Array.from(sourceProviders.values()).reduce(
     (sum, provider) => sum + Object.keys(provider.models).length,
     0
@@ -940,6 +990,7 @@ export async function updateModelPricing(input: ModelPricingUpdateInput) {
       target: modelPricing.modelId,
       set: updateValues
     });
+  await invalidateChangedModelPricingCaches();
 }
 
 export async function clearModelPricingManualOverride(modelId: number) {
@@ -947,6 +998,7 @@ export async function clearModelPricingManualOverride(modelId: number) {
     .update(modelPricing)
     .set({ manualOverride: false, matchStatus: "matched", updatedAt: new Date() })
     .where(and(eq(modelPricing.modelId, modelId), eq(modelPricing.manualOverride, true)));
+  await invalidateChangedModelPricingCaches();
 }
 
 export async function getModelPricingCount(): Promise<number> {

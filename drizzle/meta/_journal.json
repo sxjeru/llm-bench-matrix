@@ -36,6 +36,13 @@
       "when": 1779753600000,
       "tag": "0004_model_pricing",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1780185600000,
+      "tag": "0005_benchmark_value_read_indexes",
+      "breakpoints": true
     }
   ]
 }

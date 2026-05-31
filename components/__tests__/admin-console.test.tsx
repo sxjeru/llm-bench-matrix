@@ -46,8 +46,15 @@ function createJsonResponse(payload: unknown, ok = true, status = 200): Response
 
 function mockFetchSequence(...payloads: unknown[]) {
   const queuedPayloads = [...payloads];
-  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     void init;
+    if (url.startsWith("/api/admin/benchmarks/value-overlap")) {
+      return createJsonResponse({ conflictCount: 0, overlapCount: 0 });
+    }
+    return createJsonResponse(queuedPayloads.shift() ?? {});
+  });
+
+  const globalFetchWrapper = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string"
       ? input
       : input instanceof URL
@@ -58,14 +65,10 @@ function mockFetchSequence(...payloads: unknown[]) {
       return createJsonResponse({ stats: [] });
     }
 
-    if (url.startsWith("/api/admin/benchmarks/value-overlap")) {
-      return createJsonResponse({ conflictCount: 0, overlapCount: 0 });
-    }
+    return fetchMock(url, init);
+  };
 
-    return createJsonResponse(queuedPayloads.shift() ?? {});
-  });
-
-  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("fetch", globalFetchWrapper);
   return fetchMock;
 }
 
@@ -720,14 +723,16 @@ describe("AdminConsole text import", () => {
       expect(fetchMock.mock.calls.some(([input]) => input === "/api/admin/import-csv")).toBe(true);
     });
 
-    const secondCall = fetchMock.mock.calls.find(([input]) => input === "/api/admin/import-csv")!;
-    const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
+    const importCalls = fetchMock.mock.calls.filter(([input]) => input === "/api/admin/import-csv");
+    expect(importCalls).toHaveLength(1);
+    const importCsvCall = importCalls[0];
+    const importPayload = JSON.parse(((importCsvCall[1] as RequestInit).body ?? "{}") as string) as {
       csvText?: string;
     };
 
-    expect(secondPayload.csvText).toContain("Bench-1,Type-New");
-    expect(secondPayload.csvText).toContain("Vision");
-    expect(secondPayload.csvText).not.toContain("Bench-1,Type-A");
+    expect(importPayload.csvText).toContain("Bench-1,Type-New");
+    expect(importPayload.csvText).toContain("Vision");
+    expect(importPayload.csvText).not.toContain("Bench-1,Type-A");
   });
 
   test("未提供 type 的行会写入 benchmark_type_provided=0", async () => {
@@ -774,15 +779,17 @@ describe("AdminConsole text import", () => {
     await user.click(screen.getByRole("button", { name: "执行导入" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls.some((call) => call[0] === "/api/admin/import-csv")).toBe(true);
     });
 
-    const secondCall = fetchMock.mock.calls[1];
-    const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
+    const importCalls = fetchMock.mock.calls.filter((call) => call[0] === "/api/admin/import-csv");
+    expect(importCalls).toHaveLength(1);
+    const importCsvCall = importCalls[0];
+    const importPayload = JSON.parse(((importCsvCall[1] as RequestInit).body ?? "{}") as string) as {
       csvText?: string;
     };
 
-    expect(secondPayload.csvText).toContain("Bench-1,General,0");
+    expect(importPayload.csvText).toContain("Bench-1,General,0");
   });
 
   test("星号值支持 *:// 语法并自动回填注释输入", async () => {

@@ -125,6 +125,15 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     const selectMock = vi.fn().mockImplementation((selection?: unknown) => {
       if (selection && typeof selection === "object") {
+        if ("valueJson" in selection) {
+          return {
+            from: vi.fn(() => ({
+              where: vi.fn(() => ({
+                limit: vi.fn().mockResolvedValue([])
+              }))
+            }))
+          };
+        }
         return { from: dashboardFrom };
       }
       return providerSelect;
