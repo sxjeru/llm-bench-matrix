@@ -19,7 +19,7 @@ describe("GET /api/public/records", () => {
 
     expect(getDashboardRows).toHaveBeenCalledWith(300);
     expect(response.headers.get("Cache-Control")).toBe("public, s-maxage=10, stale-while-revalidate=60");
-    expect(response.headers.get("ETag")).toBe('"records:300:300:0:0:empty"');
+    expect(response.headers.get("ETag")).toBe('"records:300:300:97d170e1550eee4a"');
   });
 
   test("limit 会被限制到 1000", async () => {
@@ -42,28 +42,52 @@ describe("GET /api/public/records", () => {
 
     expect(getDashboardRows).toHaveBeenCalledWith(100);
     expect(payload.rows).toHaveLength(2);
-    expect(response.headers.get("ETag")).toBe('"records:2:100:2:2:2026-05-02T00:00:00.000Z"');
+    expect(response.headers.get("ETag")).toBe('"records:2:100:3b0c182266a8abbf"');
   });
 
   test("If-None-Match 命中时返回 304", async () => {
     vi.mocked(getDashboardRows).mockResolvedValue([]);
 
     const response = await GET(new Request("https://example.com/api/public/records", {
-      headers: { "If-None-Match": '"records:300:300:0:0:empty"' }
+      headers: { "If-None-Match": '"records:300:300:97d170e1550eee4a"' }
     }));
 
     expect(response.status).toBe(304);
-    expect(response.headers.get("ETag")).toBe('"records:300:300:0:0:empty"');
+    expect(response.headers.get("ETag")).toBe('"records:300:300:97d170e1550eee4a"');
   });
 
   test("If-None-Match 为弱 ETag（W/ 前缀）时同样返回 304", async () => {
     vi.mocked(getDashboardRows).mockResolvedValue([]);
 
     const response = await GET(new Request("https://example.com/api/public/records", {
-      headers: { "If-None-Match": 'W/"records:300:300:0:0:empty"' }
+      headers: { "If-None-Match": 'W/"records:300:300:97d170e1550eee4a"' }
     }));
 
     expect(response.status).toBe(304);
-    expect(response.headers.get("ETag")).toBe('"records:300:300:0:0:empty"');
+    expect(response.headers.get("ETag")).toBe('"records:300:300:97d170e1550eee4a"');
+  });
+
+  test("If-None-Match 为逗号分隔多个 ETag，命中任一值时返回 304", async () => {
+    vi.mocked(getDashboardRows).mockResolvedValue([]);
+
+    const response = await GET(new Request("https://example.com/api/public/records", {
+      headers: {
+        "If-None-Match": '"records:300:300:deadbeefdeadbeef", W/"records:300:300:97d170e1550eee4a"'
+      }
+    }));
+
+    expect(response.status).toBe(304);
+    expect(response.headers.get("ETag")).toBe('"records:300:300:97d170e1550eee4a"');
+  });
+
+  test("If-None-Match 为通配符 * 时返回 304", async () => {
+    vi.mocked(getDashboardRows).mockResolvedValue([]);
+
+    const response = await GET(new Request("https://example.com/api/public/records", {
+      headers: { "If-None-Match": "*" }
+    }));
+
+    expect(response.status).toBe(304);
+    expect(response.headers.get("ETag")).toBe('"records:300:300:97d170e1550eee4a"');
   });
 });

@@ -720,14 +720,16 @@ describe("AdminConsole text import", () => {
       expect(fetchMock.mock.calls.some(([input]) => input === "/api/admin/import-csv")).toBe(true);
     });
 
-    const secondCall = fetchMock.mock.calls.find(([input]) => input === "/api/admin/import-csv")!;
-    const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
+    const importCalls = fetchMock.mock.calls.filter(([input]) => input === "/api/admin/import-csv");
+    expect(importCalls).toHaveLength(1);
+    const importCsvCall = importCalls[0];
+    const importPayload = JSON.parse(((importCsvCall[1] as RequestInit).body ?? "{}") as string) as {
       csvText?: string;
     };
 
-    expect(secondPayload.csvText).toContain("Bench-1,Type-New");
-    expect(secondPayload.csvText).toContain("Vision");
-    expect(secondPayload.csvText).not.toContain("Bench-1,Type-A");
+    expect(importPayload.csvText).toContain("Bench-1,Type-New");
+    expect(importPayload.csvText).toContain("Vision");
+    expect(importPayload.csvText).not.toContain("Bench-1,Type-A");
   });
 
   test("未提供 type 的行会写入 benchmark_type_provided=0", async () => {
@@ -777,17 +779,14 @@ describe("AdminConsole text import", () => {
       expect(fetchMock.mock.calls.some((call) => call[0] === "/api/admin/import-csv")).toBe(true);
     });
 
-    const importCall = fetchMock.mock.calls.find((call) => call[0] === "/api/admin/import-csv");
-    if (!importCall) {
-      throw new Error("Import request not found");
-    }
-
-    const secondCall = importCall;
-    const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
+    const importCalls = fetchMock.mock.calls.filter((call) => call[0] === "/api/admin/import-csv");
+    expect(importCalls).toHaveLength(1);
+    const importCsvCall = importCalls[0];
+    const importPayload = JSON.parse(((importCsvCall[1] as RequestInit).body ?? "{}") as string) as {
       csvText?: string;
     };
 
-    expect(secondPayload.csvText).toContain("Bench-1,General,0");
+    expect(importPayload.csvText).toContain("Bench-1,General,0");
   });
 
   test("星号值支持 *:// 语法并自动回填注释输入", async () => {

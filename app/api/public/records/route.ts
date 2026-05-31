@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { NextResponse } from "next/server";
 import { getDashboardRows } from "@/lib/db/queries";
 import { createRateLimiter, getRateLimitKey } from "@/lib/rate-limit";
@@ -18,14 +19,31 @@ function normalizeCachedLimit(requestedLimit: number) {
 }
 
 function createRecordsEtag(rows: Awaited<ReturnType<typeof getDashboardRows>>, requestedLimit: number, cachedLimit: number) {
-  const latestRow = rows.reduce<{ id: number; updatedAt: string } | null>((latest, row) => {
-    if (!latest) return { id: row.id, updatedAt: row.updatedAt };
-    if (row.updatedAt > latest.updatedAt) return { id: row.id, updatedAt: row.updatedAt };
-    if (row.updatedAt === latest.updatedAt && row.id > latest.id) return { id: row.id, updatedAt: row.updatedAt };
-    return latest;
-  }, null);
+  const hash = createHash("sha1")
+    .update(JSON.stringify(rows))
+    .digest("hex")
+    .slice(0, 16);
 
-  return `"records:${requestedLimit}:${cachedLimit}:${rows.length}:${latestRow?.id ?? 0}:${latestRow?.updatedAt ?? "empty"}"`;
+  return `"records:${requestedLimit}:${cachedLimit}:${hash}"`;
+}
+
+function normalizeEtagToken(token: string) {
+  return token.trim().replace(/^W\//, "");
+}
+
+function ifNoneMatchMatches(ifNoneMatchHeader: string | null, etag: string) {
+  if (!ifNoneMatchHeader) return false;
+
+  const trimmedHeader = ifNoneMatchHeader.trim();
+  if (trimmedHeader === "*") return true;
+
+  const normalizedEtag = normalizeEtagToken(etag);
+  const tokens = trimmedHeader.match(/(?:W\/)?"[^\"]*"|\*/g) ?? [];
+
+  return tokens.some((token) => {
+    if (token === "*") return true;
+    return normalizeEtagToken(token) === normalizedEtag;
+  });
 }
 
 export async function GET(request: Request) {
@@ -58,8 +76,7 @@ export async function GET(request: Request) {
     "X-RateLimit-Remaining": String(rateLimit.remaining)
   };
 
-  const ifNoneMatch = request.headers.get("if-none-match")?.replace(/^W\//, "") ?? "";
-  if (ifNoneMatch === etag) {
+  if (ifNoneMatchMatches(request.headers.get("if-none-match"), etag)) {
     return new NextResponse(null, {
       status: 304,
       headers
