@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+vi.unmock("@/lib/cache-versions");
+
 vi.mock("@/lib/db/client", () => ({
   db: {}
 }));
