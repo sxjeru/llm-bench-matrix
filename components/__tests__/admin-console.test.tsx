@@ -46,8 +46,15 @@ function createJsonResponse(payload: unknown, ok = true, status = 200): Response
 
 function mockFetchSequence(...payloads: unknown[]) {
   const queuedPayloads = [...payloads];
-  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     void init;
+    if (url.startsWith("/api/admin/benchmarks/value-overlap")) {
+      return createJsonResponse({ conflictCount: 0, overlapCount: 0 });
+    }
+    return createJsonResponse(queuedPayloads.shift() ?? {});
+  });
+
+  const globalFetchWrapper = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string"
       ? input
       : input instanceof URL
@@ -58,14 +65,10 @@ function mockFetchSequence(...payloads: unknown[]) {
       return createJsonResponse({ stats: [] });
     }
 
-    if (url.startsWith("/api/admin/benchmarks/value-overlap")) {
-      return createJsonResponse({ conflictCount: 0, overlapCount: 0 });
-    }
+    return fetchMock(url, init);
+  };
 
-    return createJsonResponse(queuedPayloads.shift() ?? {});
-  });
-
-  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("fetch", globalFetchWrapper);
   return fetchMock;
 }
 
