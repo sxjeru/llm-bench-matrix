@@ -1818,6 +1818,13 @@ export function BenchmarkMatrix({
                         : compareDeltaEffective > 0
                           ? "up"
                           : "down";
+                    const compareValueDirection: CompareDirection = compareDeltaRaw === null
+                      ? "flat"
+                      : Math.abs(compareDeltaRaw) < Number.EPSILON
+                        ? "flat"
+                        : compareDeltaRaw > 0
+                          ? "up"
+                          : "down";
                     const compareIntensity =
                       compareDeltaEffective === null || compareAbsEffectiveDeltaP90 === null
                         ? 0
@@ -1826,7 +1833,7 @@ export function BenchmarkMatrix({
                     const compareBadgeStyle = showCompareBadge
                       ? getCompareDeltaBadgeStyle(compareDirection, compareIntensity, isExportCaptureMode)
                       : null;
-                    const compareArrow = compareDirection === "up" ? "▲" : compareDirection === "down" ? "▼" : "•";
+                    const compareArrow = compareValueDirection === "up" ? "▲" : compareValueDirection === "down" ? "▼" : "•";
                     const compareDeltaText = showCompareBadge && compareDeltaRaw !== null
                       ? formatComparisonDeltaValue(compareDeltaRaw)
                       : "";
@@ -1840,6 +1847,13 @@ export function BenchmarkMatrix({
                         : sourceValueDeltaEffective > 0
                           ? "up"
                           : "down";
+                    const sourceValueDeltaValueDirection: CompareDirection = sourceValueDeltaRaw === null
+                      ? "flat"
+                      : Math.abs(sourceValueDeltaRaw) < Number.EPSILON
+                        ? "flat"
+                        : sourceValueDeltaRaw > 0
+                          ? "up"
+                          : "down";
                     const sourceValueDeltaIntensity =
                       sourceValueDeltaEffective === null || sourceDeltaAbsP90 === null
                         ? 0
@@ -1849,12 +1863,13 @@ export function BenchmarkMatrix({
                     const sourceValueDeltaBadgeStyle = showSourceValueDeltaBadge
                       ? getCompareDeltaBadgeStyle(sourceValueDeltaDirection, sourceValueDeltaIntensity, isExportCaptureMode)
                       : null;
-                    const sourceValueDeltaArrow = sourceValueDeltaDirection === "up" ? "▲" : sourceValueDeltaDirection === "down" ? "▼" : "•";
+                    const sourceValueDeltaArrow = sourceValueDeltaValueDirection === "up" ? "▲" : sourceValueDeltaValueDirection === "down" ? "▼" : "•";
                     const sourceValueDeltaText = showSourceValueDeltaBadge && sourceValueDeltaRaw !== null
                       ? formatComparisonDeltaValue(sourceValueDeltaRaw)
                       : "";
                     const activeDeltaBadgeStyle = showCompareBadge ? compareBadgeStyle : sourceValueDeltaBadgeStyle;
                     const activeDeltaDirection = showCompareBadge ? compareDirection : sourceValueDeltaDirection;
+                    const activeDeltaValueDirection = showCompareBadge ? compareValueDirection : sourceValueDeltaValueDirection;
                     const activeDeltaArrow = showCompareBadge ? compareArrow : sourceValueDeltaArrow;
                     const activeDeltaText = showCompareBadge ? compareDeltaText : sourceValueDeltaText;
                     const activeDeltaTitle = showCompareBadge
@@ -1955,7 +1970,8 @@ export function BenchmarkMatrix({
                           <span
                             data-compare-delta-badge={showCompareBadge ? "1" : undefined}
                             data-source-delta-badge={showSourceValueDeltaBadge ? "1" : undefined}
-                            data-compare-direction={activeDeltaDirection}
+                            data-compare-direction={activeDeltaValueDirection}
+                            data-compare-color-direction={activeDeltaDirection}
                             className="absolute top-1/2 inline-flex h-[14px] -translate-y-1/2 items-center overflow-hidden rounded-[5px] border text-[9px] font-semibold leading-none"
                             style={{
                               right: "3px",

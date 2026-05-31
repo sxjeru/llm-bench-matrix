@@ -218,7 +218,7 @@ describe("BenchmarkMatrix 模型比较", () => {
     });
   });
 
-  test("低值更优 benchmark 中，较低分数应显示绿色上升方向", () => {
+  test("低值更优 benchmark 中，数值下降应为绿色，数值上升应为红色", () => {
     const { container } = render(<BenchmarkMatrix rows={[...lowerBetterRows]} allRows={[...lowerBetterRows]} />);
 
     const headerA = screen.getByRole("columnheader", { name: /Model A/ });
@@ -227,7 +227,13 @@ describe("BenchmarkMatrix 模型比较", () => {
     fireEvent.click(headerA, { ctrlKey: true });
     fireEvent.click(headerB, { ctrlKey: true });
 
-    expect(container.querySelector('[data-compare-delta-badge="1"][data-compare-direction="up"]')).not.toBeNull();
+    expect(container.querySelector('[data-compare-delta-badge="1"][data-compare-direction="down"][data-compare-color-direction="up"]')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "清空比较" }));
+    fireEvent.click(headerB, { ctrlKey: true });
+    fireEvent.click(headerA, { ctrlKey: true });
+
+    expect(container.querySelector('[data-compare-delta-badge="1"][data-compare-direction="up"][data-compare-color-direction="down"]')).not.toBeNull();
   });
 
   test("Ctrl/Cmd 点击不会触发行存在性过滤，普通点击仍按原行为过滤", () => {
