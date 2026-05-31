@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { NextResponse } from "next/server";
 import { getDashboardRows } from "@/lib/db/queries";
 import { createRateLimiter, getRateLimitKey } from "@/lib/rate-limit";
+import { getCacheVersion } from "@/lib/cache-versions";
 
 // 60 requests per IP per 60-second window
 const limiter = createRateLimiter(60, 60_000);
@@ -20,13 +21,13 @@ function normalizeCachedLimit(requestedLimit: number) {
   return 1000;
 }
 
-function createRecordsEtag(rows: Awaited<ReturnType<typeof getDashboardRows>>, requestedLimit: number, cachedLimit: number) {
+function createRecordsEtag(dashboardVersion: string, pricingVersion: string, requestedLimit: number) {
   const hash = createHash("sha1")
-    .update(JSON.stringify(rows))
+    .update(`records:${dashboardVersion}:${pricingVersion}:limit:${requestedLimit}`)
     .digest("hex")
     .slice(0, 16);
 
-  return `"records:${requestedLimit}:${cachedLimit}:${hash}"`;
+  return `"records:${dashboardVersion}:${pricingVersion}:limit:${requestedLimit}:${hash}"`;
 }
 
 function normalizeEtagToken(token: string) {
@@ -69,13 +70,19 @@ export async function GET(request: Request) {
   const limit = normalizeRequestedLimit(url.searchParams.get("limit"));
   const cachedLimit = normalizeCachedLimit(limit);
 
-  const cachedRows = await getDashboardRows(cachedLimit);
-  const rows = cachedRows.slice(0, limit);
-  const etag = createRecordsEtag(rows, limit, cachedLimit);
+  // Retrieve lightweight cache versions before loading rows.
+  const [dashboardVersion, pricingVersion] = await Promise.all([
+    getCacheVersion("dashboard"),
+    getCacheVersion("pricing")
+  ]);
+  const etag = createRecordsEtag(dashboardVersion, pricingVersion, limit);
+
   const headers = {
     "Cache-Control": CACHE_CONTROL_BROWSER,
     "CDN-Cache-Control": CACHE_CONTROL_CDN,
     "Vercel-CDN-Cache-Control": CACHE_CONTROL_VERCEL,
+    "X-Dashboard-Version": dashboardVersion,
+    "X-Pricing-Version": pricingVersion,
     ETag: etag,
     "X-RateLimit-Remaining": String(rateLimit.remaining)
   };
@@ -86,6 +93,9 @@ export async function GET(request: Request) {
       headers
     });
   }
+
+  const cachedRows = await getDashboardRows(cachedLimit);
+  const rows = cachedRows.slice(0, limit);
 
   return NextResponse.json(
     { rows },
