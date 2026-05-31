@@ -5,7 +5,9 @@ import { createRateLimiter, getRateLimitKey } from "@/lib/rate-limit";
 
 // 60 requests per IP per 60-second window
 const limiter = createRateLimiter(60, 60_000);
-const CACHE_CONTROL = "public, s-maxage=10, stale-while-revalidate=60";
+const CACHE_CONTROL_BROWSER = "public, max-age=0, must-revalidate";
+const CACHE_CONTROL_CDN = "public, s-maxage=10, stale-while-revalidate=60";
+const CACHE_CONTROL_VERCEL = "public, s-maxage=30, stale-while-revalidate=120";
 
 function normalizeRequestedLimit(value: string | null) {
   const limitRaw = Number.parseInt(value || "300", 10);
@@ -71,7 +73,9 @@ export async function GET(request: Request) {
   const rows = cachedRows.slice(0, limit);
   const etag = createRecordsEtag(rows, limit, cachedLimit);
   const headers = {
-    "Cache-Control": CACHE_CONTROL,
+    "Cache-Control": CACHE_CONTROL_BROWSER,
+    "CDN-Cache-Control": CACHE_CONTROL_CDN,
+    "Vercel-CDN-Cache-Control": CACHE_CONTROL_VERCEL,
     ETag: etag,
     "X-RateLimit-Remaining": String(rateLimit.remaining)
   };

@@ -18,7 +18,9 @@ describe("GET /api/public/records", () => {
     const response = await GET(new Request("https://example.com/api/public/records"));
 
     expect(getDashboardRows).toHaveBeenCalledWith(300);
-    expect(response.headers.get("Cache-Control")).toBe("public, s-maxage=10, stale-while-revalidate=60");
+    expect(response.headers.get("Cache-Control")).toBe("public, max-age=0, must-revalidate");
+    expect(response.headers.get("CDN-Cache-Control")).toBe("public, s-maxage=10, stale-while-revalidate=60");
+    expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe("public, s-maxage=30, stale-while-revalidate=120");
     expect(response.headers.get("ETag")).toBe('"records:300:300:97d170e1550eee4a"');
   });
 
@@ -53,6 +55,9 @@ describe("GET /api/public/records", () => {
     }));
 
     expect(response.status).toBe(304);
+    expect(response.headers.get("Cache-Control")).toBe("public, max-age=0, must-revalidate");
+    expect(response.headers.get("CDN-Cache-Control")).toBe("public, s-maxage=10, stale-while-revalidate=60");
+    expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe("public, s-maxage=30, stale-while-revalidate=120");
     expect(response.headers.get("ETag")).toBe('"records:300:300:97d170e1550eee4a"');
   });
 
@@ -64,6 +69,9 @@ describe("GET /api/public/records", () => {
     }));
 
     expect(response.status).toBe(304);
+    expect(response.headers.get("Cache-Control")).toBe("public, max-age=0, must-revalidate");
+    expect(response.headers.get("CDN-Cache-Control")).toBe("public, s-maxage=10, stale-while-revalidate=60");
+    expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe("public, s-maxage=30, stale-while-revalidate=120");
     expect(response.headers.get("ETag")).toBe('"records:300:300:97d170e1550eee4a"');
   });
 
@@ -77,6 +85,9 @@ describe("GET /api/public/records", () => {
     }));
 
     expect(response.status).toBe(304);
+    expect(response.headers.get("Cache-Control")).toBe("public, max-age=0, must-revalidate");
+    expect(response.headers.get("CDN-Cache-Control")).toBe("public, s-maxage=10, stale-while-revalidate=60");
+    expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe("public, s-maxage=30, stale-while-revalidate=120");
     expect(response.headers.get("ETag")).toBe('"records:300:300:97d170e1550eee4a"');
   });
 
@@ -88,6 +99,9 @@ describe("GET /api/public/records", () => {
     }));
 
     expect(response.status).toBe(304);
+    expect(response.headers.get("Cache-Control")).toBe("public, max-age=0, must-revalidate");
+    expect(response.headers.get("CDN-Cache-Control")).toBe("public, s-maxage=10, stale-while-revalidate=60");
+    expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe("public, s-maxage=30, stale-while-revalidate=120");
     expect(response.headers.get("ETag")).toBe('"records:300:300:97d170e1550eee4a"');
   });
 });
