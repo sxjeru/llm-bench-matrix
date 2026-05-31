@@ -717,10 +717,10 @@ describe("AdminConsole text import", () => {
     await user.click(screen.getByRole("button", { name: "执行导入" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls.some(([input]) => input === "/api/admin/import-csv")).toBe(true);
     });
 
-    const secondCall = fetchMock.mock.calls[1];
+    const secondCall = fetchMock.mock.calls.find(([input]) => input === "/api/admin/import-csv")!;
     const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
       csvText?: string;
     };

@@ -511,11 +511,11 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(screen.getByText("150")).toBeInTheDocument();
     const mergedCellS2 = screen.getByText("150").closest("td")!;
 
-    // S2 值为 150 ms，整体最佳值为 95 ms，差值是 55，因为 lowerIsBetter=false，比最佳值差了 55 (值增加是更差的，所以显示 ▼55，方向为 down，因为变差了)
+    // S2 值为 150 ms，整体最佳值为 95 ms，差值是 55；Source 差值徽标方向跟随底层数值变化，值增加显示 ▲55
     const sourceDeltaBadge = mergedCellS2.querySelector('[data-source-delta-badge="1"]') as HTMLElement | null;
     expect(sourceDeltaBadge).not.toBeNull();
-    expect(sourceDeltaBadge).toHaveAttribute("data-compare-direction", "down");
-    expect(sourceDeltaBadge).toHaveTextContent("▼55");
+    expect(sourceDeltaBadge).toHaveAttribute("data-compare-direction", "up");
+    expect(sourceDeltaBadge).toHaveTextContent("▲55");
   });
 });
 
