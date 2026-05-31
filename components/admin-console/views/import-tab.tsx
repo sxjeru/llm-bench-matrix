@@ -869,7 +869,7 @@ export function ImportTab({
                                               key={`matrix-benchmark-override-option-${matrixRow.key}-${option.targetId}`}
                                               role="option"
                                               aria-selected={false}
-                                              tabIndex={0}
+                                              tabIndex={-1}
                                               className="cursor-pointer rounded-sm px-2 py-1 text-left text-xs leading-5 text-base-content hover:bg-base-200/90"
                                               onMouseDown={(event) => {
                                                 event.preventDefault();
