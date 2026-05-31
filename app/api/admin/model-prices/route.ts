@@ -18,7 +18,7 @@ export async function PATCH(request: Request) {
   const body = await request.json().catch(() => null);
   try {
     await updateModelPricing(body);
-    invalidateAllCaches();
+    await invalidateAllCaches();
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(

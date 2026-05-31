@@ -118,4 +118,23 @@ describe("GET /api/public/records", () => {
     expect(response.headers.get("ETag")).toBe('"records:v-test-1:p-test-1:limit:300:5294d236f1071417"');
     expect(getDashboardRows).not.toHaveBeenCalled();
   });
+
+  test("限流响应明确不进入公共缓存", async () => {
+    vi.mocked(getDashboardRows).mockResolvedValue([]);
+
+    let response = await GET(new Request("https://example.com/api/public/records", {
+      headers: { "x-forwarded-for": "203.0.113.429" }
+    }));
+
+    for (let index = 1; index < 61; index += 1) {
+      response = await GET(new Request("https://example.com/api/public/records", {
+        headers: { "x-forwarded-for": "203.0.113.429" }
+      }));
+    }
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store, no-cache, must-revalidate, max-age=0");
+    expect(response.headers.get("CDN-Cache-Control")).toBeNull();
+    expect(response.headers.get("Vercel-CDN-Cache-Control")).toBeNull();
+  });
 });

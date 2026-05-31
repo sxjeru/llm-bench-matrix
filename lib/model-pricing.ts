@@ -25,10 +25,10 @@ function getModelPricingCacheVersion() {
   return getCacheVersion("pricing");
 }
 
-function invalidateChangedModelPricingCaches() {
+async function invalidateChangedModelPricingCaches() {
   invalidateModelPricingCaches();
   if (process.env.NODE_ENV === "test") return;
-  void bumpCacheVersions(["pricing"]);
+  await bumpCacheVersions(["pricing"]);
 }
 
 type DbModel = {
@@ -869,7 +869,7 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
       });
   }
 
-  invalidateChangedModelPricingCaches();
+  await invalidateChangedModelPricingCaches();
 
   const sourceModelCount = Array.from(sourceProviders.values()).reduce(
     (sum, provider) => sum + Object.keys(provider.models).length,
@@ -990,7 +990,7 @@ export async function updateModelPricing(input: ModelPricingUpdateInput) {
       target: modelPricing.modelId,
       set: updateValues
     });
-  invalidateChangedModelPricingCaches();
+  await invalidateChangedModelPricingCaches();
 }
 
 export async function clearModelPricingManualOverride(modelId: number) {
@@ -998,7 +998,7 @@ export async function clearModelPricingManualOverride(modelId: number) {
     .update(modelPricing)
     .set({ manualOverride: false, matchStatus: "matched", updatedAt: new Date() })
     .where(and(eq(modelPricing.modelId, modelId), eq(modelPricing.manualOverride, true)));
-  invalidateChangedModelPricingCaches();
+  await invalidateChangedModelPricingCaches();
 }
 
 export async function getModelPricingCount(): Promise<number> {

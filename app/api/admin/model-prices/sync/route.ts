@@ -9,7 +9,7 @@ export async function POST(request: Request) {
 
   try {
     const result = await syncModelsDevPricing();
-    invalidateAllCaches();
+    await invalidateAllCaches();
     return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json(

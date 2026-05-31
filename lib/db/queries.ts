@@ -53,13 +53,13 @@ const sourceOptionsStore = createVersionedCacheStore<string[]>();
  * Clear dashboard caches after admin write operations
  * (import, merge, delete, etc.) so subsequent reads reflect updated data.
  */
-export function invalidateAllCaches() {
+export async function invalidateAllCaches() {
   invalidateVersionedCacheStore(dashboardRowsStore);
   invalidateVersionedCacheStore(dashboardStatsStore);
   invalidateVersionedCacheStore(sourceOptionsStore);
   invalidateModelPricingCaches();
 
-  void bumpCacheVersions(["dashboard", "pricing", "admin_entities"]);
+  await bumpCacheVersions(["dashboard", "pricing", "admin_entities"]);
 
   try {
     revalidatePath("/");

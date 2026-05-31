@@ -59,6 +59,7 @@ export async function GET(request: Request) {
       {
         status: 429,
         headers: {
+          "Cache-Control": "private, no-store, no-cache, must-revalidate, max-age=0",
           "Retry-After": String(Math.ceil(rateLimit.retryAfterMs / 1000)),
           "X-RateLimit-Remaining": "0"
         }

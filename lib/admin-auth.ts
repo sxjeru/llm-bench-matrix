@@ -749,5 +749,13 @@ export async function requireAdmin(request: Request): Promise<NextResponse | nul
   const authorized = await isAdminAuthorized(request);
   if (authorized) return null;
 
-  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  return NextResponse.json(
+    { error: "Unauthorized" },
+    {
+      status: 401,
+      headers: {
+        "Cache-Control": "private, no-store, no-cache, must-revalidate, max-age=0"
+      }
+    }
+  );
 }

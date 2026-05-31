@@ -53,7 +53,7 @@ export async function POST(request: Request) {
   }
 
   const provider = await ensureProvider(parsed.data.name);
-  invalidateAllCaches();
+  await invalidateAllCaches();
   return NextResponse.json({ provider });
 }
 
