@@ -120,7 +120,8 @@ export async function withVersionedCache<T>(
       if (latestCached && latestCached.version === version) {
         const nextEntry = {
           ...latestCached,
-          nextVersionCheckAt: Date.now() + options.versionProbeTtlMs
+          nextVersionCheckAt: Date.now() + options.versionProbeTtlMs,
+          staleUntil: Date.now() + options.staleIfErrorMs
         };
         if (store.generation === generation) {
           store.cache.set(key, nextEntry);

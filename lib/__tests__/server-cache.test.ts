@@ -125,6 +125,53 @@ describe("server timed cache", () => {
     expect(loader).toHaveBeenCalledTimes(1);
   });
 
+  test("versioned cache extends stale window when version probe succeeds", async () => {
+    const store = createVersionedCacheStore<string>();
+    const getVersion = vi.fn()
+      .mockResolvedValueOnce("v1") // Initial load
+      .mockResolvedValueOnce("v1") // First probe (succeeds, version unchanged)
+      .mockRejectedValueOnce(new Error("db unavailable")); // Second probe (fails)
+    const loader = vi.fn()
+      .mockResolvedValueOnce("first");
+
+    const startTime = Date.now();
+    const dateNowSpy = vi.spyOn(Date, "now");
+    dateNowSpy.mockReturnValue(startTime);
+
+    // Initial load at t=0
+    await withVersionedCache(store, "key", {
+      versionProbeTtlMs: 10_000,
+      staleIfErrorMs: 30_000,
+      getVersion,
+      loader
+    });
+
+    // Advance time by 15,000ms
+    dateNowSpy.mockReturnValue(startTime + 15_000);
+
+    // Probe succeeds, version is unchanged.
+    // staleUntil should be extended to: (startTime + 15_000) + 30_000 = startTime + 45_000ms
+    await expect(withVersionedCache(store, "key", {
+      versionProbeTtlMs: 10_000,
+      staleIfErrorMs: 30_000,
+      getVersion,
+      loader
+    })).resolves.toBe("first");
+
+    // Advance time to startTime + 35,000ms (past original stale window of 30,000ms, but within new 45,000ms window)
+    dateNowSpy.mockReturnValue(startTime + 35_000);
+
+    // Probe fails, but stale value should still be served
+    await expect(withVersionedCache(store, "key", {
+      versionProbeTtlMs: 10_000,
+      staleIfErrorMs: 30_000,
+      getVersion,
+      loader
+    })).resolves.toBe("first");
+
+    dateNowSpy.mockRestore();
+  });
+
   test("versioned cache does not serve stale value on loader failure if store is invalidated during execution", async () => {
     const store = createVersionedCacheStore<string>();
     

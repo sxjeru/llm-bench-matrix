@@ -100,6 +100,98 @@ function resolveDashboardWhereClause(sourceFilter?: string | null) {
   return and(baseFilter, eq(benchmarkValues.source, normalizedSourceFilter));
 }
 
+async function loadDashboardRows(limit: number, sourceFilter: string | null): Promise<DashboardRow[]> {
+  const whereClause = resolveDashboardWhereClause(sourceFilter);
+
+  const baseQuery = db
+    .select({
+      id: benchmarkValues.id,
+      providerId: providers.id,
+      providerName: providers.name,
+      providerConfig: providers.config,
+      modelName: models.modelName,
+      benchmarkName: benchmarks.benchmarkName,
+      benchmarkType: benchmarks.benchmarkType,
+      higherIsBetter: benchmarks.higherIsBetter,
+      benchmarkTypeOverride: benchmarkSourceMeta.benchmarkType,
+      benchmarkCanonicalKey: benchmarks.canonicalKey,
+      modalities: benchmarks.modalities,
+      modalitiesOverride: benchmarkSourceMeta.modalities,
+      benchTime: benchmarkValues.benchTime,
+      valueRaw: benchmarkValues.valueRaw,
+      valueNum: benchmarkValues.valueNum,
+      valueNum2: benchmarkValues.valueNum2,
+      valueNote: benchmarkValues.valueNote,
+      source: benchmarkValues.source,
+      updatedAt: benchmarkValues.createdAt
+    })
+    .from(benchmarkValues)
+    .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+    .innerJoin(providers, eq(models.providerId, providers.id))
+    .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+    .leftJoin(
+      benchmarkSourceMeta,
+      and(
+        eq(benchmarkSourceMeta.benchmarkId, benchmarks.id),
+        eq(benchmarkSourceMeta.source, benchmarkValues.source)
+      )
+    )
+    .where(whereClause)
+    .orderBy(desc(benchmarkValues.benchTime), desc(benchmarkValues.id))
+    .limit(limit);
+
+  const rows = await baseQuery;
+
+  const providerIds = Array.from(new Set(rows.map((row) => {
+    const config = normalizeProviderConfig(row.providerConfig);
+    return typeof config.displayTargetProviderId === "number" ? config.displayTargetProviderId : -1;
+  }).filter((id) => id > 0)));
+
+  const displayTargetProviders = providerIds.length > 0
+    ? await db.select().from(providers).where(inArray(providers.id, providerIds))
+    : [];
+  const displayTargetProviderById = new Map(displayTargetProviders.map((provider) => [provider.id, provider]));
+
+  return rows.map((row) => {
+    const providerConfig = normalizeProviderConfig(row.providerConfig);
+    const displayTargetProvider = typeof providerConfig.displayTargetProviderId === "number"
+      ? displayTargetProviderById.get(providerConfig.displayTargetProviderId) ?? null
+      : null;
+    const displayTargetConfig = displayTargetProvider ? normalizeProviderConfig(displayTargetProvider.config) : null;
+    const resolvedProviderName = displayTargetProvider?.name ?? row.providerName;
+    const resolvedProviderDisplayName = displayTargetConfig?.displayName?.trim()
+      || providerConfig.displayName?.trim()
+      || displayTargetProvider?.name
+      || row.providerName;
+    const resolvedProviderBrandColor = displayTargetConfig?.branding?.color
+      ?? providerConfig.branding?.color
+      ?? null;
+
+    return {
+      id: row.id,
+      providerName: resolvedProviderName,
+      providerDisplayName: resolvedProviderDisplayName,
+      providerBrandColor: resolvedProviderBrandColor,
+      providerEntityId: displayTargetProvider?.id ?? row.providerId,
+      modelName: row.modelName,
+      benchmarkName: row.benchmarkName,
+      benchmarkType: row.benchmarkType,
+      sourceBenchmarkType: row.benchmarkTypeOverride,
+      higherIsBetter: row.higherIsBetter,
+      benchmarkCanonicalKey: row.benchmarkCanonicalKey,
+      modalities: row.modalities ?? [],
+      sourceModalities: row.modalitiesOverride,
+      benchTime: row.benchTime.toISOString(),
+      valueRaw: row.valueRaw,
+      valueNum: toNullableNumber(row.valueNum),
+      valueNum2: toNullableNumber(row.valueNum2),
+      valueNote: row.valueNote,
+      source: row.source,
+      updatedAt: row.updatedAt.toISOString()
+    };
+  });
+}
+
 export async function getDashboardRows(limit: number | null = null, sourceFilter?: string | null): Promise<DashboardRow[]> {
   const rawLimit =
     typeof limit === "number" && Number.isFinite(limit) && limit > 0
@@ -116,97 +208,7 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
       versionProbeTtlMs: CACHE_VERSION_PROBE_TTL_MS,
       staleIfErrorMs: CACHE_STALE_IF_ERROR_MS,
       getVersion: getDashboardCacheVersion,
-      loader: async () => {
-      const whereClause = resolveDashboardWhereClause(normalizedSourceFilter);
-
-      const baseQuery = db
-        .select({
-          id: benchmarkValues.id,
-          providerId: providers.id,
-          providerName: providers.name,
-          providerConfig: providers.config,
-          modelName: models.modelName,
-          benchmarkName: benchmarks.benchmarkName,
-          benchmarkType: benchmarks.benchmarkType,
-          higherIsBetter: benchmarks.higherIsBetter,
-          benchmarkTypeOverride: benchmarkSourceMeta.benchmarkType,
-          benchmarkCanonicalKey: benchmarks.canonicalKey,
-          modalities: benchmarks.modalities,
-          modalitiesOverride: benchmarkSourceMeta.modalities,
-          benchTime: benchmarkValues.benchTime,
-          valueRaw: benchmarkValues.valueRaw,
-          valueNum: benchmarkValues.valueNum,
-          valueNum2: benchmarkValues.valueNum2,
-          valueNote: benchmarkValues.valueNote,
-          source: benchmarkValues.source,
-          updatedAt: benchmarkValues.createdAt
-        })
-        .from(benchmarkValues)
-        .innerJoin(models, eq(benchmarkValues.modelId, models.id))
-        .innerJoin(providers, eq(models.providerId, providers.id))
-        .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-        .leftJoin(
-          benchmarkSourceMeta,
-          and(
-            eq(benchmarkSourceMeta.benchmarkId, benchmarks.id),
-            eq(benchmarkSourceMeta.source, benchmarkValues.source)
-          )
-        )
-        .where(whereClause)
-        .orderBy(desc(benchmarkValues.benchTime), desc(benchmarkValues.id))
-        .limit(normalizedLimit);
-
-      const rows = await baseQuery;
-
-      const providerIds = Array.from(new Set(rows.map((row) => {
-        const config = normalizeProviderConfig(row.providerConfig);
-        return typeof config.displayTargetProviderId === "number" ? config.displayTargetProviderId : -1;
-      }).filter((id) => id > 0)));
-
-      const displayTargetProviders = providerIds.length > 0
-        ? await db.select().from(providers).where(inArray(providers.id, providerIds))
-        : [];
-      const displayTargetProviderById = new Map(displayTargetProviders.map((provider) => [provider.id, provider]));
-
-      return rows.map((row) => {
-        const providerConfig = normalizeProviderConfig(row.providerConfig);
-        const displayTargetProvider = typeof providerConfig.displayTargetProviderId === "number"
-          ? displayTargetProviderById.get(providerConfig.displayTargetProviderId) ?? null
-          : null;
-        const displayTargetConfig = displayTargetProvider ? normalizeProviderConfig(displayTargetProvider.config) : null;
-        const resolvedProviderName = displayTargetProvider?.name ?? row.providerName;
-        const resolvedProviderDisplayName = displayTargetConfig?.displayName?.trim()
-          || providerConfig.displayName?.trim()
-          || displayTargetProvider?.name
-          || row.providerName;
-        const resolvedProviderBrandColor = displayTargetConfig?.branding?.color
-          ?? providerConfig.branding?.color
-          ?? null;
-
-        return {
-        id: row.id,
-        providerName: resolvedProviderName,
-        providerDisplayName: resolvedProviderDisplayName,
-        providerBrandColor: resolvedProviderBrandColor,
-        providerEntityId: displayTargetProvider?.id ?? row.providerId,
-        modelName: row.modelName,
-        benchmarkName: row.benchmarkName,
-        benchmarkType: row.benchmarkType,
-        sourceBenchmarkType: row.benchmarkTypeOverride,
-        higherIsBetter: row.higherIsBetter,
-        benchmarkCanonicalKey: row.benchmarkCanonicalKey,
-        modalities: row.modalities ?? [],
-        sourceModalities: row.modalitiesOverride,
-        benchTime: row.benchTime.toISOString(),
-        valueRaw: row.valueRaw,
-        valueNum: toNullableNumber(row.valueNum),
-        valueNum2: toNullableNumber(row.valueNum2),
-        valueNote: row.valueNote,
-        source: row.source,
-        updatedAt: row.updatedAt.toISOString()
-        };
-      });
-      }
+      loader: () => loadDashboardRows(normalizedLimit, normalizedSourceFilter)
     }
   );
 }
@@ -217,6 +219,30 @@ export type DashboardStats = {
   benchmarkCount: number;
   totalRecords: number;
 };
+
+async function loadDashboardStats(sourceFilter: string | null): Promise<DashboardStats> {
+  const whereClause = resolveDashboardWhereClause(sourceFilter);
+
+  const [result] = await db
+    .select({
+      providerCount: countDistinct(providers.id),
+      modelCount: countDistinct(models.id),
+      benchmarkCount: countDistinct(benchmarks.id),
+      totalRecords: count()
+    })
+    .from(benchmarkValues)
+    .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+    .innerJoin(providers, eq(models.providerId, providers.id))
+    .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+    .where(whereClause);
+
+  return {
+    providerCount: Number(result?.providerCount ?? 0),
+    modelCount: Number(result?.modelCount ?? 0),
+    benchmarkCount: Number(result?.benchmarkCount ?? 0),
+    totalRecords: Number(result?.totalRecords ?? 0)
+  };
+}
 
 export async function getDashboardStats(sourceFilter?: string | null): Promise<DashboardStats> {
   const normalizedSourceFilter = sourceFilter?.trim() || null;
@@ -229,29 +255,7 @@ export async function getDashboardStats(sourceFilter?: string | null): Promise<D
       versionProbeTtlMs: CACHE_VERSION_PROBE_TTL_MS,
       staleIfErrorMs: CACHE_STALE_IF_ERROR_MS,
       getVersion: getDashboardCacheVersion,
-      loader: async () => {
-      const whereClause = resolveDashboardWhereClause(normalizedSourceFilter);
-
-      const [result] = await db
-        .select({
-          providerCount: countDistinct(providers.id),
-          modelCount: countDistinct(models.id),
-          benchmarkCount: countDistinct(benchmarks.id),
-          totalRecords: count()
-        })
-        .from(benchmarkValues)
-        .innerJoin(models, eq(benchmarkValues.modelId, models.id))
-        .innerJoin(providers, eq(models.providerId, providers.id))
-        .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-        .where(whereClause);
-
-      return {
-        providerCount: Number(result?.providerCount ?? 0),
-        modelCount: Number(result?.modelCount ?? 0),
-        benchmarkCount: Number(result?.benchmarkCount ?? 0),
-        totalRecords: Number(result?.totalRecords ?? 0)
-      };
-      }
+      loader: () => loadDashboardStats(normalizedSourceFilter)
     }
   );
 }
@@ -278,6 +282,22 @@ export async function getActiveEntities() {
   };
 }
 
+async function loadSourceOptions(): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ source: benchmarkValues.source })
+    .from(benchmarkValues)
+    .where(isNotNull(benchmarkValues.source))
+    .orderBy(benchmarkValues.source);
+
+  const normalized = rows
+    .map((item) => item.source?.trim() ?? "")
+    .filter((item): item is string => item.length > 0);
+
+  // Keep post-trim uniqueness semantics stable even if DB distinct values differ
+  // only by surrounding whitespace.
+  return Array.from(new Set(normalized));
+}
+
 export async function getSourceOptions(): Promise<string[]> {
   return withVersionedCache(
     sourceOptionsStore,
@@ -286,21 +306,7 @@ export async function getSourceOptions(): Promise<string[]> {
       versionProbeTtlMs: CACHE_VERSION_PROBE_TTL_MS,
       staleIfErrorMs: CACHE_STALE_IF_ERROR_MS,
       getVersion: getDashboardCacheVersion,
-      loader: async () => {
-      const rows = await db
-        .selectDistinct({ source: benchmarkValues.source })
-        .from(benchmarkValues)
-        .where(isNotNull(benchmarkValues.source))
-        .orderBy(benchmarkValues.source);
-
-      const normalized = rows
-        .map((item) => item.source?.trim() ?? "")
-        .filter((item): item is string => item.length > 0);
-
-      // Keep post-trim uniqueness semantics stable even if DB distinct values differ
-      // only by surrounding whitespace.
-      return Array.from(new Set(normalized));
-      }
+      loader: loadSourceOptions
     }
   );
 }
