@@ -3,11 +3,21 @@ import { z } from "zod";
 import { db } from "@/lib/db/client";
 import { modelPricing, models, providers } from "@/lib/db/schema";
 import { normalizeProviderConfig } from "@/lib/provider-config";
+import { createTimedCacheStore, invalidateTimedCacheStore, withTimedCache } from "@/lib/server-cache";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const MODELS_DEV_FETCH_TIMEOUT_MS = 10_000;
 const MODELS_DEV_MAX_BYTES = 8 * 1024 * 1024;
 const MODELS_DEV_SOURCE = "models.dev";
+const MODEL_PRICING_CACHE_TTL_MS = 60_000;
+
+const modelPricingRowsStore = createTimedCacheStore<ModelPricingRow[]>();
+const adminModelPricingRowsStore = createTimedCacheStore<ModelPricingRow[]>();
+
+export function invalidateModelPricingCaches() {
+  invalidateTimedCacheStore(modelPricingRowsStore);
+  invalidateTimedCacheStore(adminModelPricingRowsStore);
+}
 
 type DbModel = {
   id: number;
@@ -593,6 +603,15 @@ async function getActiveModelRows(): Promise<DbModel[]> {
 }
 
 export async function getModelPricingRows(): Promise<ModelPricingRow[]> {
+  return withTimedCache(
+    modelPricingRowsStore,
+    "all",
+    MODEL_PRICING_CACHE_TTL_MS,
+    loadModelPricingRows
+  );
+}
+
+async function loadModelPricingRows(): Promise<ModelPricingRow[]> {
   const rows = await db
     .select({
       modelId: models.id,
@@ -653,6 +672,15 @@ export async function getModelPricingRows(): Promise<ModelPricingRow[]> {
 }
 
 export async function getAdminModelPricingRows(): Promise<ModelPricingRow[]> {
+  return withTimedCache(
+    adminModelPricingRowsStore,
+    "all",
+    MODEL_PRICING_CACHE_TTL_MS,
+    loadAdminModelPricingRows
+  );
+}
+
+async function loadAdminModelPricingRows(): Promise<ModelPricingRow[]> {
   const activeModels = await getActiveModelRows();
   const pricingRows = await getModelPricingRows();
   const pricingByModelId = new Map(pricingRows.map((row) => [row.modelId, row]));
@@ -821,6 +849,8 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
       });
   }
 
+  invalidateModelPricingCaches();
+
   const sourceModelCount = Array.from(sourceProviders.values()).reduce(
     (sum, provider) => sum + Object.keys(provider.models).length,
     0
@@ -940,6 +970,7 @@ export async function updateModelPricing(input: ModelPricingUpdateInput) {
       target: modelPricing.modelId,
       set: updateValues
     });
+  invalidateModelPricingCaches();
 }
 
 export async function clearModelPricingManualOverride(modelId: number) {
@@ -947,6 +978,7 @@ export async function clearModelPricingManualOverride(modelId: number) {
     .update(modelPricing)
     .set({ manualOverride: false, matchStatus: "matched", updatedAt: new Date() })
     .where(and(eq(modelPricing.modelId, modelId), eq(modelPricing.manualOverride, true)));
+  invalidateModelPricingCaches();
 }
 
 export async function getModelPricingCount(): Promise<number> {

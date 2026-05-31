@@ -3,6 +3,8 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db/client";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 import { normalizeProviderConfig } from "@/lib/provider-config";
+import { createTimedCacheStore, invalidateTimedCacheStore, withTimedCache } from "@/lib/server-cache";
+import { invalidateModelPricingCaches } from "@/lib/model-pricing";
 
 function toNullableNumber(value: unknown): number | null {
   if (value === null || value === undefined) return null;
@@ -41,30 +43,19 @@ const SOURCE_EMPTY_KEY = "__EMPTY__";
 const DASHBOARD_CACHE_TTL_MS = 60_000;
 const DEFAULT_MAX_DASHBOARD_ROWS = 50_000;
 
-type TimedCacheEntry<T> = {
-  value: T;
-  expiresAt: number;
-};
-
-const dashboardRowsCache = new Map<string, TimedCacheEntry<DashboardRow[]>>();
-const dashboardRowsInFlight = new Map<string, Promise<DashboardRow[]>>();
-const dashboardStatsCache = new Map<string, TimedCacheEntry<DashboardStats>>();
-const dashboardStatsInFlight = new Map<string, Promise<DashboardStats>>();
-const sourceOptionsCache = new Map<string, TimedCacheEntry<string[]>>();
-const sourceOptionsInFlight = new Map<string, Promise<string[]>>();
+const dashboardRowsStore = createTimedCacheStore<DashboardRow[]>();
+const dashboardStatsStore = createTimedCacheStore<DashboardStats>();
+const sourceOptionsStore = createTimedCacheStore<string[]>();
 
 /**
  * Clear dashboard caches after admin write operations
  * (import, merge, delete, etc.) so subsequent reads reflect updated data.
  */
 export function invalidateAllCaches() {
-  dashboardRowsCache.clear();
-  dashboardStatsCache.clear();
-  sourceOptionsCache.clear();
-
-  dashboardRowsInFlight.clear();
-  dashboardStatsInFlight.clear();
-  sourceOptionsInFlight.clear();
+  invalidateTimedCacheStore(dashboardRowsStore);
+  invalidateTimedCacheStore(dashboardStatsStore);
+  invalidateTimedCacheStore(sourceOptionsStore);
+  invalidateModelPricingCaches();
 
   try {
     revalidatePath("/");
@@ -81,41 +72,6 @@ export function invalidateAllCaches() {
 function normalizeSourceFilterKey(sourceFilter?: string | null): string {
   const normalized = sourceFilter?.trim();
   return normalized && normalized.length > 0 ? normalized : "__ALL__";
-}
-
-async function withTimedCache<T>(
-  cache: Map<string, TimedCacheEntry<T>>,
-  inFlight: Map<string, Promise<T>>,
-  key: string,
-  ttlMs: number,
-  loader: () => Promise<T>
-): Promise<T> {
-  const now = Date.now();
-  const cached = cache.get(key);
-
-  if (cached && cached.expiresAt > now) {
-    return cached.value;
-  }
-
-  const pending = inFlight.get(key);
-  if (pending) {
-    return pending;
-  }
-
-  const promise = loader()
-    .then((value) => {
-      cache.set(key, {
-        value,
-        expiresAt: Date.now() + ttlMs
-      });
-      return value;
-    })
-    .finally(() => {
-      inFlight.delete(key);
-    });
-
-  inFlight.set(key, promise);
-  return promise;
 }
 
 function resolveDashboardWhereClause(sourceFilter?: string | null) {
@@ -146,8 +102,7 @@ export async function getDashboardRows(limit: number | null = null, sourceFilter
   const cacheKey = `${normalizedLimit ?? "all"}::${normalizeSourceFilterKey(normalizedSourceFilter)}`;
 
   return withTimedCache(
-    dashboardRowsCache,
-    dashboardRowsInFlight,
+    dashboardRowsStore,
     cacheKey,
     DASHBOARD_CACHE_TTL_MS,
     async () => {
@@ -256,8 +211,7 @@ export async function getDashboardStats(sourceFilter?: string | null): Promise<D
   const cacheKey = normalizeSourceFilterKey(normalizedSourceFilter);
 
   return withTimedCache(
-    dashboardStatsCache,
-    dashboardStatsInFlight,
+    dashboardStatsStore,
     cacheKey,
     DASHBOARD_CACHE_TTL_MS,
     async () => {
@@ -310,8 +264,7 @@ export async function getActiveEntities() {
 
 export async function getSourceOptions(): Promise<string[]> {
   return withTimedCache(
-    sourceOptionsCache,
-    sourceOptionsInFlight,
+    sourceOptionsStore,
     "all",
     DASHBOARD_CACHE_TTL_MS,
     async () => {
