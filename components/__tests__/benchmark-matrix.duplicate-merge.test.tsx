@@ -2,8 +2,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { BenchmarkMatrix } from "@/components/benchmark-matrix";
 import { SHOW_SOURCE_VALUES_STORAGE_KEY } from "@/components/benchmark-matrix/constants";
+import { BenchmarkMatrix } from "@/components/benchmark-matrix";
 
 const mockSearchParams = new URLSearchParams();
 const mockReplace = vi.fn((url?: string) => {

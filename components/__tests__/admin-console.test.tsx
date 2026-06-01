@@ -1212,7 +1212,7 @@ describe("AdminConsole text import", () => {
 
     await user.click(benchmarkInput);
 
-    const optionButton = within(benchmarkRow).getByRole("option", {
+    const optionButton = screen.getByRole("option", {
       name: /Bench-1 \[Type-A\] \[11\]/
     });
 
@@ -1300,7 +1300,7 @@ describe("AdminConsole text import", () => {
 
     await user.click(benchmarkInput);
 
-    expect(await within(benchmarkRow).findByText("重复 1/2 (50%) · 重叠 2 · 冲突 1")).toBeInTheDocument();
+    expect(await screen.findByText("重复 1/2 (50%) · 重叠 2 · 冲突 1")).toBeInTheDocument();
   });
 
   test("预览内 benchmark 快捷合并后仍优先保留导入 type", async () => {
@@ -1362,7 +1362,7 @@ describe("AdminConsole text import", () => {
 
     await user.click(benchmarkInput);
 
-    const optionButton = within(benchmarkRow).getByRole("option", {
+    const optionButton = screen.getByRole("option", {
       name: /Bench-1 \[Type-A\] \[11\]/
     });
     await user.click(optionButton);
@@ -2701,7 +2701,7 @@ describe("AdminConsole rename tab", () => {
     
     await user.click(benchmarkInput);
     await waitFor(() => {
-      const dropdown = benchmarkInput.parentElement?.querySelector('[role="listbox"]') as HTMLElement | null;
+      const dropdown = document.body.querySelector('[role="listbox"]') as HTMLElement | null;
       expect(dropdown).toBeInTheDocument();
       if (dropdown) {
         expect(within(dropdown).getByText(/Bench-1 \[Type-A\] \[11\]/)).toBeInTheDocument();
@@ -2755,7 +2755,8 @@ describe("AdminConsole rename tab", () => {
     
     await user.click(benchmarkInput);
     await waitFor(() => {
-      const dropdown = benchmarkInput.parentElement?.querySelector('[role="listbox"]') as HTMLElement | null;
+      const dropdown = document.body.querySelector('[role="listbox"]') as HTMLElement | null;
+      expect(dropdown).toBeInTheDocument();
       if (dropdown) {
         expect(within(dropdown).getByText(/SomeBench \(Elo\) \[General\] \[11\]/)).toBeInTheDocument();
       }
@@ -2807,7 +2808,8 @@ describe("AdminConsole rename tab", () => {
     await user.type(benchmarkInput, "search");
 
     await waitFor(() => {
-      const dropdown = benchmarkInput.parentElement?.querySelector('[role="listbox"]') as HTMLElement | null;
+      const dropdown = document.body.querySelector('[role="listbox"]') as HTMLElement | null;
+      expect(dropdown).toBeInTheDocument();
       if (dropdown) {
         expect(within(dropdown).getByText(/SearchableBench \[General\] \[13\]/)).toBeInTheDocument();
       }
@@ -2856,8 +2858,8 @@ describe("AdminConsole rename tab", () => {
     await user.clear(benchmarkInput);
     await user.type(benchmarkInput, "Bench");
 
-    const dropdown = benchmarkInput.parentElement?.querySelector('[role="listbox"]') as HTMLElement | null;
     await waitFor(() => {
+      const dropdown = document.body.querySelector('[role="listbox"]') as HTMLElement | null;
       expect(dropdown).toBeInTheDocument();
     });
   });
