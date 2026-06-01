@@ -139,7 +139,7 @@ export function resolveProviderBrandColorForDarkTheme(
   const sourceColor = resolveProviderBrandColor(providerName, configuredColor);
   const rgb = hexToRgb(sourceColor);
   const darkSurface: [number, number, number] = [20, 27, 45];
-  const targetContrastRatio = 3.15;
+  const targetContrastRatio = 5;
 
   if (getContrastRatio(rgb, darkSurface) >= targetContrastRatio) {
     return sourceColor;
@@ -149,7 +149,7 @@ export function resolveProviderBrandColorForDarkTheme(
   const targetSaturation = saturation === 0
     ? 0
     : Math.min(0.88, Math.max(saturation + 0.1, saturation * 1.18));
-  const startingLightness = Math.max(lightness, 0.46);
+  const startingLightness = Math.max(lightness, 0.60);
 
   for (let step = 0; step <= 14; step += 1) {
     const nextLightness = clamp01(startingLightness + step * 0.025);
@@ -159,7 +159,7 @@ export function resolveProviderBrandColorForDarkTheme(
     }
   }
 
-  const fallbackRgb = hslToRgb(hue, targetSaturation, 0.78);
+  const fallbackRgb = hslToRgb(hue, targetSaturation, 0.82);
   return rgbToHex(fallbackRgb[0], fallbackRgb[1], fallbackRgb[2]);
 }
 

@@ -502,7 +502,7 @@ describe("color validation edge cases", () => {
 
   test("暗色主题展示色应提亮过暗品牌色但不改变真实配置色解析", () => {
     expect(resolveProviderBrandColorForTest("OpenAI", "#123456")).toBe("#123456");
-    expect(resolveProviderBrandColorForDarkThemeForTest("OpenAI", "#123456")).toBe("#1b75d0");
+    expect(resolveProviderBrandColorForDarkThemeForTest("OpenAI", "#123456")).toBe("#4a99e8");
   });
 });
 
