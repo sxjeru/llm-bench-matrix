@@ -1,6 +1,8 @@
 "use client";
 
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import type { ClipboardEvent, Dispatch, FormEvent, SetStateAction } from "react";
+import { createPortal } from "react-dom";
 import { FileSpreadsheet, ShieldAlert, Table2, Upload } from "lucide-react";
 import { MODALITY_OPTIONS } from "../constants";
 import type {
@@ -47,6 +49,187 @@ type BenchmarkParenthesesItem = {
   benchmarkName: string;
   benchmarkType: string;
 };
+
+type BenchmarkCandidateOption = {
+  targetId: number;
+  label: string;
+};
+
+type FloatingPosition = {
+  left: number;
+  top: number;
+  width: number;
+  maxHeight: number;
+};
+
+type MatrixBenchmarkCandidateFieldProps = {
+  matrixRowKey: string;
+  benchmarkName: string;
+  inputValue: string;
+  candidateOptions: BenchmarkCandidateOption[];
+  isOpen: boolean;
+  setOpenMatrixBenchmarkCandidateFor: Dispatch<SetStateAction<string | null>>;
+  applyBenchmarkOverwriteByTargetId: (previewBenchmarkKey: string, targetId: number) => boolean;
+  onMatrixBenchmarkNameInputChange: (previewBenchmarkKey: string, nextValue: string) => void;
+  onMatrixBenchmarkNameInputBlur: (previewBenchmarkKey: string, originalName: string, nextValue: string) => void;
+  benchmarkPreviewValueOverlapStatsMap: Map<string, BenchmarkPreviewValueOverlapStats>;
+  getBenchmarkPreviewValueOverlapStatsKey: (previewBenchmarkKey: string, candidateBenchmarkId: number) => string;
+  benchmarkPreviewValueOverlapState: {
+    key: string;
+    status: "idle" | "loading" | "success" | "error";
+    stats: BenchmarkPreviewValueOverlapStats[];
+  };
+  benchmarkPreviewValueOverlapPayload: {
+    key: string;
+  };
+  getBenchmarkPreviewValueOverlapBadgeClass: (stats: BenchmarkPreviewValueOverlapStats) => string;
+  formatBenchmarkPreviewValueOverlapStats: (stats: BenchmarkPreviewValueOverlapStats) => string;
+};
+
+function MatrixBenchmarkCandidateField({
+  matrixRowKey,
+  benchmarkName,
+  inputValue,
+  candidateOptions,
+  isOpen,
+  setOpenMatrixBenchmarkCandidateFor,
+  applyBenchmarkOverwriteByTargetId,
+  onMatrixBenchmarkNameInputChange,
+  onMatrixBenchmarkNameInputBlur,
+  benchmarkPreviewValueOverlapStatsMap,
+  getBenchmarkPreviewValueOverlapStatsKey,
+  benchmarkPreviewValueOverlapState,
+  benchmarkPreviewValueOverlapPayload,
+  getBenchmarkPreviewValueOverlapBadgeClass,
+  formatBenchmarkPreviewValueOverlapStats
+}: MatrixBenchmarkCandidateFieldProps) {
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<FloatingPosition | null>(null);
+
+  const updatePosition = useCallback(() => {
+    const rect = anchorRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    setPosition({
+      left: rect.left,
+      top: rect.top - 4,
+      width: rect.width,
+      maxHeight: Math.min(240, Math.max(120, rect.top - 12))
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [isOpen, updatePosition]);
+
+  const dropdown =
+    isOpen && position && typeof document !== "undefined"
+      ? createPortal(
+          <div
+            role="listbox"
+            data-matrix-benchmark-candidate-container="true"
+            className="fixed z-[9999] overflow-auto rounded-md border border-base-300 bg-base-100/95 p-1 shadow-xl backdrop-blur"
+            style={{
+              left: position.left,
+              top: position.top,
+              width: position.width,
+              maxHeight: position.maxHeight,
+              transform: "translateY(-100%)"
+            }}
+          >
+            {candidateOptions.map((option) => {
+              const overlapStats = benchmarkPreviewValueOverlapStatsMap.get(
+                getBenchmarkPreviewValueOverlapStatsKey(matrixRowKey, option.targetId)
+              );
+              const isLoadingOverlapStats =
+                benchmarkPreviewValueOverlapState.key === benchmarkPreviewValueOverlapPayload.key
+                && benchmarkPreviewValueOverlapState.status === "loading";
+
+              return (
+                <div
+                  key={`matrix-benchmark-override-option-${matrixRowKey}-${option.targetId}`}
+                  role="option"
+                  aria-selected={false}
+                  tabIndex={-1}
+                  className="cursor-pointer rounded-sm px-2 py-1 text-left text-xs leading-5 text-base-content hover:bg-base-200/90"
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    applyBenchmarkOverwriteByTargetId(matrixRowKey, option.targetId);
+                    setOpenMatrixBenchmarkCandidateFor(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") {
+                      return;
+                    }
+                    event.preventDefault();
+                    applyBenchmarkOverwriteByTargetId(matrixRowKey, option.targetId);
+                    setOpenMatrixBenchmarkCandidateFor(null);
+                  }}
+                >
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <span className="font-medium">{`${option.label} [${option.targetId}]`}</span>
+                    {overlapStats ? (
+                      <span
+                        className={`inline-flex shrink-0 whitespace-nowrap text-[11px] font-medium ${getBenchmarkPreviewValueOverlapBadgeClass(overlapStats)}`}
+                      >
+                        {formatBenchmarkPreviewValueOverlapStats(overlapStats)}
+                      </span>
+                    ) : isLoadingOverlapStats ? (
+                      <span className="inline-flex shrink-0 whitespace-nowrap text-[11px] font-medium text-base-content/60">重复率计算中...</span>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>,
+          document.body
+        )
+      : null;
+
+  return (
+    <div ref={anchorRef} className="relative" data-matrix-benchmark-candidate-container="true">
+      <input
+        className="input input-bordered input-xs w-full"
+        value={inputValue}
+        onFocus={() => {
+          if (candidateOptions.length > 0) {
+            setOpenMatrixBenchmarkCandidateFor(matrixRowKey);
+          }
+        }}
+        onChange={(e) => {
+          const nextInput = e.target.value;
+          const parsedTargetId = parseExplicitMergeEntityId(nextInput);
+          if (parsedTargetId !== null && applyBenchmarkOverwriteByTargetId(matrixRowKey, parsedTargetId)) {
+            setOpenMatrixBenchmarkCandidateFor(null);
+            return;
+          }
+          onMatrixBenchmarkNameInputChange(matrixRowKey, nextInput);
+          setOpenMatrixBenchmarkCandidateFor(matrixRowKey);
+        }}
+        onBlur={(e) => {
+          onMatrixBenchmarkNameInputBlur(
+            matrixRowKey,
+            benchmarkName,
+            e.target.value
+          );
+          setOpenMatrixBenchmarkCandidateFor((current) =>
+            current === matrixRowKey ? null : current
+          );
+        }}
+      />
+      {dropdown}
+    </div>
+  );
+}
 
 type ImportTabProps = {
   onPreviewWorkbook: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
@@ -674,7 +857,7 @@ export function ImportTab({
         {matrixPreview.rows.length > 0 ? (
           <div className="mt-4 space-y-2">
             <h4 className="font-semibold">矩阵预览（可编辑）</h4>
-            <div className="overflow-x-auto overflow-y-visible rounded-box border border-base-300 max-h-[420px]">
+            <div className="max-h-[420px] overflow-auto rounded-box border border-base-300">
               <table className="table table-zebra table-sm">
                 <thead>
                   <tr>
@@ -821,88 +1004,23 @@ export function ImportTab({
 
                               return (
                                 <>
-                                  <div className="relative" data-matrix-benchmark-candidate-container="true">
-                                    <input
-                                      className="input input-bordered input-xs w-full"
-                                      value={benchmarkInputValue}
-                                      onFocus={() => {
-                                        if (benchmarkCandidateOptions.length > 0) {
-                                          setOpenMatrixBenchmarkCandidateFor(matrixRow.key);
-                                        }
-                                      }}
-                                      onChange={(e) => {
-                                        const nextInput = e.target.value;
-                                        const parsedTargetId = parseExplicitMergeEntityId(nextInput);
-                                        if (parsedTargetId !== null && applyBenchmarkOverwriteByTargetId(matrixRow.key, parsedTargetId)) {
-                                          setOpenMatrixBenchmarkCandidateFor(null);
-                                          return;
-                                        }
-                                        onMatrixBenchmarkNameInputChange(matrixRow.key, nextInput);
-                                        setOpenMatrixBenchmarkCandidateFor(matrixRow.key);
-                                      }}
-                                      onBlur={(e) => {
-                                        onMatrixBenchmarkNameInputBlur(
-                                          matrixRow.key,
-                                          matrixRow.benchmarkName,
-                                          e.target.value
-                                        );
-                                        setOpenMatrixBenchmarkCandidateFor((current) =>
-                                          current === matrixRow.key ? null : current
-                                        );
-                                      }}
-                                    />
-                                    {benchmarkCandidateOptions.length > 0 && openMatrixBenchmarkCandidateFor === matrixRow.key ? (
-                                      <div
-                                        role="listbox"
-                                        className="absolute bottom-full left-0 right-0 z-[95] mb-1 max-h-60 overflow-auto rounded-md border border-base-300 bg-base-100/95 p-1 shadow-xl backdrop-blur"
-                                      >
-                                        {benchmarkCandidateOptions.map((option) => {
-                                          const overlapStats = benchmarkPreviewValueOverlapStatsMap.get(
-                                            getBenchmarkPreviewValueOverlapStatsKey(matrixRow.key, option.targetId)
-                                          );
-                                          const isLoadingOverlapStats =
-                                            benchmarkPreviewValueOverlapState.key === benchmarkPreviewValueOverlapPayload.key
-                                            && benchmarkPreviewValueOverlapState.status === "loading";
-
-                                          return (
-                                            <div
-                                              key={`matrix-benchmark-override-option-${matrixRow.key}-${option.targetId}`}
-                                              role="option"
-                                              aria-selected={false}
-                                              tabIndex={-1}
-                                              className="cursor-pointer rounded-sm px-2 py-1 text-left text-xs leading-5 text-base-content hover:bg-base-200/90"
-                                              onMouseDown={(event) => {
-                                                event.preventDefault();
-                                                applyBenchmarkOverwriteByTargetId(matrixRow.key, option.targetId);
-                                                setOpenMatrixBenchmarkCandidateFor(null);
-                                              }}
-                                              onKeyDown={(event) => {
-                                                if (event.key !== "Enter" && event.key !== " ") {
-                                                  return;
-                                                }
-                                                event.preventDefault();
-                                                applyBenchmarkOverwriteByTargetId(matrixRow.key, option.targetId);
-                                                setOpenMatrixBenchmarkCandidateFor(null);
-                                              }}
-                                            >
-                                              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                                                <span className="font-medium">{`${option.label} [${option.targetId}]`}</span>
-                                                {overlapStats ? (
-                                                  <span
-                                                    className={`inline-flex shrink-0 whitespace-nowrap text-[11px] font-medium ${getBenchmarkPreviewValueOverlapBadgeClass(overlapStats)}`}
-                                                  >
-                                                    {formatBenchmarkPreviewValueOverlapStats(overlapStats)}
-                                                  </span>
-                                                ) : isLoadingOverlapStats ? (
-                                                  <span className="inline-flex shrink-0 whitespace-nowrap text-[11px] font-medium text-base-content/60">重复率计算中...</span>
-                                                ) : null}
-                                              </div>
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    ) : null}
-                                  </div>
+                                  <MatrixBenchmarkCandidateField
+                                    matrixRowKey={matrixRow.key}
+                                    benchmarkName={matrixRow.benchmarkName}
+                                    inputValue={benchmarkInputValue}
+                                    candidateOptions={benchmarkCandidateOptions}
+                                    isOpen={benchmarkCandidateOptions.length > 0 && openMatrixBenchmarkCandidateFor === matrixRow.key}
+                                    setOpenMatrixBenchmarkCandidateFor={setOpenMatrixBenchmarkCandidateFor}
+                                    applyBenchmarkOverwriteByTargetId={applyBenchmarkOverwriteByTargetId}
+                                    onMatrixBenchmarkNameInputChange={onMatrixBenchmarkNameInputChange}
+                                    onMatrixBenchmarkNameInputBlur={onMatrixBenchmarkNameInputBlur}
+                                    benchmarkPreviewValueOverlapStatsMap={benchmarkPreviewValueOverlapStatsMap}
+                                    getBenchmarkPreviewValueOverlapStatsKey={getBenchmarkPreviewValueOverlapStatsKey}
+                                    benchmarkPreviewValueOverlapState={benchmarkPreviewValueOverlapState}
+                                    benchmarkPreviewValueOverlapPayload={benchmarkPreviewValueOverlapPayload}
+                                    getBenchmarkPreviewValueOverlapBadgeClass={getBenchmarkPreviewValueOverlapBadgeClass}
+                                    formatBenchmarkPreviewValueOverlapStats={formatBenchmarkPreviewValueOverlapStats}
+                                  />
                                 </>
                               );
                             })()}
