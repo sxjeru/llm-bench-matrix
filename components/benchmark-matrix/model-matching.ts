@@ -169,6 +169,15 @@ export function getModelFamilyMatchKey(modelName: string): string {
   if (!normalized) return "";
 
   const compact = normalized.replace(/\s+/g, "");
+
+  // Special handling for Anthropic/Claude tiers: if the name contains opus, sonnet, or haiku,
+  // we extract the prefix before that tier as the family key.
+  const tierIndex = compact.search(/(opus|sonnet|haiku)/);
+  if (tierIndex !== -1) {
+    const familyKey = compact.slice(0, tierIndex);
+    if (familyKey) return familyKey;
+  }
+
   const compactVersionMatch = compact.match(/^([a-z]+?)(?:[a-z]?\d)/);
   if (compactVersionMatch?.[1]) {
     return compactVersionMatch[1];
