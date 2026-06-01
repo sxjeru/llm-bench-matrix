@@ -14,7 +14,7 @@ import {
   Trash2,
   X
 } from "lucide-react";
-import { isValidHexColor, resolveProviderBrandColor } from "@/lib/provider-config";
+import { isValidHexColor, resolveProviderBrandColor, resolveProviderBrandColorForDarkTheme } from "@/lib/provider-config";
 import type { ModelOption, ProviderConfigDraft, ProviderOption } from "../types";
 import { createProviderPrefixRuleDraft, toProviderConfigDraft } from "../utils/provider";
 
@@ -129,7 +129,7 @@ export function ProvidersTab({
                 ) : (
                   filteredProviderOptions.map((p) => {
                     const isActive = p.id === selectedProviderConfigId;
-                    const pColor = resolveProviderBrandColor(p.name, p.config?.branding?.color);
+                    const pColor = resolveProviderBrandColorForDarkTheme(p.name, p.config?.branding?.color);
                     const mergeTargetId = p.config?.displayTargetProviderId;
                     const mergeTargetProvider = typeof mergeTargetId === "number"
                       ? providers.find((tp) => tp.id === mergeTargetId)
@@ -181,6 +181,8 @@ export function ProvidersTab({
         const draft = providerConfigDrafts[provider.id] ?? toProviderConfigDraft(provider);
         const previewDisplayName = draft.displayName.trim() || provider.name;
         const previewBrandColor = resolveProviderBrandColor(provider.name, draft.brandingColor);
+        const previewDarkBrandColor = resolveProviderBrandColorForDarkTheme(provider.name, draft.brandingColor);
+        const isPreviewBrandColorAdjusted = previewDarkBrandColor !== previewBrandColor;
         const isSaving = savingProviderConfigId === provider.id;
         const isDeleting = deletingProviderId === provider.id;
         const providerModels = models.filter((m) => m.providerId === provider.id);
@@ -192,7 +194,7 @@ export function ProvidersTab({
               <div className="flex items-center gap-3">
                 <span
                   className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-white text-sm font-bold shadow-md transition-colors duration-300"
-                  style={{ backgroundColor: previewBrandColor }}
+                  style={{ backgroundColor: previewDarkBrandColor }}
                 >
                   {previewDisplayName.charAt(0).toUpperCase()}
                 </span>
@@ -280,6 +282,21 @@ export function ProvidersTab({
                       <Palette size={16} className="text-white/80 drop-shadow-sm" />
                     </div>
                   </label>
+                  <div
+                    className="relative flex h-[2.75rem] w-[2.75rem] shrink-0 items-center justify-center rounded-xl border border-base-300 shadow-sm transition-colors duration-200"
+                    style={{ backgroundColor: previewDarkBrandColor }}
+                    title={isPreviewBrandColorAdjusted
+                      ? `暗色适配色：${previewDarkBrandColor}`
+                      : "无需暗色适配"}
+                  >
+                    {isPreviewBrandColorAdjusted ? (
+                      <span className="pointer-events-none absolute -right-1 -top-1 rounded-full border border-base-100 bg-base-content px-1 py-0.5 text-[9px] font-bold leading-none text-base-100 shadow-sm">
+                        AUTO
+                      </span>
+                    ) : (
+                      <Check size={18} className="text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.55)]" />
+                    )}
+                  </div>
                   <input
                     className="input input-bordered min-w-0 flex-1 rounded-xl font-mono text-sm uppercase bg-base-200/40 transition-colors focus:bg-base-100 focus:border-primary focus:outline-none"
                     value={draft.brandingColor}
@@ -321,23 +338,28 @@ export function ProvidersTab({
                 <span className="label-text mb-1.5 text-xs font-medium opacity-70">实时预览</span>
                 <div
                   className="relative flex h-[2.75rem] items-center overflow-hidden rounded-xl border border-base-300/50 px-4"
-                  style={{ background: `linear-gradient(135deg, ${previewBrandColor}14, ${previewBrandColor}06)` }}
+                  style={{ background: `linear-gradient(135deg, ${previewDarkBrandColor}16, ${previewDarkBrandColor}07)` }}
                 >
                   <div
                     className="absolute right-2 top-1/2 h-10 w-10 -translate-y-1/2 rounded-full opacity-10 blur-lg transition-colors duration-500"
-                    style={{ backgroundColor: previewBrandColor }}
+                    style={{ backgroundColor: previewDarkBrandColor }}
                   />
-                  <span className="relative z-10 truncate text-base font-bold tracking-tight transition-colors duration-200" style={{ color: previewBrandColor }}>
+                  <span className="relative z-10 truncate text-base font-bold tracking-tight transition-colors duration-200" style={{ color: previewDarkBrandColor }}>
                     {previewDisplayName}
                   </span>
                   <span className="relative z-10 ml-auto flex shrink-0 items-center gap-1.5 pl-3 font-mono text-[11px] opacity-50">
                     <span
                       className="inline-block h-2 w-2 rounded-full transition-colors duration-200"
-                      style={{ backgroundColor: previewBrandColor }}
+                      style={{ backgroundColor: previewDarkBrandColor }}
                     />
-                    {isValidHexColor(draft.brandingColor) ? draft.brandingColor.toLowerCase() : previewBrandColor.toLowerCase()}
+                    {previewDarkBrandColor.toLowerCase()}
                   </span>
                 </div>
+                {isPreviewBrandColorAdjusted ? (
+                  <span className="mt-1.5 block text-[11px] leading-snug opacity-60">
+                    已基于原始色 {previewBrandColor} 自动提亮增艳，保存时仍记录原始色。
+                  </span>
+                ) : null}
               </div>
             </div>
 

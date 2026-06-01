@@ -10,6 +10,7 @@ let validateProviderConfigForTest: (
 ) => void;
 let mergeProviderConfigForTest: (current: ProviderConfig, incoming: unknown) => ProviderConfig;
 let resolveProviderBrandColorForTest: (providerName: string | null | undefined, configuredColor?: string | null) => string;
+let resolveProviderBrandColorForDarkThemeForTest: (providerName: string | null | undefined, configuredColor?: string | null) => string;
 let updateProviderConfigForTest: typeof import("@/lib/admin-service").__updateProviderConfigForTest;
 let deleteProviderAndTransferModelsForTest: typeof import("@/lib/admin-service").__deleteProviderAndTransferModelsForTest;
 
@@ -39,6 +40,7 @@ beforeAll(async () => {
   updateProviderConfigForTest = adminServiceModule.__updateProviderConfigForTest;
   deleteProviderAndTransferModelsForTest = adminServiceModule.__deleteProviderAndTransferModelsForTest;
   resolveProviderBrandColorForTest = providerConfigModule.resolveProviderBrandColor;
+  resolveProviderBrandColorForDarkThemeForTest = providerConfigModule.resolveProviderBrandColorForDarkTheme;
 });
 
 beforeEach(() => {
@@ -492,6 +494,15 @@ describe("color validation edge cases", () => {
 
   test("品牌色已配置时应优先使用配置色", () => {
     expect(resolveProviderBrandColorForTest("OpenAI", "#ABCDEF")).toBe("#abcdef");
+  });
+
+  test("暗色主题展示色应保留无需调整的明亮品牌色", () => {
+    expect(resolveProviderBrandColorForDarkThemeForTest("OpenAI", "#34d399")).toBe("#34d399");
+  });
+
+  test("暗色主题展示色应提亮过暗品牌色但不改变真实配置色解析", () => {
+    expect(resolveProviderBrandColorForTest("OpenAI", "#123456")).toBe("#123456");
+    expect(resolveProviderBrandColorForDarkThemeForTest("OpenAI", "#123456")).toBe("#1b75d0");
   });
 });
 

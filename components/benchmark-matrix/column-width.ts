@@ -6,7 +6,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type SetStateAction
 } from "react";
-import { resolveProviderBrandColor } from "@/lib/provider-config";
+import { resolveProviderBrandColorForDarkTheme } from "@/lib/provider-config";
 import {
   BENCHMARK_COLUMN_WIDTH_KEY,
   CATEGORY_COLUMN_WIDTH_KEY,
@@ -385,7 +385,7 @@ export function buildModelColumnMeta({
       modelName,
       columnWidthKey,
       providerName,
-      color: resolveProviderBrandColor(canonicalProviderName, modelProviderBrandColorMap.get(modelName) ?? null),
+      color: resolveProviderBrandColorForDarkTheme(canonicalProviderName, modelProviderBrandColorMap.get(modelName) ?? null),
       columnWidth,
       isSourceMatched: sourceMatchedModelSet.has(modelName),
       isSourceMatchedFirst: sourceMatchedGroupBoundaryByModel.firstSet.has(modelName),

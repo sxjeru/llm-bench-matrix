@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronUp, Filter, Layers } from "lucide-react";
-import { resolveProviderBrandColor } from "@/lib/provider-config";
+import { resolveProviderBrandColorForDarkTheme } from "@/lib/provider-config";
 import type { Dispatch, SetStateAction } from "react";
 import { PROVIDER_MODEL_AUTO_COLLAPSE_LIMIT } from "./constants";
 import type { ProviderGroup } from "./selectors";
@@ -138,7 +138,7 @@ export function ModelFilterPanel({
                       }}
                       onChange={(e) => toggleProvider(group.providerName, e.target.checked)}
                     />
-                    <span className="text-sm font-medium" style={{ color: resolveProviderBrandColor(group.providerName, providerDisplayNameBrandColorMap.get(group.providerName) ?? null) }}>
+                    <span className="text-sm font-medium" style={{ color: resolveProviderBrandColorForDarkTheme(group.providerName, providerDisplayNameBrandColorMap.get(group.providerName) ?? null) }}>
                       {group.providerName}
                       {providerHasBaseModel ? null : <span className="ml-1 text-[10px] opacity-70">(跨页签)</span>}
                     </span>
