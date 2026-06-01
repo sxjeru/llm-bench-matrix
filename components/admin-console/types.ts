@@ -83,6 +83,7 @@ export type TextImportPreviewRow = {
 };
 
 export type Props = {
+  initialTab?: TabKey;
   providers: ProviderOption[];
   models: ModelOption[];
   benchmarks: BenchmarkOption[];

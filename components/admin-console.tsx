@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter, useSearchParams } from "next/navigation";
 import { type ClipboardEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { formatDateTimeLocalInputValue } from "@/components/benchmark-matrix/formatters";
 import { getJson, postFormData, postJson } from "./admin-console/api";
@@ -118,6 +119,7 @@ function getBenchmarkPreviewValueOverlapBadgeClass(stats: BenchmarkPreviewValueO
 }
 
 export function AdminConsole({
+  initialTab,
   providers,
   models,
   benchmarks,
@@ -125,7 +127,9 @@ export function AdminConsole({
   mergedRecords,
   initialSettings
 }: Props) {
-  const [activeTab, setActiveTab] = useState<TabKey>("import");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [activeTab, setActiveTab] = useState<TabKey>(initialTab || "import");
   const { noticeList, notifySuccess, notifyError } = useAdminNotices();
   const {
     providerConfigDrafts,
@@ -2707,11 +2711,26 @@ export function AdminConsole({
     }
   }
 
+  // Load pricing data on mount if the initial tab is pricing
+  useEffect(() => {
+    if (initialTab === "pricing") {
+      const timer = setTimeout(() => {
+        void loadModelPrices();
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function handleTabChange(tab: TabKey) {
     setActiveTab(tab);
-    if (tab !== "pricing") return;
-    if (hasLoadedPrices || loadingPrices) return;
-    void loadModelPrices();
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", tab);
+    router.replace(`/admin?${params.toString()}`, { scroll: false });
+
+    if (tab === "pricing" && !hasLoadedPrices && !loadingPrices) {
+      void loadModelPrices();
+    }
   }
 
   function updatePricingDraft(modelId: number, updater: (draft: ModelPricingDraft) => ModelPricingDraft) {

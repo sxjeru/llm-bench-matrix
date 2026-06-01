@@ -1,10 +1,15 @@
 import { AdminConsole } from "@/components/admin-console";
+import type { TabKey } from "@/components/admin-console/types";
 import { isAdminAuthorized } from "../../lib/admin-auth";
 import { getActiveEntities, getMergedEntityRecords, getSettings, getSourceOptions } from "../../lib/db/queries";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-export default async function AdminPage() {
+export default async function AdminPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
   const headerStore = await headers();
   const cookie = headerStore.get("cookie") ?? "";
   const authRequest = new Request("http://localhost/admin", {
@@ -23,8 +28,14 @@ export default async function AdminPage() {
     getSourceOptions()
   ]);
 
+  const resolvedSearchParams = await searchParams;
+  const VALID_TABS: TabKey[] = ["import", "entry", "providers", "pricing", "rename", "merge", "maintenance", "settings"];
+  const rawTab = resolvedSearchParams.tab ?? "import";
+  const initialTab: TabKey = VALID_TABS.includes(rawTab as TabKey) ? (rawTab as TabKey) : "import";
+
   return (
     <AdminConsole
+      initialTab={initialTab}
       providers={providers.map((item) => ({
         id: item.id,
         name: item.name,
