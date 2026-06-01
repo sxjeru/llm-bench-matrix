@@ -64,6 +64,214 @@ describe("BenchmarkMatrix source tabs", () => {
     expect(claudeTabs).toEqual(["Claude Opus 4.8", "Claude Opus 4.7"]);
   });
 
+  test("非全部 source 页签优先展示 source 同系列模型，再按系列覆盖率和模型名排序", () => {
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:Claude Opus 4.7"]}
+        rows={[
+          {
+            providerName: "MiniMax",
+            modelName: "MiniMax M2.7",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchmarkCanonicalKey: "bench-1:general",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "79",
+            valueNum: 79,
+            valueNote: null,
+            source: "text:Claude Opus 4.7"
+          },
+          {
+            providerName: "MiniMax",
+            modelName: "MiniMax M2.7",
+            benchmarkName: "Bench-2",
+            benchmarkType: "General",
+            benchmarkCanonicalKey: "bench-2:general",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Claude Opus 4.7"
+          },
+          {
+            providerName: "Anthropic",
+            modelName: "Claude Haiku 4.7",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchmarkCanonicalKey: "bench-1:general",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "70",
+            valueNum: 70,
+            valueNote: null,
+            source: "text:Claude Opus 4.7"
+          },
+          {
+            providerName: "Anthropic",
+            modelName: "Claude Sonnet 4.6",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchmarkCanonicalKey: "bench-1:general",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Claude Opus 4.7"
+          },
+          {
+            providerName: "Anthropic",
+            modelName: "Claude Sonnet 4.7",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchmarkCanonicalKey: "bench-1:general",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "82",
+            valueNum: 82,
+            valueNote: null,
+            source: "text:Claude Opus 4.7"
+          },
+          {
+            providerName: "Anthropic",
+            modelName: "Claude Opus 4.7",
+            benchmarkName: "Bench-2",
+            benchmarkType: "General",
+            benchmarkCanonicalKey: "bench-2:general",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "87",
+            valueNum: 87,
+            valueNote: null,
+            source: "text:Claude Opus 4.7"
+          },
+          {
+            providerName: "GPT",
+            modelName: "GPT-5.5",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchmarkCanonicalKey: "bench-1:general",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "85",
+            valueNum: 85,
+            valueNote: null,
+            source: "text:Claude Opus 4.7"
+          },
+          {
+            providerName: "GPT",
+            modelName: "GPT-5.5",
+            benchmarkName: "Bench-2",
+            benchmarkType: "General",
+            benchmarkCanonicalKey: "bench-2:general",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "86",
+            valueNum: 86,
+            valueNote: null,
+            source: "text:Claude Opus 4.7"
+          },
+          {
+            providerName: "GPT",
+            modelName: "GPT-5.5",
+            benchmarkName: "Bench-3",
+            benchmarkType: "General",
+            benchmarkCanonicalKey: "bench-3:general",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "87",
+            valueNum: 87,
+            valueNote: null,
+            source: "text:Claude Opus 4.7"
+          }
+        ]}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Claude Opus 4.7" }));
+
+    const headers = screen
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent?.trim() ?? "")
+      .filter((text) => [
+        "Claude Opus 4.7",
+        "Claude Sonnet 4.7",
+        "Claude Haiku 4.7",
+        "Claude Sonnet 4.6",
+        "GPT-5.5",
+        "MiniMax M2.7"
+      ].includes(text));
+
+    expect(headers).toEqual([
+      "Claude Opus 4.7",
+      "Claude Sonnet 4.7",
+      "Claude Haiku 4.7",
+      "Claude Sonnet 4.6",
+      "GPT-5.5",
+      "MiniMax M2.7"
+    ]);
+  });
+
+  test("非全部 source 页签会把同模型家族放在一起", () => {
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:MiniMax M3"]}
+        rows={[
+          {
+            providerName: "MiniMax",
+            modelName: "MiniMax M3",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchmarkCanonicalKey: "bench-1:general",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "81",
+            valueNum: 81,
+            valueNote: null,
+            source: "text:MiniMax M3"
+          },
+          {
+            providerName: "Claude",
+            modelName: "Claude Sonnet 4.6",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchmarkCanonicalKey: "bench-1:general",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:MiniMax M3"
+          },
+          {
+            providerName: "Claude",
+            modelName: "Claude Sonnet 4.6",
+            benchmarkName: "Bench-2",
+            benchmarkType: "General",
+            benchmarkCanonicalKey: "bench-2:general",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "82",
+            valueNum: 82,
+            valueNote: null,
+            source: "text:MiniMax M3"
+          },
+          {
+            providerName: "MiniMax",
+            modelName: "MiniMax M2.7",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchmarkCanonicalKey: "bench-1:general",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "79",
+            valueNum: 79,
+            valueNote: null,
+            source: "text:MiniMax M3"
+          }
+        ]}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "MiniMax M3" }));
+
+    const headers = screen
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent?.trim() ?? "")
+      .filter((text) => ["MiniMax M3", "MiniMax M2.7", "Claude Sonnet 4.6"].includes(text));
+
+    expect(headers).toEqual(["MiniMax M3", "MiniMax M2.7", "Claude Sonnet 4.6"]);
+  });
+
   test("当 rows 仅有单一 source 时，也会按 sourceOptions 展示全部页签", () => {
     render(
       <BenchmarkMatrix

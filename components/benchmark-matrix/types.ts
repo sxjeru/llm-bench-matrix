@@ -161,6 +161,11 @@ export type ModelVariantToken = {
   variant: "pro" | "base" | "flash" | "flash-lite" | "mini" | "nano";
 };
 
+export type ModelTierToken = {
+  familyKey: string;
+  tier: "opus" | "sonnet" | "haiku";
+};
+
 export type OverallScoreDisplayItem = {
   modelName: string;
   rawScore: number | null;

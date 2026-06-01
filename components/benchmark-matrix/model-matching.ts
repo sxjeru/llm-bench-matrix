@@ -1,6 +1,12 @@
 import { MODEL_FLASH_LITE_PATTERN, MODEL_SIZE_TOKEN_PATTERN, MODEL_VERSION_TOKEN_PATTERN, MATCH_HYPHEN_VARIANT_REGEX } from "./constants";
-import type { ModelScaleToken, ModelVariantToken, ModelVersionToken } from "./types";
+import type { ModelScaleToken, ModelTierToken, ModelVariantToken, ModelVersionToken } from "./types";
 import { sourceTabDisplayLabel } from "./utils";
+
+const MODEL_TIER_PRIORITY: Record<ModelTierToken["tier"], number> = {
+  opus: 3,
+  sonnet: 2,
+  haiku: 1
+};
 
 export function extractModelVersionToken(modelName: string): ModelVersionToken | null {
   const trimmed = modelName.trim();
@@ -129,7 +135,80 @@ export function compareModelVariantPriority(
   return priority[rightVariant] - priority[leftVariant];
 }
 
+export function extractModelTierToken(modelName: string): ModelTierToken | null {
+  const normalized = modelName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const tierMatch = normalized.match(/\b(opus|sonnet|haiku)\b/);
+  if (!tierMatch) return null;
+
+  const familyKey = normalized.slice(0, tierMatch.index).trim();
+  if (!familyKey) return null;
+
+  return {
+    familyKey,
+    tier: tierMatch[1] as ModelTierToken["tier"]
+  };
+}
+
+export function compareModelTierPriority(leftTier: ModelTierToken["tier"], rightTier: ModelTierToken["tier"]): number {
+  return MODEL_TIER_PRIORITY[rightTier] - MODEL_TIER_PRIORITY[leftTier];
+}
+
+export function getModelFamilyMatchKey(modelName: string): string {
+  const normalized = modelName
+    .toLowerCase()
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g, "-")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) return "";
+
+  const compact = normalized.replace(/\s+/g, "");
+  const compactVersionMatch = compact.match(/^([a-z]+?)(?:[a-z]?\d)/);
+  if (compactVersionMatch?.[1]) {
+    return compactVersionMatch[1];
+  }
+
+  const words = normalized.split(" ");
+  const firstWord = words[0] ?? "";
+  if (!firstWord) return "";
+
+  const alphaPrefix = firstWord.match(/^[a-z]+/)?.[0] ?? "";
+  if (!alphaPrefix) return "";
+
+  return alphaPrefix;
+}
+
 export function compareModelNameByColumnOrder(left: string, right: string, collator: Intl.Collator): number {
+  const leftTierToken = extractModelTierToken(left);
+  const rightTierToken = extractModelTierToken(right);
+  const leftVersionToken = extractModelVersionToken(left);
+  const rightVersionToken = extractModelVersionToken(right);
+
+  if (
+    leftTierToken &&
+    rightTierToken &&
+    leftTierToken.familyKey === rightTierToken.familyKey
+  ) {
+    if (
+      leftVersionToken &&
+      rightVersionToken &&
+      rightVersionToken.version !== leftVersionToken.version
+    ) {
+      return rightVersionToken.version - leftVersionToken.version;
+    }
+
+    const tierCompare = compareModelTierPriority(leftTierToken.tier, rightTierToken.tier);
+    if (tierCompare !== 0) {
+      return tierCompare;
+    }
+  }
+
   const leftVariantToken = extractModelVariantToken(left);
   const rightVariantToken = extractModelVariantToken(right);
 
@@ -144,9 +223,6 @@ export function compareModelNameByColumnOrder(left: string, right: string, colla
       return variantCompare;
     }
   }
-
-  const leftVersionToken = extractModelVersionToken(left);
-  const rightVersionToken = extractModelVersionToken(right);
 
   if (
     leftVersionToken &&

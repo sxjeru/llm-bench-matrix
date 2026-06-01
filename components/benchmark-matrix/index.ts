@@ -44,6 +44,9 @@ export {
   extractModelScaleToken,
   extractModelVariantToken,
   compareModelVariantPriority,
+  extractModelTierToken,
+  compareModelTierPriority,
+  getModelFamilyMatchKey,
   compareModelNameByColumnOrder,
   isSourceHeaderPrefixMatch
 } from "./model-matching";

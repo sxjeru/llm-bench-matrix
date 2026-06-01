@@ -10,7 +10,8 @@ import {
 } from "./constants";
 import {
   compareModelNameByColumnOrder,
-  compareSourceTabKeysByVersion
+  compareSourceTabKeysByVersion,
+  getModelFamilyMatchKey
 } from "./model-matching";
 import {
   buildDenseRankMap,
@@ -574,40 +575,110 @@ export function buildModelColumns(
     providerStats.set(providerName, provider);
   }
 
-  const orderedProviders = Array.from(providerStats.entries()).sort((a, b) => {
-    const left = a[1];
-    const right = b[1];
-    if (right.numericCount !== left.numericCount) {
-      return right.numericCount - left.numericCount;
-    }
-    if (right.totalCount !== left.totalCount) {
-      return right.totalCount - left.totalCount;
-    }
-    return a[0].localeCompare(b[0], "zh-Hans-CN", { sensitivity: "base" });
-  });
-
-  const groupedModels = orderedProviders.flatMap(([, provider]) => {
-    return [...provider.models].sort((leftModel, rightModel) => {
-      const leftStats = modelStats.get(leftModel);
-      const rightStats = modelStats.get(rightModel);
-      if (!leftStats || !rightStats) return compareModelNameByColumnOrder(leftModel, rightModel, collator);
-
-      const modelNameCompare = compareModelNameByColumnOrder(leftModel, rightModel, collator);
-      if (modelNameCompare !== 0) {
-        return modelNameCompare;
-      }
-
-      if (rightStats.numericCount !== leftStats.numericCount) {
-        return rightStats.numericCount - leftStats.numericCount;
-      }
-      if (rightStats.totalCount !== leftStats.totalCount) {
-        return rightStats.totalCount - leftStats.totalCount;
-      }
-      return 0;
-    });
-  });
-
   const baseOrderedModels = (() => {
+    if (activeSource !== SOURCE_ALL) {
+      const sourceFamilyHint = getModelFamilyMatchKey(sourceModelHint);
+
+      const getSourceMatchRank = (modelName: string, providerName: string | undefined) => {
+        if (!sourceModelHint) return 0;
+
+        const normalizedModel = normalizeMatchToken(modelName);
+        if (normalizedModel.includes(sourceModelHint)) return 0;
+
+        if (sourceFamilyHint) {
+          const modelFamilyKey = getModelFamilyMatchKey(modelName);
+          if (modelFamilyKey === sourceFamilyHint) return 1;
+        }
+
+        const normalizedProvider = normalizeMatchToken(providerName ?? "");
+        if (normalizedProvider.includes(sourceModelHint)) return 1;
+        if (sourceFamilyHint && getModelFamilyMatchKey(providerName ?? "") === sourceFamilyHint) return 1;
+
+        return 2;
+      };
+
+      const sourceMatchRankByModel = new Map<string, number>();
+      const seriesCoverageByRankAndProvider = new Map<string, number>();
+
+      for (const [modelName, stats] of modelStats.entries()) {
+        const rank = getSourceMatchRank(modelName, stats.providerName);
+        sourceMatchRankByModel.set(modelName, rank);
+
+        const seriesKey = `${rank}::${normalizeMatchToken(stats.providerName)}`;
+        seriesCoverageByRankAndProvider.set(
+          seriesKey,
+          (seriesCoverageByRankAndProvider.get(seriesKey) ?? 0) + stats.numericCount
+        );
+      }
+
+      return Array.from(modelStats.keys()).sort((leftModel, rightModel) => {
+        const leftStats = modelStats.get(leftModel);
+        const rightStats = modelStats.get(rightModel);
+
+        const leftRank = sourceMatchRankByModel.get(leftModel) ?? 0;
+        const rightRank = sourceMatchRankByModel.get(rightModel) ?? 0;
+        if (leftRank !== rightRank) {
+          return leftRank - rightRank;
+        }
+
+        const leftSeriesKey = `${leftRank}::${normalizeMatchToken(leftStats?.providerName ?? "")}`;
+        const rightSeriesKey = `${rightRank}::${normalizeMatchToken(rightStats?.providerName ?? "")}`;
+        const leftSeriesCoverage = seriesCoverageByRankAndProvider.get(leftSeriesKey) ?? 0;
+        const rightSeriesCoverage = seriesCoverageByRankAndProvider.get(rightSeriesKey) ?? 0;
+        if (rightSeriesCoverage !== leftSeriesCoverage) {
+          return rightSeriesCoverage - leftSeriesCoverage;
+        }
+
+        const modelNameCompare = compareModelNameByColumnOrder(leftModel, rightModel, collator);
+        if (modelNameCompare !== 0) {
+          return modelNameCompare;
+        }
+
+        if (!leftStats || !rightStats) return 0;
+        if (rightStats.numericCount !== leftStats.numericCount) {
+          return rightStats.numericCount - leftStats.numericCount;
+        }
+        if (rightStats.totalCount !== leftStats.totalCount) {
+          return rightStats.totalCount - leftStats.totalCount;
+        }
+
+        return leftStats.providerName.localeCompare(rightStats.providerName, "zh-Hans-CN", { sensitivity: "base" });
+      });
+    }
+
+    const orderedProviders = Array.from(providerStats.entries()).sort((a, b) => {
+      const left = a[1];
+      const right = b[1];
+      if (right.numericCount !== left.numericCount) {
+        return right.numericCount - left.numericCount;
+      }
+      if (right.totalCount !== left.totalCount) {
+        return right.totalCount - left.totalCount;
+      }
+      return a[0].localeCompare(b[0], "zh-Hans-CN", { sensitivity: "base" });
+    });
+
+    const groupedModels = orderedProviders.flatMap(([, provider]) => {
+      return [...provider.models].sort((leftModel, rightModel) => {
+        const leftStats = modelStats.get(leftModel);
+        const rightStats = modelStats.get(rightModel);
+        if (!leftStats || !rightStats) return compareModelNameByColumnOrder(leftModel, rightModel, collator);
+
+        const modelNameCompare = compareModelNameByColumnOrder(leftModel, rightModel, collator);
+        if (modelNameCompare !== 0) {
+          return modelNameCompare;
+        }
+
+        if (rightStats.numericCount !== leftStats.numericCount) {
+          return rightStats.numericCount - leftStats.numericCount;
+        }
+        if (rightStats.totalCount !== leftStats.totalCount) {
+          return rightStats.totalCount - leftStats.totalCount;
+        }
+        return 0;
+      });
+    });
+
     if (!sourceModelHint) return groupedModels;
 
     const matched: string[] = [];
