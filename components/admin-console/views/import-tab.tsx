@@ -66,6 +66,7 @@ type MatrixBenchmarkCandidateFieldProps = {
   matrixRowKey: string;
   benchmarkName: string;
   inputValue: string;
+  hasExactMatch: boolean;
   candidateOptions: BenchmarkCandidateOption[];
   isOpen: boolean;
   setOpenMatrixBenchmarkCandidateFor: Dispatch<SetStateAction<string | null>>;
@@ -90,6 +91,7 @@ function MatrixBenchmarkCandidateField({
   matrixRowKey,
   benchmarkName,
   inputValue,
+  hasExactMatch,
   candidateOptions,
   isOpen,
   setOpenMatrixBenchmarkCandidateFor,
@@ -198,7 +200,7 @@ function MatrixBenchmarkCandidateField({
   return (
     <div ref={anchorRef} className="relative" data-matrix-benchmark-candidate-container="true">
       <input
-        className="input input-bordered input-xs w-full"
+        className="input input-bordered input-xs w-full pr-6"
         value={inputValue}
         onFocus={() => {
           if (candidateOptions.length > 0) {
@@ -226,8 +228,18 @@ function MatrixBenchmarkCandidateField({
           );
         }}
       />
+      {hasExactMatch ? <ExactMatchDot title="已匹配库内同名 benchmark" /> : null}
       {dropdown}
     </div>
+  );
+}
+
+function ExactMatchDot({ title }: { title: string }) {
+  return (
+    <span
+      className="pointer-events-none absolute right-2 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-success/80"
+      title={title}
+    />
   );
 }
 
@@ -501,16 +513,30 @@ export function ImportTab({
           score += 30;
         }
 
-        if (item.benchmarkType === benchmarkType) {
+        const hasNameMatch = score > 0;
+
+        if (hasNameMatch && item.benchmarkType === benchmarkType) {
           score += 10;
         }
 
-        return score > 0 ? { id: item.id, score, index } : null;
+        return hasNameMatch ? { id: item.id, score, index } : null;
       })
       .filter((item): item is { id: number; score: number; index: number } => item !== null)
       .sort((a, b) => b.score - a.score || a.index - b.index)
       .slice(0, 30)
       .map((item) => item.id);
+  }
+
+  function hasExactModelMatch(inputValue: string) {
+    const normalizedInput = inputValue.trim().toLowerCase();
+    return normalizedInput.length > 0 && modelEntityOptions.some((item) => item.label.trim().toLowerCase() === normalizedInput);
+  }
+
+  function hasExactBenchmarkMatch(inputValue: string) {
+    const normalizedInput = inputValue.trim().toLowerCase();
+    return normalizedInput.length > 0 && benchmarks.some((item) => (
+      item.benchmarkName.trim().toLowerCase() === normalizedInput
+    ));
   }
 
   return (
@@ -876,31 +902,36 @@ export function ImportTab({
                     </th>
                     {matrixPreview.modelNames.map((modelName) => {
                       const modelWarning = modelWarningMap.get(modelName);
+                      const modelInputValue = matrixModelNameDrafts[modelName] ?? modelName;
                       const modelCandidateTargetIds = Array.from(new Set([
                         ...(modelWarning?.candidateTargetIds ?? []),
                         ...(modelWarning?.suggestedTargetId ? [modelWarning.suggestedTargetId] : [])
                       ]));
                       const modelInputListId = `matrix-model-override-${toDomSafeId(modelName)}`;
+                      const hasModelMatch = hasExactModelMatch(modelInputValue);
 
                       return (
                         <th
                           key={`matrix-model-${modelName}`}
                           className={modelWarningSet.has(modelName) ? "bg-warning/20 text-warning-content" : ""}
                         >
-                          <input
-                            className="input input-bordered input-xs w-full min-w-[120px]"
-                            list={modelCandidateTargetIds.length > 0 ? modelInputListId : undefined}
-                            value={matrixModelNameDrafts[modelName] ?? modelName}
-                            onChange={(e) => {
-                              const nextInput = e.target.value;
-                              const parsedTargetId = parseExplicitMergeEntityId(nextInput);
-                              if (parsedTargetId !== null && applyModelOverwriteByTargetId(modelName, parsedTargetId)) {
-                                return;
-                              }
-                              onMatrixModelNameInputChange(modelName, nextInput);
-                            }}
-                            onBlur={(e) => onMatrixModelNameInputBlur(modelName, e.target.value)}
-                          />
+                          <div className="relative">
+                            <input
+                              className="input input-bordered input-xs w-full min-w-[120px] pr-6"
+                              list={modelCandidateTargetIds.length > 0 ? modelInputListId : undefined}
+                              value={modelInputValue}
+                              onChange={(e) => {
+                                const nextInput = e.target.value;
+                                const parsedTargetId = parseExplicitMergeEntityId(nextInput);
+                                if (parsedTargetId !== null && applyModelOverwriteByTargetId(modelName, parsedTargetId)) {
+                                  return;
+                                }
+                                onMatrixModelNameInputChange(modelName, nextInput);
+                              }}
+                              onBlur={(e) => onMatrixModelNameInputBlur(modelName, e.target.value)}
+                            />
+                            {hasModelMatch ? <ExactMatchDot title="已匹配库内同名 model" /> : null}
+                          </div>
                           {modelCandidateTargetIds.length > 0 ? (
                             <datalist id={modelInputListId}>
                               {modelCandidateTargetIds.map((targetId) => {
@@ -988,6 +1019,7 @@ export function ImportTab({
                           <div className="space-y-1">
                             {(() => {
                               const benchmarkInputValue = matrixBenchmarkNameDrafts[matrixRow.key] ?? matrixRow.benchmarkName;
+                              const hasBenchmarkMatch = hasExactBenchmarkMatch(benchmarkInputValue);
                               const benchmarkCandidateTargetIds = Array.from(new Set([
                                 ...(benchmarkMergeCandidateMap.get(matrixRow.key) ?? []),
                                 ...(warning?.candidateTargetIds ?? []),
@@ -1008,6 +1040,7 @@ export function ImportTab({
                                     matrixRowKey={matrixRow.key}
                                     benchmarkName={matrixRow.benchmarkName}
                                     inputValue={benchmarkInputValue}
+                                    hasExactMatch={hasBenchmarkMatch}
                                     candidateOptions={benchmarkCandidateOptions}
                                     isOpen={benchmarkCandidateOptions.length > 0 && openMatrixBenchmarkCandidateFor === matrixRow.key}
                                     setOpenMatrixBenchmarkCandidateFor={setOpenMatrixBenchmarkCandidateFor}
