@@ -7,7 +7,7 @@ const schema = z.object({
   items: z.array(
     z.object({
       previewBenchmarkKey: z.string().min(1).max(500),
-      candidateBenchmarkIds: z.array(z.number().int().positive()).max(20),
+      candidateBenchmarkIds: z.array(z.number().int().positive()).max(30),
       cells: z.array(
         z.object({
           modelName: z.string().min(1).max(300),

@@ -155,6 +155,12 @@ function MatrixBenchmarkCandidateField({
               const isLoadingOverlapStats =
                 benchmarkPreviewValueOverlapState.key === benchmarkPreviewValueOverlapPayload.key
                 && benchmarkPreviewValueOverlapState.status === "loading";
+              const hasResolvedOverlapStats =
+                benchmarkPreviewValueOverlapState.key === benchmarkPreviewValueOverlapPayload.key
+                && benchmarkPreviewValueOverlapState.status === "success";
+              const hasOverlapStatsError =
+                benchmarkPreviewValueOverlapState.key === benchmarkPreviewValueOverlapPayload.key
+                && benchmarkPreviewValueOverlapState.status === "error";
 
               return (
                 <div
@@ -187,6 +193,10 @@ function MatrixBenchmarkCandidateField({
                       </span>
                     ) : isLoadingOverlapStats ? (
                       <span className="inline-flex shrink-0 whitespace-nowrap text-[11px] font-medium text-base-content/60">重复率计算中...</span>
+                    ) : hasResolvedOverlapStats ? (
+                      <span className="inline-flex shrink-0 whitespace-nowrap text-[11px] font-medium text-base-content/60">重复 0</span>
+                    ) : hasOverlapStatsError ? (
+                      <span className="inline-flex shrink-0 whitespace-nowrap text-[11px] font-medium text-error/80">重复率计算失败</span>
                     ) : null}
                   </div>
                 </div>

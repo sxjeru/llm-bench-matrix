@@ -9,7 +9,8 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({
     push: vi.fn(),
     refresh: vi.fn()
-  })
+  }),
+  useSearchParams: () => new URLSearchParams()
 }));
 
 type AdminConsoleProps = Parameters<typeof AdminConsole>[0];
@@ -1301,6 +1302,61 @@ describe("AdminConsole text import", () => {
     await user.click(benchmarkInput);
 
     expect(await screen.findByText("重复 1/2 (50%) · 重叠 2 · 冲突 1")).toBeInTheDocument();
+  });
+
+  test("矩阵预览中的 benchmark 候选无统计返回时也显示默认重复率", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "Bench 1",
+          benchmarkType: "Type-C",
+          rawValue: "70.1",
+          valueNum: 70.1,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    const queuedPayloads: unknown[] = [previewResponse];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void init;
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+
+      if (url === "/api/admin/benchmarks/preview-value-overlap") {
+        return createJsonResponse({ stats: [] });
+      }
+
+      return createJsonResponse(queuedPayloads.shift() ?? {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const matrixTable = await findMatrixPreviewTable();
+    const benchmarkInput = within(matrixTable).getByDisplayValue("Bench 1") as HTMLInputElement;
+
+    await user.click(benchmarkInput);
+
+    expect(await screen.findByText("重复 0")).toBeInTheDocument();
   });
 
   test("预览内 benchmark 快捷合并后仍优先保留导入 type", async () => {

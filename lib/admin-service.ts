@@ -2798,7 +2798,7 @@ export async function getBenchmarkPreviewValueOverlapStats(
 ): Promise<{ stats: BenchmarkPreviewValueOverlapStats[] }> {
   const items = input.items.slice(0, 200).map((item) => ({
     previewBenchmarkKey: item.previewBenchmarkKey,
-    candidateBenchmarkIds: Array.from(new Set(item.candidateBenchmarkIds.filter((id) => Number.isInteger(id) && id > 0))).slice(0, 20),
+    candidateBenchmarkIds: Array.from(new Set(item.candidateBenchmarkIds.filter((id) => Number.isInteger(id) && id > 0))).slice(0, 30),
     cells: item.cells
       .filter((cell) => cell.modelName.trim().length > 0 && cell.rawValue.trim().length > 0)
       .slice(0, 200)
