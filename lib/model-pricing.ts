@@ -89,6 +89,8 @@ export type ModelPricingRow = {
   modelId: number;
   modelName: string;
   providerName: string;
+  /** 模型在数据库中的添加时间（始终为 models.created_at，不随价格更新变动） */
+  modelCreatedAt: string;
   source: string;
   sourceProviderId: string | null;
   sourceProviderName: string | null;
@@ -640,6 +642,7 @@ async function selectModelPricingRows() {
     .select({
       modelId: models.id,
       modelName: models.modelName,
+      modelCreatedAt: models.createdAt,
       providerName: providers.name,
       source: modelPricing.source,
       sourceProviderId: modelPricing.sourceProviderId,
@@ -675,6 +678,7 @@ function mapModelPricingSelectRow(row: Awaited<ReturnType<typeof selectModelPric
   return {
     modelId: row.modelId,
     modelName: row.modelName,
+    modelCreatedAt: row.modelCreatedAt instanceof Date ? row.modelCreatedAt.toISOString() : "1970-01-01T00:00:00.000Z",
     providerName: row.providerName,
     source: row.source,
     sourceProviderId: row.sourceProviderId,
@@ -724,31 +728,32 @@ async function loadAdminModelPricingRows(): Promise<ModelPricingRow[]> {
     if (pricingRow) return mapModelPricingSelectRow(pricingRow);
 
     return {
-    modelId: model.id,
-    modelName: model.modelName,
-    providerName: model.providerName,
-    source: MODELS_DEV_SOURCE,
-    sourceProviderId: null,
-    sourceProviderName: null,
-    sourceModelId: null,
-    sourceModelName: null,
-    inputCost: null,
-    outputCost: null,
-    reasoningCost: null,
-    cacheReadCost: null,
-    cacheWriteCost: null,
-    inputAudioCost: null,
-    outputAudioCost: null,
-    currency: "USD",
-    unit: "per_1m_tokens",
-    matchConfidence: 0,
-    matchStatus: "unmatched" as const,
-    manualOverride: false,
-    note: null,
-    lastSyncedAt: null,
-    updatedAt: model.createdAt
+      modelId: model.id,
+      modelName: model.modelName,
+      modelCreatedAt: model.createdAt,
+      providerName: model.providerName,
+      source: MODELS_DEV_SOURCE,
+      sourceProviderId: null,
+      sourceProviderName: null,
+      sourceModelId: null,
+      sourceModelName: null,
+      inputCost: null,
+      outputCost: null,
+      reasoningCost: null,
+      cacheReadCost: null,
+      cacheWriteCost: null,
+      inputAudioCost: null,
+      outputAudioCost: null,
+      currency: "USD",
+      unit: "per_1m_tokens",
+      matchConfidence: 0,
+      matchStatus: "unmatched" as const,
+      manualOverride: false,
+      note: null,
+      lastSyncedAt: null,
+      updatedAt: model.createdAt
     };
-  }).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  }).sort((a, b) => Date.parse(b.modelCreatedAt) - Date.parse(a.modelCreatedAt));
 }
 
 export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {

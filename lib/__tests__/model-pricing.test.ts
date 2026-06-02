@@ -30,6 +30,7 @@ type ExistingPricingRow = {
 type PricingSelectRow = {
   modelId: number;
   modelName: string;
+  modelCreatedAt: Date;
   providerName: string;
   source: string;
   sourceProviderId: string | null;
@@ -163,6 +164,7 @@ describe("model pricing module", () => {
       {
         modelId: 1,
         modelName: "GPT-4",
+        modelCreatedAt: new Date("2026-01-01T00:00:00.000Z"),
         providerName: "OpenAI",
         source: "models.dev",
         sourceProviderId: "openai",
@@ -202,16 +204,20 @@ describe("model pricing module", () => {
     expect(db.select).toHaveBeenCalledTimes(2);
   });
 
-  test("getAdminModelPricingRows 按模型价格更新时间倒序返回，无价格时使用模型创建时间", async () => {
+  test("getAdminModelPricingRows 按模型添加时间（modelCreatedAt）倒序返回", async () => {
     const activeModels: ActiveModelRow[] = [
-      { id: 1, modelName: "Older Model", createdAt: new Date("2026-05-04T00:00:00.000Z"), sourceModelId: null, providerName: "OpenAI", providerSlug: "openai", providerConfig: {} },
+      // modelId=1: 较早添加的模型，但价格较旧
+      { id: 1, modelName: "Older Model", createdAt: new Date("2026-05-01T00:00:00.000Z"), sourceModelId: null, providerName: "OpenAI", providerSlug: "openai", providerConfig: {} },
+      // modelId=2: 较早添加，但价格最新（验证排序不受价格更新时间影响）
       { id: 2, modelName: "Newer Model", createdAt: new Date("2026-05-02T00:00:00.000Z"), sourceModelId: null, providerName: "OpenAI", providerSlug: "openai", providerConfig: {} },
+      // modelId=3: 最新添加，但无价格记录
       { id: 3, modelName: "Missing Price", createdAt: new Date("2026-05-05T00:00:00.000Z"), sourceModelId: null, providerName: "OpenAI", providerSlug: "openai", providerConfig: {} }
     ];
     const pricingRows: PricingSelectRow[] = [
       {
         modelId: 1,
         modelName: "Older Model",
+        modelCreatedAt: new Date("2026-05-01T00:00:00.000Z"),
         providerName: "OpenAI",
         source: "models.dev",
         sourceProviderId: "openai",
@@ -232,11 +238,12 @@ describe("model pricing module", () => {
         manualOverride: false,
         note: null,
         lastSyncedAt: null,
-        updatedAt: new Date("2026-05-01T00:00:00.000Z")
+        updatedAt: new Date("2026-05-10T00:00:00.000Z") // 价格最近更新，但模型是最早添加的
       },
       {
         modelId: 2,
         modelName: "Newer Model",
+        modelCreatedAt: new Date("2026-05-02T00:00:00.000Z"),
         providerName: "OpenAI",
         source: "models.dev",
         sourceProviderId: "openai",
@@ -263,10 +270,12 @@ describe("model pricing module", () => {
     const { db } = createDbMock(activeModels, [], pricingRows);
     const { getAdminModelPricingRows } = await importPricingModule(db);
 
+    // 期望按 modelCreatedAt 倒序：Missing Price(05-05) > Newer Model(05-02) > Older Model(05-01)
+    // 注意：Older Model 的价格最近更新（05-10），但仍应排在最后，因为它是最早被添加的模型
     await expect(getAdminModelPricingRows()).resolves.toMatchObject([
-      { modelId: 3, updatedAt: "2026-05-05T00:00:00.000Z" },
-      { modelId: 2, updatedAt: "2026-05-03T00:00:00.000Z" },
-      { modelId: 1, updatedAt: "2026-05-01T00:00:00.000Z" }
+      { modelId: 3, modelCreatedAt: "2026-05-05T00:00:00.000Z" },
+      { modelId: 2, modelCreatedAt: "2026-05-02T00:00:00.000Z" },
+      { modelId: 1, modelCreatedAt: "2026-05-01T00:00:00.000Z" }
     ]);
   });
 

@@ -130,6 +130,7 @@ function buildPriceRow(overrides: Partial<ModelPricingRow> = {}): ModelPricingRo
   return {
     modelId: 1,
     modelName: "Model A",
+    modelCreatedAt: "2026-05-26T00:00:00.000Z",
     providerName: "OpenAI",
     source: "models.dev",
     sourceProviderId: "openai",
@@ -309,12 +310,23 @@ describe("AdminConsole text import", () => {
     expect(screen.queryByText("Auto Model")).not.toBeInTheDocument();
   });
 
-  test("价格管理列表前端按更新时间倒序显示", async () => {
+  test("价格管理列表前端按模型添加时间（modelCreatedAt）倒序显示", async () => {
     const user = userEvent.setup();
     mockFetchSequence({
       prices: [
-        buildPriceRow({ modelId: 1, modelName: "A Older Model", updatedAt: "2026-05-01T00:00:00.000Z" }),
-        buildPriceRow({ modelId: 2, modelName: "B Newer Model", updatedAt: "2026-05-03T00:00:00.000Z" })
+        buildPriceRow({
+          modelId: 1,
+          modelName: "A Older Model",
+          modelCreatedAt: "2026-05-01T00:00:00.000Z",
+          // 注意：该模型的价格最近刚刚更新，但它仍应排在后面，因为模型本身是较早添加的
+          updatedAt: "2026-06-01T00:00:00.000Z"
+        }),
+        buildPriceRow({
+          modelId: 2,
+          modelName: "B Newer Model",
+          modelCreatedAt: "2026-05-03T00:00:00.000Z",
+          updatedAt: "2026-05-03T00:00:00.000Z"
+        })
       ]
     });
 
@@ -325,6 +337,7 @@ describe("AdminConsole text import", () => {
 
     const modelCells = screen.getAllByRole("cell").filter((cell) => /Model/.test(cell.textContent ?? ""));
     expect(modelCells.map((cell) => cell.textContent)).toEqual(expect.arrayContaining([expect.stringContaining("B Newer Model"), expect.stringContaining("A Older Model")]));
+    // B Newer Model 的 modelCreatedAt 更晚，应排在第一位（即使 A Older Model 的 updatedAt 更新）
     expect(modelCells[0]).toHaveTextContent("B Newer Model");
   });
 

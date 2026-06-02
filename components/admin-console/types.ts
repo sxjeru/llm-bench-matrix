@@ -107,6 +107,8 @@ export type ModelPricingRow = {
   modelId: number;
   modelName: string;
   providerName: string;
+  /** 模型在数据库中的添加时间（始终为 models.created_at，不随价格更新变动） */
+  modelCreatedAt: string;
   source: string;
   sourceProviderId: string | null;
   sourceProviderName: string | null;

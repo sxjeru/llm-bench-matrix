@@ -73,7 +73,7 @@ function getDraftAwareStatus(price: ModelPricingRow, draft: ModelPricingDraft | 
 }
 
 function getPricingSortTime(price: ModelPricingRow) {
-  const parsed = Date.parse(price.updatedAt);
+  const parsed = Date.parse(price.modelCreatedAt);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
