@@ -199,6 +199,74 @@ describe("model pricing module", () => {
     expect(db.select).toHaveBeenCalledTimes(4);
   });
 
+  test("getAdminModelPricingRows 按模型价格更新时间倒序返回", async () => {
+    const activeModels: ActiveModelRow[] = [
+      { id: 1, modelName: "Older Model", sourceModelId: null, providerName: "OpenAI", providerSlug: "openai", providerConfig: {} },
+      { id: 2, modelName: "Newer Model", sourceModelId: null, providerName: "OpenAI", providerSlug: "openai", providerConfig: {} },
+      { id: 3, modelName: "Missing Price", sourceModelId: null, providerName: "OpenAI", providerSlug: "openai", providerConfig: {} }
+    ];
+    const pricingRows: PricingSelectRow[] = [
+      {
+        modelId: 1,
+        modelName: "Older Model",
+        providerName: "OpenAI",
+        source: "models.dev",
+        sourceProviderId: "openai",
+        sourceProviderName: "OpenAI",
+        sourceModelId: "older-model",
+        sourceModelName: "Older Model",
+        inputCost: "1",
+        outputCost: "2",
+        reasoningCost: null,
+        cacheReadCost: null,
+        cacheWriteCost: null,
+        inputAudioCost: null,
+        outputAudioCost: null,
+        currency: "USD",
+        unit: "per_1m_tokens",
+        matchConfidence: 100,
+        matchStatus: "matched",
+        manualOverride: false,
+        note: null,
+        lastSyncedAt: null,
+        updatedAt: new Date("2026-05-01T00:00:00.000Z")
+      },
+      {
+        modelId: 2,
+        modelName: "Newer Model",
+        providerName: "OpenAI",
+        source: "models.dev",
+        sourceProviderId: "openai",
+        sourceProviderName: "OpenAI",
+        sourceModelId: "newer-model",
+        sourceModelName: "Newer Model",
+        inputCost: "1",
+        outputCost: "2",
+        reasoningCost: null,
+        cacheReadCost: null,
+        cacheWriteCost: null,
+        inputAudioCost: null,
+        outputAudioCost: null,
+        currency: "USD",
+        unit: "per_1m_tokens",
+        matchConfidence: 100,
+        matchStatus: "matched",
+        manualOverride: false,
+        note: null,
+        lastSyncedAt: null,
+        updatedAt: new Date("2026-05-03T00:00:00.000Z")
+      }
+    ];
+    const { db } = createDbMock(activeModels, [], pricingRows);
+    const { getAdminModelPricingRows } = await importPricingModule(db);
+
+    await expect(getAdminModelPricingRows()).resolves.toMatchObject([
+      { modelId: 2, updatedAt: "2026-05-03T00:00:00.000Z" },
+      { modelId: 1, updatedAt: "2026-05-01T00:00:00.000Z" },
+      { modelId: 3, updatedAt: "1970-01-01T00:00:00.000Z" }
+    ]);
+  });
+
   test("updateModelPricing persists validated payload with defaults", async () => {
     const { db, onConflictDoUpdate } = createDbMock([], []);
     const { updateModelPricing } = await importPricingModule(db);

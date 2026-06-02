@@ -704,7 +704,6 @@ async function loadAdminModelPricingRows(): Promise<ModelPricingRow[]> {
   const activeModels = await getActiveModelRows();
   const pricingRows = await getModelPricingRows();
   const pricingByModelId = new Map(pricingRows.map((row) => [row.modelId, row]));
-  const now = new Date().toISOString();
 
   return activeModels.map((model) => pricingByModelId.get(model.id) ?? {
     modelId: model.id,
@@ -729,8 +728,8 @@ async function loadAdminModelPricingRows(): Promise<ModelPricingRow[]> {
     manualOverride: false,
     note: null,
     lastSyncedAt: null,
-    updatedAt: now
-  });
+    updatedAt: "1970-01-01T00:00:00.000Z"
+  }).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 }
 
 export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {

@@ -8,6 +8,7 @@ import type { ModelPricingRow } from "@/components/admin-console/types";
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     push: vi.fn(),
+    replace: vi.fn(),
     refresh: vi.fn()
   }),
   useSearchParams: () => new URLSearchParams()
