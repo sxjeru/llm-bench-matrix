@@ -46,6 +46,81 @@ function createMockOptions(overrides: Partial<Parameters<typeof useImportPreview
 }
 
 describe("useImportPreviewState Hook - benchmarkPreviewValueOverlapPayload", () => {
+  test("导入 >100 数值且库内同名 benchmark 值均大于 100 时不显示缺失 Elo 警告", () => {
+    const draftRow: TextImportPreviewRow = {
+      rowNumber: 1,
+      providerName: "OpenAI",
+      modelName: "QwenVision2Code",
+      benchmarkName: "QwenVision2Code",
+      benchmarkType: "Multimodal Reasoning",
+      rawValue: "1215",
+      valueNum: 1215,
+      valueNum2: null,
+      valueNote: null,
+      source: null,
+      valid: true
+    };
+
+    const benchmark: BenchmarkOption = {
+      id: 101,
+      benchmarkName: "QwenVision2Code",
+      benchmarkType: "Multimodal Reasoning",
+      modalities: ["Vision"],
+      valueCount: 3,
+      overHundredValueCount: 3
+    };
+
+    const options = createMockOptions({
+      benchmarks: [benchmark],
+      textImportDraftRows: [draftRow],
+      existingBenchmarkExactMap: new Map([["qwenvision2code@@multimodal reasoning", benchmark]]),
+      existingBenchmarkByNameMap: new Map([["qwenvision2code", [benchmark]]])
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+
+    expect(result.current.benchmarkWarnings).toEqual([]);
+  });
+
+  test("导入 >100 数值但库内同名 benchmark 存在 <=100 值时仍显示缺失 Elo 警告", () => {
+    const draftRow: TextImportPreviewRow = {
+      rowNumber: 1,
+      providerName: "OpenAI",
+      modelName: "QwenVision2Code",
+      benchmarkName: "QwenVision2Code",
+      benchmarkType: "Multimodal Reasoning",
+      rawValue: "1215",
+      valueNum: 1215,
+      valueNum2: null,
+      valueNote: null,
+      source: null,
+      valid: true
+    };
+
+    const benchmark: BenchmarkOption = {
+      id: 101,
+      benchmarkName: "QwenVision2Code",
+      benchmarkType: "Multimodal Reasoning",
+      modalities: ["Vision"],
+      valueCount: 3,
+      overHundredValueCount: 2
+    };
+
+    const options = createMockOptions({
+      benchmarks: [benchmark],
+      textImportDraftRows: [draftRow],
+      existingBenchmarkExactMap: new Map([["qwenvision2code@@multimodal reasoning", benchmark]]),
+      existingBenchmarkByNameMap: new Map([["qwenvision2code", [benchmark]]])
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+
+    expect(result.current.benchmarkWarnings).toHaveLength(1);
+    expect(result.current.benchmarkWarnings[0].reasons).toContain(
+      "检测到 >100 Elo 数值，但库内不存在 QwenVision2Code (Elo)"
+    );
+  });
+
   test("在没有输入行或 benchmarks 时，返回空的 overlap 负载", () => {
     const options = createMockOptions({
       benchmarks: [],

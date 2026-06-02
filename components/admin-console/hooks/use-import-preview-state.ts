@@ -66,6 +66,11 @@ function getEloBenchmarkName(benchmarkName: string): string {
   return hasEloBenchmarkSuffix(cleanName) ? cleanName : `${cleanName} (Elo)`;
 }
 
+function isAllOverHundredBenchmark(benchmark: BenchmarkOption): boolean {
+  const valueCount = benchmark.valueCount ?? 0;
+  return valueCount > 0 && (benchmark.overHundredValueCount ?? 0) >= valueCount;
+}
+
 export function useImportPreviewState({
   benchmarks,
   textImportDraftRows,
@@ -202,8 +207,14 @@ export function useImportPreviewState({
         const eloBenchmarkName = getEloBenchmarkName(benchmarkName);
         const exactEloExisting = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(eloBenchmarkName, benchmarkType));
         const sameNameEloExisting = existingBenchmarkByNameMap.get(eloBenchmarkName.trim().toLowerCase()) ?? [];
+        const exactSameNameExisting = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(benchmarkName, benchmarkType));
+        const sameNameExisting = existingBenchmarkByNameMap.get(benchmarkName.trim().toLowerCase()) ?? [];
+        const sameNameCandidates = exactSameNameExisting
+          ? [exactSameNameExisting]
+          : sameNameExisting.filter((item) => item.benchmarkType === benchmarkType);
+        const hasAllOverHundredSameNameBenchmark = sameNameCandidates.some(isAllOverHundredBenchmark);
 
-        if (!exactEloExisting && sameNameEloExisting.length === 0) {
+        if (!exactEloExisting && sameNameEloExisting.length === 0 && !hasAllOverHundredSameNameBenchmark) {
           reasons.push(`检测到 >100 Elo 数值，但库内不存在 ${eloBenchmarkName}`);
           level = "warn";
         }

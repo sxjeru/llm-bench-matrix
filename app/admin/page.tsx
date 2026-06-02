@@ -52,7 +52,9 @@ export default async function AdminPage({
         id: item.id,
         benchmarkName: item.benchmarkName,
         benchmarkType: item.benchmarkType,
-        modalities: item.modalities
+        modalities: item.modalities,
+        valueCount: item.valueCount,
+        overHundredValueCount: item.overHundredValueCount
       }))}
       sourceOptions={sourceOptions ?? []}
       mergedRecords={mergedRecords}

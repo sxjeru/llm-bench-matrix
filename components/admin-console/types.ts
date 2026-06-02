@@ -34,6 +34,8 @@ export type BenchmarkOption = {
   benchmarkName: string;
   benchmarkType: string;
   modalities: string[];
+  valueCount?: number;
+  overHundredValueCount?: number;
 };
 
 export type MergedRecord = {

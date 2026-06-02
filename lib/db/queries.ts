@@ -1,4 +1,4 @@
-import { and, count, countDistinct, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
+import { and, count, countDistinct, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db/client";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
@@ -266,7 +266,7 @@ export async function getDashboardStats(sourceFilter?: string | null): Promise<D
 }
 
 export async function getActiveEntities() {
-  const [providerRows, modelRows, benchmarkRows] = await Promise.all([
+  const [providerRows, modelRows, benchmarkRows, benchmarkValueStats] = await Promise.all([
     db.select().from(providers).orderBy(providers.name),
     db
       .select()
@@ -277,13 +277,35 @@ export async function getActiveEntities() {
       .select()
       .from(benchmarks)
       .where(isNull(benchmarks.mergedIntoBenchmarkId))
-      .orderBy(benchmarks.benchmarkName)
+      .orderBy(benchmarks.benchmarkName),
+    db
+      .select({
+        benchmarkId: benchmarkValues.benchmarkId,
+        valueCount: sql<number>`count(*)`,
+        overHundredValueCount: sql<number>`count(*) filter (where ${benchmarkValues.valueNum} > 100 or ${benchmarkValues.valueNum2} > 100)`
+      })
+      .from(benchmarkValues)
+      .groupBy(benchmarkValues.benchmarkId)
   ]);
+
+  const statsByBenchmarkId = new Map(
+    benchmarkValueStats.map((item) => [
+      item.benchmarkId,
+      {
+        valueCount: toNullableNumber(item.valueCount) ?? 0,
+        overHundredValueCount: toNullableNumber(item.overHundredValueCount) ?? 0
+      }
+    ])
+  );
 
   return {
     providers: providerRows,
     models: modelRows,
-    benchmarks: benchmarkRows
+    benchmarks: benchmarkRows.map((benchmark) => ({
+      ...benchmark,
+      valueCount: statsByBenchmarkId.get(benchmark.id)?.valueCount ?? 0,
+      overHundredValueCount: statsByBenchmarkId.get(benchmark.id)?.overHundredValueCount ?? 0
+    }))
   };
 }
 
