@@ -34,6 +34,7 @@ async function invalidateChangedModelPricingCaches() {
 type DbModel = {
   id: number;
   modelName: string;
+  createdAt: string;
   sourceModelId: string | null;
   providerName: string;
   providerSlug: string;
@@ -587,6 +588,7 @@ async function getActiveModelRows(): Promise<DbModel[]> {
     .select({
       id: models.id,
       modelName: models.modelName,
+      createdAt: models.createdAt,
       sourceModelId: models.sourceModelId,
       providerName: providers.name,
       providerSlug: providers.slug,
@@ -603,6 +605,7 @@ async function getActiveModelRows(): Promise<DbModel[]> {
     return {
       id: row.id,
       modelName: row.modelName,
+      createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : "1970-01-01T00:00:00.000Z",
       sourceModelId: row.sourceModelId,
       providerName: row.providerName,
       providerSlug: row.providerSlug,
@@ -628,6 +631,11 @@ export async function getModelPricingRows(): Promise<ModelPricingRow[]> {
 }
 
 async function loadModelPricingRows(): Promise<ModelPricingRow[]> {
+  const rows = await selectModelPricingRows();
+  return rows.map(mapModelPricingSelectRow);
+}
+
+async function selectModelPricingRows() {
   const rows = await db
     .select({
       modelId: models.id,
@@ -660,7 +668,11 @@ async function loadModelPricingRows(): Promise<ModelPricingRow[]> {
     .where(isNull(models.mergedIntoModelId))
     .orderBy(providers.name, models.modelName);
 
-  return rows.map((row) => ({
+  return rows;
+}
+
+function mapModelPricingSelectRow(row: Awaited<ReturnType<typeof selectModelPricingRows>>[number]): ModelPricingRow {
+  return {
     modelId: row.modelId,
     modelName: row.modelName,
     providerName: row.providerName,
@@ -684,7 +696,7 @@ async function loadModelPricingRows(): Promise<ModelPricingRow[]> {
     note: row.note,
     lastSyncedAt: row.lastSyncedAt?.toISOString() ?? null,
     updatedAt: row.updatedAt.toISOString()
-  }));
+  };
 }
 
 export async function getAdminModelPricingRows(): Promise<ModelPricingRow[]> {
@@ -701,11 +713,17 @@ export async function getAdminModelPricingRows(): Promise<ModelPricingRow[]> {
 }
 
 async function loadAdminModelPricingRows(): Promise<ModelPricingRow[]> {
-  const activeModels = await getActiveModelRows();
-  const pricingRows = await getModelPricingRows();
+  const [activeModels, pricingRows] = await Promise.all([
+    getActiveModelRows(),
+    selectModelPricingRows()
+  ]);
   const pricingByModelId = new Map(pricingRows.map((row) => [row.modelId, row]));
 
-  return activeModels.map((model) => pricingByModelId.get(model.id) ?? {
+  return activeModels.map((model) => {
+    const pricingRow = pricingByModelId.get(model.id);
+    if (pricingRow) return mapModelPricingSelectRow(pricingRow);
+
+    return {
     modelId: model.id,
     modelName: model.modelName,
     providerName: model.providerName,
@@ -728,7 +746,8 @@ async function loadAdminModelPricingRows(): Promise<ModelPricingRow[]> {
     manualOverride: false,
     note: null,
     lastSyncedAt: null,
-    updatedAt: "1970-01-01T00:00:00.000Z"
+    updatedAt: model.createdAt
+    };
   }).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 }
 

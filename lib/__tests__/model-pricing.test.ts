@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-vi.unmock("@/lib/cache-versions");
+const dbClientMock = vi.hoisted(() => ({ db: {} as unknown }));
 
 vi.mock("@/lib/db/client", () => ({
-  db: {}
+  get db() {
+    return dbClientMock.db;
+  }
 }));
 
 vi.mock("next/cache", () => ({
@@ -13,6 +15,7 @@ vi.mock("next/cache", () => ({
 type ActiveModelRow = {
   id: number;
   modelName: string;
+  createdAt?: Date;
   sourceModelId: string | null;
   providerName: string;
   providerSlug: string;
@@ -92,7 +95,7 @@ function createDbMock(activeModels: ActiveModelRow[], existingRows: ExistingPric
 }
 
 async function importPricingModule(dbMock: ReturnType<typeof createDbMock>["db"]) {
-  vi.doMock("@/lib/db/client", () => ({ db: dbMock }));
+  dbClientMock.db = dbMock;
   return import("@/lib/model-pricing");
 }
 
@@ -191,19 +194,19 @@ describe("model pricing module", () => {
     ]);
     await getModelPricingRows();
 
-    expect(db.select).toHaveBeenCalledTimes(2);
+    expect(db.select).toHaveBeenCalledTimes(1);
 
     invalidateModelPricingCaches();
     await getModelPricingRows();
 
-    expect(db.select).toHaveBeenCalledTimes(4);
+    expect(db.select).toHaveBeenCalledTimes(2);
   });
 
-  test("getAdminModelPricingRows 按模型价格更新时间倒序返回", async () => {
+  test("getAdminModelPricingRows 按模型价格更新时间倒序返回，无价格时使用模型创建时间", async () => {
     const activeModels: ActiveModelRow[] = [
-      { id: 1, modelName: "Older Model", sourceModelId: null, providerName: "OpenAI", providerSlug: "openai", providerConfig: {} },
-      { id: 2, modelName: "Newer Model", sourceModelId: null, providerName: "OpenAI", providerSlug: "openai", providerConfig: {} },
-      { id: 3, modelName: "Missing Price", sourceModelId: null, providerName: "OpenAI", providerSlug: "openai", providerConfig: {} }
+      { id: 1, modelName: "Older Model", createdAt: new Date("2026-05-04T00:00:00.000Z"), sourceModelId: null, providerName: "OpenAI", providerSlug: "openai", providerConfig: {} },
+      { id: 2, modelName: "Newer Model", createdAt: new Date("2026-05-02T00:00:00.000Z"), sourceModelId: null, providerName: "OpenAI", providerSlug: "openai", providerConfig: {} },
+      { id: 3, modelName: "Missing Price", createdAt: new Date("2026-05-05T00:00:00.000Z"), sourceModelId: null, providerName: "OpenAI", providerSlug: "openai", providerConfig: {} }
     ];
     const pricingRows: PricingSelectRow[] = [
       {
@@ -261,9 +264,9 @@ describe("model pricing module", () => {
     const { getAdminModelPricingRows } = await importPricingModule(db);
 
     await expect(getAdminModelPricingRows()).resolves.toMatchObject([
+      { modelId: 3, updatedAt: "2026-05-05T00:00:00.000Z" },
       { modelId: 2, updatedAt: "2026-05-03T00:00:00.000Z" },
-      { modelId: 1, updatedAt: "2026-05-01T00:00:00.000Z" },
-      { modelId: 3, updatedAt: "1970-01-01T00:00:00.000Z" }
+      { modelId: 1, updatedAt: "2026-05-01T00:00:00.000Z" }
     ]);
   });
 
