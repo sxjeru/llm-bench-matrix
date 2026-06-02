@@ -1,5 +1,5 @@
 import { parse } from "csv-parse/sync";
-import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
   buildBenchmarkCanonicalKey,
@@ -3559,6 +3559,7 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
     const providerCache = new Map<string, Awaited<ReturnType<typeof ensureProvider>>>();
     const modelCache = new Map<string, Awaited<ReturnType<typeof ensureModelByProviderId>>>();
     const benchmarkByNameCache = new Map<string, Array<typeof benchmarks.$inferSelect>>();
+    const benchmarkByCanonicalKeyCache = new Map<string, typeof benchmarks.$inferSelect>();
     const sourceMetaUpsertMap = new Map<
       string,
       {
@@ -3570,10 +3571,12 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
     >();
     const valueRows: Array<typeof benchmarkValues.$inferInsert> = [];
 
-    const existingActiveBenchmarks = await tx
+    const existingBenchmarks = await tx
       .select()
       .from(benchmarks)
-      .where(isNull(benchmarks.mergedIntoBenchmarkId)) as Array<typeof benchmarks.$inferSelect>;
+      .where(or(isNull(benchmarks.mergedIntoBenchmarkId), isNotNull(benchmarks.mergedIntoBenchmarkId))) as Array<typeof benchmarks.$inferSelect>;
+
+    const existingActiveBenchmarks = existingBenchmarks.filter((benchmark) => benchmark.mergedIntoBenchmarkId === null);
 
     existingActiveBenchmarks
       .filter((benchmark) => benchmark.mergedIntoBenchmarkId === null)
@@ -3585,6 +3588,20 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
           benchmarkByNameCache.set(benchmarkNameKey, []);
         }
         benchmarkByNameCache.get(benchmarkNameKey)?.push(benchmark);
+        benchmarkByCanonicalKeyCache.set(benchmark.canonicalKey, benchmark);
+      });
+
+    const existingMergedBenchmarks = existingBenchmarks.filter((benchmark) => benchmark.mergedIntoBenchmarkId !== null);
+
+    existingMergedBenchmarks
+      .sort((left, right) => left.id - right.id)
+      .forEach((benchmark) => {
+        if (!benchmark.mergedIntoBenchmarkId) return;
+        const target = benchmarkByCanonicalKeyCache.get(benchmark.canonicalKey)
+          ?? existingActiveBenchmarks.find((item) => item.id === benchmark.mergedIntoBenchmarkId)
+          ?? null;
+        if (!target) return;
+        benchmarkByCanonicalKeyCache.set(benchmark.canonicalKey, target);
       });
 
     const upsertBenchmarkByNameCache = (benchmark: typeof benchmarks.$inferSelect) => {
@@ -3596,6 +3613,7 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
         .sort((left, right) => left.id - right.id);
 
       benchmarkByNameCache.set(benchmarkNameKey, next);
+      benchmarkByCanonicalKeyCache.set(benchmark.canonicalKey, benchmark);
     };
 
     const pickSharedBenchmark = (benchmarkName: string, benchmarkType: string) => {
@@ -3617,6 +3635,11 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
       const normalizedType = benchmarkType.trim().toLowerCase();
       const candidates = benchmarkByNameCache.get(eloBenchmarkName.trim().toLowerCase()) ?? [];
       return candidates.find((item) => item.benchmarkType.trim().toLowerCase() === normalizedType) ?? null;
+    };
+
+    const pickBenchmarkByCanonicalKey = (benchmarkName: string, benchmarkType: string) => {
+      const canonicalKey = buildBenchmarkCanonicalKey(benchmarkName, benchmarkType, dedupeRule);
+      return benchmarkByCanonicalKeyCache.get(canonicalKey) ?? null;
     };
 
     for (const row of rows) {
@@ -3651,7 +3674,8 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
           ? benchmarkType
           : "general";
         const parsedValue = parseBenchmarkValue(row.valueRaw);
-        let benchmark = pickSharedBenchmark(row.benchmarkName, benchmarkTypeForSelection);
+        let benchmark = pickSharedBenchmark(row.benchmarkName, benchmarkTypeForSelection)
+          ?? pickBenchmarkByCanonicalKey(row.benchmarkName, benchmarkType);
 
         if (shouldPreferExistingEloBenchmarkForImport(row.benchmarkName, parsedValue)) {
           benchmark = pickExistingEloBenchmark(row.benchmarkName, benchmarkTypeForSelection) ?? benchmark;

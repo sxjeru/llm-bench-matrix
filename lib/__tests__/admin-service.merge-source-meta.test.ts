@@ -689,6 +689,107 @@ describe("mergeEntity benchmark source meta migration", () => {
     }
   });
 
+  test("导入命中已合并 benchmark canonical 时会复用合并目标", async () => {
+    const inputText = [
+      "Category\tBenchmark\tClaude Opus 4.6",
+      "Coding Agent\tSWE-Verified\t80.8"
+    ].join("\n");
+
+    const dbSelectSpy = vi.spyOn(dbForTest, "select").mockImplementation(() => {
+      throw new Error("connect ECONNREFUSED 127.0.0.1:5432");
+    });
+
+    const existingBenchmarks = [
+      {
+        id: 591,
+        benchmarkName: "SWE-bench Verified",
+        benchmarkType: "Agentic",
+        unit: "score",
+        higherIsBetter: true,
+        modalities: ["Agentic"],
+        canonicalKey: "swebenchverified:agentic",
+        sourceBenchmarkId: null,
+        mergedIntoBenchmarkId: null,
+        createdAt: new Date("2026-04-01T00:00:00.000Z")
+      },
+      {
+        id: 674,
+        benchmarkName: "SWE Verified",
+        benchmarkType: "Coding Agent",
+        unit: "score",
+        higherIsBetter: true,
+        modalities: ["Text"],
+        canonicalKey: "sweverified:codingagent",
+        sourceBenchmarkId: null,
+        mergedIntoBenchmarkId: 591,
+        createdAt: new Date("2026-04-01T00:00:00.000Z")
+      }
+    ];
+
+    const createdProvider = { id: 1, name: "Anthropic", slug: "anthropic", createdAt: new Date("2026-04-01T00:00:00.000Z") };
+    const createdModel = {
+      id: 2,
+      providerId: 1,
+      modelName: "Claude Opus 4.6",
+      modelAlias: null,
+      canonicalKey: "claudeopus46",
+      sourceModelId: null,
+      mergedIntoModelId: null,
+      createdAt: new Date("2026-04-01T00:00:00.000Z")
+    };
+
+    const txSelect = vi.fn()
+      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(existingBenchmarks) }) })
+      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([createdProvider]) }) }) })
+      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }) }) });
+
+    const providerReturning = vi.fn().mockResolvedValue([createdProvider]);
+    const modelReturning = vi.fn().mockResolvedValue([createdModel]);
+    const valueRowsInsert = vi.fn().mockResolvedValue(undefined);
+    const sourceMetaOnConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
+    const sourceMetaValues = vi.fn(() => ({ onConflictDoUpdate: sourceMetaOnConflictDoUpdate }));
+
+    const txInsert = vi.fn()
+      .mockReturnValueOnce({ values: vi.fn(() => ({ onConflictDoUpdate: vi.fn(() => ({ returning: providerReturning })) })) })
+      .mockReturnValueOnce({ values: vi.fn(() => ({ returning: modelReturning })) })
+      .mockReturnValueOnce({ values: valueRowsInsert })
+      .mockReturnValueOnce({ values: sourceMetaValues });
+
+    const tx = {
+      select: txSelect,
+      insert: txInsert,
+      update: vi.fn(() => ({ set: vi.fn() })),
+      delete: vi.fn()
+    };
+
+    const transactionSpy = vi
+      .spyOn(dbForTest, "transaction")
+      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+
+    try {
+      const result = await importBenchmarkCsvForTest(inputText, "text:claude-opus-4.6");
+
+      expect(result.inserted).toBe(1);
+      expect(txInsert).toHaveBeenCalledTimes(4);
+      expect(valueRowsInsert).toHaveBeenCalledWith([
+        expect.objectContaining({
+          benchmarkId: 591,
+          source: "text:claude-opus-4.6"
+        })
+      ]);
+      expect(sourceMetaValues).toHaveBeenCalledWith([
+        expect.objectContaining({
+          benchmarkId: 591,
+          source: "text:claude-opus-4.6",
+          benchmarkType: "Coding Agent"
+        })
+      ]);
+    } finally {
+      transactionSpy.mockRestore();
+      dbSelectSpy.mockRestore();
+    }
+  });
+
   test("导入 >100 数值时会自动复用已存在的同名 Elo benchmark", async () => {
     const inputText = [
       "Category\tBenchmark\tGPT-5.4",
