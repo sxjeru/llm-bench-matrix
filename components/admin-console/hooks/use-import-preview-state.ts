@@ -470,10 +470,18 @@ export function useImportPreviewState({
   }, [matrixPreview.rows]);
 
   const benchmarkPreviewValueOverlapPayload = useMemo(() => {
+    function buildHyphenInsensitiveKey(input: string) {
+      return input
+        .trim()
+        .toLowerCase()
+        .replace(/[\s\-_]+/g, "");
+    }
+
     function getBenchmarkSearchCandidateIds(inputValue: string, benchmarkType: string) {
       const normalizedInput = inputValue.trim().toLowerCase();
       const inputCompareKey = buildBenchmarkCompareKey(inputValue);
-      if (!normalizedInput && !inputCompareKey) return [];
+      const inputHyphenInsensitiveKey = buildHyphenInsensitiveKey(inputValue);
+      if (!normalizedInput && !inputCompareKey && !inputHyphenInsensitiveKey) return [];
 
       return benchmarks
         .map((item, index) => {
@@ -481,6 +489,7 @@ export function useImportPreviewState({
           const typeLower = item.benchmarkType.toLowerCase();
           const labelLower = `${item.benchmarkName} [${item.benchmarkType}]`.toLowerCase();
           const compareKey = buildBenchmarkCompareKey(item.benchmarkName);
+          const hyphenInsensitiveKey = buildHyphenInsensitiveKey(item.benchmarkName);
           let score = 0;
 
           if (nameLower === normalizedInput && item.benchmarkType === benchmarkType) {
@@ -493,6 +502,10 @@ export function useImportPreviewState({
             score += 80;
           }
 
+          if (hyphenInsensitiveKey && inputHyphenInsensitiveKey && hyphenInsensitiveKey === inputHyphenInsensitiveKey) {
+            score += 70;
+          }
+
           if (normalizedInput && labelLower.includes(normalizedInput)) {
             score += 50;
           }
@@ -503,6 +516,13 @@ export function useImportPreviewState({
 
           if (compareKey && inputCompareKey && (compareKey.includes(inputCompareKey) || inputCompareKey.includes(compareKey))) {
             score += 30;
+          }
+
+          if (
+            hyphenInsensitiveKey && inputHyphenInsensitiveKey &&
+            (hyphenInsensitiveKey.includes(inputHyphenInsensitiveKey) || inputHyphenInsensitiveKey.includes(hyphenInsensitiveKey))
+          ) {
+            score += 25;
           }
 
           const hasNameMatch = score > 0;
