@@ -724,7 +724,7 @@ async function loadAdminModelPricingRows(): Promise<ModelPricingRow[]> {
     currency: "USD",
     unit: "per_1m_tokens",
     matchConfidence: 0,
-    matchStatus: "unmatched",
+    matchStatus: "unmatched" as const,
     manualOverride: false,
     note: null,
     lastSyncedAt: null,
