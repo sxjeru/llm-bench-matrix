@@ -135,6 +135,43 @@ describe("useImportPreviewState Hook - benchmarkPreviewValueOverlapPayload", () 
     ]);
   });
 
+  test("模型名变化时会更新重复率重算触发 key", () => {
+    const draftRow: TextImportPreviewRow = {
+      rowNumber: 1,
+      providerName: "OpenAI",
+      modelName: "GPT-4",
+      benchmarkName: "MMLU",
+      benchmarkType: "Multiple Choice",
+      rawValue: "0.85",
+      valueNum: 0.85,
+      valueNum2: null,
+      valueNote: null,
+      source: null,
+      valid: true
+    };
+
+    const benchmark: BenchmarkOption = {
+      id: 101,
+      benchmarkName: "MMLU",
+      benchmarkType: "Multiple Choice",
+      modalities: ["Text"]
+    };
+
+    const { result, rerender } = renderHook(
+      ({ rows }) => useImportPreviewState(createMockOptions({ benchmarks: [benchmark], textImportDraftRows: rows })),
+      { initialProps: { rows: [draftRow] } }
+    );
+
+    const initialTriggerKey = result.current.benchmarkPreviewValueOverlapTriggerKey;
+
+    rerender({ rows: [{ ...draftRow, modelName: "GPT-4o" }] });
+
+    expect(result.current.benchmarkPreviewValueOverlapPayload.items[0].cells).toEqual([
+      { modelName: "GPT-4o", rawValue: "0.85" }
+    ]);
+    expect(result.current.benchmarkPreviewValueOverlapTriggerKey).not.toBe(initialTriggerKey);
+  });
+
   test("评分排序：完全匹配名称及类型 > 完全匹配名称不同类型 > 部分匹配且类型匹配 > 部分匹配且类型不匹配", () => {
     const draftRow: TextImportPreviewRow = {
       rowNumber: 1,

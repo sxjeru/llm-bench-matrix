@@ -600,7 +600,7 @@ export function useImportPreviewState({
     }
 
     return textImportDraftRows
-      .map((row, rowIndex) => `${rowIndex}:${row.rawValue}`)
+      .map((row, rowIndex) => `${rowIndex}:${row.modelName}\u001e${row.rawValue}`)
       .join("\u001f");
   }, [textImportDraftRows]);
 
