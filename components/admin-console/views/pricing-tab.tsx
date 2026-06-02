@@ -72,6 +72,11 @@ function getDraftAwareStatus(price: ModelPricingRow, draft: ModelPricingDraft | 
   return price.matchStatus;
 }
 
+function getPricingSortTime(price: ModelPricingRow) {
+  const parsed = Date.parse(price.updatedAt);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 export function PricingTab({
   prices,
   loadingPrices,
@@ -92,24 +97,26 @@ export function PricingTab({
     updatePricingDraft(modelId, (current) => ({ ...current, [field]: value, manualOverride: true }));
   }
 
-  const filteredPrices = prices.filter((price) => {
-    const draft = pricingDrafts[price.modelId];
-    const draftAwareStatus = getDraftAwareStatus(price, draft);
-    const query = pricingSearchQuery.trim().toLowerCase();
-    const matchesQuery = !query
-      || price.modelName.toLowerCase().includes(query)
-      || price.providerName.toLowerCase().includes(query)
-      || (price.sourceModelId ?? "").toLowerCase().includes(query)
-      || (price.sourceProviderId ?? "").toLowerCase().includes(query);
+  const filteredPrices = prices
+    .filter((price) => {
+      const draft = pricingDrafts[price.modelId];
+      const draftAwareStatus = getDraftAwareStatus(price, draft);
+      const query = pricingSearchQuery.trim().toLowerCase();
+      const matchesQuery = !query
+        || price.modelName.toLowerCase().includes(query)
+        || price.providerName.toLowerCase().includes(query)
+        || (price.sourceModelId ?? "").toLowerCase().includes(query)
+        || (price.sourceProviderId ?? "").toLowerCase().includes(query);
 
-    if (!matchesQuery) return false;
-    if (pricingStatusFilter === "all") return true;
-    if (pricingStatusFilter === "manual") return draftAwareStatus === "manual";
-    if (pricingStatusFilter === "missing") {
-      return price.inputCost === null || price.outputCost === null || price.cacheReadCost === null;
-    }
-    return draftAwareStatus === pricingStatusFilter;
-  });
+      if (!matchesQuery) return false;
+      if (pricingStatusFilter === "all") return true;
+      if (pricingStatusFilter === "manual") return draftAwareStatus === "manual";
+      if (pricingStatusFilter === "missing") {
+        return price.inputCost === null || price.outputCost === null || price.cacheReadCost === null;
+      }
+      return draftAwareStatus === pricingStatusFilter;
+    })
+    .sort((a, b) => getPricingSortTime(b) - getPricingSortTime(a));
 
   const matchedCount = prices.filter((item) => item.matchStatus === "matched" || item.matchStatus === "manual").length;
   const missingCoreCount = prices.filter((item) => item.inputCost === null || item.outputCost === null || item.cacheReadCost === null).length;

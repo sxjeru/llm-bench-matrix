@@ -309,6 +309,25 @@ describe("AdminConsole text import", () => {
     expect(screen.queryByText("Auto Model")).not.toBeInTheDocument();
   });
 
+  test("价格管理列表前端按更新时间倒序显示", async () => {
+    const user = userEvent.setup();
+    mockFetchSequence({
+      prices: [
+        buildPriceRow({ modelId: 1, modelName: "A Older Model", updatedAt: "2026-05-01T00:00:00.000Z" }),
+        buildPriceRow({ modelId: 2, modelName: "B Newer Model", updatedAt: "2026-05-03T00:00:00.000Z" })
+      ]
+    });
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await user.click(screen.getByRole("tab", { name: "价格管理" }));
+    expect(await screen.findByText("B Newer Model")).toBeInTheDocument();
+
+    const modelCells = screen.getAllByRole("cell").filter((cell) => /Model/.test(cell.textContent ?? ""));
+    expect(modelCells.map((cell) => cell.textContent)).toEqual(expect.arrayContaining([expect.stringContaining("B Newer Model"), expect.stringContaining("A Older Model")]));
+    expect(modelCells[0]).toHaveTextContent("B Newer Model");
+  });
+
   test("价格管理修改价格后保存应自动开启手动覆盖", async () => {
     const user = userEvent.setup();
     const fetchMock = mockFetchSequence({ prices: [buildPriceRow({ modelId: 1, modelName: "Model A", inputCost: 1 })] });
