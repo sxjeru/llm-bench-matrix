@@ -208,7 +208,10 @@ function getInferredHigherIsBetter(
 }
 
 const MODEL_DUPLICATE_NOISE_TOKENS = new Set([
+  "low",
+  "medium",
   "high",
+  "max",
   "reasoning",
   "reason",
   "thinking",
@@ -5179,17 +5182,7 @@ function buildVersionFamilyKey(input: string): string {
     .trim();
 }
 
-function hasModelVersionGapHint(leftName: string, rightName: string): boolean {
-  const leftVersion = extractPrimaryVersionNumber(leftName);
-  const rightVersion = extractPrimaryVersionNumber(rightName);
-  if (leftVersion === null || rightVersion === null) return false;
-  if (leftVersion === rightVersion) return false;
 
-  const leftFamily = buildVersionFamilyKey(leftName);
-  const rightFamily = buildVersionFamilyKey(rightName);
-
-  return leftFamily.length > 0 && leftFamily === rightFamily;
-}
 
 function chooseMergeDirection<T extends { id: number }>(
   left: T,
@@ -5212,16 +5205,7 @@ function chooseMergeDirection<T extends { id: number }>(
   return { source: left, target: right, sourceCount: leftCount, targetCount: rightCount };
 }
 
-function hasBenchmarkVariantConflict(leftName: string, rightName: string): boolean {
-  return BENCHMARK_VARIANT_CONFLICT_HINTS.some(([leftPattern, rightPattern]) => {
-    const leftMatchLeft = leftPattern.test(leftName);
-    const leftMatchRight = leftPattern.test(rightName);
-    const rightMatchLeft = rightPattern.test(leftName);
-    const rightMatchRight = rightPattern.test(rightName);
 
-    return (leftMatchLeft && rightMatchRight) || (leftMatchRight && rightMatchLeft);
-  });
-}
 
 function extractBenchmarkNumericTokens(input: string): string[] {
   const normalizedInput = input.replace(
@@ -5316,6 +5300,7 @@ type ModelFeature = {
   bigramCounts: Map<string, number>;
   charCounts: Map<string, number>;
   compactLength: number;
+  trailingVariant: string | null;
 };
 
 type BenchmarkFeature = {
@@ -5388,6 +5373,16 @@ function hasModelVersionGapHintPrecomputed(
   if (leftVersion === null || rightVersion === null) return false;
   if (leftVersion === rightVersion) return false;
   return leftFamily.length > 0 && leftFamily === rightFamily;
+}
+
+function hasModelTrailingVariantMismatchPrecomputed(
+  leftVariant: string | null,
+  rightVariant: string | null
+): boolean {
+  if (leftVariant || rightVariant) {
+    return leftVariant !== rightVariant;
+  }
+  return false;
 }
 
 function hasBenchmarkVariantNoiseNormalizedNameMatchPrecomputed(
@@ -5525,8 +5520,15 @@ async function detectDuplicateEntityCandidatesInternal(): Promise<DuplicateEntit
     benchmarkSourceSummaryById.set(benchmarkId, formatBenchmarkSourceSummary(item.source));
   });
 
+  const trailingVariants = new Set(["low", "medium", "high", "max"]);
+
   const modelFeatures: ModelFeature[] = activeModels.map((model) => {
     const strictName = compactAlphaNum(model.modelName);
+    const normalized = normalizeLooseText(model.modelName);
+    const tokens = normalized.split(" ").filter(Boolean);
+    const lastToken = tokens[tokens.length - 1] ?? null;
+    const trailingVariant = lastToken && trailingVariants.has(lastToken) ? lastToken : null;
+
     return {
       raw: model,
       strictName,
@@ -5535,7 +5537,8 @@ async function detectDuplicateEntityCandidatesInternal(): Promise<DuplicateEntit
       versionFamily: buildVersionFamilyKey(model.modelName),
       bigramCounts: buildBigramCounts(model.modelName),
       charCounts: getCharacterCounts(strictName),
-      compactLength: strictName.length
+      compactLength: strictName.length,
+      trailingVariant
     };
   });
 
@@ -5592,6 +5595,14 @@ async function detectDuplicateEntityCandidatesInternal(): Promise<DuplicateEntit
       ) {
         confidence = downgradeDuplicateConfidence(confidence);
         reasons.push("version-gap-hint");
+      }
+
+      if (
+        confidence &&
+        hasModelTrailingVariantMismatchPrecomputed(left.trailingVariant, right.trailingVariant)
+      ) {
+        confidence = "low";
+        reasons.push("trailing-variant-mismatch");
       }
 
       if (!confidence) {

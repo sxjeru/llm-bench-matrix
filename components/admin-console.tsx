@@ -1895,6 +1895,7 @@ export function AdminConsole({
     if (reason === "numeric-token-mismatch") return "数字片段不一致（降为低置信）";
     if (reason === "variant-conflict-hint") return "疑似变体冲突";
     if (reason === "version-gap-hint") return "版本差异（已降级）";
+    if (reason === "trailing-variant-mismatch") return "末尾变体差异（降为低置信）";
     if (reason.startsWith("char-similarity-")) {
       const value = Number.parseFloat(reason.replace("char-similarity-", ""));
       if (Number.isFinite(value)) {

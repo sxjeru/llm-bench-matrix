@@ -1,10 +1,10 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 
 let detectDuplicateEntityCandidates: any;
 let invalidateAllCaches: any;
 let db: any;
 let getCacheVersion: any;
-let bumpCacheVersions: any;
 let invalidateDuplicateCandidatesCacheForTest: any;
 
 function mockDbQuery(resolveValue: any) {
@@ -36,7 +36,6 @@ beforeAll(async () => {
 
   const cacheVersionsModule = await import("@/lib/cache-versions");
   getCacheVersion = cacheVersionsModule.getCacheVersion;
-  bumpCacheVersions = cacheVersionsModule.bumpCacheVersions;
 });
 
 describe("detectDuplicateEntityCandidates with caching", () => {
@@ -52,7 +51,7 @@ describe("detectDuplicateEntityCandidates with caching", () => {
   });
 
   test("正确识别重复候选，并且在多次调用时命中缓存", async () => {
-    let currentVersion = "V1";
+    const currentVersion = "V1";
 
     vi.mocked(getCacheVersion).mockImplementation(async () => currentVersion);
 
@@ -159,5 +158,54 @@ describe("detectDuplicateEntityCandidates with caching", () => {
     const result2 = await detectDuplicateEntityCandidates();
     expect(result2).not.toBe(result1); // 引用不再相同，说明是重新生成的实例
     expect(selectSpy.mock.calls.length).toBe(10); // 又执行了 5个数据源查询
+  });
+
+  test("将末尾新增 low/medium/high/max 的 model 候选视为低置信度", async () => {
+    const currentVersion = "V1";
+    vi.mocked(getCacheVersion).mockImplementation(async () => currentVersion);
+
+    const modelsData = [
+      { id: 1, modelName: "DeepSeek-V4-Flash High", providerName: "DeepSeek" },
+      { id: 2, modelName: "DeepSeek-V4-Flash", providerName: "DeepSeek" },
+      { id: 3, modelName: "DeepSeek-V4-Flash Low", providerName: "DeepSeek" },
+      { id: 4, modelName: "DeepSeek-V4-Flash Max", providerName: "DeepSeek" },
+    ];
+
+    const benchmarksData: any[] = [];
+    const modelStatsData = [
+      { modelId: 1, count: 50 },
+      { modelId: 2, count: 40 },
+      { modelId: 3, count: 10 },
+      { modelId: 4, count: 5 }
+    ];
+    const benchmarkValueStatsData: any[] = [];
+    const benchmarkSourceStatsData: any[] = [];
+
+    vi.spyOn(db, "select").mockImplementation((fields: any) => {
+      if (fields.modelName) {
+        return mockDbQuery(modelsData);
+      }
+      if (fields.benchmarkName) {
+        return mockDbQuery(benchmarksData);
+      }
+      if (fields.modelId) {
+        return mockDbQuery(modelStatsData);
+      }
+      if (fields.benchmarkId && fields.source) {
+        return mockDbQuery(benchmarkSourceStatsData);
+      }
+      if (fields.benchmarkId) {
+        return mockDbQuery(benchmarkValueStatsData);
+      }
+      throw new Error("Unknown db.select call in test: " + JSON.stringify(fields));
+    });
+
+    const result = await detectDuplicateEntityCandidates();
+
+    expect(result.modelCandidates.length).toBeGreaterThan(0);
+    for (const candidate of result.modelCandidates) {
+      expect(candidate.confidence).toBe("low");
+      expect(candidate.reasons).toContain("trailing-variant-mismatch");
+    }
   });
 });
