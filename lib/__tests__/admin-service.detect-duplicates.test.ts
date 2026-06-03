@@ -208,4 +208,77 @@ describe("detectDuplicateEntityCandidates with caching", () => {
       expect(candidate.reasons).toContain("trailing-variant-mismatch");
     }
   });
+
+  test("将纯粹字符相似度高但类型不一致的 benchmark 候选视为中置信，且数字片段不一致时降为低置信", async () => {
+    const currentVersion = "V1";
+    vi.mocked(getCacheVersion).mockImplementation(async () => currentVersion);
+
+    const modelsData: any[] = [];
+    const modelStatsData: any[] = [];
+
+    const benchmarksData = [
+      { id: 10, benchmarkName: "GSM8K-Math-Challenge", benchmarkType: "math", modalities: ["Text"] },
+      { id: 11, benchmarkName: "GSM8K-Math-Challange", benchmarkType: "reasoning", modalities: ["Text"] },
+      { id: 12, benchmarkName: "GSM8K-Math-Very-Long-Challenge-1", benchmarkType: "math", modalities: ["Text"] },
+      { id: 13, benchmarkName: "GSM8K-Math-Very-Long-Challange-2", benchmarkType: "reasoning", modalities: ["Text"] }
+    ];
+
+    const benchmarkValueStatsData = [
+      { benchmarkId: 10, count: 20 },
+      { benchmarkId: 11, count: 15 },
+      { benchmarkId: 12, count: 20 },
+      { benchmarkId: 13, count: 15 }
+    ];
+
+    const benchmarkSourceStatsData = [
+      { benchmarkId: 10, source: "OpenAI Paper", count: 20 },
+      { benchmarkId: 11, source: "Anthropic Paper", count: 15 },
+      { benchmarkId: 12, source: "OpenAI Paper", count: 20 },
+      { benchmarkId: 13, source: "Anthropic Paper", count: 15 }
+    ];
+
+    vi.spyOn(db, "select").mockImplementation((fields: any) => {
+      if (fields.modelName) {
+        return mockDbQuery(modelsData);
+      }
+      if (fields.benchmarkName) {
+        return mockDbQuery(benchmarksData);
+      }
+      if (fields.modelId) {
+        return mockDbQuery(modelStatsData);
+      }
+      if (fields.benchmarkId && fields.source) {
+        return mockDbQuery(benchmarkSourceStatsData);
+      }
+      if (fields.benchmarkId) {
+        return mockDbQuery(benchmarkValueStatsData);
+      }
+      throw new Error("Unknown db.select call in test: " + JSON.stringify(fields));
+    });
+
+    const result = await detectDuplicateEntityCandidates();
+
+    // 应该有两个 benchmark 候选对
+    expect(result.benchmarkCandidates.length).toBeGreaterThanOrEqual(2);
+
+    // 找 GSM8K-Math-Challenge 与 GSM8K-Math-Challange 这一对 (没有数字不一致)
+    const midConfidenceCand = result.benchmarkCandidates.find(
+      (c: any) =>
+        (c.sourceName === "GSM8K-Math-Challenge" && c.targetName === "GSM8K-Math-Challange") ||
+        (c.sourceName === "GSM8K-Math-Challange" && c.targetName === "GSM8K-Math-Challenge")
+    );
+    expect(midConfidenceCand).toBeDefined();
+    expect(midConfidenceCand!.confidence).toBe("medium");
+    expect(midConfidenceCand!.reasons).toContain("type-mismatch");
+
+    // 找 GSM8K-Math-Very-Long-Challenge-1 与 GSM8K-Math-Very-Long-Challange-2 这一对 (有数字不一致)
+    const lowConfidenceCand = result.benchmarkCandidates.find(
+      (c: any) =>
+        (c.sourceName === "GSM8K-Math-Very-Long-Challenge-1" && c.targetName === "GSM8K-Math-Very-Long-Challange-2") ||
+        (c.sourceName === "GSM8K-Math-Very-Long-Challange-2" && c.targetName === "GSM8K-Math-Very-Long-Challenge-1")
+    );
+    expect(lowConfidenceCand).toBeDefined();
+    expect(lowConfidenceCand!.confidence).toBe("low");
+    expect(lowConfidenceCand!.reasons).toContain("numeric-token-mismatch");
+  });
 });

@@ -5705,7 +5705,7 @@ async function detectDuplicateEntityCandidatesInternal(): Promise<DuplicateEntit
       } else if (similarity >= 0.9) {
         reasons.push(`char-similarity-${similarity.toFixed(3)}`);
         if (confidence === "low") {
-          confidence = "low";
+          confidence = "medium";
         }
       }
 
