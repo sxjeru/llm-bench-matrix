@@ -384,6 +384,26 @@ export function BenchmarkMatrix({
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, [isSourceOverflowMenuOpen]);
 
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+
+      const openedFilters = document.querySelectorAll<HTMLDetailsElement>(
+        'details[data-modality-filter="true"][open]'
+      );
+
+      openedFilters.forEach((filter) => {
+        if (!filter.contains(target)) {
+          filter.removeAttribute("open");
+        }
+      });
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, []);
+
   const { beginColumnResize, shouldSuppressHeaderInteractions } = useMatrixColumnResize({
     activeSourceRef,
     columnResizeStateRef,
