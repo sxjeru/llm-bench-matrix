@@ -2238,6 +2238,7 @@ export function AdminConsole({
       }, 1200);
 
       notifySuccess("合并完成。");
+      router.refresh();
     } catch (error) {
       setMergeSubmitState("idle");
       notifyError(error instanceof Error ? error.message : "合并失败");
@@ -2277,6 +2278,7 @@ export function AdminConsole({
       }
 
       notifySuccess(`批量合并完成：${mergedCount} 条。`);
+      router.refresh();
     } catch (error) {
       notifyError(
         error instanceof Error
@@ -2506,17 +2508,19 @@ export function AdminConsole({
           );
 
           notifySuccess("改名完成，并已自动合并重名实体", [
-            `合并来源：${mergedSourceName ?? fallbackSourceName} [${mergedSourceId}]`,
-            "建议刷新页面以同步最新实体下拉数据"
+            `合并来源：${mergedSourceName ?? fallbackSourceName} [${mergedSourceId}]`
           ]);
+          router.refresh();
           return;
         }
 
-        notifySuccess("改名完成，并已处理重名冲突", ["建议刷新页面以同步最新实体下拉数据"]);
+        notifySuccess("改名完成，并已处理重名冲突");
+        router.refresh();
         return;
       }
 
-      notifySuccess("名称已更新并写入数据库", ["建议刷新页面以同步最新实体下拉数据"]);
+      notifySuccess("名称已更新并写入数据库");
+      router.refresh();
     } catch (error) {
       setRenameSubmitState("idle");
       notifyError(error instanceof Error ? error.message : "实体改名失败");
