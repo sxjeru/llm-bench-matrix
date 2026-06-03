@@ -13,7 +13,9 @@ import { IMPORT_VALUE_PAIR_REGEX, IMPORT_VALUE_RANK_PREFIX_REGEX, IMPORT_VALUE_S
 import type { ParsedImportRecord } from "@/lib/import/xlsm";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 import type { ProviderConfig } from "@/lib/db/schema";
-import { invalidateAllCaches } from "@/lib/db/queries";
+import { invalidateAllCaches, registerCacheInvalidator } from "@/lib/db/queries";
+import { createVersionedCacheStore, withVersionedCache, invalidateVersionedCacheStore } from "@/lib/server-cache";
+import { getCacheVersion } from "@/lib/cache-versions";
 import { isValidHexColor, normalizeProviderConfig, normalizeProviderConfigPrefix } from "@/lib/provider-config";
 
 type EnsureBenchmarkInput = {
@@ -5286,7 +5288,162 @@ function formatBenchmarkSourceSummary(source: string | null): string {
   return normalized.length > 0 ? normalized : "空 source";
 }
 
+const duplicateCandidatesStore = createVersionedCacheStore<DuplicateEntityDetectionResult>();
+
+registerCacheInvalidator(() => {
+  invalidateVersionedCacheStore(duplicateCandidatesStore);
+});
+
 export async function detectDuplicateEntityCandidates(): Promise<DuplicateEntityDetectionResult> {
+  return withVersionedCache(
+    duplicateCandidatesStore,
+    "duplicate-candidates",
+    {
+      versionProbeTtlMs: 5_000,
+      staleIfErrorMs: 30 * 60_000,
+      getVersion: () => getCacheVersion("admin_entities"),
+      loader: () => detectDuplicateEntityCandidatesInternal()
+    }
+  );
+}
+
+type ModelFeature = {
+  raw: { id: number; modelName: string; providerName: string };
+  strictName: string;
+  noiseName: string;
+  primaryVersion: number | null;
+  versionFamily: string;
+  bigramCounts: Map<string, number>;
+  charCounts: Map<string, number>;
+  compactLength: number;
+};
+
+type BenchmarkFeature = {
+  raw: { id: number; benchmarkName: string; benchmarkType: string | null; modalities: string[] };
+  normalizedName: string;
+  variantNoiseKey: string;
+  variantNoiseRemovedCount: number;
+  variantNoiseCompact: string;
+  typeNormalized: string;
+  variantConflictMatches: Array<{ leftMatch: boolean; rightMatch: boolean }>;
+  numericTokens: string[];
+  symbolNumberPairs: string[];
+  bigramCounts: Map<string, number>;
+  charCounts: Map<string, number>;
+  compactLength: number;
+};
+
+function getCharacterCounts(compact: string): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const ch of compact) {
+    map.set(ch, (map.get(ch) ?? 0) + 1);
+  }
+  return map;
+}
+
+function getDiceSimilarityPrecomputed(
+  leftMap: Map<string, number>,
+  rightMap: Map<string, number>
+): number {
+  if (leftMap.size === 0 || rightMap.size === 0) return 0;
+
+  let shared = 0;
+  let leftTotal = 0;
+  let rightTotal = 0;
+
+  leftMap.forEach((count, token) => {
+    leftTotal += count;
+    shared += Math.min(count, rightMap.get(token) ?? 0);
+  });
+  rightMap.forEach((count) => {
+    rightTotal += count;
+  });
+
+  if (leftTotal + rightTotal === 0) return 0;
+  return (2 * shared) / (leftTotal + rightTotal);
+}
+
+function getCharacterRepeatScorePrecomputed(
+  leftCompactLength: number,
+  rightCompactLength: number,
+  leftCounts: Map<string, number>,
+  rightCounts: Map<string, number>
+): number {
+  if (leftCompactLength === 0 || rightCompactLength === 0) return 0;
+
+  let shared = 0;
+  leftCounts.forEach((count, ch) => {
+    shared += Math.min(count, rightCounts.get(ch) ?? 0);
+  });
+
+  return shared / Math.max(leftCompactLength, rightCompactLength);
+}
+
+function hasModelVersionGapHintPrecomputed(
+  leftVersion: number | null,
+  rightVersion: number | null,
+  leftFamily: string,
+  rightFamily: string
+): boolean {
+  if (leftVersion === null || rightVersion === null) return false;
+  if (leftVersion === rightVersion) return false;
+  return leftFamily.length > 0 && leftFamily === rightFamily;
+}
+
+function hasBenchmarkVariantNoiseNormalizedNameMatchPrecomputed(
+  left: BenchmarkFeature,
+  right: BenchmarkFeature
+): boolean {
+  if (left.variantNoiseRemovedCount === 0 && right.variantNoiseRemovedCount === 0) {
+    return false;
+  }
+  if (!left.variantNoiseKey || !right.variantNoiseKey) {
+    return false;
+  }
+  return left.variantNoiseCompact === right.variantNoiseCompact;
+}
+
+function hasBenchmarkVariantConflictPrecomputed(
+  left: BenchmarkFeature,
+  right: BenchmarkFeature
+): boolean {
+  for (let i = 0; i < BENCHMARK_VARIANT_CONFLICT_HINTS.length; i++) {
+    const leftMatches = left.variantConflictMatches[i]!;
+    const rightMatches = right.variantConflictMatches[i]!;
+    if ((leftMatches.leftMatch && rightMatches.rightMatch) || (leftMatches.rightMatch && rightMatches.leftMatch)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasBenchmarkNumericTokenMismatchPrecomputed(
+  leftTokens: string[],
+  rightTokens: string[]
+): boolean {
+  if (leftTokens.length === 0 || rightTokens.length === 0) {
+    return false;
+  }
+  if (leftTokens.length !== rightTokens.length) {
+    return true;
+  }
+  return leftTokens.some((token, index) => token !== rightTokens[index]);
+}
+
+function hasBenchmarkSymbolSemanticMismatchPrecomputed(
+  leftTokens: string[],
+  rightTokens: string[]
+): boolean {
+  if (leftTokens.length === 0 || rightTokens.length === 0) {
+    return false;
+  }
+  if (leftTokens.length !== rightTokens.length) {
+    return true;
+  }
+  return leftTokens.some((token, index) => token !== rightTokens[index]);
+}
+
+async function detectDuplicateEntityCandidatesInternal(): Promise<DuplicateEntityDetectionResult> {
   const [activeModels, activeBenchmarks, modelValueStats, benchmarkValueStats, benchmarkSourceStats] = await Promise.all([
     db
       .select({
@@ -5368,30 +5525,48 @@ export async function detectDuplicateEntityCandidates(): Promise<DuplicateEntity
     benchmarkSourceSummaryById.set(benchmarkId, formatBenchmarkSourceSummary(item.source));
   });
 
+  const modelFeatures: ModelFeature[] = activeModels.map((model) => {
+    const strictName = compactAlphaNum(model.modelName);
+    return {
+      raw: model,
+      strictName,
+      noiseName: buildModelDuplicateKey(model.modelName),
+      primaryVersion: extractPrimaryVersionNumber(model.modelName),
+      versionFamily: buildVersionFamilyKey(model.modelName),
+      bigramCounts: buildBigramCounts(model.modelName),
+      charCounts: getCharacterCounts(strictName),
+      compactLength: strictName.length
+    };
+  });
+
   const modelCandidates: ModelDuplicateCandidate[] = [];
 
-  for (let leftIndex = 0; leftIndex < activeModels.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < activeModels.length; rightIndex += 1) {
-      const left = activeModels[leftIndex]!;
-      const right = activeModels[rightIndex]!;
+  for (let leftIndex = 0; leftIndex < modelFeatures.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < modelFeatures.length; rightIndex += 1) {
+      const left = modelFeatures[leftIndex]!;
+      const right = modelFeatures[rightIndex]!;
 
-      const strictLeft = compactAlphaNum(left.modelName);
-      const strictRight = compactAlphaNum(right.modelName);
-      const noiseLeft = buildModelDuplicateKey(left.modelName);
-      const noiseRight = buildModelDuplicateKey(right.modelName);
-      const charRepeatScore = getCharacterRepeatScore(left.modelName, right.modelName);
-      const diceScore = getDiceSimilarity(left.modelName, right.modelName);
+      const charRepeatScore = getCharacterRepeatScorePrecomputed(
+        left.compactLength,
+        right.compactLength,
+        left.charCounts,
+        right.charCounts
+      );
+      const diceScore = getDiceSimilarityPrecomputed(
+        left.bigramCounts,
+        right.bigramCounts
+      );
       const similarity = Math.max(charRepeatScore, diceScore);
 
       const reasons: string[] = [];
       let confidence: DuplicateConfidence | null = null;
 
-      if (strictLeft && strictLeft === strictRight) {
+      if (left.strictName && left.strictName === right.strictName) {
         confidence = "high";
         reasons.push("strict-normalized-equal");
       }
 
-      if (noiseLeft && noiseRight && noiseLeft === noiseRight) {
+      if (left.noiseName && right.noiseName && left.noiseName === right.noiseName) {
         confidence = "high";
         reasons.push("ignore-high-reasoning-tokens-equal");
       }
@@ -5408,7 +5583,12 @@ export async function detectDuplicateEntityCandidates(): Promise<DuplicateEntity
         confidence
         && !reasons.includes("strict-normalized-equal")
         && !reasons.includes("ignore-high-reasoning-tokens-equal")
-        && hasModelVersionGapHint(left.modelName, right.modelName)
+        && hasModelVersionGapHintPrecomputed(
+          left.primaryVersion,
+          right.primaryVersion,
+          left.versionFamily,
+          right.versionFamily
+        )
       ) {
         confidence = downgradeDuplicateConfidence(confidence);
         reasons.push("version-gap-hint");
@@ -5418,7 +5598,7 @@ export async function detectDuplicateEntityCandidates(): Promise<DuplicateEntity
         continue;
       }
 
-      const direction = chooseMergeDirection(left, right, modelValueCountById);
+      const direction = chooseMergeDirection(left.raw, right.raw, modelValueCountById);
 
       modelCandidates.push({
         sourceId: direction.source.id,
@@ -5437,36 +5617,59 @@ export async function detectDuplicateEntityCandidates(): Promise<DuplicateEntity
     }
   }
 
+  const benchmarkFeatures: BenchmarkFeature[] = activeBenchmarks.map((benchmark) => {
+    const compactName = compactAlphaNum(benchmark.benchmarkName);
+    const variantNoise = buildBenchmarkDuplicateVariantNoiseKey(benchmark.benchmarkName);
+    return {
+      raw: benchmark,
+      normalizedName: buildBenchmarkDuplicateKey(benchmark.benchmarkName),
+      variantNoiseKey: variantNoise.normalizedKey,
+      variantNoiseRemovedCount: variantNoise.removedTokenCount,
+      variantNoiseCompact: compactAlphaNum(variantNoise.normalizedKey),
+      typeNormalized: normalizeLooseText(benchmark.benchmarkType || "general") || "general",
+      variantConflictMatches: BENCHMARK_VARIANT_CONFLICT_HINTS.map(([leftPattern, rightPattern]) => ({
+        leftMatch: leftPattern.test(benchmark.benchmarkName),
+        rightMatch: rightPattern.test(benchmark.benchmarkName)
+      })),
+      numericTokens: extractBenchmarkNumericTokens(benchmark.benchmarkName),
+      symbolNumberPairs: extractBenchmarkSymbolNumberPairs(benchmark.benchmarkName),
+      bigramCounts: buildBigramCounts(benchmark.benchmarkName),
+      charCounts: getCharacterCounts(compactName),
+      compactLength: compactName.length
+    };
+  });
+
   const benchmarkCandidates: BenchmarkDuplicateCandidate[] = [];
 
-  for (let leftIndex = 0; leftIndex < activeBenchmarks.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < activeBenchmarks.length; rightIndex += 1) {
-      const left = activeBenchmarks[leftIndex]!;
-      const right = activeBenchmarks[rightIndex]!;
+  for (let leftIndex = 0; leftIndex < benchmarkFeatures.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < benchmarkFeatures.length; rightIndex += 1) {
+      const left = benchmarkFeatures[leftIndex]!;
+      const right = benchmarkFeatures[rightIndex]!;
 
-      const normalizedLeftName = buildBenchmarkDuplicateKey(left.benchmarkName);
-      const normalizedRightName = buildBenchmarkDuplicateKey(right.benchmarkName);
-      const sameNormalizedName = normalizedLeftName.length > 0 && normalizedLeftName === normalizedRightName;
-      const sameVariantNoiseNormalizedName = hasBenchmarkVariantNoiseNormalizedNameMatch(
-        left.benchmarkName,
-        right.benchmarkName
+      const sameNormalizedName = left.normalizedName.length > 0 && left.normalizedName === right.normalizedName;
+      const sameVariantNoiseNormalizedName = hasBenchmarkVariantNoiseNormalizedNameMatchPrecomputed(left, right);
+
+      const charRepeatScore = getCharacterRepeatScorePrecomputed(
+        left.compactLength,
+        right.compactLength,
+        left.charCounts,
+        right.charCounts
       );
-
-      const charRepeatScore = getCharacterRepeatScore(left.benchmarkName, right.benchmarkName);
-      const diceScore = getDiceSimilarity(left.benchmarkName, right.benchmarkName);
+      const diceScore = getDiceSimilarityPrecomputed(
+        left.bigramCounts,
+        right.bigramCounts
+      );
       const similarity = Math.max(charRepeatScore, diceScore);
 
       if (!sameNormalizedName && !sameVariantNoiseNormalizedName && similarity < 0.9) {
         continue;
       }
 
-      const leftType = normalizeLooseText(left.benchmarkType || "general") || "general";
-      const rightType = normalizeLooseText(right.benchmarkType || "general") || "general";
-      const sameType = leftType === rightType;
-      const hasGeneralTypeGap = leftType === "general" || rightType === "general";
-      const hasVariantConflict = hasBenchmarkVariantConflict(left.benchmarkName, right.benchmarkName);
-      const hasNumericTokenMismatch = hasBenchmarkNumericTokenMismatch(left.benchmarkName, right.benchmarkName);
-      const hasSymbolSemanticMismatch = hasBenchmarkSymbolSemanticMismatch(left.benchmarkName, right.benchmarkName);
+      const sameType = left.typeNormalized === right.typeNormalized;
+      const hasGeneralTypeGap = left.typeNormalized === "general" || right.typeNormalized === "general";
+      const hasVariantConflict = hasBenchmarkVariantConflictPrecomputed(left, right);
+      const hasNumericTokenMismatch = hasBenchmarkNumericTokenMismatchPrecomputed(left.numericTokens, right.numericTokens);
+      const hasSymbolSemanticMismatch = hasBenchmarkSymbolSemanticMismatchPrecomputed(left.symbolNumberPairs, right.symbolNumberPairs);
 
       const reasons: string[] = [];
       let confidence: DuplicateConfidence = "low";
@@ -5518,17 +5721,17 @@ export async function detectDuplicateEntityCandidates(): Promise<DuplicateEntity
         if (confidence === "high") confidence = "medium";
       }
 
-      const direction = chooseMergeDirection(left, right, benchmarkValueCountById);
+      const direction = chooseMergeDirection(left.raw, right.raw, benchmarkValueCountById);
 
       benchmarkCandidates.push({
         sourceId: direction.source.id,
         sourceName: direction.source.benchmarkName,
-        sourceType: direction.source.benchmarkType,
+        sourceType: direction.source.benchmarkType ?? "",
         sourceSourceSummary: benchmarkSourceSummaryById.get(direction.source.id) ?? "空 source",
         sourceValueCount: direction.sourceCount,
         targetId: direction.target.id,
         targetName: direction.target.benchmarkName,
-        targetType: direction.target.benchmarkType,
+        targetType: direction.target.benchmarkType ?? "",
         targetSourceSummary: benchmarkSourceSummaryById.get(direction.target.id) ?? "空 source",
         targetValueCount: direction.targetCount,
         confidence,
@@ -5559,6 +5762,7 @@ export async function detectDuplicateEntityCandidates(): Promise<DuplicateEntity
     benchmarkCandidates: benchmarkCandidates.sort(sortByConfidence).slice(0, DUPLICATE_RESULT_LIMIT)
   };
 }
+
 
 export function __normalizeDuplicateCompareTextForTest(input: string): string {
   return normalizeLooseText(input);
@@ -6339,4 +6543,8 @@ export async function __buildProviderCanonicalNameResolverForTest(
   options?: { db?: DbExecutor }
 ) {
   return buildProviderCanonicalNameResolver(rows, options);
+}
+
+export function __invalidateDuplicateCandidatesCacheForTest() {
+  invalidateVersionedCacheStore(duplicateCandidatesStore);
 }

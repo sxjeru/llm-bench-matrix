@@ -49,6 +49,12 @@ const dashboardRowsStore = createVersionedCacheStore<DashboardRow[]>();
 const dashboardStatsStore = createVersionedCacheStore<DashboardStats>();
 const sourceOptionsStore = createVersionedCacheStore<string[]>();
 
+const cacheInvalidators: Array<() => void> = [];
+
+export function registerCacheInvalidator(fn: () => void) {
+  cacheInvalidators.push(fn);
+}
+
 /**
  * Clear dashboard caches after admin write operations
  * (import, merge, delete, etc.) so subsequent reads reflect updated data.
@@ -58,6 +64,9 @@ export async function invalidateAllCaches() {
   invalidateVersionedCacheStore(dashboardStatsStore);
   invalidateVersionedCacheStore(sourceOptionsStore);
   invalidateModelPricingCaches();
+  for (const fn of cacheInvalidators) {
+    fn();
+  }
 
   await bumpCacheVersions(["dashboard", "pricing", "admin_entities"]);
 

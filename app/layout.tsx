@@ -7,7 +7,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "LLM Bench Matrix",
-  description: "Lightweight benchmark dashboard with admin gate and Drizzle-backed storage",
+  description: "Multi-source LLM benchmark matrix with heatmap visualization, model comparison and image export",
   icons: {
     icon: "/icon.svg",
     shortcut: "/icon.svg",
