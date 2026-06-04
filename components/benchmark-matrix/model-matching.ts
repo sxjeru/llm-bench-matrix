@@ -47,10 +47,25 @@ export function compareSourceTabKeysByVersion(leftKey: string, rightKey: string)
   if (
     leftVersionToken &&
     rightVersionToken &&
-    leftVersionToken.familyKey === rightVersionToken.familyKey &&
-    rightVersionToken.version !== leftVersionToken.version
+    leftVersionToken.familyKey === rightVersionToken.familyKey
   ) {
-    return rightVersionToken.version - leftVersionToken.version;
+    if (rightVersionToken.version !== leftVersionToken.version) {
+      return rightVersionToken.version - leftVersionToken.version;
+    }
+
+    const leftVariantToken = extractModelVariantToken(leftLabel);
+    const rightVariantToken = extractModelVariantToken(rightLabel);
+    if (
+      leftVariantToken &&
+      rightVariantToken &&
+      leftVariantToken.familyKey.length > 0 &&
+      leftVariantToken.familyKey === rightVariantToken.familyKey
+    ) {
+      const variantCompare = compareModelVariantPriority(leftVariantToken.variant, rightVariantToken.variant);
+      if (variantCompare !== 0) {
+        return variantCompare;
+      }
+    }
   }
 
   const labelCompare = leftLabel.localeCompare(rightLabel, "zh-Hans-CN", { numeric: true, sensitivity: "base" });
@@ -95,6 +110,8 @@ export function extractModelVariantToken(modelName: string): ModelVariantToken |
   if (!normalized) return null;
 
   const variant: ModelVariantToken["variant"] = (() => {
+    if (/\bultra\b/.test(normalized)) return "ultra";
+    if (/\bsuper\b/.test(normalized)) return "super";
     if (/\bpro\b/.test(normalized)) return "pro";
     if (MODEL_FLASH_LITE_PATTERN.test(normalized)) return "flash-lite";
     if (/\bflash\b/.test(normalized)) return "flash";
@@ -103,7 +120,7 @@ export function extractModelVariantToken(modelName: string): ModelVariantToken |
     return "base";
   })();
 
-  const variantMatch = normalized.match(MODEL_FLASH_LITE_PATTERN) ?? normalized.match(/\b(?:pro|flash|mini|nano)\b/);
+  const variantMatch = normalized.match(MODEL_FLASH_LITE_PATTERN) ?? normalized.match(/\b(?:ultra|super|pro|flash|mini|nano)\b/);
 
   const familyKey = normalized
     .slice(0, variantMatch?.index ?? normalized.length)
@@ -124,6 +141,8 @@ export function compareModelVariantPriority(
   rightVariant: ModelVariantToken["variant"]
 ): number {
   const priority: Record<ModelVariantToken["variant"], number> = {
+    ultra: 8,
+    super: 7,
     pro: 6,
     base: 5,
     flash: 4,

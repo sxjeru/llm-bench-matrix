@@ -64,6 +64,38 @@ describe("BenchmarkMatrix source tabs", () => {
     expect(claudeTabs).toEqual(["Claude Opus 4.8", "Claude Opus 4.7"]);
   });
 
+  test("Nemotron 组内页签按 ultra > super > nano 顺序排序", () => {
+    render(
+      <BenchmarkMatrix
+        sourceOptions={[
+          "text:Nemotron 3 Nano",
+          "text:Nemotron 3 Ultra",
+          "text:Nemotron 3 Super"
+        ]}
+        rows={[
+          {
+            providerName: "NVIDIA",
+            modelName: "Nemotron 3 Nano",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Nemotron 3 Nano"
+          }
+        ]}
+      />
+    );
+
+    const nemotronTabs = screen
+      .getAllByRole("tab")
+      .map((tab) => tab.textContent?.trim() ?? "")
+      .filter((label) => label.startsWith("Nemotron 3"));
+
+    expect(nemotronTabs).toEqual(["Nemotron 3 Ultra", "Nemotron 3 Super", "Nemotron 3 Nano"]);
+  });
+
   test("非全部 source 页签优先展示 source 同系列模型，再按系列覆盖率和模型名排序", () => {
     render(
       <BenchmarkMatrix
