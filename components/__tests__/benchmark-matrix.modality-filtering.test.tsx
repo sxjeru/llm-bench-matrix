@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
 import type { MatrixInputRow } from "@/components/benchmark-matrix/types";
 

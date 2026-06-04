@@ -3646,7 +3646,7 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
       .forEach((benchmark) => {
         if (!benchmark.mergedIntoBenchmarkId) return;
 
-        let targetId = benchmark.mergedIntoBenchmarkId;
+        const targetId = benchmark.mergedIntoBenchmarkId;
         let target = existingBenchmarks.find((item) => item.id === targetId) ?? null;
         const seenIds = new Set<number>([benchmark.id, targetId]);
         while (target && target.mergedIntoBenchmarkId !== null) {
