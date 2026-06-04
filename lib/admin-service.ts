@@ -2510,6 +2510,31 @@ export async function ensureModelByProviderId(input: {
   return created;
 }
 
+async function resolveActiveBenchmark(
+  benchmark: typeof benchmarks.$inferSelect,
+  executor: DbExecutor
+): Promise<typeof benchmarks.$inferSelect> {
+  let current = benchmark;
+  const seenIds = new Set<number>([current.id]);
+  while (current.mergedIntoBenchmarkId !== null) {
+    const nextId = current.mergedIntoBenchmarkId;
+    if (seenIds.has(nextId)) {
+      break;
+    }
+    seenIds.add(nextId);
+    const [next] = await executor
+      .select()
+      .from(benchmarks)
+      .where(eq(benchmarks.id, nextId))
+      .limit(1);
+    if (!next) {
+      break;
+    }
+    current = next;
+  }
+  return current;
+}
+
 export async function ensureBenchmark(
   input: EnsureBenchmarkInput,
   options?: { dedupeRule?: ModelDedupeRule; db?: DbExecutor }
@@ -2531,21 +2556,22 @@ export async function ensureBenchmark(
   const [existing] = await executor
     .select()
     .from(benchmarks)
-    .where(and(eq(benchmarks.canonicalKey, canonicalKey), isNull(benchmarks.mergedIntoBenchmarkId)))
+    .where(eq(benchmarks.canonicalKey, canonicalKey))
     .limit(1);
 
   if (existing) {
-    if (forceLowerIsBetter && existing.higherIsBetter) {
+    const activeBenchmark = await resolveActiveBenchmark(existing, executor);
+    if (forceLowerIsBetter && activeBenchmark.higherIsBetter) {
       const updatedResult = await executor
         .update(benchmarks)
         .set({ higherIsBetter: false })
-        .where(eq(benchmarks.id, existing.id))
+        .where(eq(benchmarks.id, activeBenchmark.id))
         .returning();
       const updated = firstResultRow<typeof benchmarks.$inferSelect>(updatedResult);
-      return updated ?? { ...existing, higherIsBetter: false };
+      return updated ?? { ...activeBenchmark, higherIsBetter: false };
     }
 
-    return existing;
+    return activeBenchmark;
   }
 
   const [existingByNameType] = await executor
@@ -2553,12 +2579,29 @@ export async function ensureBenchmark(
     .from(benchmarks)
     .where(and(
       eq(benchmarks.benchmarkName, cleanName),
-      eq(benchmarks.benchmarkType, cleanType),
-      isNull(benchmarks.mergedIntoBenchmarkId)
+      eq(benchmarks.benchmarkType, cleanType)
     ))
     .limit(1);
 
   if (existingByNameType) {
+    // If the found record is itself merged into another, just resolve to the
+    // active target and return it — do NOT touch the active target's canonical key,
+    // because its key belongs to a completely different name/type.
+    if (existingByNameType.mergedIntoBenchmarkId !== null) {
+      const activeBenchmark = await resolveActiveBenchmark(existingByNameType, executor);
+      if (forceLowerIsBetter && activeBenchmark.higherIsBetter) {
+        const updatedResult = await executor
+          .update(benchmarks)
+          .set({ higherIsBetter: false })
+          .where(eq(benchmarks.id, activeBenchmark.id))
+          .returning();
+        const updated = firstResultRow<typeof benchmarks.$inferSelect>(updatedResult);
+        return updated ?? { ...activeBenchmark, higherIsBetter: false };
+      }
+      return activeBenchmark;
+    }
+
+    // existingByNameType is itself active — apply the original sync logic.
     const shouldSyncCanonical = existingByNameType.canonicalKey !== canonicalKey;
     const shouldSyncLowerIsBetter = forceLowerIsBetter && existingByNameType.higherIsBetter;
 
@@ -3602,22 +3645,53 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
       .sort((left, right) => left.id - right.id)
       .forEach((benchmark) => {
         if (!benchmark.mergedIntoBenchmarkId) return;
-        const target = benchmarkByCanonicalKeyCache.get(benchmark.canonicalKey)
-          ?? existingActiveBenchmarks.find((item) => item.id === benchmark.mergedIntoBenchmarkId)
-          ?? null;
+
+        let targetId = benchmark.mergedIntoBenchmarkId;
+        let target = existingBenchmarks.find((item) => item.id === targetId) ?? null;
+        const seenIds = new Set<number>([benchmark.id, targetId]);
+        while (target && target.mergedIntoBenchmarkId !== null) {
+          const nextId = target.mergedIntoBenchmarkId;
+          if (seenIds.has(nextId)) break;
+          seenIds.add(nextId);
+          target = existingBenchmarks.find((item) => item.id === nextId) ?? null;
+        }
+
         if (!target) return;
+
         benchmarkByCanonicalKeyCache.set(benchmark.canonicalKey, target);
+
+        const benchmarkNameKey = benchmark.benchmarkName.trim().toLowerCase();
+        if (benchmarkNameKey) {
+          if (!benchmarkByNameCache.has(benchmarkNameKey)) {
+            benchmarkByNameCache.set(benchmarkNameKey, []);
+          }
+          const list = benchmarkByNameCache.get(benchmarkNameKey)!;
+          if (!list.some(item => item.id === target.id)) {
+            list.push(target);
+          }
+        }
       });
 
     const upsertBenchmarkByNameCache = (benchmark: typeof benchmarks.$inferSelect) => {
+      // Also update all existing alias entries that point to this benchmark
+      for (const [key, list] of benchmarkByNameCache.entries()) {
+        const index = list.findIndex(item => item.id === benchmark.id);
+        if (index !== -1) {
+          const next = [...list];
+          next[index] = benchmark;
+          benchmarkByNameCache.set(key, next);
+        }
+      }
+
       const benchmarkNameKey = benchmark.benchmarkName.trim().toLowerCase();
       if (!benchmarkNameKey) return;
 
       const existing = benchmarkByNameCache.get(benchmarkNameKey) ?? [];
-      const next = [...existing.filter((item) => item.id !== benchmark.id), benchmark]
-        .sort((left, right) => left.id - right.id);
+      if (!existing.some(item => item.id === benchmark.id)) {
+        const next = [...existing, benchmark].sort((left, right) => left.id - right.id);
+        benchmarkByNameCache.set(benchmarkNameKey, next);
+      }
 
-      benchmarkByNameCache.set(benchmarkNameKey, next);
       benchmarkByCanonicalKeyCache.set(benchmark.canonicalKey, benchmark);
     };
 
@@ -3701,6 +3775,18 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
           benchmark = createdBenchmark;
 
           upsertBenchmarkByNameCache(createdBenchmark);
+
+          const rowAliasKey = row.benchmarkName.trim().toLowerCase();
+          if (rowAliasKey && rowAliasKey !== createdBenchmark.benchmarkName.trim().toLowerCase()) {
+            if (!benchmarkByNameCache.has(rowAliasKey)) {
+              benchmarkByNameCache.set(rowAliasKey, []);
+            }
+            const list = benchmarkByNameCache.get(rowAliasKey)!;
+            if (!list.some(item => item.id === createdBenchmark.id)) {
+              const next = [...list, createdBenchmark].sort((left, right) => left.id - right.id);
+              benchmarkByNameCache.set(rowAliasKey, next);
+            }
+          }
         }
 
         if (!benchmark) {
