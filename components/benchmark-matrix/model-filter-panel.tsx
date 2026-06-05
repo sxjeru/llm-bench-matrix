@@ -46,7 +46,7 @@ export function ModelFilterPanel({
   toggleModel
 }: ModelFilterPanelProps) {
   return (
-    <div className={`${isFullscreen ? "mt-2" : ""} rounded-box border border-base-300/70 bg-base-200/35 p-3`}>
+    <div className={`${isFullscreen ? "mt-2" : ""} rounded-box border border-base-300/70 bg-base-200/35 p-3`} data-nosnippet>
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs opacity-80">
         <Layers size={14} />
         <span>模型层叠筛选：点击可展开具体模型列表</span>

@@ -34,7 +34,7 @@ export function HeatmapPanel({
   resetHeatmapPaletteToDefault
 }: HeatmapPanelProps) {
   return (
-    <div className="heatmap-panel">
+    <div className="heatmap-panel" data-nosnippet>
       <div className="heatmap-panel-top">
         <div className="heatmap-panel-title-wrap">
           <span className="heatmap-panel-title">热力图渐变设置</span>

@@ -31,7 +31,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="container">{children}</div>
         </main>
 
-        <footer className="site-footnote">
+        <footer className="site-footnote" data-nosnippet>
           <div className="container">
             <div className="site-footnote-card">
               {process.env.NEXT_PUBLIC_VERCOUNT_SCRIPT_URL && (
