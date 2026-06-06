@@ -37,7 +37,8 @@ vi.mock("@/lib/db/queries", () => ({
     benchmarkCount: 27,
     totalRecords: 36
   })),
-  getSourceOptions: vi.fn(async () => ["text:only", "text:another"])
+  getSourceOptions: vi.fn(async () => ["text:only", "text:another"]),
+  getSettings: vi.fn(async () => [])
 }));
 
 describe("HomePage metrics", () => {

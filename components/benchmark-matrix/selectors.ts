@@ -414,13 +414,15 @@ export function buildFilteredRows(
   allRowsIndex: AllRowsIndex,
   selectedModelSet: Set<string>,
   selectedModels: string[],
-  baseBenchmarkKeySet: Set<string>
+  baseBenchmarkKeySet: Set<string>,
+  benchmarkSearchQuery: string = ""
 ): MatrixInputRow[] {
   if (selectedModelSet.size === 0 || baseBenchmarkKeySet.size === 0) {
     return [];
   }
 
   const result: MatrixInputRow[] = [];
+  const normalizedQuery = benchmarkSearchQuery.trim().toLowerCase();
 
   selectedModels.forEach((modelName) => {
     const indexedRows = allRowsIndex.rowsByModel.get(modelName);
@@ -430,6 +432,13 @@ export function buildFilteredRows(
 
     indexedRows.forEach((indexed) => {
       if (baseBenchmarkKeySet.has(indexed.matrixKey)) {
+        if (normalizedQuery) {
+          const matchName = indexed.row.benchmarkName?.toLowerCase().includes(normalizedQuery);
+          const matchType = indexed.row.benchmarkType?.toLowerCase().includes(normalizedQuery);
+          if (!matchName && !matchType) {
+            return;
+          }
+        }
         result.push(indexed.row);
       }
     });

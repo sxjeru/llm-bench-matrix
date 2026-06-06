@@ -3,6 +3,7 @@
 /* eslint-disable react-hooks/preserve-manual-memoization -- This large matrix keeps hand-tuned memoization to preserve table behavior. */
 
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -185,6 +186,18 @@ export function BenchmarkMatrix({
   const [supportsAvifExport, setSupportsAvifExport] = useState(false);
   const [isModelFilterExpanded, setIsModelFilterExpanded] = useState(false);
   const [expandedLowCoverageProviders, setExpandedLowCoverageProviders] = useState<Record<string, boolean>>({});
+  const [benchmarkSearchInputValue, setBenchmarkSearchInputValue] = useState("");
+  const [benchmarkSearchQuery, setBenchmarkSearchQuery] = useState("");
+  const preSearchShowLowCoverageRowsRef = useRef<boolean | null>(null);
+  const handleSetShowLowCoverageRows = useCallback((value: boolean | ((prev: boolean) => boolean)) => {
+    setShowLowCoverageRows((prev) => {
+      const next = typeof value === "function" ? value(prev) : value;
+      if (benchmarkSearchInputValue.trim().length > 0) {
+        preSearchShowLowCoverageRowsRef.current = next;
+      }
+      return next;
+    });
+  }, [benchmarkSearchInputValue]);
   const [overflowSourceKeys, setOverflowSourceKeys] = useState<string[]>([]);
   const [isSourceOverflowMenuOpen, setIsSourceOverflowMenuOpen] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
@@ -683,6 +696,30 @@ export function BenchmarkMatrix({
   }, []);
 
   useEffect(() => {
+    if (benchmarkSearchInputValue.trim().length === 0) {
+      if (preSearchShowLowCoverageRowsRef.current !== null) {
+        setShowLowCoverageRows(preSearchShowLowCoverageRowsRef.current);
+        preSearchShowLowCoverageRowsRef.current = null;
+      }
+      setBenchmarkSearchQuery("");
+      return;
+    }
+
+    if (preSearchShowLowCoverageRowsRef.current === null) {
+      preSearchShowLowCoverageRowsRef.current = showLowCoverageRows;
+    }
+
+    const timer = setTimeout(() => {
+      if (benchmarkSearchInputValue.includes("'")) {
+        return;
+      }
+      setBenchmarkSearchQuery(benchmarkSearchInputValue);
+      setShowLowCoverageRows(true);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [benchmarkSearchInputValue]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
 
@@ -700,8 +737,8 @@ export function BenchmarkMatrix({
   const modelProviderBrandColorMap = allRowsIndex.modelProviderBrandColorMap;
 
   const filteredRows = useMemo(
-    () => buildFilteredRows(allRowsIndex, selectedModelSet, selectedModels, baseBenchmarkKeySet),
-    [allRowsIndex, selectedModelSet, selectedModels, baseBenchmarkKeySet]
+    () => buildFilteredRows(allRowsIndex, selectedModelSet, selectedModels, baseBenchmarkKeySet, benchmarkSearchQuery),
+    [allRowsIndex, selectedModelSet, selectedModels, baseBenchmarkKeySet, benchmarkSearchQuery]
   );
 
   const coveragePrunedRows = useMemo(
@@ -1137,7 +1174,7 @@ export function BenchmarkMatrix({
         showDuplicateRows={showDuplicateRows}
         setShowDuplicateRows={setShowDuplicateRows}
         showLowCoverageRows={showLowCoverageRows}
-        setShowLowCoverageRows={setShowLowCoverageRows}
+        setShowLowCoverageRows={handleSetShowLowCoverageRows}
         showPriceRows={showPriceRows}
         setShowPriceRows={setShowPriceRows}
         hasPriceData={modelPrices.length > 0}
@@ -1180,6 +1217,8 @@ export function BenchmarkMatrix({
         setExpandedLowCoverageProviders={setExpandedLowCoverageProviders}
         toggleProvider={toggleProvider}
         toggleModel={toggleModel}
+        benchmarkSearchInputValue={benchmarkSearchInputValue}
+        setBenchmarkSearchInputValue={setBenchmarkSearchInputValue}
       />
 
       <div

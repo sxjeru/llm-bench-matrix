@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Filter, Layers } from "lucide-react";
+import { ChevronDown, ChevronUp, Filter, Layers, Search, X } from "lucide-react";
 import { resolveProviderBrandColorForDarkTheme } from "@/lib/provider-config";
 import type { Dispatch, SetStateAction } from "react";
 import { PROVIDER_MODEL_AUTO_COLLAPSE_LIMIT } from "./constants";
@@ -23,6 +23,8 @@ type ModelFilterPanelProps = {
   setExpandedLowCoverageProviders: Dispatch<SetStateAction<Record<string, boolean>>>;
   toggleProvider: (providerName: string, checked: boolean) => void;
   toggleModel: (modelName: string, checked: boolean) => void;
+  benchmarkSearchInputValue: string;
+  setBenchmarkSearchInputValue: (value: string) => void;
 };
 
 export function ModelFilterPanel({
@@ -43,7 +45,9 @@ export function ModelFilterPanel({
   expandedLowCoverageProviders,
   setExpandedLowCoverageProviders,
   toggleProvider,
-  toggleModel
+  toggleModel,
+  benchmarkSearchInputValue,
+  setBenchmarkSearchInputValue
 }: ModelFilterPanelProps) {
   return (
     <div className={`${isFullscreen ? "mt-2" : ""} rounded-box border border-base-300/70 bg-base-200/35 p-3`} data-nosnippet>
@@ -61,6 +65,27 @@ export function ModelFilterPanel({
         </button>
 
         <div className="ml-auto flex flex-wrap items-center gap-2 opacity-100">
+          <div className="relative flex items-center">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-50 pointer-events-none" />
+            <input
+              type="text"
+              className="input input-xs input-bordered pl-7 pr-7 w-36 bg-base-100/50 transition-all focus:w-48"
+              placeholder="筛选 Benchmark"
+              value={benchmarkSearchInputValue}
+              onChange={(e) => setBenchmarkSearchInputValue(e.target.value)}
+            />
+            {benchmarkSearchInputValue && (
+              <button
+                type="button"
+                aria-label="清除搜索"
+                className="btn btn-xs btn-circle btn-ghost absolute right-1.5 top-1/2 -translate-y-1/2 h-5 w-5 min-h-0 p-0 text-base-content/50 hover:text-base-content hover:bg-base-300/30 border-none"
+                onClick={() => setBenchmarkSearchInputValue("")}
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+
           <div className="flex items-center gap-1 text-xs opacity-75">
             <Filter size={14} />
             已选模型 {selectedModelCount}/{allModelCount}
