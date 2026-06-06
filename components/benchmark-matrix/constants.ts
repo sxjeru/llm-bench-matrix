@@ -20,6 +20,7 @@ export const MODEL_ORDER_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:model-order-b
 export const COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:column-width-by-source";
 export const HEATMAP_PALETTE_STORAGE_KEY = "benchmark-matrix:heatmap-palette";
 export const EXPORT_PRESET_STORAGE_KEY = "benchmark-matrix:export-preset";
+export const EXPORT_FOOTNOTE_ENABLED_STORAGE_KEY = "benchmark-matrix:export-footnote-enabled";
 export const CATEGORY_COLUMN_WIDTH_KEY = "__CATEGORY__";
 export const BENCHMARK_COLUMN_WIDTH_KEY = "__BENCHMARK__";
 export const DEFAULT_CATEGORY_COLUMN_WIDTH = 150;

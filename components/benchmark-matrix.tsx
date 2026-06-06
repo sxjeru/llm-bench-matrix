@@ -131,7 +131,9 @@ export function BenchmarkMatrix({
   rows,
   allRows = rows,
   sourceOptions: allSourceOptions = [],
-  modelPrices = []
+  modelPrices = [],
+  exportFootnoteText,
+  exportFootnoteAlign
 }: Props) {
   const sectionRef = useRef<HTMLElement | null>(null);
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
@@ -177,6 +179,8 @@ export function BenchmarkMatrix({
   const [heatmapAlpha, setHeatmapAlpha] = useState(DEFAULT_HEATMAP_ALPHA);
   const [heatmapPresetSelection, setHeatmapPresetSelection] = useState<HeatmapPresetSelection>(DEFAULT_HEATMAP_PRESET_KEY);
   const [exportPreset, setExportPreset] = useState<ExportPresetKey>(DEFAULT_EXPORT_PRESET);
+  const exportIncludeFootnoteLoadedRef = useRef(false);
+  const [exportIncludeFootnote, setExportIncludeFootnote] = useState(true);
   const [supportsWebpExport, setSupportsWebpExport] = useState(true);
   const [supportsAvifExport, setSupportsAvifExport] = useState(false);
   const [isModelFilterExpanded, setIsModelFilterExpanded] = useState(false);
@@ -322,7 +326,10 @@ export function BenchmarkMatrix({
   useExportPresetStorage({
     exportPresetLoadedRef,
     exportPreset,
-    setExportPreset
+    setExportPreset,
+    exportIncludeFootnoteLoadedRef,
+    exportIncludeFootnote,
+    setExportIncludeFootnote
   });
 
   useHeatmapPaletteStorage({
@@ -1122,6 +1129,9 @@ export function BenchmarkMatrix({
         exportPreset={exportPreset}
         setExportPreset={setExportPreset}
         availableExportPresetKeys={availableExportPresetKeys}
+        exportIncludeFootnote={exportIncludeFootnote}
+        setExportIncludeFootnote={setExportIncludeFootnote}
+        hasFootnoteText={Boolean(exportFootnoteText)}
         showCategory={showCategory}
         setShowCategory={setShowCategory}
         showDuplicateRows={showDuplicateRows}
@@ -1174,6 +1184,7 @@ export function BenchmarkMatrix({
 
       <div
         ref={tableViewportRef}
+        data-export-footnote={exportIncludeFootnote ? exportFootnoteText : undefined}
         style={{
           overflow: "auto",
           maxHeight: isFullscreen
@@ -2189,6 +2200,30 @@ export function BenchmarkMatrix({
             ) : null}
           </tbody>
         </table>
+        {exportIncludeFootnote && exportFootnoteText && isExportCaptureMode ? (() => {
+          const now = new Date();
+          const formattedTime = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, "0")}.${String(now.getDate()).padStart(2, "0")}`;
+          const processedText = exportFootnoteText
+            .replace(/\{time\}/g, formattedTime)
+            .replace(/\{model_count\}/g, String(modelColumns.length))
+            .replace(/\{data_source\}/g, activeSource === SOURCE_ALL ? "全数据源" : activeSource);
+          return (
+            <div
+              data-export-footnote-element="true"
+              style={{
+                padding: "2.5px 6px 1.5px 6px",
+                textAlign: exportFootnoteAlign || "center",
+                fontSize: "12px",
+                color: "rgba(255, 255, 255, 0.5)",
+                whiteSpace: "pre-wrap",
+                width: "max-content",
+                minWidth: "100%"
+              }}
+            >
+              {processedText}
+            </div>
+          );
+        })() : null}
       </div>
 
       <HeatmapPanel

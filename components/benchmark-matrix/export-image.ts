@@ -191,9 +191,14 @@ export function resolveCaptureDimensions(element: HTMLElement): { width: number;
     ? Math.max(table.scrollWidth || 0, table.clientWidth || 0)
     : Math.max(element.scrollWidth || 0, element.clientWidth || 0);
 
-  const heightSource = table
+  let heightSource = table
     ? Math.max(table.scrollHeight || 0, table.clientHeight || 0)
     : Math.max(element.scrollHeight || 0, element.clientHeight || 0);
+
+  const footnoteEl = element.querySelector("[data-export-footnote-element]") as HTMLElement | null;
+  if (footnoteEl) {
+    heightSource += footnoteEl.offsetHeight || footnoteEl.scrollHeight || 0;
+  }
 
   return {
     width: Math.max(1, Math.round(widthSource)),

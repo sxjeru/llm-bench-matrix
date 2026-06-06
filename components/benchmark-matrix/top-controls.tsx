@@ -51,6 +51,9 @@ type TopControlsProps = {
   exportPreset: ExportPresetKey;
   setExportPreset: Dispatch<SetStateAction<ExportPresetKey>>;
   availableExportPresetKeys: ExportPresetKey[];
+  exportIncludeFootnote: boolean;
+  setExportIncludeFootnote: Dispatch<SetStateAction<boolean>>;
+  hasFootnoteText: boolean;
   showCategory: boolean;
   setShowCategory: Dispatch<SetStateAction<boolean>>;
   showDuplicateRows: boolean;
@@ -98,6 +101,9 @@ export function BenchmarkMatrixTopControls({
   exportPreset,
   setExportPreset,
   availableExportPresetKeys,
+  exportIncludeFootnote,
+  setExportIncludeFootnote,
+  hasFootnoteText,
   showCategory,
   setShowCategory,
   showDuplicateRows,
@@ -372,6 +378,17 @@ export function BenchmarkMatrixTopControls({
               <Copy size={14} />
               {isCopyingTableImage ? "复制中..." : "复制到剪贴板"}
             </button>
+            {hasFootnoteText && (
+              <label className="label mt-1 cursor-pointer justify-start gap-2 px-3 hover:bg-base-200/50">
+                <input
+                  type="checkbox"
+                  className="checkbox checkbox-xs"
+                  checked={exportIncludeFootnote}
+                  onChange={(e) => setExportIncludeFootnote(e.target.checked)}
+                />
+                <span className="label-text text-xs">包含底部脚注</span>
+              </label>
+            )}
           </div>
         </div>
 

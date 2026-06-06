@@ -96,6 +96,8 @@ export type Props = {
   allRows?: MatrixInputRow[];
   sourceOptions?: string[];
   modelPrices?: ModelPriceInfo[];
+  exportFootnoteText?: string;
+  exportFootnoteAlign?: "left" | "center" | "right";
 };
 
 export type ModelPriceInfo = {

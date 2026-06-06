@@ -11,7 +11,8 @@ import {
   SHOW_CATEGORY_STORAGE_KEY,
   SHOW_DUPLICATE_STORAGE_KEY,
   SHOW_PRICE_ROWS_STORAGE_KEY,
-  SHOW_SOURCE_VALUES_STORAGE_KEY
+  SHOW_SOURCE_VALUES_STORAGE_KEY,
+  EXPORT_FOOTNOTE_ENABLED_STORAGE_KEY
 } from "./constants";
 import { clampHeatmapAlpha, normalizeHexColor } from "./colors";
 import { isExportPresetKey } from "./export-image";
@@ -57,6 +58,9 @@ type ExportPresetStorageOptions = {
   exportPresetLoadedRef: MutableRefValue<boolean>;
   exportPreset: ExportPresetKey;
   setExportPreset: Dispatch<SetStateAction<ExportPresetKey>>;
+  exportIncludeFootnoteLoadedRef: MutableRefValue<boolean>;
+  exportIncludeFootnote: boolean;
+  setExportIncludeFootnote: Dispatch<SetStateAction<boolean>>;
 };
 
 type HeatmapPaletteStorageOptions = {
@@ -370,7 +374,10 @@ export function useMatrixPreferenceStorage({
 export function useExportPresetStorage({
   exportPresetLoadedRef,
   exportPreset,
-  setExportPreset
+  setExportPreset,
+  exportIncludeFootnoteLoadedRef,
+  exportIncludeFootnote,
+  setExportIncludeFootnote
 }: ExportPresetStorageOptions) {
   useEffect(() => {
     const nextExportPreset = loadExportPreset();
@@ -392,6 +399,23 @@ export function useExportPresetStorage({
       // ignore storage access errors gracefully
     }
   }, [exportPreset, exportPresetLoadedRef]);
+
+  useEffect(() => {
+    const nextIncludeFootnote = loadStoredBoolean(EXPORT_FOOTNOTE_ENABLED_STORAGE_KEY);
+
+    enqueueStateUpdate(() => {
+      if (nextIncludeFootnote !== null) {
+        setExportIncludeFootnote(nextIncludeFootnote);
+      }
+      exportIncludeFootnoteLoadedRef.current = true;
+    });
+  }, [setExportIncludeFootnote, exportIncludeFootnoteLoadedRef]);
+
+  useEffect(() => {
+    if (!exportIncludeFootnoteLoadedRef.current) return;
+
+    saveStoredBoolean(EXPORT_FOOTNOTE_ENABLED_STORAGE_KEY, exportIncludeFootnote);
+  }, [exportIncludeFootnote, exportIncludeFootnoteLoadedRef]);
 }
 
 export function useHeatmapPaletteStorage({

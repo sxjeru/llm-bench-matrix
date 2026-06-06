@@ -3203,6 +3203,8 @@ export function AdminConsole({
             onSaveSetting={onSaveSetting}
             onClearDatabase={onClearDatabase}
             sortedSettings={sortedSettings}
+            notifySuccess={notifySuccess}
+            notifyError={notifyError}
           />
         ) : null}
       </div>

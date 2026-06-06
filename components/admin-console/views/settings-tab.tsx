@@ -1,8 +1,9 @@
 "use client";
 
-import type { Dispatch, FormEvent, SetStateAction } from "react";
-import { Settings2 } from "lucide-react";
+import { useState, type Dispatch, type FormEvent, type SetStateAction } from "react";
+import { Settings2, HelpCircle } from "lucide-react";
 import type { ModelDedupeRule } from "../types";
+import { postJson } from "../api";
 
 type SettingsTabProps = {
   modelDedupeRule: ModelDedupeRule;
@@ -25,6 +26,8 @@ type SettingsTabProps = {
   onSaveSetting: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
   onClearDatabase: () => void;
   sortedSettings: [string, unknown][];
+  notifySuccess: (message: string, details?: string[]) => void;
+  notifyError: (message: string, details?: string[]) => void;
 };
 
 export function SettingsTab({
@@ -47,14 +50,105 @@ export function SettingsTab({
   setSettingNote,
   onSaveSetting,
   onClearDatabase,
-  sortedSettings
+  sortedSettings,
+  notifySuccess,
+  notifyError
 }: SettingsTabProps) {
+  const [footnoteText, setFootnoteText] = useState(() => {
+    const footnoteSetting = sortedSettings.find(([key]) => key === "export_footnote_text");
+    const val = footnoteSetting?.[1];
+    if (typeof val === "string") return val;
+    if (val && typeof val === "object") {
+      const config = val as Record<string, unknown>;
+      if (typeof config.text === "string") return config.text;
+    }
+    return "";
+  });
+  const [footnoteAlign, setFootnoteAlign] = useState<"left" | "center" | "right">(() => {
+    const footnoteSetting = sortedSettings.find(([key]) => key === "export_footnote_text");
+    const val = footnoteSetting?.[1];
+    if (val && typeof val === "object") {
+      const config = val as Record<string, unknown>;
+      if (typeof config.align === "string" && ["left", "center", "right"].includes(config.align)) {
+        return config.align as "left" | "center" | "right";
+      }
+    }
+    return "center";
+  });
+  const [isSavingFootnote, setIsSavingFootnote] = useState(false);
+
+  async function handleSaveFootnote() {
+    if (isSavingFootnote) return;
+    setIsSavingFootnote(true);
+    try {
+      await postJson("/api/admin/settings", {
+        key: "export_footnote_text",
+        valueJson: {
+          text: footnoteText,
+          align: footnoteAlign
+        },
+        note: "图片导出时的底部脚注",
+        updatedBy: "admin"
+      });
+      notifySuccess("脚注内容已保存。");
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "保存失败");
+    } finally {
+      setIsSavingFootnote(false);
+    }
+  }
+
   return (
     <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
       <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold">
         <Settings2 size={18} />
         Settings
       </h3>
+
+      <div className="mb-5 rounded-box border border-base-300 bg-base-200/50 p-4">
+        <h4 className="mb-2 flex items-center gap-2 font-semibold">
+          图片导出脚注
+          <div 
+            className="tooltip tooltip-right font-normal" 
+            data-tip="支持占位符：{time} (当前日期)、 {model_count} (当前显示的模型数)、{data_source} (当前选定的数据源)"
+          >
+            <HelpCircle size={16} className="text-base-content/50 hover:text-base-content/80 transition-colors cursor-help" />
+          </div>
+        </h4>
+        <p className="mb-3 text-sm opacity-80">
+          设置导出矩阵图片时底部显示的脚注内容。可留空不显示脚注。
+        </p>
+        <div className="flex flex-col gap-3">
+          <textarea
+            className="textarea textarea-bordered w-full min-h-[80px]"
+            value={footnoteText}
+            onChange={(e) => setFootnoteText(e.target.value)}
+            placeholder="例如：数据来源：xxx评测集 | 制表时间：{time}"
+          />
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium whitespace-nowrap">对齐方式：</span>
+              <select
+                className="select select-bordered select-sm"
+                value={footnoteAlign}
+                onChange={(e) => setFootnoteAlign(e.target.value as "left" | "center" | "right")}
+              >
+                <option value="left">居左</option>
+                <option value="center">居中</option>
+                <option value="right">居右</option>
+              </select>
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={handleSaveFootnote}
+              disabled={isSavingFootnote}
+            >
+              {isSavingFootnote ? "保存中..." : "保存脚注配置"}
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div className="mb-5 rounded-box border border-base-300 bg-base-200/50 p-4">
         <h4 className="mb-2 font-semibold">模型重复识别规则</h4>

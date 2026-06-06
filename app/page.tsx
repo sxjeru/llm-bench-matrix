@@ -1,5 +1,5 @@
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
-import { getDashboardRows, getDashboardStats, getSourceOptions } from "@/lib/db/queries";
+import { getDashboardRows, getDashboardStats, getSourceOptions, getSettings } from "@/lib/db/queries";
 import { getModelPricingRows } from "@/lib/model-pricing";
 import { Suspense } from "react";
 
@@ -8,11 +8,12 @@ export const revalidate = 60;
 export default async function HomePage() {
   const rowsPromise = getDashboardRows(null, null);
 
-  const [rows, sourceOptions, stats, modelPrices] = await Promise.all([
+  const [rows, sourceOptions, stats, modelPrices, settings] = await Promise.all([
     rowsPromise,
     getSourceOptions(),
     getDashboardStats(null),
-    getModelPricingRows()
+    getModelPricingRows(),
+    getSettings()
   ]);
 
   const toMatrixRow = (row: (typeof rows)[number]) => ({
@@ -38,6 +39,20 @@ export default async function HomePage() {
   });
 
   const mappedRows = rows.map(toMatrixRow);
+  
+  const rawFootnote = settings.export_footnote_text;
+  let exportFootnoteText: string | undefined = undefined;
+  let exportFootnoteAlign: "left" | "center" | "right" = "center";
+
+  if (typeof rawFootnote === "string") {
+    exportFootnoteText = rawFootnote;
+  } else if (rawFootnote && typeof rawFootnote === "object") {
+    const config = rawFootnote as Record<string, unknown>;
+    exportFootnoteText = typeof config.text === "string" ? config.text : undefined;
+    exportFootnoteAlign = ["left", "center", "right"].includes(config.align as string) 
+      ? (config.align as "left" | "center" | "right") 
+      : "center";
+  }
 
   return (
     <>
@@ -77,6 +92,8 @@ export default async function HomePage() {
           rows={mappedRows}
           allRows={mappedRows}
           modelPrices={modelPrices}
+          exportFootnoteText={exportFootnoteText}
+          exportFootnoteAlign={exportFootnoteAlign}
         />
       </Suspense>
 
