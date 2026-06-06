@@ -14,6 +14,29 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => mockSearchParams
 }));
 
+let capturedFootnoteText = "";
+
+vi.mock("html2canvas-pro", () => {
+  return {
+    default: vi.fn().mockImplementation((element, options) => {
+      if (options && typeof options.onclone === "function") {
+        options.onclone(document);
+      }
+      const footnoteEl = document.querySelector('[data-export-footnote-element="true"]');
+      if (footnoteEl) {
+        capturedFootnoteText = footnoteEl.textContent || "";
+      }
+      const canvas = document.createElement("canvas");
+      canvas.toBlob = (callback) => {
+        if (callback) {
+          callback(new Blob([], { type: "image/png" }));
+        }
+      };
+      return Promise.resolve(canvas);
+    })
+  };
+});
+
 const rows = [
   // Bench-High (all 5 models have it, coverage = 100%)
   { providerName: "OpenAI", modelName: "Model A", benchmarkName: "Bench-High", benchmarkType: "General", benchmarkCanonicalKey: "bench-high:general", benchTime: "2026-04-06T00:00:00.000Z", valueRaw: "90", valueNum: 90, valueNote: null, source: "text:S1" },
@@ -152,5 +175,49 @@ describe("BenchmarkMatrix 搜索筛选与低覆盖率状态恢复", () => {
     // 恢复后由于被手动修改为隐藏，Bench-Low 仍保持隐藏
     expect(screen.queryByText("Bench-Low")).not.toBeInTheDocument();
     expect(screen.getByText("Bench-High")).toBeInTheDocument();
+  });
+
+  test("脚注占位符替换：当前日期 {time} 格式为 YYYY-MM-DD，source 最后更新日期 {source_time} 正确计算并替换", async () => {
+    vi.setSystemTime(new Date("2026-06-06T12:00:00.000Z"));
+
+    const customRows = [
+      { providerName: "OpenAI", modelName: "Model A", benchmarkName: "Bench-1", benchmarkType: "General", benchmarkCanonicalKey: "bench-1:general", benchTime: "2026-01-10T00:00:00.000Z", valueRaw: "90", valueNum: 90, valueNote: null, source: "text:S1" },
+      { providerName: "OpenAI", modelName: "Model A", benchmarkName: "Bench-2", benchmarkType: "General", benchmarkCanonicalKey: "bench-2:general", benchTime: "2026-01-20T00:00:00.000Z", valueRaw: "80", valueNum: 80, valueNote: null, source: "text:S1" },
+      { providerName: "OpenAI", modelName: "Model A", benchmarkName: "Bench-3", benchmarkType: "General", benchmarkCanonicalKey: "bench-3:general", benchTime: "2026-01-15T00:00:00.000Z", valueRaw: "70", valueNum: 70, valueNote: null, source: "text:S2" }
+    ] as const;
+
+    const footnoteText = "制表时间：{time} | 数据更新时间：{source_time} | 数据源：{data_source}";
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:S1", "text:S2"]}
+        rows={[...customRows]}
+        exportFootnoteText={footnoteText}
+      />
+    );
+
+    const exportButton = screen.getByRole("button", { name: "导出图片" });
+    fireEvent.click(exportButton);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+
+    // 默认是全部页签，因此数据源占位符是“全数据源”，数据更新日期是所有数据的最大更新日期 2026-01-20
+    expect(capturedFootnoteText).toBe("制表时间：2026-06-06 | 数据更新时间：2026-01-20 | 数据源：全数据源");
+
+    // 切换到 S2 页签
+    const s2Tab = screen.getByRole("tab", { name: "S2" });
+    fireEvent.click(s2Tab);
+
+    // 再次点击导出
+    fireEvent.click(exportButton);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+
+    // 切换后，数据更新日期应该是 S2 的最大更新日期 2026-01-15，数据源是 text:S2
+    expect(capturedFootnoteText).toBe("制表时间：2026-06-06 | 数据更新时间：2026-01-15 | 数据源：text:S2");
+
+    vi.useRealTimers();
   });
 });

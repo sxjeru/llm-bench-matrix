@@ -110,7 +110,7 @@ export function SettingsTab({
           图片导出脚注
           <div 
             className="tooltip tooltip-right font-normal" 
-            data-tip="支持占位符：{time} (当前日期)、 {model_count} (当前显示的模型数)、{data_source} (当前选定的数据源)"
+            data-tip="支持占位符：{time} (当前日期)、 {source_time} (数据源最后更新日期)、{model_count} (当前显示的模型数)、{data_source} (当前选定的数据源)"
           >
             <HelpCircle size={16} className="text-base-content/50 hover:text-base-content/80 transition-colors cursor-help" />
           </div>

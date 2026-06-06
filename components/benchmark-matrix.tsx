@@ -2241,9 +2241,32 @@ export function BenchmarkMatrix({
         </table>
         {exportIncludeFootnote && exportFootnoteText && isExportCaptureMode ? (() => {
           const now = new Date();
-          const formattedTime = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, "0")}.${String(now.getDate()).padStart(2, "0")}`;
+          const formattedTime = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+          
+          let sourceTime = "";
+          const relevantRows = activeSource === SOURCE_ALL 
+            ? allRows 
+            : allRows.filter((row) => row.source === activeSource);
+          
+          if (relevantRows.length > 0) {
+            let maxTimeMs = 0;
+            relevantRows.forEach((row) => {
+              if (row.benchTime) {
+                const timeMs = new Date(row.benchTime).getTime();
+                if (!isNaN(timeMs) && timeMs > maxTimeMs) {
+                  maxTimeMs = timeMs;
+                }
+              }
+            });
+            if (maxTimeMs > 0) {
+              const maxDate = new Date(maxTimeMs);
+              sourceTime = `${maxDate.getFullYear()}-${String(maxDate.getMonth() + 1).padStart(2, "0")}-${String(maxDate.getDate()).padStart(2, "0")}`;
+            }
+          }
+
           const processedText = exportFootnoteText
             .replace(/\{time\}/g, formattedTime)
+            .replace(/\{source_time\}/g, sourceTime)
             .replace(/\{model_count\}/g, String(modelColumns.length))
             .replace(/\{data_source\}/g, activeSource === SOURCE_ALL ? "全数据源" : activeSource);
           return (
