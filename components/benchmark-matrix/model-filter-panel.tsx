@@ -65,7 +65,7 @@ export function ModelFilterPanel({
         </button>
 
         <div className="ml-auto flex flex-wrap items-center gap-2 opacity-100">
-          <div className="relative flex items-center">
+          <div className="relative flex items-center mr-2">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-50 pointer-events-none" />
             <input
               type="text"
