@@ -2268,7 +2268,8 @@ export function BenchmarkMatrix({
             .replace(/\{time\}/g, formattedTime)
             .replace(/\{source_time\}/g, sourceTime)
             .replace(/\{model_count\}/g, String(modelColumns.length))
-            .replace(/\{data_source\}/g, activeSource === SOURCE_ALL ? "全数据源" : activeSource);
+            .replace(/\{data_source\}/g, activeSource === SOURCE_ALL ? "全数据源" : sourceTabDisplayLabel(activeSource).trim())
+            .replace(/\{origin_source\}/g, activeSource);
           return (
             <div
               data-export-footnote-element="true"
