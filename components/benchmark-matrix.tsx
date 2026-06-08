@@ -1241,10 +1241,10 @@ export function BenchmarkMatrix({
                     position: "sticky",
                     top: 0,
                     zIndex: 22,
-                    width: 72,
-                    minWidth: 72,
-                    maxWidth: 72,
-                    padding: "6px 6px",
+                    width: 52,
+                    minWidth: 52,
+                    maxWidth: 52,
+                    padding: "6px 2px",
                     background: "rgba(20, 27, 45, 0.96)",
                     backdropFilter: "blur(6px)",
                     whiteSpace: "nowrap"
@@ -1252,7 +1252,8 @@ export function BenchmarkMatrix({
                 >
                 <details className="dropdown dropdown-bottom" data-modality-filter="true">
                   <summary
-                    className="btn btn-ghost btn-xs h-auto min-h-0 px-1 normal-case text-inherit"
+                    className="btn btn-ghost btn-xs h-auto min-h-0 px-0.5 normal-case text-inherit text-[10px]"
+                    style={{ letterSpacing: "-0.03em" }}
                     onClick={(event) => {
                       if (!shouldSuppressHeaderInteractions()) return;
                       event.preventDefault();
@@ -1733,16 +1734,16 @@ export function BenchmarkMatrix({
                 >
                   <td
                     style={{
-                      width: 72,
-                      minWidth: 72,
-                      maxWidth: 72,
-                      padding: "4px 6px",
+                      width: 52,
+                      minWidth: 52,
+                      maxWidth: 52,
+                      padding: "4px 2px",
                       textAlign: "center",
                       ...rowCellLineStyle,
                       ...rowLeftEdgeStyle
                     }}
                   >
-                    <div className="flex flex-wrap items-center justify-center gap-1">
+                    <div className="flex flex-wrap items-center justify-center gap-0.5">
                       {matrixRow.modalities.map((modality, idx) =>
                         renderModalityBadge(modality, `${rowKey}-modality-${modality}-${idx}`)
                       )}
@@ -2114,10 +2115,10 @@ export function BenchmarkMatrix({
               >
                 <td
                   style={{
-                    width: 72,
-                    minWidth: 72,
-                    maxWidth: 72,
-                    padding: "4px 6px",
+                    width: 52,
+                    minWidth: 52,
+                    maxWidth: 52,
+                    padding: "4px 2px",
                     textAlign: "center",
                     borderTop: "1px solid rgba(147, 197, 253, 0.35)",
                     backgroundColor: "rgba(18, 31, 52, 0.92)",
