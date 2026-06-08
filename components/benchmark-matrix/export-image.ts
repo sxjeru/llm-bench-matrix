@@ -122,18 +122,27 @@ export function applyExportSourceFrameFallback(root: HTMLElement, color: string,
 
   sourceMatchedCells.forEach((cell) => {
     cell.style.boxShadow = "none";
+    const computedStyle = cell.ownerDocument.defaultView?.getComputedStyle(cell);
 
     if (cell.dataset.sourceMatchFirst === "1") {
       cell.style.borderLeft = `${width}px solid ${color}`;
+      const padding = parseFloat(cell.style.paddingLeft || computedStyle?.paddingLeft || "0");
+      if (padding >= width) cell.style.paddingLeft = `${padding - width}px`;
     }
     if (cell.dataset.sourceMatchLast === "1") {
       cell.style.borderRight = `${width}px solid ${color}`;
+      const padding = parseFloat(cell.style.paddingRight || computedStyle?.paddingRight || "0");
+      if (padding >= width) cell.style.paddingRight = `${padding - width}px`;
     }
     if (cell.tagName === "TH") {
       cell.style.borderTop = `${width}px solid ${color}`;
+      const padding = parseFloat(cell.style.paddingTop || computedStyle?.paddingTop || "0");
+      if (padding >= width) cell.style.paddingTop = `${padding - width}px`;
     }
     if (cell.dataset.sourceMatchBottom === "1") {
       cell.style.borderBottom = `${width}px solid ${color}`;
+      const padding = parseFloat(cell.style.paddingBottom || computedStyle?.paddingBottom || "0");
+      if (padding >= width) cell.style.paddingBottom = `${padding - width}px`;
     }
   });
 }
@@ -146,15 +155,26 @@ export function applyExportCompareBaselineFallback(root: HTMLElement, color: str
   const baselineCells = root.querySelectorAll<HTMLElement>("[data-compare-baseline='1']");
 
   baselineCells.forEach((cell) => {
+    const computedStyle = cell.ownerDocument.defaultView?.getComputedStyle(cell);
+
     cell.style.borderLeft = `${width}px solid ${color}`;
+    const pLeft = parseFloat(cell.style.paddingLeft || computedStyle?.paddingLeft || "0");
+    if (pLeft >= width) cell.style.paddingLeft = `${pLeft - width}px`;
+
     cell.style.borderRight = `${width}px solid ${color}`;
+    const pRight = parseFloat(cell.style.paddingRight || computedStyle?.paddingRight || "0");
+    if (pRight >= width) cell.style.paddingRight = `${pRight - width}px`;
 
     if (cell.tagName === "TH") {
       cell.style.borderTop = `${width}px solid ${color}`;
+      const pTop = parseFloat(cell.style.paddingTop || computedStyle?.paddingTop || "0");
+      if (pTop >= width) cell.style.paddingTop = `${pTop - width}px`;
     }
 
     if (cell.dataset.compareBaselineBottom === "1") {
       cell.style.borderBottom = `${width}px solid ${color}`;
+      const pBottom = parseFloat(cell.style.paddingBottom || computedStyle?.paddingBottom || "0");
+      if (pBottom >= width) cell.style.paddingBottom = `${pBottom - width}px`;
     }
   });
 }

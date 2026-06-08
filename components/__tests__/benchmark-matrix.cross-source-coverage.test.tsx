@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
+  __applyExportCompareBaselineFallbackForTest,
   __applyExportSourceFrameFallbackForTest,
   __buildSourceFrameShadowsForTest,
   __resolveCaptureDimensionsForTest,
@@ -645,6 +646,125 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     expect(cell.style.borderRight).toContain("2px");
     expect(cell.style.borderBottom).toContain("2px");
     expect(cell.style.boxShadow).toBe("none");
+  });
+
+  test("导出 source 边框兜底会扣减对应方向的 padding 以保持 content-box 宽度/高度一致", () => {
+    const root = document.createElement("div");
+    const cell = document.createElement("td");
+    cell.setAttribute("data-source-match", "1");
+    cell.setAttribute("data-source-match-first", "1");
+    cell.setAttribute("data-source-match-last", "1");
+    cell.setAttribute("data-source-match-bottom", "1");
+    cell.style.paddingLeft = "8px";
+    cell.style.paddingRight = "6px";
+    cell.style.paddingBottom = "5px";
+    root.appendChild(cell);
+
+    const thCell = document.createElement("th");
+    thCell.setAttribute("data-source-match", "1");
+    thCell.style.paddingTop = "10px";
+    root.appendChild(thCell);
+
+    __applyExportSourceFrameFallbackForTest(root, "rgba(93, 167, 255, 0.65)", 2);
+
+    expect(cell.style.paddingLeft).toBe("6px");
+    expect(cell.style.paddingRight).toBe("4px");
+    expect(cell.style.paddingBottom).toBe("3px");
+    expect(thCell.style.paddingTop).toBe("8px");
+  });
+
+  test("导出 source 边框兜底在 padding 不足时不会扣减为负值", () => {
+    const root = document.createElement("div");
+    const cell = document.createElement("td");
+    cell.setAttribute("data-source-match", "1");
+    cell.setAttribute("data-source-match-first", "1");
+    cell.style.paddingLeft = "1px";
+    root.appendChild(cell);
+
+    __applyExportSourceFrameFallbackForTest(root, "rgba(93, 167, 255, 0.65)", 2);
+
+    expect(cell.style.paddingLeft).toBe("1px");
+  });
+
+  test("导出 source 边框兜底会从 computedStyle 读取 padding 并进行扣减", () => {
+    const root = document.createElement("div");
+    const cell = document.createElement("td");
+    cell.setAttribute("data-source-match", "1");
+    cell.setAttribute("data-source-match-first", "1");
+    root.appendChild(cell);
+
+    const defaultView = cell.ownerDocument.defaultView;
+    if (defaultView) {
+      vi.spyOn(defaultView, "getComputedStyle").mockImplementation((el) => {
+        if (el === cell) {
+          return { paddingLeft: "12px" } as CSSStyleDeclaration;
+        }
+        return {} as CSSStyleDeclaration;
+      });
+    }
+
+    __applyExportSourceFrameFallbackForTest(root, "rgba(93, 167, 255, 0.65)", 3);
+
+    expect(cell.style.paddingLeft).toBe("9px");
+    vi.restoreAllMocks();
+  });
+
+  test("导出 compare baseline 边框兜底会扣减对应方向的 padding 以保持 content-box 宽度/高度一致", () => {
+    const root = document.createElement("div");
+    const cell = document.createElement("td");
+    cell.setAttribute("data-compare-baseline", "1");
+    cell.setAttribute("data-compare-baseline-bottom", "1");
+    cell.style.paddingLeft = "8px";
+    cell.style.paddingRight = "8px";
+    cell.style.paddingBottom = "6px";
+    root.appendChild(cell);
+
+    const thCell = document.createElement("th");
+    thCell.setAttribute("data-compare-baseline", "1");
+    thCell.style.paddingTop = "10px";
+    root.appendChild(thCell);
+
+    __applyExportCompareBaselineFallbackForTest(root, "rgba(250, 211, 106, 0.9)", 2);
+
+    expect(cell.style.paddingLeft).toBe("6px");
+    expect(cell.style.paddingRight).toBe("6px");
+    expect(cell.style.paddingBottom).toBe("4px");
+    expect(thCell.style.paddingTop).toBe("8px");
+  });
+
+  test("导出 compare baseline 边框兜底在 padding 不足时不会扣减为负值", () => {
+    const root = document.createElement("div");
+    const cell = document.createElement("td");
+    cell.setAttribute("data-compare-baseline", "1");
+    cell.style.paddingLeft = "1px";
+    root.appendChild(cell);
+
+    __applyExportCompareBaselineFallbackForTest(root, "rgba(250, 211, 106, 0.9)", 2);
+
+    expect(cell.style.paddingLeft).toBe("1px");
+  });
+
+  test("导出 compare baseline 边框兜底会从 computedStyle 读取 padding 并进行扣减", () => {
+    const root = document.createElement("div");
+    const cell = document.createElement("td");
+    cell.setAttribute("data-compare-baseline", "1");
+    root.appendChild(cell);
+
+    const defaultView = cell.ownerDocument.defaultView;
+    if (defaultView) {
+      vi.spyOn(defaultView, "getComputedStyle").mockImplementation((el) => {
+        if (el === cell) {
+          return { paddingLeft: "10px", paddingRight: "10px" } as CSSStyleDeclaration;
+        }
+        return {} as CSSStyleDeclaration;
+      });
+    }
+
+    __applyExportCompareBaselineFallbackForTest(root, "rgba(250, 211, 106, 0.9)", 2);
+
+    expect(cell.style.paddingLeft).toBe("8px");
+    expect(cell.style.paddingRight).toBe("8px");
+    vi.restoreAllMocks();
   });
 
   test("表头 tooltip 仅显示点击动作且会随排序状态更新", () => {
