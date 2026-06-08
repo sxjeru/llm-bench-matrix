@@ -726,6 +726,8 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
 
     __applyExportCompareBaselineFallbackForTest(root, "rgba(250, 211, 106, 0.9)", 2);
 
+    expect(cell.style.boxShadow).toBe("none");
+    expect(thCell.style.boxShadow).toBe("none");
     expect(cell.style.paddingLeft).toBe("6px");
     expect(cell.style.paddingRight).toBe("6px");
     expect(cell.style.paddingBottom).toBe("4px");

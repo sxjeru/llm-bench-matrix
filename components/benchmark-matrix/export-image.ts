@@ -155,6 +155,7 @@ export function applyExportCompareBaselineFallback(root: HTMLElement, color: str
   const baselineCells = root.querySelectorAll<HTMLElement>("[data-compare-baseline='1']");
 
   baselineCells.forEach((cell) => {
+    cell.style.boxShadow = "none";
     const computedStyle = cell.ownerDocument.defaultView?.getComputedStyle(cell);
 
     cell.style.borderLeft = `${width}px solid ${color}`;
