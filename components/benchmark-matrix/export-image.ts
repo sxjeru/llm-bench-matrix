@@ -301,6 +301,17 @@ export async function renderElementToImageBlob(
             clonedTable.style.minWidth = `${width}px`;
             clonedTable.style.borderCollapse = "separate";
             clonedTable.style.borderSpacing = "0";
+
+            // Ensure all cells have explicit bottom borders with good contrast in the export
+            const cells = clonedTable.querySelectorAll<HTMLElement>("th, td");
+            cells.forEach((cell) => {
+              const bg = cell.style.backgroundColor;
+              const hasHeatBg = bg && bg !== "transparent" && !bg.includes("rgba(20, 27, 45") && !bg.includes("rgba(18, 31, 52");
+              if (hasHeatBg) {
+                // For heatmap cells, a subtle white line stands out best
+                cell.style.borderBottom = "1px solid rgba(255, 255, 255, 0.16)";
+              }
+            });
           }
 
           const clonedModalityFilters = clonedRoot.querySelectorAll<HTMLElement>("[data-modality-filter='true']");
