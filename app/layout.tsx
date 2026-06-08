@@ -7,7 +7,16 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "LLM Bench Matrix",
-  description: "Multi-source LLM benchmark matrix with heatmap visualization, model comparison and image export",
+  description: "LLM 多源评测汇总矩阵，支持热力图可视化、模型对比与图片导出等。聚合多个主流大模型评测基准数据，便捷直观比较各模型客观表现。",
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-snippet": -1
+    }
+  },
   icons: {
     icon: "/icon.svg",
     shortcut: "/icon.svg",
