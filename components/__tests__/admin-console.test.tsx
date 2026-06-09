@@ -1950,6 +1950,79 @@ describe("AdminConsole data maintenance", () => {
     expect(await screen.findByText("最近一次检测未发现混合量纲问题。")).toBeInTheDocument();
   });
 
+  test("混合量纲中当 <1 的值少于 3 项时默认折叠", async () => {
+    const user = userEvent.setup();
+
+    const consistencyResponse = {
+      generatedAt: "2026-04-18T10:00:00.000Z",
+      issues: [
+        {
+          issueType: "mixed-scale-0-1-vs-100",
+          recommendedAction: "normalize-scale",
+          benchmarkId: 12,
+          benchmarkName: "Bench-Few-Small",
+          benchmarkType: "Type-A",
+          valueCount: 10,
+          smallValueCount: 2,
+          largeValueCount: 8,
+          zeroToHundredCount: 10,
+          overHundredCount: 0,
+          minValue: 0.15,
+          maxValue: 88.5,
+          segments: [
+            {
+              key: "small",
+              label: "0-1",
+              count: 2,
+              minValue: 0.15,
+              maxValue: 0.15
+            },
+            {
+              key: "large",
+              label: ">10",
+              count: 8,
+              minValue: 88.5,
+              maxValue: 88.5
+            }
+          ],
+          valueDetails: [
+            {
+              value: 0.15,
+              field: "valueNum",
+              modelName: "Model A",
+              source: "text:seed",
+              benchTime: "2026-04-18T09:00:00.000Z"
+            },
+            {
+              value: 0.25,
+              field: "valueNum",
+              modelName: "Model C",
+              source: "text:seed2",
+              benchTime: "2026-04-18T09:02:00.000Z"
+            },
+            {
+              value: 88.5,
+              field: "valueNum",
+              modelName: "Model B",
+              source: "text:seed",
+              benchTime: "2026-04-18T09:05:00.000Z"
+            }
+          ]
+        }
+      ]
+    };
+
+    mockFetchSequence(consistencyResponse);
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await user.click(screen.getByRole("tab", { name: "数据维护" }));
+    await user.click(screen.getByRole("button", { name: "开始一致性检测" }));
+
+    expect(await screen.findByText("Bench-Few-Small")).toBeInTheDocument();
+    expect(screen.getByText("默认折叠")).toBeInTheDocument();
+  });
+
   test("可检测 0-100 与 >100 的 Elo 混用并触发拆分", async () => {
     const user = userEvent.setup();
 

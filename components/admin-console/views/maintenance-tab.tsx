@@ -96,7 +96,11 @@ export function MaintenanceTab({
             const hasOnlyZeroInSmallValues =
               belowOneDetails.length > 0
               && belowOneDetails.every((detail) => Math.abs(detail.value) < 1e-12);
-            const shouldDefaultCollapse = hasTtsSource || hasOnlyZeroInSmallValues;
+            const hasFewSmallValues =
+              issue.issueType === "mixed-scale-0-1-vs-100" && belowOneDetails.length < 3;
+            const shouldDefaultCollapse =
+              hasTtsSource || hasOnlyZeroInSmallValues || hasFewSmallValues;
+
 
             const splitDraft = scaleSplitNameDrafts[issue.benchmarkId] ?? {
               baseName: issue.benchmarkName,
