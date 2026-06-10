@@ -165,7 +165,7 @@ export type ModelVariantToken = {
 
 export type ModelTierToken = {
   familyKey: string;
-  tier: "opus" | "sonnet" | "haiku";
+  tier: "mythos" | "fable" | "opus" | "sonnet" | "haiku";
 };
 
 export type OverallScoreDisplayItem = {

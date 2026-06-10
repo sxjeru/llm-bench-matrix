@@ -3,6 +3,8 @@ import type { ModelScaleToken, ModelTierToken, ModelVariantToken, ModelVersionTo
 import { sourceTabDisplayLabel } from "./utils";
 
 const MODEL_TIER_PRIORITY: Record<ModelTierToken["tier"], number> = {
+  mythos: 5,
+  fable: 4,
   opus: 3,
   sonnet: 2,
   haiku: 1
@@ -161,7 +163,7 @@ export function extractModelTierToken(modelName: string): ModelTierToken | null 
     .replace(/\s+/g, " ")
     .trim();
 
-  const tierMatch = normalized.match(/\b(opus|sonnet|haiku)\b/);
+  const tierMatch = normalized.match(/\b(mythos|fable|opus|sonnet|haiku)\b/);
   if (!tierMatch) return null;
 
   const familyKey = normalized.slice(0, tierMatch.index).trim();
@@ -189,9 +191,9 @@ export function getModelFamilyMatchKey(modelName: string): string {
 
   const compact = normalized.replace(/\s+/g, "");
 
-  // Special handling for Anthropic/Claude tiers: if the name contains opus, sonnet, or haiku,
+  // Special handling for Anthropic/Claude tiers: if the name contains mythos, fable, opus, sonnet, or haiku,
   // we extract the prefix before that tier as the family key.
-  const tierIndex = compact.search(/(opus|sonnet|haiku)/);
+  const tierIndex = compact.search(/(mythos|fable|opus|sonnet|haiku)/);
   if (tierIndex !== -1) {
     const familyKey = compact.slice(0, tierIndex);
     if (familyKey) return familyKey;
@@ -276,6 +278,18 @@ export function compareModelNameByColumnOrder(left: string, right: string, colla
 
     if (leftScaleToken.isEstimated !== rightScaleToken.isEstimated) {
       return leftScaleToken.isEstimated ? 1 : -1;
+    }
+  }
+
+  const leftFamily = getModelFamilyMatchKey(left);
+  const rightFamily = getModelFamilyMatchKey(right);
+
+  if (leftFamily && rightFamily && leftFamily === rightFamily) {
+    if (leftVersionToken && !rightVersionToken) {
+      return -1;
+    }
+    if (!leftVersionToken && rightVersionToken) {
+      return 1;
     }
   }
 

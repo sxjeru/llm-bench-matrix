@@ -163,6 +163,8 @@ const PAPER_HEADER_NOISE_TOKENS = new Set([
   "types"
 ]);
 const PAPER_MODEL_TAIL_PREFIX_TOKENS = new Set([
+  "mythos",
+  "fable",
   "opus",
   "sonnet",
   "haiku",
