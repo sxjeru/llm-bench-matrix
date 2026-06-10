@@ -18,7 +18,8 @@ import {
   getTextImportBenchmarkKey,
   isLowerBetterPreviewBenchmark,
   removeParenthesesContent,
-  resolveHardcodedBenchmarkAliasTarget
+  resolveHardcodedBenchmarkAliasTarget,
+  getBenchmarkSearchCandidateIds
 } from "../utils/benchmark";
 import {
   composePairRawValue,
@@ -481,75 +482,6 @@ export function useImportPreviewState({
   }, [matrixPreview.rows]);
 
   const benchmarkPreviewValueOverlapPayload = useMemo(() => {
-    function buildHyphenInsensitiveKey(input: string) {
-      return input
-        .trim()
-        .toLowerCase()
-        .replace(/[\s\-_]+/g, "");
-    }
-
-    function getBenchmarkSearchCandidateIds(inputValue: string, benchmarkType: string) {
-      const normalizedInput = inputValue.trim().toLowerCase();
-      const inputCompareKey = buildBenchmarkCompareKey(inputValue);
-      const inputHyphenInsensitiveKey = buildHyphenInsensitiveKey(inputValue);
-      if (!normalizedInput && !inputCompareKey && !inputHyphenInsensitiveKey) return [];
-
-      return benchmarks
-        .map((item, index) => {
-          const nameLower = item.benchmarkName.toLowerCase();
-          const typeLower = item.benchmarkType.toLowerCase();
-          const labelLower = `${item.benchmarkName} [${item.benchmarkType}]`.toLowerCase();
-          const compareKey = buildBenchmarkCompareKey(item.benchmarkName);
-          const hyphenInsensitiveKey = buildHyphenInsensitiveKey(item.benchmarkName);
-          let score = 0;
-
-          if (nameLower === normalizedInput && item.benchmarkType === benchmarkType) {
-            score += 100;
-          } else if (nameLower === normalizedInput) {
-            score += 90;
-          }
-
-          if (compareKey && inputCompareKey && compareKey === inputCompareKey) {
-            score += 80;
-          }
-
-          if (hyphenInsensitiveKey && inputHyphenInsensitiveKey && hyphenInsensitiveKey === inputHyphenInsensitiveKey) {
-            score += 70;
-          }
-
-          if (normalizedInput && labelLower.includes(normalizedInput)) {
-            score += 50;
-          }
-
-          if (normalizedInput && (nameLower.includes(normalizedInput) || typeLower.includes(normalizedInput))) {
-            score += 40;
-          }
-
-          if (compareKey && inputCompareKey && (compareKey.includes(inputCompareKey) || inputCompareKey.includes(compareKey))) {
-            score += 30;
-          }
-
-          if (
-            hyphenInsensitiveKey && inputHyphenInsensitiveKey &&
-            (hyphenInsensitiveKey.includes(inputHyphenInsensitiveKey) || inputHyphenInsensitiveKey.includes(hyphenInsensitiveKey))
-          ) {
-            score += 25;
-          }
-
-          const hasNameMatch = score > 0;
-
-          if (hasNameMatch && item.benchmarkType === benchmarkType) {
-            score += 10;
-          }
-
-          return hasNameMatch ? { id: item.id, score, index } : null;
-        })
-        .filter((item): item is { id: number; score: number; index: number } => item !== null)
-        .sort((a, b) => b.score - a.score || a.index - b.index)
-        .slice(0, 30)
-        .map((item) => item.id);
-    }
-
     const warningCandidates = benchmarkWarnings.map((warning) => [
       warning.key,
       Array.from(new Set([
@@ -564,7 +496,7 @@ export function useImportPreviewState({
     });
 
     matrixPreview.rows.forEach((row) => {
-      const searchCandidateIds = getBenchmarkSearchCandidateIds(row.benchmarkName, row.benchmarkType);
+      const searchCandidateIds = getBenchmarkSearchCandidateIds(row.benchmarkName, row.benchmarkType, benchmarks);
       if (searchCandidateIds.length === 0) return;
 
       candidateMap.set(row.key, Array.from(new Set([...(candidateMap.get(row.key) ?? []), ...searchCandidateIds])));

@@ -372,6 +372,40 @@ describe("useImportPreviewState Hook - benchmarkPreviewValueOverlapPayload", () 
     expect(result.current.benchmarkPreviewValueOverlapPayload.items[0].candidateBenchmarkIds).toEqual([42]);
   });
 
+  test("benchmark 搜索候选会忽略空格差异", () => {
+    const draftRow: TextImportPreviewRow = {
+      rowNumber: 1,
+      providerName: "OpenAI",
+      modelName: "GPT-4",
+      benchmarkName: "AutomationBench",
+      benchmarkType: "General",
+      rawValue: "0.85",
+      valueNum: 0.85,
+      valueNum2: null,
+      valueNote: null,
+      source: null,
+      valid: true
+    };
+
+    const benchmark: BenchmarkOption = {
+      id: 42,
+      benchmarkName: "Automation Bench",
+      benchmarkType: "General",
+      modalities: ["Text"]
+    };
+
+    const options = createMockOptions({
+      benchmarks: [benchmark],
+      textImportDraftRows: [draftRow],
+      ignoredBenchmarkKeys: { "AutomationBench@@General": true }
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+
+    expect(result.current.benchmarkPreviewValueOverlapPayload.items).toHaveLength(1);
+    expect(result.current.benchmarkPreviewValueOverlapPayload.items[0].candidateBenchmarkIds).toEqual([42]);
+  });
+
   test("空输入或空 compare key 时不返回候选 id", () => {
     const draftRow: TextImportPreviewRow = {
       rowNumber: 1,

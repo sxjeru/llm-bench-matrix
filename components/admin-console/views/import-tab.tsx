@@ -16,7 +16,7 @@ import type {
   StructuredCsvImportRow,
   TextImportPreviewRow
 } from "../types";
-import { buildBenchmarkCompareKey, getOmniDocBenchNormalizeHint } from "../utils/benchmark";
+import { getOmniDocBenchNormalizeHint, getBenchmarkSearchCandidateIds } from "../utils/benchmark";
 import { toDomSafeId } from "../utils/dom";
 import { formatPreviewNumericValue } from "../utils/import-values";
 import { parseExplicitMergeEntityId } from "../utils/merge";
@@ -486,55 +486,6 @@ export function ImportTab({
 }: ImportTabProps) {
   function renderModalityBadge(modalityInput: string, key: string) {
     return <ModalityBadge key={key} modalityInput={modalityInput} />;
-  }
-
-  function getBenchmarkSearchCandidateIds(inputValue: string, benchmarkType: string) {
-    const normalizedInput = inputValue.trim().toLowerCase();
-    const inputCompareKey = buildBenchmarkCompareKey(inputValue);
-    if (!normalizedInput && !inputCompareKey) return [];
-
-    return benchmarks
-      .map((item, index) => {
-        const nameLower = item.benchmarkName.toLowerCase();
-        const typeLower = item.benchmarkType.toLowerCase();
-        const labelLower = `${item.benchmarkName} [${item.benchmarkType}]`.toLowerCase();
-        const compareKey = buildBenchmarkCompareKey(item.benchmarkName);
-        let score = 0;
-
-        if (nameLower === normalizedInput && item.benchmarkType === benchmarkType) {
-          score += 100;
-        } else if (nameLower === normalizedInput) {
-          score += 90;
-        }
-
-        if (compareKey && inputCompareKey && compareKey === inputCompareKey) {
-          score += 80;
-        }
-
-        if (normalizedInput && labelLower.includes(normalizedInput)) {
-          score += 50;
-        }
-
-        if (normalizedInput && (nameLower.includes(normalizedInput) || typeLower.includes(normalizedInput))) {
-          score += 40;
-        }
-
-        if (compareKey && inputCompareKey && (compareKey.includes(inputCompareKey) || inputCompareKey.includes(compareKey))) {
-          score += 30;
-        }
-
-        const hasNameMatch = score > 0;
-
-        if (hasNameMatch && item.benchmarkType === benchmarkType) {
-          score += 10;
-        }
-
-        return hasNameMatch ? { id: item.id, score, index } : null;
-      })
-      .filter((item): item is { id: number; score: number; index: number } => item !== null)
-      .sort((a, b) => b.score - a.score || a.index - b.index)
-      .slice(0, 30)
-      .map((item) => item.id);
   }
 
   function hasExactModelMatch(inputValue: string) {
@@ -1034,7 +985,7 @@ export function ImportTab({
                                 ...(benchmarkMergeCandidateMap.get(matrixRow.key) ?? []),
                                 ...(warning?.candidateTargetIds ?? []),
                                 ...(warning?.suggestedTargetId ? [warning.suggestedTargetId] : []),
-                                ...getBenchmarkSearchCandidateIds(benchmarkInputValue, matrixRow.benchmarkType)
+                                ...getBenchmarkSearchCandidateIds(benchmarkInputValue, matrixRow.benchmarkType, benchmarks)
                               ])).slice(0, 30);
                               const benchmarkCandidateOptions = benchmarkCandidateTargetIds.map((targetId) => {
                                 const target = benchmarkEntityOptions.find((item) => String(item.id) === String(targetId));
