@@ -1439,6 +1439,7 @@ export function BenchmarkMatrix({
                     data-source-match-first={model.isSourceMatchedFirst ? "1" : undefined}
                     data-source-match-last={model.isSourceMatchedLast ? "1" : undefined}
                     data-compare-baseline={isCompareBaseline ? "1" : undefined}
+                    data-presence-active={isPresenceFilterActive ? "1" : undefined}
                     aria-grabbed={isDraggingCurrentModel ? "true" : "false"}
                     title={isCompareBaseline
                       ? "基准模型（Ctrl/Cmd+点击可取消）"
@@ -2319,6 +2320,7 @@ export {
   __buildCompareBaselineShadowsForTest,
   __applyExportSourceFrameFallbackForTest,
   __applyExportCompareBaselineFallbackForTest,
+  __applyExportPresenceFilterFallbackForTest,
   __buildOverallScoreDisplayDecimalsMapForTest,
   __resolveCaptureDimensionsForTest
 } from "./benchmark-matrix/index";

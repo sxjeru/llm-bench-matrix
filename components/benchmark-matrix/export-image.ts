@@ -184,6 +184,52 @@ export function __applyExportCompareBaselineFallbackForTest(root: HTMLElement, c
   applyExportCompareBaselineFallback(root, color, width);
 }
 
+export function applyExportPresenceFilterFallback(root: HTMLElement): void {
+  const activeHeaders = root.querySelectorAll<HTMLElement>("[data-presence-active='1']");
+
+  activeHeaders.forEach((cell) => {
+    cell.style.boxShadow = "none";
+    const computedStyle = cell.ownerDocument.defaultView?.getComputedStyle(cell);
+
+    // 1. Add bottom border to replicate the 2px blue underline
+    cell.style.borderBottom = "2px solid rgba(166, 203, 255, 0.96)";
+
+    // 2. Adjust padding bottom to account for the added border
+    const pBottom = parseFloat(cell.style.paddingBottom || computedStyle?.paddingBottom || "0");
+    if (pBottom >= 2) {
+      cell.style.paddingBottom = `${pBottom - 2}px`;
+    }
+
+    // 3. Create a absolute div inside th to replicate the blue edge glowing effect
+    const glowEl = cell.ownerDocument.createElement("div");
+    glowEl.style.position = "absolute";
+    glowEl.style.left = "0";
+    glowEl.style.right = "0";
+    glowEl.style.bottom = "0";
+    glowEl.style.height = "12px";
+    glowEl.style.background = "linear-gradient(to top, rgba(124, 177, 255, 0.28), rgba(124, 177, 255, 0))";
+    glowEl.style.pointerEvents = "none";
+    glowEl.style.zIndex = "1";
+
+    // 4. Ensure existing cell children render on top of the glow element
+    Array.from(cell.children).forEach((child) => {
+      const childHtml = child as HTMLElement;
+      if (childHtml.style) {
+        if (!childHtml.style.position) {
+          childHtml.style.position = "relative";
+        }
+        childHtml.style.zIndex = "2";
+      }
+    });
+
+    cell.appendChild(glowEl);
+  });
+}
+
+export function __applyExportPresenceFilterFallbackForTest(root: HTMLElement): void {
+  applyExportPresenceFilterFallback(root);
+}
+
 export function applyExportOverallRowNudgeFallback(root: HTMLElement): void {
   const overallRow = root.querySelector<HTMLTableRowElement>("tr[data-overall-row='1']");
   if (!overallRow) return;
@@ -329,6 +375,7 @@ export async function renderElementToImageBlob(
           applyExportOverallRowNudgeFallback(clonedRoot);
           applyExportSourceFrameFallback(clonedRoot, exportSourceFrameColor, exportSourceFrameWidth);
           applyExportCompareBaselineFallback(clonedRoot, exportCompareBaselineColor, exportCompareBaselineWidth);
+          applyExportPresenceFilterFallback(clonedRoot);
         }
       });
     } finally {

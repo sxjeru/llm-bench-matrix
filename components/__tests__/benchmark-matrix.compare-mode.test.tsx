@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   __applyExportCompareBaselineFallbackForTest,
+  __applyExportPresenceFilterFallbackForTest,
   BenchmarkMatrix
 } from "@/components/benchmark-matrix";
 
@@ -269,5 +270,31 @@ describe("BenchmarkMatrix 模型比较", () => {
     expect(cell.style.borderLeft).toContain("2px");
     expect(cell.style.borderRight).toContain("2px");
     expect(cell.style.borderBottom).toContain("2px");
+  });
+
+  test("导出列存在性过滤激活列兜底会写入底边框与发光 overlay 元素", () => {
+    const root = document.createElement("div");
+    const header = document.createElement("th");
+    const childDiv = document.createElement("div");
+
+    header.setAttribute("data-presence-active", "1");
+    header.appendChild(childDiv);
+    root.appendChild(header);
+
+    __applyExportPresenceFilterFallbackForTest(root);
+
+    // Should have 2px solid bottom border
+    expect(header.style.borderBottom).toContain("2px");
+    
+    // Should have a child element created for the glow effect
+    const glowDiv = header.querySelector("div:last-child");
+    expect(glowDiv).not.toBeNull();
+    expect(glowDiv?.style.position).toBe("absolute");
+    expect(glowDiv?.style.height).toBe("12px");
+    expect(glowDiv?.style.background).toContain("rgba(124, 177, 255, 0.28)");
+
+    // The original content child zIndex should be nudged to 2
+    expect(childDiv.style.zIndex).toBe("2");
+    expect(childDiv.style.position).toBe("relative");
   });
 });

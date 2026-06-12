@@ -103,6 +103,8 @@ export {
   __applyExportSourceFrameFallbackForTest,
   applyExportCompareBaselineFallback,
   __applyExportCompareBaselineFallbackForTest,
+  applyExportPresenceFilterFallback,
+  __applyExportPresenceFilterFallbackForTest,
   applyExportOverallRowNudgeFallback,
   resolveCaptureDimensions,
   __resolveCaptureDimensionsForTest,
