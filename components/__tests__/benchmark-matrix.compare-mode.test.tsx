@@ -287,7 +287,7 @@ describe("BenchmarkMatrix 模型比较", () => {
     expect(header.style.borderBottom).toContain("2px");
     
     // Should have a child element created for the glow effect
-    const glowDiv = header.querySelector("div:last-child");
+    const glowDiv = header.querySelector<HTMLElement>("div:last-child");
     expect(glowDiv).not.toBeNull();
     expect(glowDiv?.style.position).toBe("absolute");
     expect(glowDiv?.style.height).toBe("12px");
