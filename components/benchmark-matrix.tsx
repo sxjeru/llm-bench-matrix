@@ -1948,7 +1948,7 @@ export function BenchmarkMatrix({
                       ? `相对基准 ${compareBaselineModelName} 的差值`
                       : "相对表格默认取值的差值";
                     const showAnyDeltaBadge = showCompareBadge || showSourceValueDeltaBadge;
-                    const showQuestionMarkIcon = (shouldRenderSourceValues ? noteText.length > 0 : shouldShowQuestionMark) && !showAnyDeltaBadge;
+                    const showQuestionMarkIcon = (shouldRenderSourceValues ? (noteText.length > 0 && noteText.toLowerCase() !== "x") : shouldShowQuestionMark) && !showAnyDeltaBadge;
 
                     const basePadding = showQuestionMarkIcon
                       ? (isPairNumericDisplay ? 18 : 22)

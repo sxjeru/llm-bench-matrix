@@ -134,6 +134,8 @@ export function getMatrixCellDisplayValue(
   if (!raw) return "--";
 
   const hasStarMarker = /[*∗﹡✱✳✻]/.test(raw);
+  const isXNote = valueNote?.trim().toLowerCase() === "x";
+
   const pairMatch = raw.match(
     /^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/
   );
@@ -142,18 +144,20 @@ export function getMatrixCellDisplayValue(
     const [, first, second] = pairMatch;
     const hasCurrencySymbol = /[$¥€£]/.test(first) || /[$¥€£]/.test(second);
 
+    const suffix = isXNote ? "x" : "";
+
     if (hasCurrencySymbol) {
-      return `${first.trim()} / ${second.trim()}`;
+      return `${first.trim()} / ${second.trim()}${suffix}`;
     }
 
     const firstNumeric = formatValueNumForDisplay(valueNum);
     const secondNumeric = formatValueNumForDisplay(valueNum2);
 
     if (firstNumeric !== null && secondNumeric !== null) {
-      return `${firstNumeric} / ${secondNumeric}`;
+      return `${firstNumeric} / ${secondNumeric}${suffix}`;
     }
 
-    return `${first.trim()} / ${second.trim()}`;
+    return `${first.trim()} / ${second.trim()}${suffix}`;
   }
 
   const currencySingleMatch = raw.match(/^((?:[$¥€£]\s*)[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/);
@@ -161,18 +165,27 @@ export function getMatrixCellDisplayValue(
     const [, value, tail] = currencySingleMatch;
     const tailText = tail.trim();
 
-    if (!tailText) return value.trim();
-    if (tailText === "*" || tailText.startsWith("*")) return `${value.trim()}*`;
-    if (valueNote && valueNote.trim().length > 0) return value.trim();
+    const suffix = isXNote ? "x" : "";
 
-    return `${value.trim()}${tailText}`;
+    if (!tailText) return `${value.trim()}${suffix}`;
+    if (tailText === "*" || tailText.startsWith("*")) return `${value.trim()}*`;
+    if (valueNote && valueNote.trim().length > 0) return `${value.trim()}${suffix}`;
+
+    return `${value.trim()}${tailText}${suffix}`;
   }
 
   const numericDisplay = formatValueNumForDisplay(valueNum);
   if (numericDisplay !== null) {
     const hasHashPrefix = /^[#＃]/.test(raw);
     const prefix = hasHashPrefix ? raw.match(/^[#＃]+/)?.[0] ?? "" : "";
-    return hasStarMarker ? `${prefix}${numericDisplay}*` : `${prefix}${numericDisplay}`;
+    
+    let suffix = "";
+    if (hasStarMarker) {
+      suffix = "*";
+    } else if (isXNote) {
+      suffix = "x";
+    }
+    return `${prefix}${numericDisplay}${suffix}`;
   }
 
   const singleMatch = raw.match(/^([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/);
@@ -180,12 +193,15 @@ export function getMatrixCellDisplayValue(
     const [, value, tail] = singleMatch;
     const tailText = tail.trim();
 
-    if (!tailText) return value;
-    if (tailText === "*" || tailText.startsWith("*")) return `${value}*`;
-    if (valueNote && valueNote.trim().length > 0) return value;
+    const suffix = isXNote ? "x" : "";
 
-    return `${value}${tailText}`;
+    if (!tailText) return `${value}${suffix}`;
+    if (tailText === "*" || tailText.startsWith("*")) return `${value}*`;
+    if (valueNote && valueNote.trim().length > 0) return `${value}${suffix}`;
+
+    return `${value}${tailText}${suffix}`;
   }
 
-  return raw;
+  const suffix = isXNote ? "x" : "";
+  return `${raw}${suffix}`;
 }

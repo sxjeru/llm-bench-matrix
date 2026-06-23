@@ -876,7 +876,7 @@ export function buildMatrixRows(
         noteText,
         displayValue: getMatrixCellDisplayValue(row.valueNum, row.valueNum2 ?? null, row.valueRaw, row.valueNote),
         hasMeaningfulMultipleValues: false,
-        shouldShowQuestionMark: noteText.length > 0
+        shouldShowQuestionMark: noteText.length > 0 && noteText.toLowerCase() !== "x"
       });
     } else {
       const existingCell = matrixRow.cells.get(row.modelName)!;
@@ -948,7 +948,7 @@ export function buildMatrixRows(
           noteText,
           displayValue: getMatrixCellDisplayValue(effectiveValueNum, effectiveValueNum2, effectiveValueRaw, effectiveValueNote),
           hasMeaningfulMultipleValues,
-          shouldShowQuestionMark: hasMeaningfulMultipleValues || noteText.length > 0
+          shouldShowQuestionMark: hasMeaningfulMultipleValues || (noteText.length > 0 && noteText.toLowerCase() !== "x")
         });
       });
 

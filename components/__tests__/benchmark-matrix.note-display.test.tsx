@@ -165,4 +165,31 @@ describe("BenchmarkMatrix 星号值显示", () => {
     expect(seedEntries).toHaveLength(1);
     expect(qwenEntries).toHaveLength(1);
   });
+
+  test("遇到注释为 x 的，在表格数值后直接显示 x 且不展示问号标记", () => {
+    const { container } = render(
+      <BenchmarkMatrix
+        rows={[
+          {
+            providerName: "OpenAI",
+            modelName: "GPT-5-mini High",
+            benchmarkName: "Terminal Bench 2.0",
+            benchmarkType: "Coding Agent",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "23",
+            valueNum: 23,
+            valueNote: "x",
+            source: "text:demo"
+          }
+        ]}
+      />
+    );
+
+    expect(screen.getByText("23x")).toBeInTheDocument();
+    
+    const questionMark = Array.from(container.querySelectorAll("span")).find(
+      (node) => node.textContent === "?" && !node.hasAttribute("data-overall-tooltip-trigger")
+    );
+    expect(questionMark).toBeUndefined();
+  });
 });
