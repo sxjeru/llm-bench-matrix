@@ -204,6 +204,44 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(screen.getByText("81.2")).toBeInTheDocument();
   });
 
+  test("识别 @ 和 ^ 符号的语义差异，不应被误合并", () => {
+    render(
+      <BenchmarkMatrix
+        rows={[
+          {
+            providerName: "OpenAI",
+            modelName: "Model A",
+            benchmarkName: "Claw-Eval (Pass@3)",
+            benchmarkType: "Coding",
+            benchmarkCanonicalKey: "claw-eval(pass@3):coding",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "76.9",
+            valueNum: 76.9,
+            valueNote: null,
+            source: "text:demo"
+          },
+          {
+            providerName: "OpenAI",
+            modelName: "Model A",
+            benchmarkName: "Claw-Eval (Pass^3)",
+            benchmarkType: "Coding",
+            benchmarkCanonicalKey: "claw-eval(pass^3):coding",
+            benchTime: "2026-04-06T01:00:00.000Z",
+            valueRaw: "81.2",
+            valueNum: 81.2,
+            valueNote: null,
+            source: "text:demo"
+          }
+        ]}
+      />
+    );
+
+    expect(screen.getByText("Claw-Eval (Pass@3)")).toBeInTheDocument();
+    expect(screen.getByText("Claw-Eval (Pass^3)")).toBeInTheDocument();
+    expect(screen.getByText("76.9")).toBeInTheDocument();
+    expect(screen.getByText("81.2")).toBeInTheDocument();
+  });
+
   test("全部页签不显示 Source 原值开关，切换到具体 source 后才显示", async () => {
     const user = userEvent.setup();
 
