@@ -3,7 +3,7 @@ import { getDashboardRows, getDashboardStats, getSourceOptions, getSettings } fr
 import { getModelPricingRows } from "@/lib/model-pricing";
 import { Suspense } from "react";
 
-export const revalidate = 60;
+export const revalidate = false;
 
 export default async function HomePage() {
   const rowsPromise = getDashboardRows(null, null);

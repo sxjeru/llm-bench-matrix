@@ -42,8 +42,8 @@ vi.mock("@/lib/db/queries", () => ({
 }));
 
 describe("HomePage metrics", () => {
-  test("首页使用 60 秒重新验证", () => {
-    expect(revalidate).toBe(60);
+  test("首页使用按需重新验证", () => {
+    expect(revalidate).toBe(false);
   });
 
   test("统计卡片使用聚合统计结果而非 rows 子集", async () => {
