@@ -3,6 +3,7 @@
 /* eslint-disable react-hooks/preserve-manual-memoization -- This large matrix keeps hand-tuned memoization to preserve table behavior. */
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -16,6 +17,7 @@ import {
   Check,
   TriangleAlert
 } from "lucide-react";
+import { BenchmarkRankingPanel } from "./benchmark-matrix/benchmark-ranking-panel";
 import {
   useMatrixColumnResize,
   useMatrixColumnWidths,
@@ -49,6 +51,7 @@ import {
   buildDisplayedCoverageMetaByModel,
   buildFilteredRows,
   buildHeaderUniqueCounts,
+  buildBenchmarkRankingData,
   buildMatrixRows,
   buildModelColumns,
   buildModelCoveragePercentMap,
@@ -212,6 +215,7 @@ export function BenchmarkMatrix({
     mode: "data"
   });
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
+  const [expandedRankingRowKey, setExpandedRankingRowKey] = useState<string | null>(null);
   const [temporarilyHiddenRowKeys, setTemporarilyHiddenRowKeys] = useState<string[]>([]);
   const [rowPresenceFilterModel, setRowPresenceFilterModel] = useState<string | null>(null);
   const [compareModelOrder, setCompareModelOrder] = useState<string[]>([]);
@@ -847,6 +851,35 @@ export function BenchmarkMatrix({
     [priceMatrixRows, temporarilyHiddenRowKeySet]
   );
 
+  const benchmarkRankingModelNames = useMemo(
+    () => Array.from(baseModelNameSet),
+    [baseModelNameSet]
+  );
+
+  const priceRankingModelNames = useMemo(() => {
+    const baseModels = activeSource === SOURCE_ALL
+      ? allModelNames
+      : Array.from(baseModelNameSet);
+    const ordered = [...baseModels];
+    const seen = new Set(ordered);
+
+    if (activeSource === SOURCE_ALL) {
+      modelPrices.forEach((price) => {
+        if (!seen.has(price.modelName)) {
+          seen.add(price.modelName);
+          ordered.push(price.modelName);
+        }
+      });
+    }
+
+    return ordered;
+  }, [activeSource, allModelNames, baseModelNameSet, modelPrices]);
+
+  const priceRankingMatrixRows = useMemo(
+    () => effectiveShowPriceRows ? buildPriceMatrixRows(priceRankingModelNames, modelPrices) : [],
+    [effectiveShowPriceRows, priceRankingModelNames, modelPrices]
+  );
+
   const summaryMatrixRows = useMemo(
     () => effectiveShowPriceRows ? [...visiblePriceMatrixRows, ...visiblePresenceFilteredMatrixRows] : visiblePresenceFilteredMatrixRows,
     [effectiveShowPriceRows, visiblePriceMatrixRows, visiblePresenceFilteredMatrixRows]
@@ -876,6 +909,17 @@ export function BenchmarkMatrix({
     () => effectiveShowPriceRows ? [...visiblePriceMatrixRows, ...sortedMatrixRows] : sortedMatrixRows,
     [effectiveShowPriceRows, visiblePriceMatrixRows, sortedMatrixRows]
   );
+
+  const displayMatrixRowKeySet = useMemo(
+    () => new Set(displayMatrixRows.map((row) => row.rowKey)),
+    [displayMatrixRows]
+  );
+
+  useEffect(() => {
+    if (!expandedRankingRowKey) return;
+    if (displayMatrixRowKeySet.has(expandedRankingRowKey)) return;
+    enqueueStateUpdate(() => setExpandedRankingRowKey(null));
+  }, [displayMatrixRowKeySet, expandedRankingRowKey]);
 
   const headerUniqueCounts = useMemo(
     () => buildHeaderUniqueCounts(visiblePresenceFilteredMatrixRows),
@@ -994,6 +1038,7 @@ export function BenchmarkMatrix({
     compareModelSet,
     compareBaselineModelName
   });
+  const tableColumnCount = 2 + (showCategory ? 1 : 0) + modelColumnMeta.length;
 
   const hasOverallSummary = useMemo(() => {
     return modelColumns.some((modelName) => overallSummaryByModel.get(modelName)?.rawScore !== null);
@@ -1036,6 +1081,7 @@ export function BenchmarkMatrix({
     setTemporarilyHiddenRowKeys((prev) => (prev.includes(rowKey) ? prev : [...prev, rowKey]));
     setSelectedRowKey((prev) => (prev === rowKey ? null : prev));
     setColumnSortBenchmarkKey((prev) => (prev === rowKey ? null : prev));
+    setExpandedRankingRowKey((prev) => (prev === rowKey ? null : prev));
     setActiveCellTooltip(null);
     setActiveOverallTooltip(null);
     window.getSelection()?.removeAllRanges();
@@ -1773,17 +1819,37 @@ export function BenchmarkMatrix({
                     Number.EPSILON
                   )
                 : null;
+              const expandedRankingData = expandedRankingRowKey === rowKey
+                ? buildBenchmarkRankingData(
+                    matrixRow.isPriceRow
+                      ? priceRankingMatrixRows.find((row) => row.rowKey === rowKey) ?? matrixRow
+                      : matrixRow,
+                    baseSourceRows,
+                    matrixRow.isPriceRow ? priceRankingModelNames : benchmarkRankingModelNames,
+                    modelColumns,
+                    showDuplicateRows
+                  )
+                : null;
 
               return (
+                <Fragment key={rowKey}>
                 <tr
-                  key={rowKey}
                   data-metric-type={matrixRow.isPriceRow ? "price" : undefined}
+                  data-ranking-expanded={expandedRankingData ? "1" : undefined}
                   className={isSelectedRow ? "matrix-row-selected" : "matrix-row-hover"}
                   onMouseDown={preventTemporaryRowHideTextSelection}
                   onClick={(event) => {
                     if (event.shiftKey) {
                       event.preventDefault();
                       temporarilyHideRow(rowKey);
+                      return;
+                    }
+
+                    if (isCompareModifierClick(event)) {
+                      event.preventDefault();
+                      setExpandedRankingRowKey((prev) => (prev === rowKey ? null : rowKey));
+                      setActiveCellTooltip(null);
+                      setActiveOverallTooltip(null);
                       return;
                     }
 
@@ -2160,6 +2226,22 @@ export function BenchmarkMatrix({
                     );
                   })}
                 </tr>
+                {expandedRankingData ? (
+                  <tr data-ranking-row={rowKey}>
+                    <td
+                      colSpan={tableColumnCount}
+                      style={{
+                        padding: "8px 10px",
+                        backgroundColor: "rgba(15, 23, 42, 0.86)",
+                        borderTop: "1px solid rgba(148, 163, 184, 0.16)",
+                        borderBottom: "1px solid rgba(148, 163, 184, 0.2)"
+                      }}
+                    >
+                      <BenchmarkRankingPanel ranking={expandedRankingData} />
+                    </td>
+                  </tr>
+                ) : null}
+                </Fragment>
               );
             })}
 

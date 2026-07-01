@@ -72,6 +72,27 @@ export type MatrixRow = {
   isPriceRow?: boolean;
 };
 
+export type BenchmarkRankingItem = {
+  modelName: string;
+  displayValue: string;
+  valueNum: number;
+  comparableScore: number;
+  rank: number;
+  barPercent: number;
+  isVisibleColumn: boolean;
+};
+
+export type BenchmarkRankingData = {
+  rowKey: string;
+  benchmark: string;
+  category: string;
+  isPriceRow: boolean;
+  lowerIsBetter: boolean;
+  rankedModelCount: number;
+  missingModelCount: number;
+  items: BenchmarkRankingItem[];
+};
+
 export type ProviderIdentity = {
   canonicalName: string;
   displayName: string;

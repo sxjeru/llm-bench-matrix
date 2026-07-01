@@ -23,6 +23,7 @@ import {
 } from "./scoring";
 import type {
   IndexedMatrixInputRow,
+  BenchmarkRankingData,
   MatrixCell,
   MatrixCellEntry,
   MatrixInputRow,
@@ -1132,6 +1133,143 @@ export function buildPriceMatrixRows(
       isPriceRow: true
     };
   });
+}
+
+function getBenchmarkRankingComparableScore(matrixRow: MatrixRow, valueNum: number): number {
+  return matrixRow.isPriceRow
+    ? -valueNum
+    : getBenchmarkComparableScore(matrixRow.benchmark, valueNum, matrixRow.category, matrixRow.higherIsBetter);
+}
+
+function buildRankingDataFromMatrixRow(
+  matrixRow: MatrixRow,
+  candidateModelNames: readonly string[],
+  visibleModelNames: readonly string[]
+): BenchmarkRankingData {
+  const candidateModelSet = new Set(candidateModelNames);
+  const visibleModelSet = new Set(visibleModelNames);
+  const numericItems = Array.from(candidateModelSet)
+    .map((modelName) => {
+      const cell = matrixRow.cells.get(modelName);
+      const valueNum = cell?.valueNum ?? null;
+      if (valueNum === null || !Number.isFinite(valueNum)) return null;
+
+      return {
+        modelName,
+        displayValue: cell?.displayValue ?? String(valueNum),
+        valueNum,
+        comparableScore: getBenchmarkRankingComparableScore(matrixRow, valueNum),
+        rank: 0,
+        barPercent: 0,
+        isVisibleColumn: visibleModelSet.has(modelName)
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+
+  const rankMap = buildDenseRankMap(
+    numericItems.map((item) => ({ modelName: item.modelName, score: item.comparableScore })),
+    2
+  );
+  const comparableValues = numericItems.map((item) => item.comparableScore);
+  const minComparable = comparableValues.length > 0 ? Math.min(...comparableValues) : null;
+  const maxComparable = comparableValues.length > 0 ? Math.max(...comparableValues) : null;
+  const comparableRange =
+    minComparable !== null && maxComparable !== null
+      ? maxComparable - minComparable
+      : 0;
+
+  const items = numericItems
+    .map((item) => {
+      const normalized = comparableRange > Number.EPSILON && minComparable !== null
+        ? (item.comparableScore - minComparable) / comparableRange
+        : 1;
+
+      return {
+        ...item,
+        rank: rankMap.get(item.modelName) ?? 0,
+        barPercent: Math.max(4, Math.min(100, normalized * 100))
+      };
+    })
+    .sort((left, right) => {
+      if (right.comparableScore !== left.comparableScore) {
+        return right.comparableScore - left.comparableScore;
+      }
+      return left.modelName.localeCompare(right.modelName, "zh-Hans-CN", { numeric: true, sensitivity: "base" });
+    });
+
+  return {
+    rowKey: matrixRow.rowKey,
+    benchmark: matrixRow.benchmark,
+    category: matrixRow.category,
+    isPriceRow: Boolean(matrixRow.isPriceRow),
+    lowerIsBetter: Boolean(matrixRow.isPriceRow) || !matrixRow.higherIsBetter,
+    rankedModelCount: items.length,
+    missingModelCount: Math.max(0, candidateModelSet.size - items.length),
+    items
+  };
+}
+
+export function buildBenchmarkRankingData(
+  matrixRow: MatrixRow,
+  sourceRows: readonly MatrixInputRow[],
+  candidateModelNames: readonly string[],
+  visibleModelNames: readonly string[],
+  showDuplicateRows: boolean
+): BenchmarkRankingData {
+  if (matrixRow.isPriceRow) {
+    return buildRankingDataFromMatrixRow(matrixRow, candidateModelNames, visibleModelNames);
+  }
+
+  const matchingRows = sourceRows.filter((row) => getMatrixGroupingKey(row, showDuplicateRows) === matrixRow.rowKey);
+  const cellsByModel = new Map<string, MatrixCell>();
+
+  matchingRows.forEach((row) => {
+    if (!candidateModelNames.includes(row.modelName)) return;
+
+    const previous = cellsByModel.get(row.modelName);
+    const rowValueNum = row.valueNum;
+    const rowValueNum2 = row.valueNum2 ?? null;
+    const rowValueNote = row.valueNote;
+    const rowCell = {
+      valueRaw: row.valueRaw,
+      valueNum: rowValueNum,
+      valueNum2: rowValueNum2,
+      valueNote: rowValueNote,
+      source: row.source,
+      benchTime: row.benchTime,
+      allEntries: [],
+      hasMultipleValues: false,
+      uniqueEntries: [],
+      noteText: (rowValueNote ?? "").trim(),
+      displayValue: getMatrixCellDisplayValue(rowValueNum, rowValueNum2, row.valueRaw, rowValueNote),
+      hasMeaningfulMultipleValues: false,
+      shouldShowQuestionMark: false
+    } satisfies MatrixCell;
+
+    if (!previous) {
+      cellsByModel.set(row.modelName, rowCell);
+      return;
+    }
+
+    if (rowValueNum === null || !Number.isFinite(rowValueNum)) return;
+    if (previous.valueNum === null || !Number.isFinite(previous.valueNum)) {
+      cellsByModel.set(row.modelName, rowCell);
+      return;
+    }
+
+    const previousScore = getBenchmarkRankingComparableScore(matrixRow, previous.valueNum);
+    const nextScore = getBenchmarkRankingComparableScore(matrixRow, rowValueNum);
+    if (nextScore > previousScore) {
+      cellsByModel.set(row.modelName, rowCell);
+    }
+  });
+
+  const rankingMatrixRow: MatrixRow = {
+    ...matrixRow,
+    cells: cellsByModel
+  };
+
+  return buildRankingDataFromMatrixRow(rankingMatrixRow, candidateModelNames, visibleModelNames);
 }
 
 export function buildModelCoveragePercentMap(displayedCoverageMetaByModel: DisplayedCoverageMetaByModel): Map<string, number> {
