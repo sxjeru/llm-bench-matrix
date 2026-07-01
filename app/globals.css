@@ -106,6 +106,9 @@ a {
 .source-tab-label-text {
   grid-area: 1 / 1;
   white-space: pre;
+  text-shadow:
+    0 0 6px color-mix(in srgb, currentColor 35%, transparent),
+    0 0 12px color-mix(in srgb, currentColor 16%, transparent);
 }
 
 .page {
