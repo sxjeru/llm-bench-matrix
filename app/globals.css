@@ -90,6 +90,24 @@ a {
   background: #182544;
 }
 
+.source-tab-label {
+  display: inline-grid;
+  align-items: baseline;
+}
+
+.source-tab-label::before {
+  content: attr(data-label);
+  grid-area: 1 / 1;
+  visibility: hidden;
+  font-weight: 700;
+  white-space: pre;
+}
+
+.source-tab-label-text {
+  grid-area: 1 / 1;
+  white-space: pre;
+}
+
 .page {
   flex: 1;
   padding: 26px 0 40px;

@@ -31,6 +31,7 @@ type TopControlsProps = {
   setIsSourceOverflowMenuOpen: Dispatch<SetStateAction<boolean>>;
   setSourceAndUrl: (sourceKey: string) => void;
   getSourceTabDisplayText: (source: SourceOption) => string;
+  getSourceTabTextColor: (source: SourceOption) => string | null;
   getSourceTabTitle: (source: SourceOption) => string;
   isFullscreen: boolean;
   toggleFullscreen: () => void;
@@ -68,6 +69,32 @@ type TopControlsProps = {
   onSourceValuesButtonClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 };
 
+function SourceTabLabel({
+  text,
+  textColor,
+  isActive
+}: {
+  text: string;
+  textColor: string | null;
+  isActive: boolean;
+}) {
+  const [firstCharacter = "", ...restCharacters] = Array.from(text);
+  const restText = restCharacters.join("");
+
+  return (
+    <span
+      className="source-tab-label"
+      data-label={text}
+      style={!isActive && textColor ? { color: textColor } : undefined}
+    >
+      <span className={`source-tab-label-text ${isActive ? "font-bold" : "font-medium"}`}>
+        {firstCharacter ? <span className="font-bold">{firstCharacter}</span> : null}
+        {restText}
+      </span>
+    </span>
+  );
+}
+
 export function BenchmarkMatrixTopControls({
   sourceTabsMenuRef,
   sourceTabsViewportRef,
@@ -81,6 +108,7 @@ export function BenchmarkMatrixTopControls({
   setIsSourceOverflowMenuOpen,
   setSourceAndUrl,
   getSourceTabDisplayText,
+  getSourceTabTextColor,
   getSourceTabTitle,
   isFullscreen,
   toggleFullscreen,
@@ -117,6 +145,14 @@ export function BenchmarkMatrixTopControls({
   displaySourceValuesInCells,
   onSourceValuesButtonClick
 }: TopControlsProps) {
+  const renderSourceTabLabel = (source: SourceOption) => (
+    <SourceTabLabel
+      text={getSourceTabDisplayText(source)}
+      textColor={getSourceTabTextColor(source)}
+      isActive={activeSource === source.key}
+    />
+  );
+
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 mb-2">
@@ -141,15 +177,15 @@ export function BenchmarkMatrixTopControls({
                       type="button"
                       role="tab"
                       aria-selected={activeSource === source.key}
-                      className={`tab relative h-9 min-h-0 shrink-0 overflow-visible rounded-xl text-base-content/80 transition-all duration-150 ${
+                      className={`tab relative h-9 min-h-0 shrink-0 overflow-visible rounded-xl !px-2 text-base-content/80 transition-all duration-150 ${
                         activeSource === source.key
-                          ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content font-semibold shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
+                          ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
                           : "hover:!rounded-xl hover:bg-white/10 hover:text-base-content"
                       }`}
                       onClick={() => setSourceAndUrl(source.key)}
                       title={getSourceTabTitle(source)}
                     >
-                      {getSourceTabDisplayText(source)}
+                      {renderSourceTabLabel(source)}
                       {sourceNewStateByKey.get(source.key)?.isNew ? (
                         <span
                           aria-hidden="true"
@@ -204,15 +240,15 @@ export function BenchmarkMatrixTopControls({
                           role="tab"
                           aria-selected={activeSource === source.key}
                           tabIndex={isSourceOverflowMenuOpen ? undefined : -1}
-                          className={`tab relative h-9 min-h-0 overflow-visible rounded-xl text-base-content/80 transition-all duration-150 ${
+                          className={`tab relative h-9 min-h-0 overflow-visible rounded-xl !px-2 text-base-content/80 transition-all duration-150 ${
                             activeSource === source.key
-                              ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content font-semibold shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
+                              ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
                               : "hover:!rounded-xl hover:bg-white/10 hover:text-base-content"
                           }`}
                           onClick={() => setSourceAndUrl(source.key)}
                           title={getSourceTabTitle(source)}
                         >
-                          {getSourceTabDisplayText(source)}
+                          {renderSourceTabLabel(source)}
                           {sourceNewStateByKey.get(source.key)?.isNew ? (
                             <span
                               aria-hidden="true"
@@ -240,13 +276,13 @@ export function BenchmarkMatrixTopControls({
                   type="button"
                   data-source-tab-measure="item"
                   data-source-tab-measure-key={source.key}
-                  className={`tab relative h-9 min-h-0 shrink-0 overflow-visible rounded-xl text-base-content/80 transition-all duration-150 ${
+                  className={`tab relative h-9 min-h-0 shrink-0 overflow-visible rounded-xl !px-2 text-base-content/80 transition-all duration-150 ${
                     activeSource === source.key
-                      ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content font-semibold shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
+                      ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
                       : "hover:!rounded-xl hover:bg-white/10 hover:text-base-content"
                   }`}
                 >
-                  {getSourceTabDisplayText(source)}
+                  {renderSourceTabLabel(source)}
                   {sourceNewStateByKey.get(source.key)?.isNew ? (
                     <span
                       aria-hidden="true"

@@ -7,7 +7,8 @@ import {
   type Dispatch,
   type SetStateAction
 } from "react";
-import { SOURCE_ALL } from "./constants";
+import { isValidHexColor, resolveProviderBrandColorForDarkTheme } from "@/lib/provider-config";
+import { SOURCE_ALL, SOURCE_EMPTY } from "./constants";
 import { formatTooltipTime } from "./formatters";
 import type { MatrixInputRow, RowSortMode } from "./types";
 import {
@@ -15,8 +16,11 @@ import {
   buildSourceOptions,
   type SourceOption
 } from "./selectors";
+import { getModelFamilyMatchKey } from "./model-matching";
 import {
   areStringArraysEqual,
+  getSourceKey,
+  normalizeMatchToken,
   sourceTabDisplayLabel
 } from "./utils";
 
@@ -41,6 +45,84 @@ type UseMatrixSourceTabsOptions = {
   skipSelectionPersistenceOnceRef: MutableRefValue<boolean>;
   setRowSortState: Dispatch<SetStateAction<{ column: "category" | "benchmark"; mode: RowSortMode }>>;
 };
+
+type SourceProviderMatch = {
+  rank: number;
+  sourceDistance: number;
+  providerName: string;
+  providerBrandColor: string | null;
+};
+
+function getRowProviderDisplayName(row: MatrixInputRow): string {
+  return row.providerDisplayName?.trim() || row.providerName || "Unknown";
+}
+
+function getSourceProviderMatchRank(sourceLabel: string, row: MatrixInputRow): number | null {
+  const sourceToken = normalizeMatchToken(sourceLabel);
+  if (!sourceToken) return null;
+
+  const modelToken = normalizeMatchToken(row.modelName);
+  if (modelToken === sourceToken) return 0;
+  if (modelToken.startsWith(sourceToken)) return 1;
+  if (modelToken.includes(sourceToken)) return 2;
+
+  const sourceFamilyKey = getModelFamilyMatchKey(sourceLabel);
+  if (sourceFamilyKey && getModelFamilyMatchKey(row.modelName) === sourceFamilyKey) {
+    return 3;
+  }
+
+  const providerToken = normalizeMatchToken(getRowProviderDisplayName(row));
+  if (providerToken && sourceToken.includes(providerToken)) return 4;
+  if (sourceFamilyKey && getModelFamilyMatchKey(getRowProviderDisplayName(row)) === sourceFamilyKey) {
+    return 4;
+  }
+
+  return null;
+}
+
+function buildSourceTabTextColorByKey(
+  allRows: MatrixInputRow[],
+  sourceOptions: SourceOption[]
+): Map<string, string> {
+  const colorByKey = new Map<string, string>();
+
+  for (const source of sourceOptions) {
+    if (source.key === SOURCE_ALL || source.key === SOURCE_EMPTY) continue;
+
+    const sourceLabel = sourceTabDisplayLabel(source.key).trim();
+    let bestMatch: SourceProviderMatch | null = null;
+
+    for (const row of allRows) {
+      const rank = getSourceProviderMatchRank(sourceLabel, row);
+      if (rank === null) continue;
+
+      const sourceDistance = getSourceKey(row.source) === source.key ? 0 : 1;
+      const candidate: SourceProviderMatch = {
+        rank,
+        sourceDistance,
+        providerName: getRowProviderDisplayName(row),
+        providerBrandColor: row.providerBrandColor ?? null
+      };
+
+      if (
+        !bestMatch ||
+        candidate.rank < bestMatch.rank ||
+        (candidate.rank === bestMatch.rank && candidate.sourceDistance < bestMatch.sourceDistance)
+      ) {
+        bestMatch = candidate;
+      }
+    }
+
+    if (bestMatch?.providerBrandColor && isValidHexColor(bestMatch.providerBrandColor)) {
+      colorByKey.set(
+        source.key,
+        resolveProviderBrandColorForDarkTheme(bestMatch.providerName, bestMatch.providerBrandColor)
+      );
+    }
+  }
+
+  return colorByKey;
+}
 
 export function useMatrixSourceTabs({
   rows,
@@ -86,10 +168,15 @@ export function useMatrixSourceTabs({
     () => buildSourceNewStateByKey(allRows, sourceNewReferenceTime),
     [allRows, sourceNewReferenceTime]
   );
+  const sourceTabTextColorByKey = useMemo(
+    () => buildSourceTabTextColorByKey(allRows, sourceOptions),
+    [allRows, sourceOptions]
+  );
 
   const getSourceTabDisplayText = (source: SourceOption) => (
     source.key === SOURCE_ALL ? source.label : sourceTabDisplayLabel(source.key)
   );
+  const getSourceTabTextColor = (source: SourceOption) => sourceTabTextColorByKey.get(source.key) ?? null;
   const getSourceTabTitle = (source: SourceOption) => {
     const displayText = getSourceTabDisplayText(source);
     const newState = sourceNewStateByKey.get(source.key);
@@ -306,6 +393,7 @@ export function useMatrixSourceTabs({
     overflowSourceOptions,
     sourceNewStateByKey,
     getSourceTabDisplayText,
+    getSourceTabTextColor,
     getSourceTabTitle,
     setSourceAndUrl
   };

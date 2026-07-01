@@ -239,6 +239,7 @@ export function BenchmarkMatrix({
     overflowSourceOptions,
     sourceNewStateByKey,
     getSourceTabDisplayText,
+    getSourceTabTextColor,
     getSourceTabTitle,
     setSourceAndUrl
   } = useMatrixSourceTabs({
@@ -1146,6 +1147,7 @@ export function BenchmarkMatrix({
         setIsSourceOverflowMenuOpen={setIsSourceOverflowMenuOpen}
         setSourceAndUrl={setSourceAndUrl}
         getSourceTabDisplayText={getSourceTabDisplayText}
+        getSourceTabTextColor={getSourceTabTextColor}
         getSourceTabTitle={getSourceTabTitle}
         isFullscreen={isFullscreen}
         toggleFullscreen={toggleFullscreen}

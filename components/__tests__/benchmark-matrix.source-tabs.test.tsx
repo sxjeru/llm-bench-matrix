@@ -97,6 +97,73 @@ describe("BenchmarkMatrix source tabs", () => {
     expect(nemotronTabs).toEqual(["Nemotron 3 Ultra", "Nemotron 3 Super", "Nemotron 3 Nano"]);
   });
 
+  test("source 页签文本使用 provider 颜色，首字符加粗，选中后恢复白色加粗", async () => {
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:Claude Opus 4.7"]}
+        rows={[
+          {
+            providerName: "Anthropic",
+            providerBrandColor: "#f0f0f0",
+            modelName: "Claude Opus 4.7",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Claude Opus 4.7"
+          }
+        ]}
+      />
+    );
+
+    const sourceTab = screen.getByRole("tab", { name: "Claude Opus 4.7" });
+    const coloredLabel = sourceTab.querySelector(".source-tab-label") as HTMLElement;
+    const visibleText = sourceTab.querySelector(".source-tab-label-text");
+    const firstCharacter = sourceTab.querySelector("span.font-bold");
+
+    expect(coloredLabel).toHaveTextContent("Claude Opus 4.7");
+    expect(coloredLabel).toHaveStyle({ color: "rgb(240, 240, 240)" });
+    expect(visibleText).toHaveClass("font-medium");
+    expect(firstCharacter).toHaveTextContent("C");
+
+    fireEvent.click(sourceTab);
+
+    await waitFor(() => {
+      expect(sourceTab).toHaveClass("tab-active");
+    });
+
+    expect(coloredLabel.style.color).toBe("");
+    expect(visibleText).toHaveClass("font-bold");
+  });
+
+  test("未配置自定义 provider 颜色的 source 页签不使用 fallback 颜色", () => {
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:Claude Opus 4.7"]}
+        rows={[
+          {
+            providerName: "Anthropic",
+            modelName: "Claude Opus 4.7",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Claude Opus 4.7"
+          }
+        ]}
+      />
+    );
+
+    const sourceTab = screen.getByRole("tab", { name: "Claude Opus 4.7" });
+    const label = sourceTab.querySelector(".source-tab-label") as HTMLElement;
+
+    expect(label.style.color).toBe("");
+  });
+
   test("非全部 source 页签优先展示 source 同系列模型，再按系列覆盖率和模型名排序", () => {
     render(
       <BenchmarkMatrix
