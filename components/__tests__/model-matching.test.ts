@@ -32,8 +32,6 @@ describe("model-matching variant sorting", () => {
   });
 
   test("compareSourceTabKeysByVersion should sort ultra > super > nano", () => {
-    const collator = new Intl.Collator("en");
-    
     // Nemotron 3 Ultra should come before Nemotron 3 Super
     expect(compareSourceTabKeysByVersion("text:Nemotron 3 Ultra", "text:Nemotron 3 Super")).toBeLessThan(0);
     // Nemotron 3 Super should come before Nemotron 3 Nano

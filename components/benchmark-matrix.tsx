@@ -189,10 +189,12 @@ export function BenchmarkMatrix({
   const [expandedLowCoverageProviders, setExpandedLowCoverageProviders] = useState<Record<string, boolean>>({});
   const [benchmarkSearchInputValue, setBenchmarkSearchInputValue] = useState("");
   const [benchmarkSearchQuery, setBenchmarkSearchQuery] = useState("");
+  const showLowCoverageRowsRef = useRef(showLowCoverageRows);
   const preSearchShowLowCoverageRowsRef = useRef<boolean | null>(null);
   const handleSetShowLowCoverageRows = useCallback((value: boolean | ((prev: boolean) => boolean)) => {
     setShowLowCoverageRows((prev) => {
       const next = typeof value === "function" ? value(prev) : value;
+      showLowCoverageRowsRef.current = next;
       if (benchmarkSearchInputValue.trim().length > 0) {
         preSearchShowLowCoverageRowsRef.current = next;
       }
@@ -701,9 +703,15 @@ export function BenchmarkMatrix({
   }, []);
 
   useEffect(() => {
+    showLowCoverageRowsRef.current = showLowCoverageRows;
+  }, [showLowCoverageRows]);
+
+  useEffect(() => {
     if (benchmarkSearchInputValue.trim().length === 0) {
       if (preSearchShowLowCoverageRowsRef.current !== null) {
-        setShowLowCoverageRows(preSearchShowLowCoverageRowsRef.current);
+        const restoredShowLowCoverageRows = preSearchShowLowCoverageRowsRef.current;
+        showLowCoverageRowsRef.current = restoredShowLowCoverageRows;
+        setShowLowCoverageRows(restoredShowLowCoverageRows);
         preSearchShowLowCoverageRowsRef.current = null;
       }
       setBenchmarkSearchQuery("");
@@ -711,7 +719,7 @@ export function BenchmarkMatrix({
     }
 
     if (preSearchShowLowCoverageRowsRef.current === null) {
-      preSearchShowLowCoverageRowsRef.current = showLowCoverageRows;
+      preSearchShowLowCoverageRowsRef.current = showLowCoverageRowsRef.current;
     }
 
     const timer = setTimeout(() => {
@@ -719,6 +727,7 @@ export function BenchmarkMatrix({
         return;
       }
       setBenchmarkSearchQuery(benchmarkSearchInputValue);
+      showLowCoverageRowsRef.current = true;
       setShowLowCoverageRows(true);
     }, 300);
     return () => clearTimeout(timer);
