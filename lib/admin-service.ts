@@ -4939,10 +4939,22 @@ export async function deleteModelAndAllValues(modelId: number) {
 export async function deleteBenchmarkValuesBySource(sourceInput: string) {
   const rawSource = sourceInput.trim();
   if (!rawSource) {
-    const deletedRows = await db
-      .delete(benchmarkValues)
-      .where(or(isNull(benchmarkValues.source), eq(benchmarkValues.source, "")))
-      .returning({ id: benchmarkValues.id });
+    const result = await db.transaction(async (tx: DbTransactionClient) => {
+      const deletedRows = await tx
+        .delete(benchmarkValues)
+        .where(or(isNull(benchmarkValues.source), eq(benchmarkValues.source, "")))
+        .returning({ id: benchmarkValues.id });
+
+      const deletedSourceMetaRows = await tx
+        .delete(benchmarkSourceMeta)
+        .where(eq(benchmarkSourceMeta.source, ""))
+        .returning({ id: benchmarkSourceMeta.id });
+
+      return {
+        deletedRows,
+        deletedSourceMetaRows
+      };
+    });
 
     await invalidateAllCaches();
 
@@ -4951,7 +4963,8 @@ export async function deleteBenchmarkValuesBySource(sourceInput: string) {
       source: "",
       normalizedSource: null,
       matchedSources: ["", "<NULL>"],
-      deleted: deletedRows.length,
+      deleted: result.deletedRows.length,
+      deletedSourceMeta: result.deletedSourceMetaRows.length,
       deletedEmptySource: true
     };
   }
@@ -4968,15 +4981,22 @@ export async function deleteBenchmarkValuesBySource(sourceInput: string) {
   }
 
   const matchedSources = Array.from(candidates).filter(Boolean);
-  const deletedRows = await db
-    .delete(benchmarkValues)
-    .where(inArray(benchmarkValues.source, matchedSources))
-    .returning({ id: benchmarkValues.id });
+  const result = await db.transaction(async (tx: DbTransactionClient) => {
+    const deletedRows = await tx
+      .delete(benchmarkValues)
+      .where(inArray(benchmarkValues.source, matchedSources))
+      .returning({ id: benchmarkValues.id });
 
-  const deletedSourceMetaRows = await db
-    .delete(benchmarkSourceMeta)
-    .where(inArray(benchmarkSourceMeta.source, matchedSources))
-    .returning({ id: benchmarkSourceMeta.id });
+    const deletedSourceMetaRows = await tx
+      .delete(benchmarkSourceMeta)
+      .where(inArray(benchmarkSourceMeta.source, matchedSources))
+      .returning({ id: benchmarkSourceMeta.id });
+
+    return {
+      deletedRows,
+      deletedSourceMetaRows
+    };
+  });
 
   await invalidateAllCaches();
 
@@ -4985,8 +5005,8 @@ export async function deleteBenchmarkValuesBySource(sourceInput: string) {
     source: rawSource,
     normalizedSource,
     matchedSources,
-    deleted: deletedRows.length,
-    deletedSourceMeta: deletedSourceMetaRows.length,
+    deleted: result.deletedRows.length,
+    deletedSourceMeta: result.deletedSourceMetaRows.length,
     deletedEmptySource: false
   };
 }
