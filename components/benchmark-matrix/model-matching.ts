@@ -45,6 +45,10 @@ export function compareSourceTabKeysByVersion(leftKey: string, rightKey: string)
 
   const leftVersionToken = extractModelVersionToken(leftLabel);
   const rightVersionToken = extractModelVersionToken(rightLabel);
+  const tierCompare = compareTieredModelByVersionThenTier(leftLabel, rightLabel);
+  if (tierCompare !== 0) {
+    return tierCompare;
+  }
 
   if (
     leftVersionToken &&
@@ -159,14 +163,19 @@ export function compareModelVariantPriority(
 export function extractModelTierToken(modelName: string): ModelTierToken | null {
   const normalized = modelName
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g, " ")
+    .replace(/[^a-z0-9.]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
   const tierMatch = normalized.match(/\b(mythos|fable|opus|sonnet|haiku)\b/);
   if (!tierMatch) return null;
 
-  const familyKey = normalized.slice(0, tierMatch.index).trim();
+  const familyKey = normalized
+    .slice(0, tierMatch.index)
+    .replace(/\b\d+(?:\.\d+)?\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!familyKey) return null;
 
   return {
@@ -177,6 +186,34 @@ export function extractModelTierToken(modelName: string): ModelTierToken | null 
 
 export function compareModelTierPriority(leftTier: ModelTierToken["tier"], rightTier: ModelTierToken["tier"]): number {
   return MODEL_TIER_PRIORITY[rightTier] - MODEL_TIER_PRIORITY[leftTier];
+}
+
+function compareTieredModelByVersionThenTier(left: string, right: string): number {
+  const leftTierToken = extractModelTierToken(left);
+  const rightTierToken = extractModelTierToken(right);
+
+  if (
+    !leftTierToken ||
+    !rightTierToken ||
+    leftTierToken.familyKey !== rightTierToken.familyKey
+  ) {
+    return 0;
+  }
+
+  const leftVersionToken = extractModelVersionToken(left);
+  const rightVersionToken = extractModelVersionToken(right);
+
+  if (leftVersionToken && rightVersionToken && rightVersionToken.version !== leftVersionToken.version) {
+    return rightVersionToken.version - leftVersionToken.version;
+  }
+  if (leftVersionToken && !rightVersionToken) {
+    return -1;
+  }
+  if (!leftVersionToken && rightVersionToken) {
+    return 1;
+  }
+
+  return compareModelTierPriority(leftTierToken.tier, rightTierToken.tier);
 }
 
 export function getModelFamilyMatchKey(modelName: string): string {
@@ -195,7 +232,7 @@ export function getModelFamilyMatchKey(modelName: string): string {
   // we extract the prefix before that tier as the family key.
   const tierIndex = compact.search(/(mythos|fable|opus|sonnet|haiku)/);
   if (tierIndex !== -1) {
-    const familyKey = compact.slice(0, tierIndex);
+    const familyKey = compact.slice(0, tierIndex).replace(/\d+$/g, "");
     if (familyKey) return familyKey;
   }
 
@@ -215,28 +252,11 @@ export function getModelFamilyMatchKey(modelName: string): string {
 }
 
 export function compareModelNameByColumnOrder(left: string, right: string, collator: Intl.Collator): number {
-  const leftTierToken = extractModelTierToken(left);
-  const rightTierToken = extractModelTierToken(right);
   const leftVersionToken = extractModelVersionToken(left);
   const rightVersionToken = extractModelVersionToken(right);
-
-  if (
-    leftTierToken &&
-    rightTierToken &&
-    leftTierToken.familyKey === rightTierToken.familyKey
-  ) {
-    if (
-      leftVersionToken &&
-      rightVersionToken &&
-      rightVersionToken.version !== leftVersionToken.version
-    ) {
-      return rightVersionToken.version - leftVersionToken.version;
-    }
-
-    const tierCompare = compareModelTierPriority(leftTierToken.tier, rightTierToken.tier);
-    if (tierCompare !== 0) {
-      return tierCompare;
-    }
+  const tierCompare = compareTieredModelByVersionThenTier(left, right);
+  if (tierCompare !== 0) {
+    return tierCompare;
   }
 
   const leftVariantToken = extractModelVariantToken(left);

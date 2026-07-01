@@ -4,6 +4,7 @@ import {
   compareModelVariantPriority,
   compareSourceTabKeysByVersion,
   compareModelNameByColumnOrder,
+  extractModelTierToken,
   getModelFamilyMatchKey
 } from "../benchmark-matrix/model-matching";
 
@@ -48,22 +49,35 @@ describe("model-matching variant sorting", () => {
     expect(compareModelNameByColumnOrder("Nemotron 3 Super", "Nemotron 3 Nano", collator)).toBeLessThan(0);
   });
 
-  test("compareModelNameByColumnOrder should sort Claude Mythos 5 > Claude Mythos Preview > Claude Fable 5 > Claude Opus 4.8", () => {
+  test("compareModelNameByColumnOrder should sort Claude tier models by version before tier", () => {
     const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 
-    // Claude Mythos 5 should come before Claude Mythos Preview
-    expect(compareModelNameByColumnOrder("Claude Mythos 5", "Claude Mythos Preview", collator)).toBeLessThan(0);
-    
-    // Claude Mythos Preview should come before Claude Fable 5
-    expect(compareModelNameByColumnOrder("Claude Mythos Preview", "Claude Fable 5", collator)).toBeLessThan(0);
-    
-    // Claude Fable 5 should come before Claude Opus 4.8
+    // Version is primary, so Claude Sonnet 5 should come before Claude Opus 4.8.
+    expect(compareModelNameByColumnOrder("Claude Sonnet 5", "Claude Opus 4.8", collator)).toBeLessThan(0);
+    expect(compareModelNameByColumnOrder("Claude Opus 4.8", "Claude Sonnet 5", collator)).toBeGreaterThan(0);
+
+    // Within the same version, tier priority is mythos > fable > opus > sonnet > haiku.
+    expect(compareModelNameByColumnOrder("Claude Mythos 5", "Claude Fable 5", collator)).toBeLessThan(0);
+    expect(compareModelNameByColumnOrder("Claude Fable 5", "Claude Opus 5", collator)).toBeLessThan(0);
+    expect(compareModelNameByColumnOrder("Claude Opus 5", "Claude Sonnet 5", collator)).toBeLessThan(0);
+    expect(compareModelNameByColumnOrder("Claude Sonnet 5", "Claude Haiku 5", collator)).toBeLessThan(0);
+
+    // Versioned tier models should sort before preview names without an explicit version.
+    expect(compareModelNameByColumnOrder("Claude Fable 5", "Claude Mythos Preview", collator)).toBeLessThan(0);
+
+    // Alternate Claude name order should still be grouped under the same tier family.
+    expect(extractModelTierToken("Claude 5 Sonnet")).toEqual({
+      familyKey: "claude",
+      tier: "sonnet"
+    });
+
     expect(compareModelNameByColumnOrder("Claude Fable 5", "Claude Opus 4.8", collator)).toBeLessThan(0);
 
-    // And they should be grouped together under the same family check
+    // And they should be grouped together under the same family check.
     expect(getModelFamilyMatchKey("Claude Mythos 5")).toBe("claude");
     expect(getModelFamilyMatchKey("Claude Mythos Preview")).toBe("claude");
     expect(getModelFamilyMatchKey("Claude Fable 5")).toBe("claude");
     expect(getModelFamilyMatchKey("Claude Opus 4.8")).toBe("claude");
+    expect(getModelFamilyMatchKey("Claude 5 Sonnet")).toBe("claude");
   });
 });

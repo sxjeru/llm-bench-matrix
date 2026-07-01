@@ -22,7 +22,7 @@ describe("BenchmarkMatrix source tabs", () => {
     }
   });
 
-  test("同系列 source 页签按新版本优先排序（如 Qwen3.6 在 Qwen3.5 前，Claude Opus 4.8 在 4.7 前）", () => {
+  test("同系列 source 页签按新版本优先排序（如 Qwen3.6 在 Qwen3.5 前，Claude Sonnet 5 在 Opus 4.8 前）", () => {
     render(
       <BenchmarkMatrix
         sourceOptions={[
@@ -31,7 +31,8 @@ describe("BenchmarkMatrix source tabs", () => {
           "text:Qwen3.4",
           "text:Gemini-2.5-Pro",
           "text:Claude Opus 4.7",
-          "text:Claude Opus 4.8"
+          "text:Claude Opus 4.8",
+          "text:Claude Sonnet 5"
         ]}
         rows={[
           {
@@ -59,9 +60,9 @@ describe("BenchmarkMatrix source tabs", () => {
     const claudeTabs = screen
       .getAllByRole("tab")
       .map((tab) => tab.textContent?.trim() ?? "")
-      .filter((label) => label.startsWith("Claude Opus"));
+      .filter((label) => label.startsWith("Claude"));
 
-    expect(claudeTabs).toEqual(["Claude Opus 4.8", "Claude Opus 4.7"]);
+    expect(claudeTabs).toEqual(["Claude Sonnet 5", "Claude Opus 4.8", "Claude Opus 4.7"]);
   });
 
   test("Nemotron 组内页签按 ultra > super > nano 顺序排序", () => {
