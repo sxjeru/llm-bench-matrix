@@ -1,24 +1,59 @@
+import { X } from "lucide-react";
 import type { BenchmarkRankingData } from "./types";
+import type { BenchmarkRankingScaleMode, BenchmarkRankingScope } from "./types";
 
 type BenchmarkRankingPanelProps = {
   ranking: BenchmarkRankingData;
+  scope: BenchmarkRankingScope;
+  scaleMode: BenchmarkRankingScaleMode;
+  placement: "above" | "below";
+  onScopeChange: (scope: BenchmarkRankingScope) => void;
+  onScaleModeChange: (mode: BenchmarkRankingScaleMode) => void;
+  onClose: () => void;
 };
 
-export function BenchmarkRankingPanel({ ranking }: BenchmarkRankingPanelProps) {
+function formatRankingDisplayValue(value: string): string {
+  return value
+    .split("/")[0]
+    ?.replace(/[*∗﹡✱✳✻]/g, "")
+    .trim() || value.replace(/[*∗﹡✱✳✻]/g, "").trim();
+}
+
+export function BenchmarkRankingPanel({
+  ranking,
+  scope,
+  scaleMode,
+  placement,
+  onScopeChange,
+  onScaleModeChange,
+  onClose
+}: BenchmarkRankingPanelProps) {
   const hasItems = ranking.items.length > 0;
+  const scopeOptions: Array<{ value: BenchmarkRankingScope; label: string }> = [
+    { value: "source", label: "本页" },
+    { value: "all", label: "全部" }
+  ];
+  const scaleOptions: Array<{ value: BenchmarkRankingScaleMode; label: string }> = [
+    { value: "relative", label: "相对" },
+    { value: "fixed", label: "0-100" }
+  ];
 
   return (
     <div
       data-benchmark-ranking-panel={ranking.rowKey}
       className="w-full"
+      onMouseDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
     >
-      <div className="flex min-w-[560px] flex-col gap-2 rounded-lg border border-slate-500/25 bg-slate-950/45 px-3 py-2 shadow-inner">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+      <div
+        className="flex max-h-[min(72vh,720px)] w-full flex-col gap-2 rounded-lg border border-slate-500/35 bg-slate-950/95 px-3 py-2.5 shadow-2xl backdrop-blur"
+        data-placement={placement}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
-              <span className="truncate text-sm font-semibold text-slate-100">
-                {ranking.isPriceRow ? "Price ranking" : "Benchmark ranking"}
+              <span className="truncate text-sm font-semibold text-slate-100" title={ranking.benchmark}>
+                {ranking.benchmark}
               </span>
               {ranking.lowerIsBetter ? (
                 <span
@@ -30,31 +65,78 @@ export function BenchmarkRankingPanel({ ranking }: BenchmarkRankingPanelProps) {
               ) : null}
             </div>
             <div className="mt-0.5 truncate text-xs text-slate-400">
-              {ranking.category} / {ranking.benchmark}
+              {ranking.category}
             </div>
           </div>
-          <div className="shrink-0 text-xs font-medium text-slate-300">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+            <div className="inline-flex overflow-hidden rounded-md border border-slate-600/50 bg-slate-900/80 p-0.5">
+              {scopeOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`ranking-popover-button h-7 px-2.5 text-xs font-semibold transition ${
+                    scope === option.value
+                      ? "rounded bg-sky-300/20 text-sky-100"
+                      : "text-slate-400 hover:text-slate-100"
+                  }`}
+                  onClick={() => onScopeChange(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <div className="inline-flex overflow-hidden rounded-md border border-slate-600/50 bg-slate-900/80 p-0.5">
+              {scaleOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`ranking-popover-button h-7 px-2.5 text-xs font-semibold transition ${
+                    scaleMode === option.value
+                      ? "rounded bg-cyan-300/20 text-cyan-100"
+                      : "text-slate-400 hover:text-slate-100"
+                  }`}
+                  onClick={() => onScaleModeChange(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="ranking-popover-button inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-600/50 bg-slate-900/80 text-slate-300 transition hover:text-slate-50"
+              onClick={onClose}
+              aria-label="关闭排行浮窗"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-medium text-slate-400">
+          <span>
             {ranking.rankedModelCount} ranked
             {ranking.missingModelCount > 0 ? (
               <span className="text-slate-500"> / {ranking.missingModelCount} missing</span>
             ) : null}
-          </div>
+          </span>
+          <span>{ranking.scaleLabel}</span>
         </div>
 
         {hasItems ? (
-          <div className="max-h-[360px] overflow-y-auto pr-1">
-            <div className="grid gap-1.5">
+          <div className="overflow-y-auto pr-1">
+            <div className="grid gap-1">
               {ranking.items.map((item) => {
                 const isTop = item.rank === 1;
                 const isSecond = item.rank === 2;
+                const displayValue = formatRankingDisplayValue(item.displayValue);
 
                 return (
                   <div
                     key={`${ranking.rowKey}::ranking::${item.modelName}`}
                     data-ranking-model={item.modelName}
-                    className="grid min-h-8 items-center gap-2 text-xs"
+                    className="grid min-h-7 items-center gap-x-1 text-xs"
                     style={{
-                      gridTemplateColumns: "42px minmax(150px, 260px) minmax(56px, 88px) minmax(180px, 1fr)"
+                      gridTemplateColumns: "24px minmax(104px, 170px) minmax(120px, 1fr) minmax(40px, 56px)"
                     }}
                   >
                     <div
@@ -63,22 +145,22 @@ export function BenchmarkRankingPanel({ ranking }: BenchmarkRankingPanelProps) {
                       #{item.rank}
                     </div>
                     <div
-                      className={`truncate ${isTop ? "font-extrabold text-slate-50" : item.isVisibleColumn ? "font-semibold text-slate-200" : "font-medium text-slate-500"}`}
+                      className={`truncate pl-1.5 ${isTop ? "font-extrabold text-slate-50" : item.isVisibleColumn ? "font-semibold text-slate-200" : "font-normal text-slate-400"}`}
                       title={item.modelName}
                     >
                       {item.modelName}
                     </div>
-                    <div
-                      className={`truncate text-right tabular-nums ${isTop ? "font-extrabold text-amber-100" : isSecond ? "font-bold text-slate-100 underline decoration-slate-400 underline-offset-2" : "font-semibold text-slate-300"}`}
-                      title={item.displayValue}
-                    >
-                      {item.displayValue}
-                    </div>
-                    <div className="relative h-5 min-w-0 overflow-hidden rounded-md bg-slate-800/80">
+                    <div className="relative h-[18px] min-w-0 overflow-hidden rounded bg-slate-800/80">
                       <div
-                        className={`absolute inset-y-0 left-0 rounded-md ${isTop ? "bg-amber-300/80" : isSecond ? "bg-cyan-300/70" : "bg-sky-400/55"}`}
+                        className={`absolute inset-y-0 left-0 rounded ${isTop ? "bg-amber-300/80" : isSecond ? "bg-cyan-300/70" : "bg-sky-400/55"}`}
                         style={{ width: `${item.barPercent}%` }}
                       />
+                    </div>
+                    <div
+                      className={`truncate pr-2 text-right tabular-nums ${isTop ? "font-extrabold text-amber-100" : isSecond ? "font-bold text-slate-100 underline decoration-slate-400 underline-offset-2" : "font-semibold text-slate-300"}`}
+                      title={item.displayValue}
+                    >
+                      {displayValue}
                     </div>
                   </div>
                 );

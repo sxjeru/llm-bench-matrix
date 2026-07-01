@@ -24,6 +24,7 @@ import {
 import type {
   IndexedMatrixInputRow,
   BenchmarkRankingData,
+  BenchmarkRankingScaleMode,
   MatrixCell,
   MatrixCellEntry,
   MatrixInputRow,
@@ -1144,10 +1145,12 @@ function getBenchmarkRankingComparableScore(matrixRow: MatrixRow, valueNum: numb
 function buildRankingDataFromMatrixRow(
   matrixRow: MatrixRow,
   candidateModelNames: readonly string[],
-  visibleModelNames: readonly string[]
+  visibleModelNames: readonly string[],
+  scaleMode: BenchmarkRankingScaleMode
 ): BenchmarkRankingData {
   const candidateModelSet = new Set(candidateModelNames);
   const visibleModelSet = new Set(visibleModelNames);
+  const lowerIsBetter = Boolean(matrixRow.isPriceRow) || !matrixRow.higherIsBetter;
   const numericItems = Array.from(candidateModelSet)
     .map((modelName) => {
       const cell = matrixRow.cells.get(modelName);
@@ -1177,17 +1180,40 @@ function buildRankingDataFromMatrixRow(
     minComparable !== null && maxComparable !== null
       ? maxComparable - minComparable
       : 0;
+  const rawValues = numericItems.map((item) => item.valueNum);
+  const canUseFixedScale =
+    !matrixRow.isPriceRow &&
+    rawValues.length > 0 &&
+    rawValues.every((value) => value >= 0 && value <= 100);
+  const fixedScaleMax = canUseFixedScale && rawValues.every((value) => value >= 0 && value <= 1)
+    ? 1
+    : 100;
+  const effectiveScaleMode = scaleMode === "fixed" && canUseFixedScale ? "fixed" : "relative";
+  const scaleLabel = effectiveScaleMode === "fixed"
+    ? `0-${fixedScaleMax}`
+    : matrixRow.isPriceRow && scaleMode === "fixed"
+      ? "Relative price range"
+      : "Relative range";
 
   const items = numericItems
     .map((item) => {
-      const normalized = comparableRange > Number.EPSILON && minComparable !== null
-        ? (item.comparableScore - minComparable) / comparableRange
-        : 1;
+      const normalized = effectiveScaleMode === "fixed"
+        ? lowerIsBetter
+          ? (fixedScaleMax - item.valueNum) / fixedScaleMax
+          : item.valueNum / fixedScaleMax
+        : comparableRange > Number.EPSILON && minComparable !== null
+          ? (item.comparableScore - minComparable) / comparableRange
+          : 1;
+      const clampedPercent = Math.max(0, Math.min(100, normalized * 100));
 
       return {
         ...item,
         rank: rankMap.get(item.modelName) ?? 0,
-        barPercent: Math.max(4, Math.min(100, normalized * 100))
+        barPercent: effectiveScaleMode === "relative"
+          ? Math.max(7, clampedPercent)
+          : clampedPercent > 0
+            ? Math.max(4, clampedPercent)
+            : 0
       };
     })
     .sort((left, right) => {
@@ -1202,7 +1228,10 @@ function buildRankingDataFromMatrixRow(
     benchmark: matrixRow.benchmark,
     category: matrixRow.category,
     isPriceRow: Boolean(matrixRow.isPriceRow),
-    lowerIsBetter: Boolean(matrixRow.isPriceRow) || !matrixRow.higherIsBetter,
+    lowerIsBetter,
+    scaleMode,
+    effectiveScaleMode,
+    scaleLabel,
     rankedModelCount: items.length,
     missingModelCount: Math.max(0, candidateModelSet.size - items.length),
     items
@@ -1214,17 +1243,19 @@ export function buildBenchmarkRankingData(
   sourceRows: readonly MatrixInputRow[],
   candidateModelNames: readonly string[],
   visibleModelNames: readonly string[],
-  showDuplicateRows: boolean
+  showDuplicateRows: boolean,
+  scaleMode: BenchmarkRankingScaleMode
 ): BenchmarkRankingData {
   if (matrixRow.isPriceRow) {
-    return buildRankingDataFromMatrixRow(matrixRow, candidateModelNames, visibleModelNames);
+    return buildRankingDataFromMatrixRow(matrixRow, candidateModelNames, visibleModelNames, scaleMode);
   }
 
   const matchingRows = sourceRows.filter((row) => getMatrixGroupingKey(row, showDuplicateRows) === matrixRow.rowKey);
   const cellsByModel = new Map<string, MatrixCell>();
+  const candidateModelSet = new Set(candidateModelNames);
 
   matchingRows.forEach((row) => {
-    if (!candidateModelNames.includes(row.modelName)) return;
+    if (!candidateModelSet.has(row.modelName)) return;
 
     const previous = cellsByModel.get(row.modelName);
     const rowValueNum = row.valueNum;
@@ -1269,7 +1300,7 @@ export function buildBenchmarkRankingData(
     cells: cellsByModel
   };
 
-  return buildRankingDataFromMatrixRow(rankingMatrixRow, candidateModelNames, visibleModelNames);
+  return buildRankingDataFromMatrixRow(rankingMatrixRow, candidateModelNames, visibleModelNames, scaleMode);
 }
 
 export function buildModelCoveragePercentMap(displayedCoverageMetaByModel: DisplayedCoverageMetaByModel): Map<string, number> {

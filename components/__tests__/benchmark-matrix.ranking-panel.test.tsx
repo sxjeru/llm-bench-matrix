@@ -57,7 +57,7 @@ describe("BenchmarkMatrix ranking panel", () => {
 
     fireEvent.click(benchRow!, { ctrlKey: true });
 
-    expect(screen.getByText("Benchmark ranking")).toBeInTheDocument();
+    expect(screen.getAllByText("Bench-1").length).toBeGreaterThan(0);
 
     const modelB = container.querySelector('[data-ranking-model="Model B"]');
     const modelA = container.querySelector('[data-ranking-model="Model A"]');
@@ -66,6 +66,15 @@ describe("BenchmarkMatrix ranking panel", () => {
     expect(modelB).toHaveTextContent("#1");
     expect(modelB).toHaveTextContent("75");
     expect(modelA).toHaveTextContent("#2");
+
+    fireEvent.click(screen.getByRole("button", { name: "0-100" }));
+    expect(screen.getAllByText("0-100").length).toBeGreaterThan(0);
+
+    const panel = container.querySelector("[data-benchmark-ranking-panel]");
+    expect(panel?.parentElement).not.toBeNull();
+    expect(panel?.parentElement?.parentElement).not.toBeNull();
+    fireEvent.mouseDown(panel!.parentElement!.parentElement!);
+    expect(container.querySelector("[data-benchmark-ranking-panel]")).toBeNull();
   });
 
   test("Ctrl/Cmd clicking a price row expands a lower-price ranking chart", () => {
@@ -87,8 +96,9 @@ describe("BenchmarkMatrix ranking panel", () => {
     expect(inputPriceRow).not.toBeNull();
 
     fireEvent.click(inputPriceRow!, { ctrlKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "全部" }));
 
-    expect(screen.getByText("Price ranking")).toBeInTheDocument();
+    expect(screen.getAllByText("Input Price").length).toBeGreaterThan(0);
 
     const modelB = container.querySelector('[data-ranking-model="Model B"]');
     const modelC = container.querySelector('[data-ranking-model="Model C"]');

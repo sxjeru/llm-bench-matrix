@@ -488,7 +488,7 @@ body.column-resizing * {
 input:not(.input):not(.file-input):not(.checkbox):not(.toggle),
 select:not(.select),
 textarea:not(.textarea),
-button:not(.btn):not(.tab) {
+button:not(.btn):not(.tab):not(.ranking-popover-button) {
   width: 100%;
   border-radius: 10px;
   border: 1px solid #354261;
@@ -503,11 +503,15 @@ textarea:not(.textarea) {
   resize: vertical;
 }
 
-button:not(.btn):not(.tab) {
+button:not(.btn):not(.tab):not(.ranking-popover-button) {
   cursor: pointer;
   background: linear-gradient(135deg, #355dff, #4a9aff);
   border-color: transparent;
   font-weight: 600;
+}
+
+.ranking-popover-button {
+  cursor: pointer;
 }
 
 button.secondary {

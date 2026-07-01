@@ -3,7 +3,6 @@
 /* eslint-disable react-hooks/preserve-manual-memoization -- This large matrix keeps hand-tuned memoization to preserve table behavior. */
 
 import {
-  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -81,6 +80,8 @@ import {
   type HeatmapPaletteRgb,
   type CompareDirection,
   type ExportPresetKey,
+  type BenchmarkRankingScaleMode,
+  type BenchmarkRankingScope,
   SOURCE_ALL,
   OVERALL_ROW_KEY,
   PRICE_CACHE_INPUT_ROW_KEY,
@@ -132,6 +133,10 @@ const PRICE_ROW_KEY_SET = new Set([
   PRICE_CACHE_INPUT_ROW_KEY
 ]);
 
+const RANKING_POPOVER_GAP = 8;
+const RANKING_POPOVER_MARGIN = 16;
+const RANKING_POPOVER_MAX_WIDTH = 860;
+
 export function BenchmarkMatrix({
   rows,
   allRows = rows,
@@ -146,6 +151,7 @@ export function BenchmarkMatrix({
   const sourceTabsMeasureRef = useRef<HTMLDivElement | null>(null);
   const sourceTabsMenuRef = useRef<HTMLDivElement | null>(null);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
+  const rankingPopoverRef = useRef<HTMLDivElement | null>(null);
   const showCategoryLoadedRef = useRef(false);
   const showDuplicateLoadedRef = useRef(false);
   const showSourceValuesLoadedRef = useRef(false);
@@ -216,6 +222,14 @@ export function BenchmarkMatrix({
   });
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [expandedRankingRowKey, setExpandedRankingRowKey] = useState<string | null>(null);
+  const [rankingScope, setRankingScope] = useState<BenchmarkRankingScope>("source");
+  const [rankingScaleMode, setRankingScaleMode] = useState<BenchmarkRankingScaleMode>("relative");
+  const [rankingPopoverPosition, setRankingPopoverPosition] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    placement: "above" | "below";
+  } | null>(null);
   const [temporarilyHiddenRowKeys, setTemporarilyHiddenRowKeys] = useState<string[]>([]);
   const [rowPresenceFilterModel, setRowPresenceFilterModel] = useState<string | null>(null);
   const [compareModelOrder, setCompareModelOrder] = useState<string[]>([]);
@@ -856,29 +870,19 @@ export function BenchmarkMatrix({
     [baseModelNameSet]
   );
 
-  const priceRankingModelNames = useMemo(() => {
-    const baseModels = activeSource === SOURCE_ALL
-      ? allModelNames
-      : Array.from(baseModelNameSet);
-    const ordered = [...baseModels];
+  const allRankingModelNames = useMemo(() => {
+    const ordered = Array.from(new Set(allRowsWithSourceMeta.map((row) => row.modelName)));
     const seen = new Set(ordered);
 
-    if (activeSource === SOURCE_ALL) {
-      modelPrices.forEach((price) => {
-        if (!seen.has(price.modelName)) {
-          seen.add(price.modelName);
-          ordered.push(price.modelName);
-        }
-      });
-    }
+    modelPrices.forEach((price) => {
+      if (!seen.has(price.modelName)) {
+        seen.add(price.modelName);
+        ordered.push(price.modelName);
+      }
+    });
 
     return ordered;
-  }, [activeSource, allModelNames, baseModelNameSet, modelPrices]);
-
-  const priceRankingMatrixRows = useMemo(
-    () => effectiveShowPriceRows ? buildPriceMatrixRows(priceRankingModelNames, modelPrices) : [],
-    [effectiveShowPriceRows, priceRankingModelNames, modelPrices]
-  );
+  }, [allRowsWithSourceMeta, modelPrices]);
 
   const summaryMatrixRows = useMemo(
     () => effectiveShowPriceRows ? [...visiblePriceMatrixRows, ...visiblePresenceFilteredMatrixRows] : visiblePresenceFilteredMatrixRows,
@@ -918,7 +922,10 @@ export function BenchmarkMatrix({
   useEffect(() => {
     if (!expandedRankingRowKey) return;
     if (displayMatrixRowKeySet.has(expandedRankingRowKey)) return;
-    enqueueStateUpdate(() => setExpandedRankingRowKey(null));
+    enqueueStateUpdate(() => {
+      setExpandedRankingRowKey(null);
+      setRankingPopoverPosition(null);
+    });
   }, [displayMatrixRowKeySet, expandedRankingRowKey]);
 
   const headerUniqueCounts = useMemo(
@@ -992,6 +999,63 @@ export function BenchmarkMatrix({
     });
   }, [baseModelColumns, columnSortBenchmarkKey, isPriceRowSortKey, overallSummaryByModel, priceMatrixRows]);
 
+  const activeRankingData = useMemo(() => {
+    if (!expandedRankingRowKey) return null;
+
+    const matrixRow = displayMatrixRows.find((row) => row.rowKey === expandedRankingRowKey);
+    if (!matrixRow) return null;
+
+    const candidateModelNames = rankingScope === "all"
+      ? allRankingModelNames
+      : benchmarkRankingModelNames;
+    const sourceRowsForRanking = rankingScope === "all"
+      ? allRowsWithSourceMeta
+      : baseSourceRows;
+    const rankingMatrixRow = matrixRow.isPriceRow
+      ? buildPriceMatrixRows(candidateModelNames, modelPrices).find((row) => row.rowKey === matrixRow.rowKey) ?? matrixRow
+      : matrixRow;
+
+    return buildBenchmarkRankingData(
+      rankingMatrixRow,
+      sourceRowsForRanking,
+      candidateModelNames,
+      modelColumns,
+      showDuplicateRows,
+      rankingScaleMode
+    );
+  }, [
+    allRankingModelNames,
+    allRowsWithSourceMeta,
+    baseSourceRows,
+    benchmarkRankingModelNames,
+    displayMatrixRows,
+    expandedRankingRowKey,
+    modelColumns,
+    modelPrices,
+    rankingScaleMode,
+    rankingScope,
+    showDuplicateRows
+  ]);
+
+  useLayoutEffect(() => {
+    if (!activeRankingData || !rankingPopoverPosition || !rankingPopoverRef.current) return;
+
+    const rect = rankingPopoverRef.current.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) return;
+
+    let nextTop = rankingPopoverPosition.top;
+
+    if (rect.top < RANKING_POPOVER_MARGIN) {
+      nextTop += RANKING_POPOVER_MARGIN - rect.top;
+    } else if (rect.bottom > window.innerHeight - RANKING_POPOVER_MARGIN) {
+      nextTop -= rect.bottom - (window.innerHeight - RANKING_POPOVER_MARGIN);
+    }
+
+    if (Math.abs(nextTop - rankingPopoverPosition.top) < 1) return;
+
+    setRankingPopoverPosition((prev) => prev ? { ...prev, top: nextTop } : prev);
+  }, [activeRankingData, rankingPopoverPosition]);
+
   const compareModelSet = useMemo(() => new Set(compareModelOrder), [compareModelOrder]);
   const compareBaselineModelName = compareModelOrder[0] ?? null;
   const isCompareActive = compareModelOrder.length >= 2;
@@ -1038,7 +1102,6 @@ export function BenchmarkMatrix({
     compareModelSet,
     compareBaselineModelName
   });
-  const tableColumnCount = 2 + (showCategory ? 1 : 0) + modelColumnMeta.length;
 
   const hasOverallSummary = useMemo(() => {
     return modelColumns.some((modelName) => overallSummaryByModel.get(modelName)?.rawScore !== null);
@@ -1082,9 +1145,35 @@ export function BenchmarkMatrix({
     setSelectedRowKey((prev) => (prev === rowKey ? null : prev));
     setColumnSortBenchmarkKey((prev) => (prev === rowKey ? null : prev));
     setExpandedRankingRowKey((prev) => (prev === rowKey ? null : prev));
+    setRankingPopoverPosition(null);
     setActiveCellTooltip(null);
     setActiveOverallTooltip(null);
     window.getSelection()?.removeAllRanges();
+  }
+
+  function getRankingPopoverPosition(event: ReactMouseEvent<HTMLTableRowElement>): {
+    top: number;
+    left: number;
+    width: number;
+    placement: "above" | "below";
+  } {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const width = Math.min(viewportWidth - RANKING_POPOVER_MARGIN * 2, RANKING_POPOVER_MAX_WIDTH);
+    const preferredLeft = event.clientX - width / 2;
+    const left = Math.max(
+      RANKING_POPOVER_MARGIN,
+      Math.min(preferredLeft, viewportWidth - width - RANKING_POPOVER_MARGIN)
+    );
+    const spaceBelow = viewportHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const placement = spaceBelow >= 360 || spaceBelow >= spaceAbove ? "below" : "above";
+    const top = placement === "below"
+      ? Math.min(rect.bottom + RANKING_POPOVER_GAP, viewportHeight - RANKING_POPOVER_MARGIN)
+      : Math.max(rect.top - RANKING_POPOVER_GAP, RANKING_POPOVER_MARGIN);
+
+    return { top, left, width, placement };
   }
 
   function preventTemporaryRowHideTextSelection(event: ReactMouseEvent<HTMLTableRowElement>) {
@@ -1819,23 +1908,11 @@ export function BenchmarkMatrix({
                     Number.EPSILON
                   )
                 : null;
-              const expandedRankingData = expandedRankingRowKey === rowKey
-                ? buildBenchmarkRankingData(
-                    matrixRow.isPriceRow
-                      ? priceRankingMatrixRows.find((row) => row.rowKey === rowKey) ?? matrixRow
-                      : matrixRow,
-                    baseSourceRows,
-                    matrixRow.isPriceRow ? priceRankingModelNames : benchmarkRankingModelNames,
-                    modelColumns,
-                    showDuplicateRows
-                  )
-                : null;
-
               return (
-                <Fragment key={rowKey}>
                 <tr
+                  key={rowKey}
                   data-metric-type={matrixRow.isPriceRow ? "price" : undefined}
-                  data-ranking-expanded={expandedRankingData ? "1" : undefined}
+                  data-ranking-expanded={expandedRankingRowKey === rowKey ? "1" : undefined}
                   className={isSelectedRow ? "matrix-row-selected" : "matrix-row-hover"}
                   onMouseDown={preventTemporaryRowHideTextSelection}
                   onClick={(event) => {
@@ -1847,7 +1924,12 @@ export function BenchmarkMatrix({
 
                     if (isCompareModifierClick(event)) {
                       event.preventDefault();
-                      setExpandedRankingRowKey((prev) => (prev === rowKey ? null : rowKey));
+                      const nextPosition = getRankingPopoverPosition(event);
+                      setExpandedRankingRowKey((prev) => {
+                        const shouldClose = prev === rowKey;
+                        setRankingPopoverPosition(shouldClose ? null : nextPosition);
+                        return shouldClose ? null : rowKey;
+                      });
                       setActiveCellTooltip(null);
                       setActiveOverallTooltip(null);
                       return;
@@ -2226,22 +2308,6 @@ export function BenchmarkMatrix({
                     );
                   })}
                 </tr>
-                {expandedRankingData ? (
-                  <tr data-ranking-row={rowKey}>
-                    <td
-                      colSpan={tableColumnCount}
-                      style={{
-                        padding: "8px 10px",
-                        backgroundColor: "rgba(15, 23, 42, 0.86)",
-                        borderTop: "1px solid rgba(148, 163, 184, 0.16)",
-                        borderBottom: "1px solid rgba(148, 163, 184, 0.2)"
-                      }}
-                    >
-                      <BenchmarkRankingPanel ranking={expandedRankingData} />
-                    </td>
-                  </tr>
-                ) : null}
-                </Fragment>
               );
             })}
 
@@ -2438,6 +2504,40 @@ export function BenchmarkMatrix({
           );
         })() : null}
       </div>
+
+      {activeRankingData && rankingPopoverPosition ? (
+        <div
+          className="fixed inset-0 z-[130] bg-transparent"
+          onMouseDown={() => {
+            setExpandedRankingRowKey(null);
+            setRankingPopoverPosition(null);
+          }}
+        >
+          <div
+            ref={rankingPopoverRef}
+            className="fixed"
+            style={{
+              top: rankingPopoverPosition.top,
+              left: rankingPopoverPosition.left,
+              width: rankingPopoverPosition.width,
+              transform: rankingPopoverPosition.placement === "above" ? "translateY(-100%)" : undefined
+            }}
+          >
+            <BenchmarkRankingPanel
+              ranking={activeRankingData}
+              scope={rankingScope}
+              scaleMode={rankingScaleMode}
+              placement={rankingPopoverPosition.placement}
+              onScopeChange={setRankingScope}
+              onScaleModeChange={setRankingScaleMode}
+              onClose={() => {
+                setExpandedRankingRowKey(null);
+                setRankingPopoverPosition(null);
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
 
       <HeatmapPanel
         heatmapPalette={heatmapPalette}

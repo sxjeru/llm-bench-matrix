@@ -82,12 +82,18 @@ export type BenchmarkRankingItem = {
   isVisibleColumn: boolean;
 };
 
+export type BenchmarkRankingScope = "source" | "all";
+export type BenchmarkRankingScaleMode = "relative" | "fixed";
+
 export type BenchmarkRankingData = {
   rowKey: string;
   benchmark: string;
   category: string;
   isPriceRow: boolean;
   lowerIsBetter: boolean;
+  scaleMode: BenchmarkRankingScaleMode;
+  effectiveScaleMode: BenchmarkRankingScaleMode;
+  scaleLabel: string;
   rankedModelCount: number;
   missingModelCount: number;
   items: BenchmarkRankingItem[];
