@@ -10,6 +10,7 @@ import {
   useRef,
   useState
 } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Check,
@@ -209,6 +210,7 @@ export function BenchmarkMatrix({
     mode: "data"
   });
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
+  const [temporarilyHiddenRowKeys, setTemporarilyHiddenRowKeys] = useState<string[]>([]);
   const [rowPresenceFilterModel, setRowPresenceFilterModel] = useState<string | null>(null);
   const [compareModelOrder, setCompareModelOrder] = useState<string[]>([]);
   const [isDownloadingTableImage, setIsDownloadingTableImage] = useState(false);
@@ -812,19 +814,38 @@ export function BenchmarkMatrix({
     [modalityFilteredMatrixRows, rowPresenceFilterModel]
   );
 
+  const temporarilyHiddenRowKeySet = useMemo(
+    () => new Set(temporarilyHiddenRowKeys),
+    [temporarilyHiddenRowKeys]
+  );
+
+  const visiblePresenceFilteredMatrixRows = useMemo(
+    () => temporarilyHiddenRowKeySet.size === 0
+      ? presenceFilteredMatrixRows
+      : presenceFilteredMatrixRows.filter((row) => !temporarilyHiddenRowKeySet.has(row.rowKey)),
+    [presenceFilteredMatrixRows, temporarilyHiddenRowKeySet]
+  );
+
   const priceMatrixRows = useMemo(
     () => effectiveShowPriceRows ? buildPriceMatrixRows(baseModelColumns, modelPrices) : [],
     [effectiveShowPriceRows, baseModelColumns, modelPrices]
   );
 
+  const visiblePriceMatrixRows = useMemo(
+    () => temporarilyHiddenRowKeySet.size === 0
+      ? priceMatrixRows
+      : priceMatrixRows.filter((row) => !temporarilyHiddenRowKeySet.has(row.rowKey)),
+    [priceMatrixRows, temporarilyHiddenRowKeySet]
+  );
+
   const summaryMatrixRows = useMemo(
-    () => effectiveShowPriceRows ? [...priceMatrixRows, ...presenceFilteredMatrixRows] : presenceFilteredMatrixRows,
-    [effectiveShowPriceRows, priceMatrixRows, presenceFilteredMatrixRows]
+    () => effectiveShowPriceRows ? [...visiblePriceMatrixRows, ...visiblePresenceFilteredMatrixRows] : visiblePresenceFilteredMatrixRows,
+    [effectiveShowPriceRows, visiblePriceMatrixRows, visiblePresenceFilteredMatrixRows]
   );
 
   const displayedCoverageMetaByModel = useMemo(
-    () => buildDisplayedCoverageMetaByModel(allModelNames, coveredModelsByGroupingKey, presenceFilteredMatrixRows, priceMatrixRows),
-    [allModelNames, coveredModelsByGroupingKey, presenceFilteredMatrixRows, priceMatrixRows]
+    () => buildDisplayedCoverageMetaByModel(allModelNames, coveredModelsByGroupingKey, visiblePresenceFilteredMatrixRows, visiblePriceMatrixRows),
+    [allModelNames, coveredModelsByGroupingKey, visiblePresenceFilteredMatrixRows, visiblePriceMatrixRows]
   );
 
   const modelCoveragePercentMap = useMemo(
@@ -838,18 +859,18 @@ export function BenchmarkMatrix({
   );
 
   const sortedMatrixRows = useMemo(
-    () => sortMatrixRows(presenceFilteredMatrixRows, rowSortState, activeSource),
-    [presenceFilteredMatrixRows, rowSortState, activeSource]
+    () => sortMatrixRows(visiblePresenceFilteredMatrixRows, rowSortState, activeSource),
+    [visiblePresenceFilteredMatrixRows, rowSortState, activeSource]
   );
 
   const displayMatrixRows = useMemo(
-    () => effectiveShowPriceRows ? [...priceMatrixRows, ...sortedMatrixRows] : sortedMatrixRows,
-    [effectiveShowPriceRows, priceMatrixRows, sortedMatrixRows]
+    () => effectiveShowPriceRows ? [...visiblePriceMatrixRows, ...sortedMatrixRows] : sortedMatrixRows,
+    [effectiveShowPriceRows, visiblePriceMatrixRows, sortedMatrixRows]
   );
 
   const headerUniqueCounts = useMemo(
-    () => buildHeaderUniqueCounts(presenceFilteredMatrixRows),
-    [presenceFilteredMatrixRows]
+    () => buildHeaderUniqueCounts(visiblePresenceFilteredMatrixRows),
+    [visiblePresenceFilteredMatrixRows]
   );
 
   const overallSummaryByModel = useMemo(
@@ -968,6 +989,7 @@ export function BenchmarkMatrix({
   const hasOverallSummary = useMemo(() => {
     return modelColumns.some((modelName) => overallSummaryByModel.get(modelName)?.rawScore !== null);
   }, [modelColumns, overallSummaryByModel]);
+  const shouldShowOverallSummary = hasOverallSummary && !temporarilyHiddenRowKeySet.has(OVERALL_ROW_KEY);
 
   const overallHeatRange = useMemo(
     () => buildOverallHeatRange(modelColumns, overallSummaryByModel),
@@ -999,6 +1021,21 @@ export function BenchmarkMatrix({
       : getInactiveColumnBaseMode();
     const next = nextRowSortMode(current);
     return getSortActionText(next);
+  }
+
+  function temporarilyHideRow(rowKey: string) {
+    setTemporarilyHiddenRowKeys((prev) => (prev.includes(rowKey) ? prev : [...prev, rowKey]));
+    setSelectedRowKey((prev) => (prev === rowKey ? null : prev));
+    setColumnSortBenchmarkKey((prev) => (prev === rowKey ? null : prev));
+    setActiveCellTooltip(null);
+    setActiveOverallTooltip(null);
+    window.getSelection()?.removeAllRanges();
+  }
+
+  function preventTemporaryRowHideTextSelection(event: ReactMouseEvent<HTMLTableRowElement>) {
+    if (event.shiftKey) {
+      event.preventDefault();
+    }
   }
 
   function toggleModel(modelName: string, checked: boolean) {
@@ -1733,7 +1770,14 @@ export function BenchmarkMatrix({
                   key={rowKey}
                   data-metric-type={matrixRow.isPriceRow ? "price" : undefined}
                   className={isSelectedRow ? "matrix-row-selected" : "matrix-row-hover"}
-                  onClick={() => {
+                  onMouseDown={preventTemporaryRowHideTextSelection}
+                  onClick={(event) => {
+                    if (event.shiftKey) {
+                      event.preventDefault();
+                      temporarilyHideRow(rowKey);
+                      return;
+                    }
+
                     setSelectedRowKey((prev) => (prev === rowKey ? null : rowKey));
                     setColumnSortBenchmarkKey((prev) => (prev === rowKey ? null : rowKey));
                   }}
@@ -2110,11 +2154,18 @@ export function BenchmarkMatrix({
               );
             })}
 
-            {hasOverallSummary ? (
+            {shouldShowOverallSummary ? (
               <tr
                 data-overall-row="1"
                 className={selectedRowKey === OVERALL_ROW_KEY ? "matrix-row-selected" : "matrix-row-hover"}
-                onClick={() => {
+                onMouseDown={preventTemporaryRowHideTextSelection}
+                onClick={(event) => {
+                  if (event.shiftKey) {
+                    event.preventDefault();
+                    temporarilyHideRow(OVERALL_ROW_KEY);
+                    return;
+                  }
+
                   setSelectedRowKey((prev) => (prev === OVERALL_ROW_KEY ? null : OVERALL_ROW_KEY));
                   setColumnSortBenchmarkKey((prev) => (prev === OVERALL_ROW_KEY ? null : OVERALL_ROW_KEY));
                 }}
