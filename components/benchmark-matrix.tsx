@@ -237,6 +237,8 @@ export function BenchmarkMatrix({
     hasSourceData,
     visibleSourceOptions,
     overflowSourceOptions,
+    overflowSourceMenuOptions,
+    promotedOverflowSourceKey,
     sourceNewStateByKey,
     getSourceTabDisplayText,
     getSourceTabTextColor,
@@ -1141,6 +1143,8 @@ export function BenchmarkMatrix({
         sourceOptions={sourceOptions}
         visibleSourceOptions={visibleSourceOptions}
         overflowSourceOptions={overflowSourceOptions}
+        overflowSourceMenuOptions={overflowSourceMenuOptions}
+        promotedOverflowSourceKey={promotedOverflowSourceKey}
         sourceNewStateByKey={sourceNewStateByKey}
         activeSource={activeSource}
         isSourceOverflowMenuOpen={isSourceOverflowMenuOpen}

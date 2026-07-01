@@ -156,6 +156,7 @@ export function useMatrixSourceTabs({
     [allSourceOptions, allRows]
   );
   const overflowSourceKeySet = useMemo(() => new Set(overflowSourceKeys), [overflowSourceKeys]);
+  const [promotedOverflowSourceKey, setPromotedOverflowSourceKey] = useState<string | null>(null);
   const visibleSourceOptions = useMemo(
     () => sourceOptions.filter((source) => !overflowSourceKeySet.has(source.key)),
     [sourceOptions, overflowSourceKeySet]
@@ -163,6 +164,12 @@ export function useMatrixSourceTabs({
   const overflowSourceOptions = useMemo(
     () => sourceOptions.filter((source) => overflowSourceKeySet.has(source.key)),
     [sourceOptions, overflowSourceKeySet]
+  );
+  const overflowSourceMenuOptions = useMemo(
+    () => sourceOptions.filter((source) => (
+      overflowSourceKeySet.has(source.key) || source.key === promotedOverflowSourceKey
+    )),
+    [sourceOptions, overflowSourceKeySet, promotedOverflowSourceKey]
   );
   const sourceNewStateByKey = useMemo(
     () => buildSourceNewStateByKey(allRows, sourceNewReferenceTime),
@@ -227,6 +234,7 @@ export function useMatrixSourceTabs({
 
       if (!viewportElement || !measureElement || allKeys.length === 0) {
         setOverflowSourceKeys((prev) => (prev.length > 0 ? [] : prev));
+        setPromotedOverflowSourceKey((prev) => (prev === null ? prev : null));
         return;
       }
 
@@ -252,12 +260,14 @@ export function useMatrixSourceTabs({
 
       if (!hasValidMeasurements) {
         setOverflowSourceKeys((prev) => (prev.length > 0 ? [] : prev));
+        setPromotedOverflowSourceKey((prev) => (prev === null ? prev : null));
         return;
       }
 
       const totalWidth = allKeys.reduce((sum, key) => sum + (widthByKey.get(key) ?? 0), 0);
       if (totalWidth <= availableWidth) {
         setOverflowSourceKeys((prev) => (prev.length > 0 ? [] : prev));
+        setPromotedOverflowSourceKey((prev) => (prev === null ? prev : null));
         return;
       }
 
@@ -266,8 +276,15 @@ export function useMatrixSourceTabs({
         const fallbackVisibleKeys = allKeys.includes(activeSource) ? [activeSource] : allKeys.slice(0, 1);
         const fallbackVisibleSet = new Set(fallbackVisibleKeys);
         const nextOverflowKeys = allKeys.filter((key) => !fallbackVisibleSet.has(key));
+        const nextPromotedOverflowSourceKey =
+          activeSource !== SOURCE_ALL && fallbackVisibleSet.has(activeSource) && allKeys[0] !== activeSource
+            ? activeSource
+            : null;
 
         setOverflowSourceKeys((prev) => (areStringArraysEqual(prev, nextOverflowKeys) ? prev : nextOverflowKeys));
+        setPromotedOverflowSourceKey((prev) => (
+          prev === nextPromotedOverflowSourceKey ? prev : nextPromotedOverflowSourceKey
+        ));
         return;
       }
 
@@ -283,7 +300,6 @@ export function useMatrixSourceTabs({
           break;
         }
       }
-
       const forceIncludeKey = (key: string, mandatory: boolean) => {
         if (!allKeys.includes(key) || visibleKeys.includes(key)) return;
 
@@ -320,8 +336,18 @@ export function useMatrixSourceTabs({
       );
 
       const nextOverflowKeys = allKeys.filter((key) => !visibleSet.has(key));
+      const activeSourceOrder = orderMap.get(activeSource) ?? -1;
+      const nextPromotedOverflowSourceKey =
+        activeSource !== SOURCE_ALL &&
+        visibleSet.has(activeSource) &&
+        nextOverflowKeys.some((key) => (orderMap.get(key) ?? -1) < activeSourceOrder)
+          ? activeSource
+          : null;
 
       setOverflowSourceKeys((prev) => (areStringArraysEqual(prev, nextOverflowKeys) ? prev : nextOverflowKeys));
+      setPromotedOverflowSourceKey((prev) => (
+        prev === nextPromotedOverflowSourceKey ? prev : nextPromotedOverflowSourceKey
+      ));
       if (nextOverflowKeys.length === 0) {
         setIsSourceOverflowMenuOpen(false);
       }
@@ -391,6 +417,8 @@ export function useMatrixSourceTabs({
     hasSourceData,
     visibleSourceOptions,
     overflowSourceOptions,
+    overflowSourceMenuOptions,
+    promotedOverflowSourceKey,
     sourceNewStateByKey,
     getSourceTabDisplayText,
     getSourceTabTextColor,

@@ -90,7 +90,7 @@ export function buildSourceOptions(rows: MatrixInputRow[], allSourceOptions: str
   const keys = Array.from(new Set([...rowSourceKeys, ...externalSourceKeys])).sort(compareSourceTabKeysByVersion);
 
   return [
-    { key: SOURCE_ALL, label: "全部" },
+    { key: SOURCE_ALL, label: "All" },
     ...keys.map((key) => ({ key, label: getSourceLabel(key) }))
   ];
 }

@@ -25,6 +25,8 @@ type TopControlsProps = {
   sourceOptions: SourceOption[];
   visibleSourceOptions: SourceOption[];
   overflowSourceOptions: SourceOption[];
+  overflowSourceMenuOptions: SourceOption[];
+  promotedOverflowSourceKey: string | null;
   sourceNewStateByKey: Map<string, { updatedAtMs: number; isNew: boolean }>;
   activeSource: string;
   isSourceOverflowMenuOpen: boolean;
@@ -102,6 +104,8 @@ export function BenchmarkMatrixTopControls({
   sourceOptions,
   visibleSourceOptions,
   overflowSourceOptions,
+  overflowSourceMenuOptions,
+  promotedOverflowSourceKey,
   sourceNewStateByKey,
   activeSource,
   isSourceOverflowMenuOpen,
@@ -177,7 +181,7 @@ export function BenchmarkMatrixTopControls({
                       type="button"
                       role="tab"
                       aria-selected={activeSource === source.key}
-                      className={`tab relative h-9 min-h-0 shrink-0 overflow-visible rounded-xl !px-2 text-base-content/80 transition-all duration-150 ${
+                      className={`tab relative h-9 min-h-0 shrink-0 overflow-visible rounded-xl !pl-2 !pr-[9px] text-base-content/80 transition-all duration-150 ${
                         activeSource === source.key
                           ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
                           : "hover:!rounded-xl hover:bg-white/10 hover:text-base-content"
@@ -189,7 +193,7 @@ export function BenchmarkMatrixTopControls({
                       {sourceNewStateByKey.get(source.key)?.isNew ? (
                         <span
                           aria-hidden="true"
-                          className="pointer-events-none absolute right-[4px] top-[6px] h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_0_1px_rgba(6,78,59,0.75),0_0_8px_rgba(110,231,183,0.45)]"
+                          className="pointer-events-none absolute right-[3px] top-[6px] h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_0_1px_rgba(6,78,59,0.75),0_0_8px_rgba(110,231,183,0.45)]"
                         />
                       ) : null}
                     </button>
@@ -233,29 +237,40 @@ export function BenchmarkMatrixTopControls({
                 >
                   <div className="overflow-hidden border-t border-white/8 mt-0.5">
                     <div className="flex flex-wrap items-center gap-1 py-1">
-                      {overflowSourceOptions.map((source) => (
-                        <button
-                          key={`overflow-${source.key}`}
-                          type="button"
-                          role="tab"
-                          aria-selected={activeSource === source.key}
-                          tabIndex={isSourceOverflowMenuOpen ? undefined : -1}
-                          className={`tab relative h-9 min-h-0 overflow-visible rounded-xl !px-2 text-base-content/80 transition-all duration-150 ${
-                            activeSource === source.key
-                              ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
-                              : "hover:!rounded-xl hover:bg-white/10 hover:text-base-content"
-                          }`}
-                          onClick={() => setSourceAndUrl(source.key)}
-                          title={getSourceTabTitle(source)}
-                        >
-                          {renderSourceTabLabel(source)}
-                          {sourceNewStateByKey.get(source.key)?.isNew ? (
-                            <span
-                              aria-hidden="true"
-                              className="pointer-events-none absolute right-[4px] top-[6px] h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_0_1px_rgba(6,78,59,0.75),0_0_8px_rgba(110,231,183,0.45)]"
-                            />
-                          ) : null}
-                        </button>
+                      {overflowSourceMenuOptions.map((source) => (
+                        source.key === promotedOverflowSourceKey ? (
+                          <span
+                            key={`overflow-placeholder-${source.key}`}
+                            aria-hidden="true"
+                            data-source-tab-placeholder={source.key}
+                            className="inline-flex h-9 items-center gap-1 rounded-xl border border-white/10 bg-white/[0.04] !pl-2 !pr-[9px] text-xs font-medium text-base-content/45"
+                          >
+                            <span>{getSourceTabDisplayText(source)}</span>
+                          </span>
+                        ) : (
+                          <button
+                            key={`overflow-${source.key}`}
+                            type="button"
+                            role="tab"
+                            aria-selected={activeSource === source.key}
+                            tabIndex={isSourceOverflowMenuOpen ? undefined : -1}
+                            className={`tab relative h-9 min-h-0 overflow-visible rounded-xl !pl-2 !pr-[9px] text-base-content/80 transition-all duration-150 ${
+                              activeSource === source.key
+                                ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
+                                : "hover:!rounded-xl hover:bg-white/10 hover:text-base-content"
+                            }`}
+                            onClick={() => setSourceAndUrl(source.key)}
+                            title={getSourceTabTitle(source)}
+                          >
+                            {renderSourceTabLabel(source)}
+                            {sourceNewStateByKey.get(source.key)?.isNew ? (
+                              <span
+                                aria-hidden="true"
+                                className="pointer-events-none absolute right-[3px] top-[6px] h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_0_1px_rgba(6,78,59,0.75),0_0_8px_rgba(110,231,183,0.45)]"
+                              />
+                            ) : null}
+                          </button>
+                        )
                       ))}
                     </div>
                   </div>
@@ -276,7 +291,7 @@ export function BenchmarkMatrixTopControls({
                   type="button"
                   data-source-tab-measure="item"
                   data-source-tab-measure-key={source.key}
-                  className={`tab relative h-9 min-h-0 shrink-0 overflow-visible rounded-xl !px-2 text-base-content/80 transition-all duration-150 ${
+                  className={`tab relative h-9 min-h-0 shrink-0 overflow-visible rounded-xl !pl-2 !pr-[9px] text-base-content/80 transition-all duration-150 ${
                     activeSource === source.key
                       ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
                       : "hover:!rounded-xl hover:bg-white/10 hover:text-base-content"
@@ -286,7 +301,7 @@ export function BenchmarkMatrixTopControls({
                   {sourceNewStateByKey.get(source.key)?.isNew ? (
                     <span
                       aria-hidden="true"
-                      className="pointer-events-none absolute right-[4px] top-[6px] h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_0_1px_rgba(6,78,59,0.75),0_0_8px_rgba(110,231,183,0.45)]"
+                      className="pointer-events-none absolute right-[3px] top-[6px] h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_0_1px_rgba(6,78,59,0.75),0_0_8px_rgba(110,231,183,0.45)]"
                     />
                   ) : null}
                 </button>

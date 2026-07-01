@@ -367,7 +367,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
       expect(screen.getByRole("button", { name: "显示原始值" })).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("tab", { name: "全部" }));
+    await user.click(screen.getByRole("tab", { name: "All" }));
 
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "显示原始值" })).not.toBeInTheDocument();
@@ -556,4 +556,3 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(sourceDeltaBadge).toHaveTextContent("▲55");
   });
 });
-

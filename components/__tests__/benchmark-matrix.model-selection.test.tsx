@@ -93,7 +93,7 @@ describe("BenchmarkMatrix 模型筛选按页签记忆", () => {
     fireEvent.click(screen.getByRole("tab", { name: "S1" }));
     expect(screen.getByText(/已选模型/)).toHaveTextContent("已选模型 1/3");
 
-    fireEvent.click(screen.getByRole("tab", { name: "全部" }));
+    fireEvent.click(screen.getByRole("tab", { name: "All" }));
     expect(screen.getByText(/已选模型/)).toHaveTextContent("已选模型 2/3");
   });
 
