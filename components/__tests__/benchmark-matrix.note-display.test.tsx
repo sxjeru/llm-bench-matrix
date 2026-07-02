@@ -153,7 +153,7 @@ describe("BenchmarkMatrix 星号值显示", () => {
     expect(questionMark).toBeTruthy();
     fireEvent.mouseEnter(questionMark as HTMLElement);
 
-    const duplicateHint = await screen.findByText("该单元格存在多条记录");
+    const duplicateHint = await screen.findByText("存在多条记录");
     const tooltip = duplicateHint.closest("div");
     expect(tooltip).not.toBeNull();
 

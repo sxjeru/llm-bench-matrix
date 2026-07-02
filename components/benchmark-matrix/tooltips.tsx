@@ -1,3 +1,5 @@
+/* eslint-disable react-hooks/set-state-in-effect */
+import { useRef, useState, useLayoutEffect } from "react";
 import { formatTooltipTime } from "./formatters";
 import { getMatrixCellDisplayValue } from "./scoring";
 import type { MatrixCellEntry, OverallModelSummary } from "./types";
@@ -7,6 +9,7 @@ type CellTooltip = {
   y: number;
   entries: MatrixCellEntry[];
   note: string | null;
+  targetHeight?: number;
 };
 
 type OverallTooltip = {
@@ -14,6 +17,7 @@ type OverallTooltip = {
   y: number;
   modelName: string;
   summary: OverallModelSummary;
+  targetHeight?: number;
 };
 
 type MatrixCellTooltipProps = {
@@ -25,19 +29,46 @@ type OverallScoreTooltipProps = {
 };
 
 export function MatrixCellTooltip({ tooltip }: MatrixCellTooltipProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [adjustedTop, setAdjustedTop] = useState<number | null>(null);
+  const [adjustedTransform, setAdjustedTransform] = useState<string>("translate(-50%, -100%)");
+
+  useLayoutEffect(() => {
+    if (!tooltip) {
+      setAdjustedTop(null);
+      setAdjustedTransform("translate(-50%, -100%)");
+      return;
+    }
+
+    if (ref.current) {
+      const height = ref.current.offsetHeight;
+      const topOffset = tooltip.y - height;
+      
+      if (topOffset < 8) {
+        const targetH = tooltip.targetHeight ?? 24;
+        setAdjustedTop(tooltip.y + 12 + targetH);
+        setAdjustedTransform("translate(-50%, 0)");
+      } else {
+        setAdjustedTop(tooltip.y);
+        setAdjustedTransform("translate(-50%, -100%)");
+      }
+    }
+  }, [tooltip]);
+
   if (!tooltip) return null;
 
   return (
     <div
-      className="pointer-events-none fixed z-[2600] w-[320px] max-w-[320px] rounded-xl border border-white/20 bg-slate-900/96 p-2 text-left text-[11px] font-medium text-slate-100 shadow-2xl backdrop-blur-lg"
+      ref={ref}
+      className="pointer-events-none fixed z-[2600] w-[320px] max-w-[320px] rounded-xl border border-white/20 bg-slate-900/80 p-2 text-left text-[11px] font-medium text-slate-100 shadow-2xl backdrop-blur-lg"
       style={{
         left: tooltip.x,
-        top: tooltip.y,
-        transform: "translate(-50%, -100%)"
+        top: adjustedTop !== null ? adjustedTop : tooltip.y,
+        transform: adjustedTransform
       }}
     >
       {tooltip.entries.length > 1 ? (
-        <span className="mb-1 block text-[10px] text-slate-300">该单元格存在多条记录</span>
+        <span className="mb-1 block text-[10px] text-slate-300">存在多条记录</span>
       ) : null}
 
       {tooltip.note ? (
@@ -70,15 +101,42 @@ export function MatrixCellTooltip({ tooltip }: MatrixCellTooltipProps) {
 }
 
 export function OverallScoreTooltip({ tooltip }: OverallScoreTooltipProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [adjustedTop, setAdjustedTop] = useState<number | null>(null);
+  const [adjustedTransform, setAdjustedTransform] = useState<string>("translate(-50%, -100%)");
+
+  useLayoutEffect(() => {
+    if (!tooltip) {
+      setAdjustedTop(null);
+      setAdjustedTransform("translate(-50%, -100%)");
+      return;
+    }
+
+    if (ref.current) {
+      const height = ref.current.offsetHeight;
+      const topOffset = tooltip.y - height;
+      
+      if (topOffset < 8) {
+        const targetH = tooltip.targetHeight ?? 24;
+        setAdjustedTop(tooltip.y + 12 + targetH);
+        setAdjustedTransform("translate(-50%, 0)");
+      } else {
+        setAdjustedTop(tooltip.y);
+        setAdjustedTransform("translate(-50%, -100%)");
+      }
+    }
+  }, [tooltip]);
+
   if (!tooltip) return null;
 
   return (
     <div
-      className="pointer-events-none fixed z-[2600] w-[320px] max-w-[320px] rounded-xl border border-white/20 bg-slate-900/96 p-2 text-left text-[11px] font-medium text-slate-100 shadow-2xl backdrop-blur-lg"
+      ref={ref}
+      className="pointer-events-none fixed z-[2600] w-[320px] max-w-[320px] rounded-xl border border-white/20 bg-slate-900/80 p-2 text-left text-[11px] font-medium text-slate-100 shadow-2xl backdrop-blur-lg"
       style={{
         left: tooltip.x,
-        top: tooltip.y,
-        transform: "translate(-50%, -100%)"
+        top: adjustedTop !== null ? adjustedTop : tooltip.y,
+        transform: adjustedTransform
       }}
     >
       <span className="mb-1 block text-[10px] text-slate-300">{tooltip.modelName} · 总评细节</span>
