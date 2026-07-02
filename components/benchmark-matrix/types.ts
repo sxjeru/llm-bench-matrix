@@ -72,6 +72,22 @@ export type MatrixRow = {
   isPriceRow?: boolean;
 };
 
+export type BoxPlotPercentStats = {
+  min: number;
+  q1: number;
+  median: number;
+  q3: number;
+  max: number;
+  outliers: number[];
+  count: number;
+  rawMin: number;
+  rawQ1: number;
+  rawMedian: number;
+  rawQ3: number;
+  rawMax: number;
+  rawOutliers: number[];
+};
+
 export type BenchmarkRankingItem = {
   modelName: string;
   displayValue: string;
@@ -80,6 +96,9 @@ export type BenchmarkRankingItem = {
   rank: number;
   barPercent: number;
   isVisibleColumn: boolean;
+  boxplot?: BoxPlotPercentStats | null;
+  allEntries?: MatrixCellEntry[];
+  noteText?: string;
 };
 
 export type BenchmarkRankingScope = "source" | "all";

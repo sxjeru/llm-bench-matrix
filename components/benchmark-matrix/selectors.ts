@@ -21,6 +21,7 @@ import {
   getSortedQuantile,
   isLowerBetterBenchmark
 } from "./scoring";
+import { calculateBoxPlotStats } from "@/lib/boxplot-stats";
 import type {
   IndexedMatrixInputRow,
   BenchmarkRankingData,
@@ -1164,7 +1165,8 @@ function buildRankingDataFromMatrixRow(
         comparableScore: getBenchmarkRankingComparableScore(matrixRow, valueNum),
         rank: 0,
         barPercent: 0,
-        isVisibleColumn: visibleModelSet.has(modelName)
+        isVisibleColumn: visibleModelSet.has(modelName),
+        cell
       };
     })
     .filter((item): item is NonNullable<typeof item> => item !== null);
@@ -1197,23 +1199,72 @@ function buildRankingDataFromMatrixRow(
 
   const items = numericItems
     .map((item) => {
-      const normalized = effectiveScaleMode === "fixed"
-        ? lowerIsBetter
-          ? (fixedScaleMax - item.valueNum) / fixedScaleMax
-          : item.valueNum / fixedScaleMax
-        : comparableRange > Number.EPSILON && minComparable !== null
-          ? (item.comparableScore - minComparable) / comparableRange
-          : 1;
-      const clampedPercent = Math.max(0, Math.min(100, normalized * 100));
+      const toPercent = (scoreVal: number, rawVal: number) => {
+        const normalized = effectiveScaleMode === "fixed"
+          ? lowerIsBetter
+            ? (fixedScaleMax - rawVal) / fixedScaleMax
+            : rawVal / fixedScaleMax
+          : comparableRange > Number.EPSILON && minComparable !== null
+            ? (scoreVal - minComparable) / comparableRange
+            : 1;
+        return Math.max(0, Math.min(100, normalized * 100));
+      };
+
+      const primaryPercent = toPercent(item.comparableScore, item.valueNum);
+      const clampedPercent = Math.max(0, Math.min(100, primaryPercent));
+
+      const allEntries = item.cell?.allEntries ?? [];
+      const validEntries = allEntries
+        .map((entry) => {
+          const val = entry.valueNum;
+          if (val === null || !Number.isFinite(val)) return null;
+          return {
+            rawVal: val,
+            scoreVal: getBenchmarkRankingComparableScore(matrixRow, val)
+          };
+        })
+        .filter((e): e is NonNullable<typeof e> => e !== null);
+
+      let boxplot = null;
+      if (validEntries.length >= 2) {
+        const percents = validEntries.map((e) => toPercent(e.scoreVal, e.rawVal));
+        const rawVals = validEntries.map((e) => e.rawVal);
+
+        const stats = calculateBoxPlotStats(percents);
+        const rawStats = calculateBoxPlotStats(rawVals);
+
+        boxplot = {
+          min: stats.min,
+          q1: stats.q1,
+          median: stats.median,
+          q3: stats.q3,
+          max: stats.max,
+          outliers: stats.outliers,
+          count: stats.count,
+          rawMin: rawStats.min,
+          rawQ1: rawStats.q1,
+          rawMedian: rawStats.median,
+          rawQ3: rawStats.q3,
+          rawMax: rawStats.max,
+          rawOutliers: rawStats.outliers
+        };
+      }
 
       return {
-        ...item,
+        modelName: item.modelName,
+        displayValue: item.displayValue,
+        valueNum: item.valueNum,
+        comparableScore: item.comparableScore,
         rank: rankMap.get(item.modelName) ?? 0,
         barPercent: effectiveScaleMode === "relative"
           ? Math.max(7, clampedPercent)
           : clampedPercent > 0
             ? Math.max(4, clampedPercent)
-            : 0
+            : 0,
+        isVisibleColumn: item.isVisibleColumn,
+        boxplot,
+        allEntries: item.cell?.allEntries ?? [],
+        noteText: item.cell?.noteText ?? ""
       };
     })
     .sort((left, right) => {
@@ -1257,41 +1308,64 @@ export function buildBenchmarkRankingData(
   matchingRows.forEach((row) => {
     if (!candidateModelSet.has(row.modelName)) return;
 
-    const previous = cellsByModel.get(row.modelName);
     const rowValueNum = row.valueNum;
     const rowValueNum2 = row.valueNum2 ?? null;
     const rowValueNote = row.valueNote;
-    const rowCell = {
+    const entry = {
       valueRaw: row.valueRaw,
       valueNum: rowValueNum,
       valueNum2: rowValueNum2,
       valueNote: rowValueNote,
       source: row.source,
-      benchTime: row.benchTime,
-      allEntries: [],
-      hasMultipleValues: false,
-      uniqueEntries: [],
-      noteText: (rowValueNote ?? "").trim(),
-      displayValue: getMatrixCellDisplayValue(rowValueNum, rowValueNum2, row.valueRaw, rowValueNote),
-      hasMeaningfulMultipleValues: false,
-      shouldShowQuestionMark: false
-    } satisfies MatrixCell;
+      benchTime: row.benchTime
+    };
 
+    const previous = cellsByModel.get(row.modelName);
     if (!previous) {
+      const noteText = (rowValueNote ?? "").trim();
+      const rowCell: MatrixCell = {
+        valueRaw: row.valueRaw,
+        valueNum: rowValueNum,
+        valueNum2: rowValueNum2,
+        valueNote: rowValueNote,
+        source: row.source,
+        benchTime: row.benchTime,
+        allEntries: [entry],
+        hasMultipleValues: false,
+        uniqueEntries: [entry],
+        noteText,
+        displayValue: getMatrixCellDisplayValue(rowValueNum, rowValueNum2, row.valueRaw, rowValueNote),
+        hasMeaningfulMultipleValues: false,
+        shouldShowQuestionMark: noteText.length > 0 && noteText.toLowerCase() !== "x"
+      };
       cellsByModel.set(row.modelName, rowCell);
-      return;
-    }
+    } else {
+      previous.allEntries.push(entry);
+      previous.hasMultipleValues = previous.allEntries.length > 1;
 
-    if (rowValueNum === null || !Number.isFinite(rowValueNum)) return;
-    if (previous.valueNum === null || !Number.isFinite(previous.valueNum)) {
-      cellsByModel.set(row.modelName, rowCell);
-      return;
-    }
-
-    const previousScore = getBenchmarkRankingComparableScore(matrixRow, previous.valueNum);
-    const nextScore = getBenchmarkRankingComparableScore(matrixRow, rowValueNum);
-    if (nextScore > previousScore) {
-      cellsByModel.set(row.modelName, rowCell);
+      if (rowValueNum !== null && Number.isFinite(rowValueNum)) {
+        if (previous.valueNum === null || !Number.isFinite(previous.valueNum)) {
+          previous.valueRaw = row.valueRaw;
+          previous.valueNum = rowValueNum;
+          previous.valueNum2 = rowValueNum2;
+          previous.valueNote = rowValueNote;
+          previous.source = row.source;
+          previous.benchTime = row.benchTime;
+          previous.displayValue = getMatrixCellDisplayValue(rowValueNum, rowValueNum2, row.valueRaw, rowValueNote);
+        } else {
+          const previousScore = getBenchmarkRankingComparableScore(matrixRow, previous.valueNum);
+          const nextScore = getBenchmarkRankingComparableScore(matrixRow, rowValueNum);
+          if (nextScore > previousScore) {
+            previous.valueRaw = row.valueRaw;
+            previous.valueNum = rowValueNum;
+            previous.valueNum2 = rowValueNum2;
+            previous.valueNote = rowValueNote;
+            previous.source = row.source;
+            previous.benchTime = row.benchTime;
+            previous.displayValue = getMatrixCellDisplayValue(rowValueNum, rowValueNum2, row.valueRaw, rowValueNote);
+          }
+        }
+      }
     }
   });
 

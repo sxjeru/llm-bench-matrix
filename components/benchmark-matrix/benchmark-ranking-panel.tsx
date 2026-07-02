@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import type { BenchmarkRankingData } from "./types";
+import type { BenchmarkRankingData, BenchmarkRankingItem } from "./types";
 import type { BenchmarkRankingScaleMode, BenchmarkRankingScope } from "./types";
 
 type BenchmarkRankingPanelProps = {
@@ -7,9 +7,12 @@ type BenchmarkRankingPanelProps = {
   scope: BenchmarkRankingScope;
   scaleMode: BenchmarkRankingScaleMode;
   placement: "above" | "below";
+  showBoxPlot: boolean;
   onScopeChange: (scope: BenchmarkRankingScope) => void;
   onScaleModeChange: (mode: BenchmarkRankingScaleMode) => void;
+  onShowBoxPlotChange: (show: boolean) => void;
   onClose: () => void;
+  onHoverItem?: (rect: DOMRect | null, item: BenchmarkRankingItem | null) => void;
 };
 
 function formatRankingDisplayValue(value: string): string {
@@ -24,9 +27,12 @@ export function BenchmarkRankingPanel({
   scope,
   scaleMode,
   placement,
+  showBoxPlot,
   onScopeChange,
   onScaleModeChange,
-  onClose
+  onShowBoxPlotChange,
+  onClose,
+  onHoverItem
 }: BenchmarkRankingPanelProps) {
   const hasItems = ranking.items.length > 0;
   const scopeOptions: Array<{ value: BenchmarkRankingScope; label: string }> = [
@@ -69,6 +75,17 @@ export function BenchmarkRankingPanel({
             </div>
           </div>
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+            <button
+              type="button"
+              className={`ranking-popover-button h-8 rounded-md border border-slate-600/50 bg-slate-900/80 px-2 text-xs font-semibold transition ${
+                showBoxPlot
+                  ? "bg-sky-300/20 text-sky-100 border-sky-400/45"
+                  : "text-slate-400 hover:text-slate-100 hover:border-slate-500/50"
+              }`}
+              onClick={() => onShowBoxPlotChange(!showBoxPlot)}
+            >
+              箱线图
+            </button>
             <div className="inline-flex overflow-hidden rounded-md border border-slate-600/50 bg-slate-900/80 p-0.5">
               {scopeOptions.map((option) => (
                 <button
@@ -150,11 +167,77 @@ export function BenchmarkRankingPanel({
                     >
                       {item.modelName}
                     </div>
-                    <div className="relative h-[18px] min-w-0 overflow-hidden rounded bg-slate-800/80">
-                      <div
-                        className={`absolute inset-y-0 left-0 rounded ${isTop ? "bg-amber-300/80" : isSecond ? "bg-cyan-300/70" : "bg-sky-400/55"}`}
-                        style={{ width: `${item.barPercent}%` }}
-                      />
+                    <div
+                      className={`relative h-[18px] min-w-0 rounded bg-slate-800/80 ${showBoxPlot && item.boxplot ? "cursor-help" : ""}`}
+                      onMouseEnter={(event) => {
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        onHoverItem?.(rect, item);
+                      }}
+                      onMouseLeave={() => {
+                        onHoverItem?.(null, null);
+                      }}
+                    >
+                      {item.boxplot && showBoxPlot ? (
+                        <>
+                          {/* Background progress bar underneath (color is darker/subtler) */}
+                          <div
+                            className={`absolute inset-y-0 left-0 rounded ${isTop ? "bg-amber-300/35" : isSecond ? "bg-cyan-300/25" : "bg-sky-400/20"}`}
+                            style={{ width: `${item.barPercent}%` }}
+                          />
+                          {/* BoxPlot on top */}
+                          <div className="absolute inset-0 flex items-center px-1">
+                            <div className="relative w-full h-[10px]">
+                              {/* Whisker Line */}
+                              <div
+                                className="absolute top-1/2 h-[2px] -translate-y-1/2 bg-sky-400/50"
+                                style={{
+                                  left: `${item.boxplot.min}%`,
+                                  right: `${100 - item.boxplot.max}%`
+                                }}
+                              />
+                              {/* Left Whisker Cap */}
+                              <div
+                                className="absolute top-1/2 w-[1px] h-[6px] -translate-y-1/2 bg-sky-400/70"
+                                style={{ left: `${item.boxplot.min}%` }}
+                              />
+                              {/* Right Whisker Cap */}
+                              <div
+                                className="absolute top-1/2 w-[1px] h-[6px] -translate-y-1/2 bg-sky-400/70"
+                                style={{ left: `${item.boxplot.max}%` }}
+                              />
+                              {/* Box */}
+                              <div
+                                className={`absolute top-0 h-full border border-sky-400/80 ${isTop ? "bg-amber-300/40" : isSecond ? "bg-cyan-300/35" : "bg-sky-400/30"} rounded-sm`}
+                                style={{
+                                  left: `${item.boxplot.q1}%`,
+                                  width: `${item.boxplot.q3 - item.boxplot.q1}%`
+                                }}
+                              />
+                              {/* Median Line */}
+                              <div
+                                className="absolute top-0 w-[2px] h-full bg-white"
+                                style={{ left: `${item.boxplot.median}%` }}
+                              />
+                              {/* Outliers */}
+                              {item.boxplot.outliers.map((outlierPercent, idx) => (
+                                <div
+                                  key={idx}
+                                  className="absolute top-1/2 w-[6px] h-[6px] rounded-full border border-sky-400 bg-slate-950"
+                                  style={{
+                                    left: `${outlierPercent}%`,
+                                    transform: "translate(-50%, -50%)"
+                                  }}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div
+                          className={`absolute inset-y-0 left-0 rounded ${isTop ? "bg-amber-300/80" : isSecond ? "bg-cyan-300/70" : "bg-sky-400/55"}`}
+                          style={{ width: `${item.barPercent}%` }}
+                        />
+                      )}
                     </div>
                     <div
                       className={`truncate pr-2 text-right tabular-nums ${isTop ? "font-extrabold text-amber-100" : isSecond ? "font-bold text-slate-100 underline decoration-slate-400 underline-offset-2" : "font-semibold text-slate-300"}`}

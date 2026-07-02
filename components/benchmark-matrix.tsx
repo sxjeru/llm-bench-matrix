@@ -224,6 +224,7 @@ export function BenchmarkMatrix({
   const [expandedRankingRowKey, setExpandedRankingRowKey] = useState<string | null>(null);
   const [rankingScope, setRankingScope] = useState<BenchmarkRankingScope>("source");
   const [rankingScaleMode, setRankingScaleMode] = useState<BenchmarkRankingScaleMode>("relative");
+  const [rankingShowBoxPlot, setRankingShowBoxPlot] = useState<boolean>(false);
   const [rankingPopoverPosition, setRankingPopoverPosition] = useState<{
     top: number;
     left: number;
@@ -244,12 +245,14 @@ export function BenchmarkMatrix({
     y: number;
     entries: MatrixCellEntry[];
     note: string | null;
+    targetHeight?: number;
   } | null>(null);
   const [activeOverallTooltip, setActiveOverallTooltip] = useState<{
     x: number;
     y: number;
     modelName: string;
     summary: OverallModelSummary;
+    targetHeight?: number;
   } | null>(null);
 
   const {
@@ -2296,7 +2299,8 @@ export function BenchmarkMatrix({
                                 x: rect.left + rect.width / 2,
                                 y: rect.top - 6,
                                 entries: uniqueEntries,
-                                note: noteText.length > 0 ? noteText : null
+                                note: noteText.length > 0 ? noteText : null,
+                                targetHeight: rect.height
                               });
                             }}
                             onMouseLeave={() => setActiveCellTooltip(null)}
@@ -2440,7 +2444,8 @@ export function BenchmarkMatrix({
                               x: rect.left + rect.width / 2,
                               y: rect.top - 6,
                               modelName: model.modelName,
-                              summary
+                              summary,
+                              targetHeight: rect.height
                             });
                           }}
                           onMouseLeave={() => setActiveOverallTooltip(null)}
@@ -2528,11 +2533,26 @@ export function BenchmarkMatrix({
               scope={rankingScope}
               scaleMode={rankingScaleMode}
               placement={rankingPopoverPosition.placement}
+              showBoxPlot={rankingShowBoxPlot}
               onScopeChange={setRankingScope}
               onScaleModeChange={setRankingScaleMode}
+              onShowBoxPlotChange={setRankingShowBoxPlot}
               onClose={() => {
                 setExpandedRankingRowKey(null);
                 setRankingPopoverPosition(null);
+              }}
+              onHoverItem={(rect, item) => {
+                if (!rankingShowBoxPlot || !rect || !item || !item.allEntries || item.allEntries.length === 0) {
+                  setActiveCellTooltip(null);
+                  return;
+                }
+                setActiveCellTooltip({
+                  x: rect.left + rect.width / 2,
+                  y: rect.top - 6,
+                  entries: item.allEntries,
+                  note: item.noteText && item.noteText.length > 0 ? item.noteText : null,
+                  targetHeight: rect.height
+                });
               }}
             />
           </div>
