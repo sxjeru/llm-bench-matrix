@@ -13,6 +13,8 @@ import {
   XAxis,
   YAxis
 } from "recharts";
+import { calculateBoxPlotStats, type BoxPlotStats } from "@/lib/boxplot-stats";
+import { CustomBoxPlotLayer } from "./custom-boxplot-layer";
 
 type Row = {
   benchmarkName: string;
@@ -76,25 +78,45 @@ function ChartPanel({
 }
 
 export function DashboardCharts({ rows }: { rows: Row[] }) {
-  const benchmarkAverage = useMemo(() => {
-    const aggregate = new Map<string, { sum: number; count: number }>();
+  // 收集每个 benchmark+model 组合的所有数值
+  const benchmarkModelDistribution = useMemo(() => {
+    const distribution = new Map<string, { values: number[]; benchmarkName: string; modelName: string }>();
 
     rows.forEach((row) => {
       if (row.valueNum === null) return;
-      const current = aggregate.get(row.benchmarkName) || { sum: 0, count: 0 };
-      current.sum += row.valueNum;
-      current.count += 1;
-      aggregate.set(row.benchmarkName, current);
+      const key = `${row.benchmarkName}::${row.modelName}`;
+      const current = distribution.get(key) || { values: [], benchmarkName: row.benchmarkName, modelName: row.modelName };
+      current.values.push(row.valueNum);
+      distribution.set(key, current);
     });
 
-    return Array.from(aggregate.entries())
-      .map(([benchmark, agg]) => ({
-        benchmark,
-        avg: Number((agg.sum / agg.count).toFixed(4))
+    // 只保留有多个值的组合（至少2个值才有意义绘制箱线图）
+    const boxplotData: BoxPlotStats[] = Array.from(distribution.entries())
+      .filter(([, data]) => data.values.length >= 2)
+      .map(([, data]) => ({
+        benchmark: `${data.benchmarkName} - ${data.modelName}`,
+        benchmarkName: data.benchmarkName,
+        modelName: data.modelName,
+        ...calculateBoxPlotStats(data.values)
       }))
-      .sort((a, b) => b.avg - a.avg)
+      .sort((a, b) => b.median - a.median) // 按中位数排序
       .slice(0, 12);
+
+    return boxplotData;
   }, [rows]);
+
+  const yDomain = useMemo(() => {
+    if (benchmarkModelDistribution.length === 0) return [0, 100];
+    let minVal = Infinity;
+    let maxVal = -Infinity;
+    benchmarkModelDistribution.forEach((item) => {
+      const allVals = [item.min, item.q1, item.median, item.q3, item.max, ...item.outliers];
+      minVal = Math.min(minVal, ...allVals);
+      maxVal = Math.max(maxVal, ...allVals);
+    });
+    const padding = (maxVal - minVal) * 0.05 || 1;
+    return [minVal >= 0 ? Math.max(0, minVal - padding) : minVal - padding, maxVal + padding];
+  }, [benchmarkModelDistribution]);
 
   const trendData = useMemo(() => {
     return rows
@@ -111,15 +133,44 @@ export function DashboardCharts({ rows }: { rows: Row[] }) {
 
   return (
     <div className="legacy-grid">
-      <ChartPanel title="Benchmark 均值（Top 12）">
+      <ChartPanel title="Benchmark 分布（Top 12，箱线图）">
         {({ width, height }) => (
-          <BarChart width={width} height={height} data={benchmarkAverage} margin={{ top: 12, right: 16, bottom: 24, left: 0 }}>
+          <BarChart width={width} height={height} data={benchmarkModelDistribution} margin={{ top: 12, right: 16, bottom: 24, left: 40 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#24314f" />
-            <XAxis dataKey="benchmark" angle={-25} textAnchor="end" interval={0} height={70} />
-            <YAxis />
-            <Tooltip />
-            <Legend />
-            <Bar dataKey="avg" fill="#5da7ff" name="平均分" radius={[6, 6, 0, 0]} />
+            <XAxis dataKey="benchmark" angle={-25} textAnchor="end" interval={0} height={90} tick={{ fontSize: 11 }} />
+            <YAxis domain={yDomain} />
+            <Tooltip
+              content={({ active, payload }) => {
+                if (!active || !payload || !payload[0]) return null;
+                const data = payload[0].payload as BoxPlotStats & { benchmarkName: string; modelName: string };
+                return (
+                  <div className="rounded-lg border border-base-300 bg-base-100/95 p-3 shadow-lg backdrop-blur-sm">
+                    <p className="mb-1 font-semibold text-slate-200">{data.benchmarkName}</p>
+                    <p className="mb-2 text-xs text-slate-400">{data.modelName}</p>
+                    <div className="space-y-1 text-xs text-slate-300">
+                      <p>最大值: {data.max.toFixed(2)}</p>
+                      <p>Q3 (75%): {data.q3.toFixed(2)}</p>
+                      <p className="font-semibold">中位数: {data.median.toFixed(2)}</p>
+                      <p>Q1 (25%): {data.q1.toFixed(2)}</p>
+                      <p>最小值: {data.min.toFixed(2)}</p>
+                      {data.outliers.length > 0 && (
+                        <p className="text-amber-400">异常值: {data.outliers.length} 个</p>
+                      )}
+                      <p className="pt-1 text-slate-400">样本数: {data.count}</p>
+                    </div>
+                  </div>
+                );
+              }}
+            />
+            <Legend
+              content={() => (
+                <div className="text-center text-xs text-slate-400">
+                  箱体显示 Q1-Q3 范围，白线为中位数，须线延伸至 1.5×IQR，圆点为异常值
+                </div>
+              )}
+            />
+            <Bar dataKey="median" fill="transparent" />
+            <CustomBoxPlotLayer data={benchmarkModelDistribution} />
           </BarChart>
         )}
       </ChartPanel>
