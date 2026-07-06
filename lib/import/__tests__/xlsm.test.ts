@@ -63,6 +63,25 @@ describe("parseWorkbookBuffer", () => {
     expect(row?.rawValue).toBe("56.2 / 60.7*");
     expect(row?.valueNum).toBeCloseTo(56.2);
     expect(row?.valueNum2).toBeCloseTo(60.7);
+    expect(row?.valueNote).toBeNull();
+    expect(parsed.warnings).toHaveLength(0);
+  });
+
+  test("支持首个双值段带星号格式", async () => {
+    const buffer = buildWorkbookBuffer([
+      ["Category", "Benchmark", "Model A"],
+      ["Business", "Pair Bench", "91*/83"]
+    ]);
+
+    const parsed = await parseWorkbookBuffer(buffer, "Sheet1");
+    const row = parsed.records.find((item) => item.benchmarkName === "Pair Bench");
+
+    expect(row).toBeDefined();
+    expect(row?.valid).toBe(true);
+    expect(row?.rawValue).toBe("91*/83");
+    expect(row?.valueNum).toBeCloseTo(91);
+    expect(row?.valueNum2).toBeCloseTo(83);
+    expect(row?.valueNote).toBeNull();
     expect(parsed.warnings).toHaveLength(0);
   });
 

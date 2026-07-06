@@ -97,6 +97,23 @@ describe("paper-table 文本解析", () => {
     expect(valueByModel.get("M5")).toBe("77.3");
   });
 
+  test("成对值段内星号不会被解析为注释", async () => {
+    const inputText = [
+      "Benchmark M1 M2 M3",
+      "PairBench 81/77.3* 91*/83 81/77.3*paper"
+    ].join("\n");
+
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const byModel = new Map(parsed.rows.map((row) => [row.modelName, row]));
+
+    expect(byModel.get("M1")?.valueRaw).toBe("81/77.3*");
+    expect(byModel.get("M1")?.valueNote).toBeNull();
+    expect(byModel.get("M2")?.valueRaw).toBe("91*/83");
+    expect(byModel.get("M2")?.valueNote).toBeNull();
+    expect(byModel.get("M3")?.valueRaw).toBe("81/77.3*paper");
+    expect(byModel.get("M3")?.valueNote).toBeNull();
+  });
+
   test("三值指标标签会自动拆成多个 benchmark", async () => {
     const inputText = [
       "Benchmark\tModel-A\tModel-B\tModel-C",
@@ -873,4 +890,3 @@ describe("paper-table 文本解析", () => {
     expect(downRows.every((row) => row.higherIsBetter === false)).toBe(true);
   });
 });
-

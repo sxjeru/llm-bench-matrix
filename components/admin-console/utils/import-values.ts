@@ -26,21 +26,63 @@ export function formatPreviewNumericValue(
   return `${currencyMatch[1]}${formatted}`;
 }
 
+const IMPORT_DRAFT_NUMERIC_TOKEN_PATTERN =
+  "(?:[#＃]\\s*)?(?:[$¥€£]\\s*)?[+-]?(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d+)?";
+const IMPORT_DRAFT_ATTACHED_MARKER_PATTERN = "[*∗﹡✱✳✻](?!://)(?:[0-9A-Za-z]*)?";
+const IMPORT_DRAFT_PAIR_SEGMENT_PATTERN =
+  `${IMPORT_DRAFT_NUMERIC_TOKEN_PATTERN}(?:${IMPORT_DRAFT_ATTACHED_MARKER_PATTERN})?`;
+const IMPORT_DRAFT_PAIR_REGEX = new RegExp(
+  `^(${IMPORT_DRAFT_PAIR_SEGMENT_PATTERN})\\s*\\/\\s*(${IMPORT_DRAFT_PAIR_SEGMENT_PATTERN})(.*)$`
+);
+
+function isStarMarkerOnly(input: string): boolean {
+  return /^[*∗﹡✱✳✻]+$/.test(input.trim());
+}
+
+function startsWithStarMarker(input: string): boolean {
+  return /^[*∗﹡✱✳✻]/.test(input.trim());
+}
+
+function normalizePairTailToNote(tail: string): string | null {
+  const normalized = tail.trim();
+  if (!normalized) return null;
+
+  if (isStarMarkerOnly(normalized)) {
+    return null;
+  }
+
+  if (/^[*∗﹡✱✳✻]:\/\//.test(normalized)) {
+    const note = normalized.slice(4).trim();
+    return note.length > 0 ? note : null;
+  }
+
+  if (/^[*∗﹡✱✳✻]/.test(normalized)) {
+    const note = normalized.slice(1).trim();
+    return note.length > 0 ? note : null;
+  }
+
+  return normalized;
+}
+
+function appendSpacedStarMarker(segment: string, tail: string): string {
+  if (!startsWithStarMarker(tail)) return segment;
+  if (/[*∗﹡✱✳✻](?:[0-9A-Za-z]*)?$/.test(segment.trim())) return segment;
+  return `${segment}*`;
+}
+
 export function parsePairRawValue(rawValue: string): { first: string; second: string; note: string | null } | null {
   const normalized = rawValue.trim();
-  const pairMatch = normalized.match(
-    /^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/
-  );
+  const pairMatch = normalized.match(IMPORT_DRAFT_PAIR_REGEX);
 
   if (!pairMatch) return null;
 
   const [, first, second, tail] = pairMatch;
-  const note = tail.trim();
+  const note = normalizePairTailToNote(tail);
 
   return {
     first: first.trim(),
-    second: second.trim(),
-    note: note.length > 0 ? note : null
+    second: appendSpacedStarMarker(second.trim(), tail),
+    note
   };
 }
 

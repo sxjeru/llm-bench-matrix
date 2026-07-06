@@ -394,6 +394,20 @@ function mergeImportValueNotes(primaryNote: string | null | undefined, secondary
   return null;
 }
 
+function startsWithImportStarMarker(input: string): boolean {
+  return /^[*∗﹡✱✳✻]/.test(input.trim());
+}
+
+function hasAttachedImportStarMarker(input: string): boolean {
+  return /[*∗﹡✱✳✻](?:[0-9A-Za-z]*)?$/.test(input.trim());
+}
+
+function appendSpacedImportStarMarker(segment: string, tail: string): string {
+  if (!startsWithImportStarMarker(tail)) return segment;
+  if (hasAttachedImportStarMarker(segment)) return segment;
+  return `${segment}*`;
+}
+
 function normalizeImportedValueAndExtractNote(rawInput: string, explicitNoteInput?: string | null): {
   valueRaw: string;
   valueNote: string | null;
@@ -420,8 +434,8 @@ function normalizeImportedValueAndExtractNote(rawInput: string, explicitNoteInpu
     const [, first, second, tail] = pairMatch;
     const tailText = tail.trim();
 
-    if (tailText.length > 0 && !tailText.startsWith("*")) {
-      valueRaw = `${first.trim()} / ${second.trim()}`;
+    if (tailText.length > 0) {
+      valueRaw = `${first.trim()} / ${appendSpacedImportStarMarker(second.trim(), tailText)}`;
     }
 
     return {

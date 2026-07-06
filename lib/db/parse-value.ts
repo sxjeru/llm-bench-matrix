@@ -12,25 +12,33 @@ function toNumber(input: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function normalizeSingleTailToNote(tail: string): string | null {
+function isStarMarkerOnly(input: string): boolean {
+  return /^[*∗﹡✱✳✻]+$/.test(input.trim());
+}
+
+function normalizeStarPrefixedNote(tail: string): string | null {
   const normalized = tail.trim();
   if (!normalized) return null;
 
-  if (normalized === "*") {
+  if (isStarMarkerOnly(normalized)) {
     return null;
   }
 
-  if (normalized.startsWith("*://")) {
+  if (/^[*∗﹡✱✳✻]:\/\//.test(normalized)) {
     const note = normalized.slice(4).trim();
     return note.length > 0 ? note : null;
   }
 
-  if (normalized.startsWith("*")) {
+  if (/^[*∗﹡✱✳✻]/.test(normalized)) {
     const note = normalized.slice(1).trim();
     return note.length > 0 ? note : null;
   }
 
   return normalized;
+}
+
+function normalizeSingleTailToNote(tail: string): string | null {
+  return normalizeStarPrefixedNote(tail);
 }
 
 export function parseBenchmarkValue(rawInput: string): ParsedBenchmarkValue {
@@ -48,7 +56,7 @@ export function parseBenchmarkValue(rawInput: string): ParsedBenchmarkValue {
   const pairMatch = raw.match(IMPORT_VALUE_PAIR_REGEX);
   if (pairMatch) {
     const [, first, second, tail] = pairMatch;
-    const note = tail.trim();
+    const note = normalizeStarPrefixedNote(tail);
 
     return {
       valueRaw: raw,

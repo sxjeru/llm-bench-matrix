@@ -1042,7 +1042,7 @@ describe("AdminConsole text import", () => {
     expect(secondPayload.csvText).toContain("70 / 80 paired.note");
   });
 
-  test("清空原始成对星号注释后导入时不会恢复星号", async () => {
+  test("原始成对星号标记不是注释，清空备注后导入仍保留星号", async () => {
     const user = userEvent.setup();
 
     const previewResponse: PreviewResponse = {
@@ -1060,7 +1060,7 @@ describe("AdminConsole text import", () => {
           rawValue: "70/80*",
           valueNum: 70,
           valueNum2: 80,
-          valueNote: "*",
+          valueNote: null,
           source: "text:sample",
           valid: true
         }
@@ -1089,7 +1089,7 @@ describe("AdminConsole text import", () => {
       throw new Error("Pair note input not found");
     }
 
-    expect(pairInput).toHaveValue("*");
+    expect(pairInput).toHaveValue("");
 
     await user.clear(pairInput);
     await user.tab();
@@ -1110,7 +1110,7 @@ describe("AdminConsole text import", () => {
     };
 
     expect(secondPayload.rows?.[0]).toMatchObject({
-      rawValue: "70 / 80",
+      rawValue: "70 / 80*",
       valueNote: null
     });
   });
