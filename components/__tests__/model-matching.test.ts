@@ -38,6 +38,14 @@ describe("model-matching variant sorting", () => {
     expect(compareSourceTabKeysByVersion("text:Nemotron 3 Super", "text:Nemotron 3 Nano")).toBeLessThan(0);
   });
 
+  test("comparators should sort same-version xxB models by larger size first", () => {
+    const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+
+    expect(compareSourceTabKeysByVersion("text:Ornith-1.0-27B", "text:Ornith-1.0-9B")).toBeLessThan(0);
+    expect(compareSourceTabKeysByVersion("text:Ornith-1.0-9B", "text:Ornith-1.0-27B")).toBeGreaterThan(0);
+    expect(compareModelNameByColumnOrder("Ornith-1.0-27B", "Ornith-1.0-9B", collator)).toBeLessThan(0);
+  });
+
   test("compareModelNameByColumnOrder should sort ultra > super > nano", () => {
     const collator = new Intl.Collator("en");
 

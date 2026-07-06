@@ -97,6 +97,38 @@ describe("BenchmarkMatrix source tabs", () => {
     expect(nemotronTabs).toEqual(["Nemotron 3 Ultra", "Nemotron 3 Super", "Nemotron 3 Nano"]);
   });
 
+  test("同版本 source 页签按 xxB 大小降序排序", () => {
+    render(
+      <BenchmarkMatrix
+        sourceOptions={[
+          "text:Ornith-1.0-9B",
+          "text:Ornith-1.0-27B",
+          "text:Ornith-1.0-3B"
+        ]}
+        rows={[
+          {
+            providerName: "Ornith",
+            modelName: "Ornith-1.0-9B",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Ornith-1.0-9B"
+          }
+        ]}
+      />
+    );
+
+    const ornithTabs = screen
+      .getAllByRole("tab")
+      .map((tab) => tab.textContent?.trim() ?? "")
+      .filter((label) => label.startsWith("Ornith-1.0"));
+
+    expect(ornithTabs).toEqual(["Ornith-1.0-27B", "Ornith-1.0-9B", "Ornith-1.0-3B"]);
+  });
+
   test("source 页签文本使用 provider 颜色，首字符加粗，选中后恢复白色加粗", async () => {
     render(
       <BenchmarkMatrix

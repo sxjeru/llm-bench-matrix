@@ -72,6 +72,11 @@ export function compareSourceTabKeysByVersion(leftKey: string, rightKey: string)
         return variantCompare;
       }
     }
+
+    const scaleCompare = compareModelScaleSize(leftLabel, rightLabel);
+    if (scaleCompare !== 0) {
+      return scaleCompare;
+    }
   }
 
   const labelCompare = leftLabel.localeCompare(rightLabel, "zh-Hans-CN", { numeric: true, sensitivity: "base" });
@@ -103,6 +108,30 @@ export function extractModelScaleToken(modelName: string): ModelScaleToken | nul
     sizeInBillions,
     isEstimated: estimatePrefix.toLowerCase() === "e"
   };
+}
+
+function compareModelScaleSize(left: string, right: string): number {
+  const leftScaleToken = extractModelScaleToken(left);
+  const rightScaleToken = extractModelScaleToken(right);
+
+  if (
+    !leftScaleToken ||
+    !rightScaleToken ||
+    leftScaleToken.prefixKey.length === 0 ||
+    leftScaleToken.prefixKey !== rightScaleToken.prefixKey
+  ) {
+    return 0;
+  }
+
+  if (rightScaleToken.sizeInBillions !== leftScaleToken.sizeInBillions) {
+    return rightScaleToken.sizeInBillions - leftScaleToken.sizeInBillions;
+  }
+
+  if (leftScaleToken.isEstimated !== rightScaleToken.isEstimated) {
+    return leftScaleToken.isEstimated ? 1 : -1;
+  }
+
+  return 0;
 }
 
 export function extractModelVariantToken(modelName: string): ModelVariantToken | null {
@@ -283,22 +312,9 @@ export function compareModelNameByColumnOrder(left: string, right: string, colla
     return rightVersionToken.version - leftVersionToken.version;
   }
 
-  const leftScaleToken = extractModelScaleToken(left);
-  const rightScaleToken = extractModelScaleToken(right);
-
-  if (
-    leftScaleToken &&
-    rightScaleToken &&
-    leftScaleToken.prefixKey.length > 0 &&
-    leftScaleToken.prefixKey === rightScaleToken.prefixKey
-  ) {
-    if (rightScaleToken.sizeInBillions !== leftScaleToken.sizeInBillions) {
-      return rightScaleToken.sizeInBillions - leftScaleToken.sizeInBillions;
-    }
-
-    if (leftScaleToken.isEstimated !== rightScaleToken.isEstimated) {
-      return leftScaleToken.isEstimated ? 1 : -1;
-    }
+  const scaleCompare = compareModelScaleSize(left, right);
+  if (scaleCompare !== 0) {
+    return scaleCompare;
   }
 
   const leftFamily = getModelFamilyMatchKey(left);
