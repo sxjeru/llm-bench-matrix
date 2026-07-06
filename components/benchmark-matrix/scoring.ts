@@ -43,6 +43,21 @@ export function getBenchmarkComparableScore(
   return valueNum;
 }
 
+export function getBenchmarkBestComparableScore(
+  benchmarkName: string,
+  valueNum: number | null | undefined,
+  valueNum2: number | null | undefined,
+  benchmarkType?: string,
+  higherIsBetter?: boolean
+): number | null {
+  const comparableScores = [valueNum, valueNum2]
+    .filter((value): value is number => value !== null && value !== undefined && Number.isFinite(value))
+    .map((value) => getBenchmarkComparableScore(benchmarkName, value, benchmarkType, higherIsBetter));
+
+  if (comparableScores.length === 0) return null;
+  return Math.max(...comparableScores);
+}
+
 export function getSortedQuantile(sortedValues: number[], q: number): number {
   if (sortedValues.length === 0) return 0;
   if (sortedValues.length === 1) return sortedValues[0] ?? 0;

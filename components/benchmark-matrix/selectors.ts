@@ -16,6 +16,7 @@ import {
 import {
   buildDenseRankMap,
   buildOverallScoreDisplayDecimalsMap,
+  getBenchmarkBestComparableScore,
   getBenchmarkComparableScore,
   getMatrixCellDisplayValue,
   getSortedQuantile,
@@ -736,16 +737,19 @@ export function buildModelColumns(
 
   const benchmarkScoreMap = new Map<string, number>();
   coveragePrunedRows.forEach((row) => {
-    if (getMatrixGroupingKey(row, showDuplicateRows) !== columnSortBenchmarkKey || row.valueNum === null) {
+    if (getMatrixGroupingKey(row, showDuplicateRows) !== columnSortBenchmarkKey) {
       return;
     }
 
-    const comparableScore = getBenchmarkComparableScore(
+    const comparableScore = getBenchmarkBestComparableScore(
       row.benchmarkName,
       row.valueNum,
+      row.valueNum2 ?? null,
       row.benchmarkType,
       row.higherIsBetter
     );
+    if (comparableScore === null) return;
+
     const previous = benchmarkScoreMap.get(row.modelName);
     if (previous === undefined || comparableScore > previous) {
       benchmarkScoreMap.set(row.modelName, comparableScore);

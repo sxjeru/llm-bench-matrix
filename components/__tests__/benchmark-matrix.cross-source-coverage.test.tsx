@@ -323,6 +323,51 @@ const pairMaxSplitRows = [
   }
 ] as const;
 
+const pairCompactDisplayRows = [
+  {
+    providerName: "Pair",
+    modelName: "Model Compact",
+    benchmarkName: "Bench-Pair-Compact",
+    benchmarkType: "General",
+    benchmarkCanonicalKey: "bench-pair-compact:general",
+    benchTime: "2026-04-06T00:00:00.000Z",
+    valueRaw: "48.2 / 46.6*",
+    valueNum: 48.2,
+    valueNum2: 46.6,
+    valueNote: null,
+    source: "text:pair"
+  }
+] as const;
+
+const pairColumnSortRows = [
+  {
+    providerName: "Pair",
+    modelName: "Model A Primary",
+    benchmarkName: "Bench-Pair-Sort",
+    benchmarkType: "General",
+    benchmarkCanonicalKey: "bench-pair-sort:general",
+    benchTime: "2026-04-06T00:00:00.000Z",
+    valueRaw: "78.5 / 78.5",
+    valueNum: 78.5,
+    valueNum2: 78.5,
+    valueNote: null,
+    source: "text:pair"
+  },
+  {
+    providerName: "Pair",
+    modelName: "Model Z Better Second",
+    benchmarkName: "Bench-Pair-Sort",
+    benchmarkType: "General",
+    benchmarkCanonicalKey: "bench-pair-sort:general",
+    benchTime: "2026-04-06T00:00:00.000Z",
+    valueRaw: "73.6 / 79.7*",
+    valueNum: 73.6,
+    valueNum2: 79.7,
+    valueNote: null,
+    source: "text:pair"
+  }
+] as const;
+
 const singleRankRows = [
   {
     providerName: "Single",
@@ -1031,6 +1076,45 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
 
     expect(screen.getByText("70")).toHaveStyle("text-decoration: underline");
     expect(screen.getByText("90")).toHaveStyle("text-decoration: underline");
+  });
+
+  test("前端表格双值展示使用紧凑分隔符", () => {
+    const { container } = render(
+      <BenchmarkMatrix
+        sourceOptions={["text:pair"]}
+        rows={[...pairCompactDisplayRows]}
+        allRows={[...pairCompactDisplayRows]}
+      />
+    );
+
+    const cell = container.querySelector('td[data-model-name="Model Compact"]');
+    expect(cell).not.toBeNull();
+    expect(cell).toHaveTextContent("48.2/46.6*");
+    expect(cell).not.toHaveTextContent("48.2 / 46.6*");
+  });
+
+  test("按双值 benchmark 排列模型列时第二个值参与排序", () => {
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:pair"]}
+        rows={[...pairColumnSortRows]}
+        allRows={[...pairColumnSortRows]}
+      />
+    );
+
+    const benchRow = screen.getByText("Bench-Pair-Sort").closest("tr");
+    expect(benchRow).not.toBeNull();
+    fireEvent.click(benchRow!);
+
+    const headerTexts = screen
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent?.replace(/\s+/g, " ").trim() ?? "");
+
+    const benchmarkIndex = headerTexts.findIndex((text) => text.includes("Benchmark"));
+    expect(benchmarkIndex).toBeGreaterThanOrEqual(0);
+
+    const modelHeaders = headerTexts.slice(benchmarkIndex + 1).filter((text) => text.length > 0);
+    expect(modelHeaders.slice(0, 2)).toEqual(["Model Z Better Second", "Model A Primary"]);
   });
 
   test("单值场景下第一名加粗、第二名下划线", () => {

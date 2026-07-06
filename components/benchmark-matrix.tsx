@@ -136,6 +136,16 @@ const PRICE_ROW_KEY_SET = new Set([
 const RANKING_POPOVER_GAP = 8;
 const RANKING_POPOVER_MARGIN = 16;
 const RANKING_POPOVER_MAX_WIDTH = 860;
+const FRONTEND_TABLE_PAIR_VALUE_REGEX =
+  /^\s*((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?[^\s/]*)\s*\/\s*((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?.*)\s*$/;
+
+function formatFrontendTableCellText(value: string): string {
+  const pairMatch = value.match(FRONTEND_TABLE_PAIR_VALUE_REGEX);
+  if (!pairMatch) return value;
+
+  const [, first, second] = pairMatch;
+  return `${first.trim()}/${second.trim()}`;
+}
 
 export function BenchmarkMatrix({
   rows,
@@ -2046,7 +2056,7 @@ export function BenchmarkMatrix({
                         ? -cellNum2
                         : getBenchmarkComparableScore(matrixRow.benchmark, cellNum2, matrixRow.category, matrixRow.higherIsBetter)
                       : null;
-                    const rawText = cell?.displayValue ?? "--";
+                    const rawText = formatFrontendTableCellText(cell?.displayValue ?? "--");
                     const noteText = cell?.noteText ?? "";
                     const shouldShowQuestionMark = cell?.shouldShowQuestionMark ?? false;
                     const uniqueEntries = cell?.uniqueEntries ?? [];
@@ -2237,11 +2247,11 @@ export function BenchmarkMatrix({
                         }}
                       >
                         {shouldRenderSourceValues ? (
-                          <span style={singleCellScoreStyle}>{sourceValueItem!.displayValue}</span>
+                          <span style={singleCellScoreStyle}>{formatFrontendTableCellText(sourceValueItem!.displayValue)}</span>
                         ) : isPairNumericDisplay && pairDisplayParts ? (
                           <span className="inline-flex items-center gap-0 leading-none">
                             <span style={isTopCellFirst ? topRankSegmentStyle : isSecondCellFirst ? secondRankSegmentStyle : undefined}>{pairDisplayParts.first}</span>
-                            <span className="mx-[1px] opacity-85">/</span>
+                            <span className="opacity-85">/</span>
                             <span style={isTopCellSecond ? topRankSegmentStyle : isSecondCellSecond ? secondRankSegmentStyle : undefined}>{pairDisplayParts.second}</span>
                           </span>
                         ) : (
