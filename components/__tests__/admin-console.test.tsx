@@ -21,6 +21,7 @@ type PreviewResponse = {
   total: number;
   skipped: number;
   warningCount: number;
+  warnings?: unknown[];
   previewRows: Array<{
     rowNumber: number;
     providerName: string;
@@ -661,6 +662,68 @@ describe("AdminConsole text import", () => {
     await triggerPreview(user);
 
     expect(await screen.findByText(/检测到 2 条解析警告/)).toBeInTheDocument();
+  });
+
+  test("文本预览存在非数值模型值时用错误弹窗展示详情", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "matrix-table",
+      total: 2,
+      skipped: 0,
+      warningCount: 1,
+      warnings: [
+        {
+          type: "non-numeric-import-value",
+          rowNumber: 2,
+          modelName: "M1",
+          benchmarkName: "BrokenBench",
+          benchmarkType: "General",
+          rawValue: "text-only)",
+          reason: "模型列解析到非数值内容，可能是表格分列错位或原始值格式不受支持",
+          action: "请在预览表中核对该行，修正表格分隔/引号或编辑 Raw 值后再导入"
+        }
+      ],
+      previewRows: [
+        {
+          rowNumber: 2,
+          providerName: "Unknown",
+          modelName: "M1",
+          benchmarkName: "BrokenBench",
+          benchmarkType: "General",
+          rawValue: "text-only)",
+          valueNum: null,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: false
+        },
+        {
+          rowNumber: 2,
+          providerName: "Unknown",
+          modelName: "M2",
+          benchmarkName: "BrokenBench",
+          benchmarkType: "General",
+          rawValue: "45.3",
+          valueNum: 45.3,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    mockFetchSequence(previewResponse);
+    render(<AdminConsole {...buildProps()} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    expect(await screen.findByText(/检测到 1 条解析警告/)).toBeInTheDocument();
+    expect(await screen.findByText(/模型 M1/)).toBeInTheDocument();
+    expect(screen.getByText(/模型列解析到非数值内容/)).toBeInTheDocument();
+    expect(screen.getByText(/修正表格分隔\/引号或编辑 Raw 值后再导入/)).toBeInTheDocument();
   });
 
   test("导入返回 warningCount 时展示自动处理提示", async () => {

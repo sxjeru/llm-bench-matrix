@@ -77,7 +77,7 @@ type ParsedTextImportResult = {
   warnings?: TextParseWarning[];
 };
 
-type TextParseWarning = {
+type UnsupportedSpecialSymbolWarning = {
   type: "unsupported-special-symbol";
   rowNumber: number;
   modelName: string;
@@ -88,6 +88,19 @@ type TextParseWarning = {
   symbols: string[];
   reason: string;
 };
+
+type NonNumericImportValueWarning = {
+  type: "non-numeric-import-value";
+  rowNumber: number;
+  modelName: string;
+  benchmarkName: string;
+  benchmarkType: string;
+  rawValue: string;
+  reason: string;
+  action: string;
+};
+
+type TextParseWarning = UnsupportedSpecialSymbolWarning | NonNumericImportValueWarning;
 
 /** Structural type covering the Drizzle methods used by entity-ensure helpers. */
 type DbExecutor = Pick<typeof db, "select" | "insert" | "update" | "delete" | "execute">;
@@ -1385,6 +1398,30 @@ function sanitizeUnsupportedValueSymbols(rows: NormalizedTextImportRow[]): {
     rows: sanitizedRows,
     warnings
   };
+}
+
+function collectNonNumericImportValueWarnings(rows: NormalizedTextImportRow[]): TextParseWarning[] {
+  return rows.flatMap((row) => {
+    const parsedValue = parseBenchmarkValue(row.valueRaw);
+    if (
+      parsedValue.valueRaw.length === 0
+      || parsedValue.valueNum !== null
+      || parsedValue.valueNum2 !== null
+    ) {
+      return [];
+    }
+
+    return [{
+      type: "non-numeric-import-value" as const,
+      rowNumber: row.rowNumber,
+      modelName: row.modelName,
+      benchmarkName: row.benchmarkName,
+      benchmarkType: row.benchmarkType,
+      rawValue: row.valueRaw,
+      reason: "模型列解析到非数值内容，可能是表格分列错位或原始值格式不受支持",
+      action: "请在预览表中核对该行，修正表格分隔/引号或编辑 Raw 值后再导入"
+    }];
+  });
 }
 
 function looksLikeStructuredCsv(firstLine: string): boolean {
@@ -4914,12 +4951,13 @@ function parseBenchmarkTextRowsCore(inputText: string, defaultSource: string | n
 
   const sanitized = sanitizeUnsupportedValueSymbols(selectedParsed.rows);
   const expandedRows = expandMetricLabeledImportRows(sanitized.rows);
+  const nonNumericWarnings = collectNonNumericImportValueWarnings(expandedRows);
 
   return {
     ...selectedParsed,
     rows: expandedRows,
     parseSource: "text",
-    warnings: [...(selectedParsed.warnings ?? []), ...sanitized.warnings]
+    warnings: [...(selectedParsed.warnings ?? []), ...sanitized.warnings, ...nonNumericWarnings]
   };
 }
 
@@ -5059,7 +5097,7 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
       valueNum2: parsedValue.valueNum2,
       valueNote: mergedNote,
       source: row.source,
-      valid: parsedValue.valueRaw.length > 0
+      valid: parsedValue.valueRaw.length > 0 && (parsedValue.valueNum !== null || parsedValue.valueNum2 !== null)
     };
   });
 

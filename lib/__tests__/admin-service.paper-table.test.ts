@@ -17,6 +17,38 @@ type ParsedTextImportResult = {
     type?: string;
     field?: string;
     before?: string;
+    rowNumber?: number;
+    modelName?: string;
+    benchmarkName?: string;
+    benchmarkType?: string;
+    rawValue?: string;
+    reason?: string;
+    action?: string;
+  }>;
+};
+
+type PreviewTextImportResult = {
+  format: string;
+  total: number;
+  skipped: number;
+  warningCount: number;
+  warnings?: Array<{
+    type?: string;
+    rowNumber?: number;
+    modelName?: string;
+    benchmarkName?: string;
+    benchmarkType?: string;
+    rawValue?: string;
+    reason?: string;
+    action?: string;
+  }>;
+  previewRows: Array<{
+    modelName: string;
+    benchmarkName: string;
+    rawValue: string;
+    valueNum: number | null;
+    valueNum2: number | null;
+    valid: boolean;
   }>;
 };
 
@@ -25,6 +57,11 @@ let parseBenchmarkTextRowsForTest: (
   sourceInput?: string | null,
   htmlInput?: string | null
 ) => Promise<ParsedTextImportResult>;
+let previewBenchmarkTextImportForTest: (
+  inputText: string,
+  sourceInput?: string | null,
+  htmlInput?: string | null
+) => Promise<PreviewTextImportResult>;
 let normalizeDuplicateCompareTextForTest: (input: string) => string;
 let getDuplicateNameSimilarityForTest: (left: string, right: string) => number;
 let hasBenchmarkNumericTokenMismatchForTest: (left: string, right: string) => boolean;
@@ -34,6 +71,8 @@ beforeAll(async () => {
   process.env.DATABASE_URL ??= "postgres://test:test@127.0.0.1:5432/test";
   const adminServiceModule = await import("@/lib/admin-service");
   parseBenchmarkTextRowsForTest = adminServiceModule.__parseBenchmarkTextRowsForTest as typeof parseBenchmarkTextRowsForTest;
+  previewBenchmarkTextImportForTest =
+    adminServiceModule.previewBenchmarkTextImport as typeof previewBenchmarkTextImportForTest;
   normalizeDuplicateCompareTextForTest =
     adminServiceModule.__normalizeDuplicateCompareTextForTest as typeof normalizeDuplicateCompareTextForTest;
   getDuplicateNameSimilarityForTest =
@@ -771,6 +810,32 @@ describe("paper-table 文本解析", () => {
     expect(valueByModel.get("M1")).toBe("45.3");
     expect(valueByModel.get("M7")).toBe("61.7 / 47.1*");
     expect(valueByModel.get("M11")).toBe("63.2*");
+  });
+
+  test("文本导入预览会对模型值列中的非数值内容返回错误提示所需 warning", async () => {
+    const inputText = [
+      "Benchmark,M1,M2",
+      "BrokenBench,text-only),45.3"
+    ].join("\n");
+
+    const preview = await previewBenchmarkTextImportForTest(inputText, "text:unit-test");
+
+    expect(preview.format).toBe("matrix-table");
+    expect(preview.warningCount).toBe(1);
+
+    const warning = preview.warnings?.[0];
+    expect(warning?.type).toBe("non-numeric-import-value");
+    expect(warning?.rowNumber).toBe(2);
+    expect(warning?.modelName).toBe("M1");
+    expect(warning?.benchmarkName).toBe("BrokenBench");
+    expect(warning?.rawValue).toBe("text-only)");
+    expect(warning?.reason).toContain("模型列解析到非数值内容");
+
+    const invalidRow = preview.previewRows.find((row) => row.modelName === "M1");
+    expect(invalidRow?.rawValue).toBe("text-only)");
+    expect(invalidRow?.valueNum).toBeNull();
+    expect(invalidRow?.valueNum2).toBeNull();
+    expect(invalidRow?.valid).toBe(false);
   });
 
   test("逗号分隔矩阵首列为评测维度时不会被当作模型", async () => {
