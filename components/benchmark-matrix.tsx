@@ -105,8 +105,8 @@ import {
   isLowerBetterBenchmark,
   getBenchmarkComparableScore,
   getSortedQuantile,
-  formatValueNumForDisplay,
   formatComparisonDeltaValue,
+  getMatrixCellPairDisplayParts,
   normalizeHexColor,
   hexToRgbTuple,
   rgbaFromHex,
@@ -2073,13 +2073,12 @@ export function BenchmarkMatrix({
                       comparableCellNum2 !== null &&
                       secondaryComparableSecond !== null &&
                       comparableCellNum2 === secondaryComparableSecond;
-                    const pairFirstDisplay = cell ? formatValueNumForDisplay(cell.valueNum) : null;
-                    const pairSecondDisplay = cell ? formatValueNumForDisplay(cell.valueNum2) : null;
+                    const pairDisplayParts = cell
+                      ? getMatrixCellPairDisplayParts(cell.valueNum, cell.valueNum2, cell.valueRaw, cell.valueNote)
+                      : null;
                     const isPairNumericDisplay =
-                      Boolean(cell?.valueRaw.includes("/")) &&
-                      pairFirstDisplay !== null &&
-                      pairSecondDisplay !== null &&
-                      !/[$¥€£]/.test(cell?.valueRaw ?? "");
+                      pairDisplayParts !== null &&
+                      !pairDisplayParts.hasCurrencySymbol;
 
                     const compareDeltaRaw =
                       isCompareActive
@@ -2239,11 +2238,11 @@ export function BenchmarkMatrix({
                       >
                         {shouldRenderSourceValues ? (
                           <span style={singleCellScoreStyle}>{sourceValueItem!.displayValue}</span>
-                        ) : isPairNumericDisplay && pairFirstDisplay && pairSecondDisplay ? (
+                        ) : isPairNumericDisplay && pairDisplayParts ? (
                           <span className="inline-flex items-center gap-0 leading-none">
-                            <span style={isTopCellFirst ? topRankSegmentStyle : isSecondCellFirst ? secondRankSegmentStyle : undefined}>{pairFirstDisplay}</span>
+                            <span style={isTopCellFirst ? topRankSegmentStyle : isSecondCellFirst ? secondRankSegmentStyle : undefined}>{pairDisplayParts.first}</span>
                             <span className="mx-[1px] opacity-85">/</span>
-                            <span style={isTopCellSecond ? topRankSegmentStyle : isSecondCellSecond ? secondRankSegmentStyle : undefined}>{pairSecondDisplay}</span>
+                            <span style={isTopCellSecond ? topRankSegmentStyle : isSecondCellSecond ? secondRankSegmentStyle : undefined}>{pairDisplayParts.second}</span>
                           </span>
                         ) : (
                           <span style={singleCellScoreStyle}>{rawText}</span>

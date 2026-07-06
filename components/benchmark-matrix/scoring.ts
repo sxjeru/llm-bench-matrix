@@ -124,6 +124,109 @@ export function __buildOverallScoreDisplayDecimalsMapForTest(items: OverallScore
   return buildOverallScoreDisplayDecimalsMap(items);
 }
 
+export type MatrixCellPairDisplayParts = {
+  first: string;
+  second: string;
+  hasCurrencySymbol: boolean;
+};
+
+const DISPLAY_NUMERIC_TOKEN_REGEX =
+  /^\s*((?:[#＃]\s*)?(?:[$¥€£]\s*)?)([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/;
+const STAR_MARKER_REGEX = /[*∗﹡✱✳✻]/;
+
+function splitRawPairValue(raw: string): [string, string] | null {
+  const slashIndex = raw.indexOf("/");
+  if (slashIndex < 0) return null;
+
+  const first = raw.slice(0, slashIndex).trim();
+  const second = raw.slice(slashIndex + 1).trim();
+  if (!first || !second) return null;
+
+  return [first, second];
+}
+
+function normalizeInlineSuffix(tailRaw: string, valueNote: string | null, isLastSegment: boolean): string {
+  const tailText = tailRaw.trim();
+  const noteText = valueNote?.trim() ?? "";
+  const isXNote = noteText.toLowerCase() === "x";
+  const isStarNote = noteText === "*";
+
+  if (tailText) {
+    if (STAR_MARKER_REGEX.test(tailText)) {
+      return "*";
+    }
+
+    const isTightlyAttached = !/^\s/.test(tailRaw);
+    if (isTightlyAttached) {
+      return tailText.split(/\s+/)[0] ?? "";
+    }
+  }
+
+  if (isLastSegment && isStarNote) return "*";
+  if (isLastSegment && isXNote) return "x";
+
+  return "";
+}
+
+function formatPairSegment(
+  rawSegment: string | null,
+  valueNum: number | null,
+  valueNote: string | null,
+  isLastSegment: boolean
+): { text: string; hasCurrencySymbol: boolean } | null {
+  const numericDisplay = formatValueNumForDisplay(valueNum);
+  if (numericDisplay === null) return null;
+
+  const match = rawSegment?.match(DISPLAY_NUMERIC_TOKEN_REGEX);
+  if (!match) {
+    const fallbackSuffix = normalizeInlineSuffix("", valueNote, isLastSegment);
+    return {
+      text: `${numericDisplay}${fallbackSuffix}`,
+      hasCurrencySymbol: false
+    };
+  }
+
+  const [, rawPrefix, rawNumber, rawTail] = match;
+  const normalizedPrefix = rawPrefix.replace(/\s+/g, "");
+  const hasCurrencySymbol = /[$¥€£]/.test(normalizedPrefix);
+  const suffix = normalizeInlineSuffix(rawTail, valueNote, isLastSegment);
+
+  if (hasCurrencySymbol) {
+    const currencyText = `${normalizedPrefix}${rawNumber.trim()}${suffix}`;
+    return {
+      text: currencyText,
+      hasCurrencySymbol
+    };
+  }
+
+  return {
+    text: `${normalizedPrefix}${numericDisplay}${suffix}`,
+    hasCurrencySymbol
+  };
+}
+
+export function getMatrixCellPairDisplayParts(
+  valueNum: number | null,
+  valueNum2: number | null,
+  rawValue: string,
+  valueNote: string | null
+): MatrixCellPairDisplayParts | null {
+  const firstNumeric = formatValueNumForDisplay(valueNum);
+  const secondNumeric = formatValueNumForDisplay(valueNum2);
+  if (firstNumeric === null || secondNumeric === null) return null;
+
+  const rawPair = splitRawPairValue(rawValue.trim());
+  const firstSegment = formatPairSegment(rawPair?.[0] ?? null, valueNum, valueNote, false);
+  const secondSegment = formatPairSegment(rawPair?.[1] ?? null, valueNum2, valueNote, true);
+  if (!firstSegment || !secondSegment) return null;
+
+  return {
+    first: firstSegment.text,
+    second: secondSegment.text,
+    hasCurrencySymbol: firstSegment.hasCurrencySymbol || secondSegment.hasCurrencySymbol
+  };
+}
+
 export function getMatrixCellDisplayValue(
   valueNum: number | null,
   valueNum2: number | null,
@@ -135,6 +238,11 @@ export function getMatrixCellDisplayValue(
 
   const hasStarMarker = /[*∗﹡✱✳✻]/.test(raw);
   const isXNote = valueNote?.trim().toLowerCase() === "x";
+
+  const pairDisplayParts = getMatrixCellPairDisplayParts(valueNum, valueNum2, raw, valueNote);
+  if (pairDisplayParts) {
+    return `${pairDisplayParts.first} / ${pairDisplayParts.second}`;
+  }
 
   const pairMatch = raw.match(
     /^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/

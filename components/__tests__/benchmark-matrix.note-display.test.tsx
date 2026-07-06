@@ -192,4 +192,30 @@ describe("BenchmarkMatrix 星号值显示", () => {
     );
     expect(questionMark).toBeUndefined();
   });
+
+  test("双值单元格保留每段数字后紧贴的后缀", () => {
+    render(
+      <BenchmarkMatrix
+        rows={[
+          {
+            providerName: "OpenAI",
+            modelName: "GPT-5-mini High",
+            benchmarkName: "Terminal Bench 2.0",
+            benchmarkType: "Coding Agent",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "2x / 3x",
+            valueNum: 2,
+            valueNum2: 3,
+            valueNote: null,
+            source: "text:demo"
+          }
+        ]}
+      />
+    );
+
+    const valueCell = screen.getByText("2x").closest("td");
+    expect(valueCell).not.toBeNull();
+    expect(valueCell).toHaveTextContent("2x/3x");
+    expect(screen.getByText("3x")).toBeInTheDocument();
+  });
 });

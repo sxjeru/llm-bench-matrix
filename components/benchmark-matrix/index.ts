@@ -14,7 +14,8 @@ export {
   buildDenseRankMap,
   buildOverallScoreDisplayDecimalsMap,
   __buildOverallScoreDisplayDecimalsMapForTest,
-  getMatrixCellDisplayValue
+  getMatrixCellDisplayValue,
+  getMatrixCellPairDisplayParts
 } from "./scoring";
 
 // Re-export all functions from formatters module
