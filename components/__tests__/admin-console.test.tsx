@@ -2855,6 +2855,59 @@ describe("AdminConsole rename tab", () => {
     expect(await screen.findByText(/名称已更新并写入数据库/i)).toBeInTheDocument();
   });
 
+  test("可在名称维护页签提交 source 改名", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetchSequence({
+      ok: true,
+      entityType: "source",
+      previousName: "text:sample",
+      nextName: "text:renamed",
+      action: "renamed"
+    });
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await user.click(screen.getByRole("tab", { name: "名称维护" }));
+    await user.selectOptions(screen.getByRole("combobox"), "source");
+
+    const searchInput = screen.getByPlaceholderText("输入名称或 ID 关键字搜索实体");
+    await user.clear(searchInput);
+    await user.type(searchInput, "sample");
+
+    await user.click(await screen.findByText("text:sample"));
+
+    const renameInput = screen.getByPlaceholderText("输入新的 source 名称");
+    await user.clear(renameInput);
+    await user.type(renameInput, "text:renamed");
+
+    await user.click(screen.getByRole("button", { name: "保存名称变更" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const call = fetchMock.mock.calls[0];
+    expect(call?.[0]).toBe("/api/admin/rename-entity");
+
+    const payload = JSON.parse(((call?.[1] as RequestInit).body ?? "{}") as string) as {
+      entityType?: string;
+      entityId?: number;
+      sourceName?: string;
+      nextName?: string;
+      mergeOnConflict?: boolean;
+    };
+
+    expect(payload).toMatchObject({
+      entityType: "source",
+      sourceName: "text:sample",
+      nextName: "text:renamed",
+      mergeOnConflict: true
+    });
+    expect(payload.entityId).toBeUndefined();
+
+    expect(await screen.findByText(/名称已更新并写入数据库/i)).toBeInTheDocument();
+  });
+
   test("benchmark 改名命中冲突时会提示自动合并并写入合并记录", async () => {
     const user = userEvent.setup();
     const fetchMock = mockFetchSequence({

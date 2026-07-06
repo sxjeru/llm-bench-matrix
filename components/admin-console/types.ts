@@ -215,6 +215,8 @@ export type NoticeItem = NoticeState & {
 
 export type MergeSubmitState = "idle" | "submitting" | "success";
 
+export type RenameEntityType = "model" | "benchmark" | "source";
+
 export type RenameSubmitState = "idle" | "submitting" | "success";
 
 export type BenchmarkValueOverlapStats = {

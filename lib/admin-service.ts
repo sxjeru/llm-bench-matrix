@@ -3225,19 +3225,32 @@ export async function mergeEntity(input: {
   await invalidateAllCaches();
 }
 
-export type RenameEntityInput = {
-  entityType: "model" | "benchmark";
-  entityId: number;
-  nextName: string;
-  nextProviderId?: number;
-  nextBenchmarkType?: string;
-  mergeOnConflict?: boolean;
-};
+export type RenameEntityInput =
+  | {
+      entityType: "model";
+      entityId: number;
+      nextName: string;
+      nextProviderId?: number;
+      mergeOnConflict?: boolean;
+    }
+  | {
+      entityType: "benchmark";
+      entityId: number;
+      nextName: string;
+      nextBenchmarkType?: string;
+      mergeOnConflict?: boolean;
+    }
+  | {
+      entityType: "source";
+      sourceName: string;
+      nextName: string;
+      mergeOnConflict?: boolean;
+    };
 
 export type RenameEntityResult = {
   ok: true;
-  entityType: "model" | "benchmark";
-  entityId: number;
+  entityType: "model" | "benchmark" | "source";
+  entityId?: number;
   previousName: string;
   nextName: string;
   previousProviderId?: number;
@@ -3247,15 +3260,127 @@ export type RenameEntityResult = {
   action: "renamed" | "merged-and-renamed" | "unchanged";
   mergedSourceId?: number;
   mergedSourceName?: string;
+  renamedValueCount?: number;
+  renamedSourceMetaCount?: number;
+  mergedSourceMetaCount?: number;
 };
 
 export async function renameEntity(input: RenameEntityInput): Promise<RenameEntityResult> {
+  const mergeOnConflict = input.mergeOnConflict !== false;
+
+  if (input.entityType === "source") {
+    const previousSource = input.sourceName.trim();
+    const nextSource = input.nextName.trim();
+
+    if (!previousSource) {
+      throw new Error("sourceName is required");
+    }
+
+    if (!nextSource) {
+      throw new Error("nextName is required");
+    }
+
+    const result = await db.transaction(async (tx: DbTransactionClient): Promise<RenameEntityResult> => {
+      const previousValueRows = await tx
+        .select({ id: benchmarkValues.id })
+        .from(benchmarkValues)
+        .where(eq(benchmarkValues.source, previousSource))
+        .limit(1);
+
+      const previousMetaRows = await tx
+        .select({
+          id: benchmarkSourceMeta.id,
+          benchmarkId: benchmarkSourceMeta.benchmarkId
+        })
+        .from(benchmarkSourceMeta)
+        .where(eq(benchmarkSourceMeta.source, previousSource));
+
+      if (previousValueRows.length === 0 && previousMetaRows.length === 0) {
+        throw new Error(`source not found: ${previousSource}`);
+      }
+
+      if (previousSource === nextSource) {
+        return {
+          ok: true,
+          entityType: "source",
+          previousName: previousSource,
+          nextName: nextSource,
+          action: "unchanged",
+          renamedValueCount: 0,
+          renamedSourceMetaCount: 0,
+          mergedSourceMetaCount: 0
+        };
+      }
+
+      const nextValueRows = await tx
+        .select({ id: benchmarkValues.id })
+        .from(benchmarkValues)
+        .where(eq(benchmarkValues.source, nextSource))
+        .limit(1);
+
+      const nextMetaRows = await tx
+        .select({
+          id: benchmarkSourceMeta.id,
+          benchmarkId: benchmarkSourceMeta.benchmarkId
+        })
+        .from(benchmarkSourceMeta)
+        .where(eq(benchmarkSourceMeta.source, nextSource));
+
+      const hasConflict = nextValueRows.length > 0 || nextMetaRows.length > 0;
+      if (hasConflict && !mergeOnConflict) {
+        throw new Error(`source rename conflicts with existing source (${nextSource})，可开启 mergeOnConflict 自动合并`);
+      }
+
+      const targetBenchmarkIds = new Set(nextMetaRows.map((row) => row.benchmarkId));
+      const sourceMetaIdsToUpdate = previousMetaRows
+        .filter((row) => !targetBenchmarkIds.has(row.benchmarkId))
+        .map((row) => row.id);
+      const sourceMetaIdsToDelete = previousMetaRows
+        .filter((row) => targetBenchmarkIds.has(row.benchmarkId))
+        .map((row) => row.id);
+
+      if (sourceMetaIdsToUpdate.length > 0) {
+        await tx
+          .update(benchmarkSourceMeta)
+          .set({ source: nextSource, updatedAt: new Date() })
+          .where(inArray(benchmarkSourceMeta.id, sourceMetaIdsToUpdate));
+      }
+
+      if (sourceMetaIdsToDelete.length > 0) {
+        await tx
+          .delete(benchmarkSourceMeta)
+          .where(inArray(benchmarkSourceMeta.id, sourceMetaIdsToDelete));
+      }
+
+      const updatedValueRows = await tx
+        .update(benchmarkValues)
+        .set({ source: nextSource })
+        .where(eq(benchmarkValues.source, previousSource))
+        .returning({ id: benchmarkValues.id });
+
+      return {
+        ok: true,
+        entityType: "source",
+        previousName: previousSource,
+        nextName: nextSource,
+        action: hasConflict ? "merged-and-renamed" : "renamed",
+        mergedSourceName: hasConflict ? nextSource : undefined,
+        renamedValueCount: updatedValueRows.length,
+        renamedSourceMetaCount: sourceMetaIdsToUpdate.length,
+        mergedSourceMetaCount: sourceMetaIdsToDelete.length
+      };
+    });
+
+    await invalidateAllCaches();
+
+    return result;
+  }
+
   const nextName = normalizeNameParenthesisSpacing(input.nextName);
   if (!nextName) {
     throw new Error("nextName is required");
   }
 
-  const mergeOnConflict = input.mergeOnConflict !== false;
   const dedupeRule = await getModelDedupeRule();
 
   if (input.entityType === "benchmark") {

@@ -31,6 +31,7 @@ import type {
   ModelPricingSyncResult,
   PreviewRow,
   Props,
+  RenameEntityType,
   RenameSubmitState,
   ScaleConsistencyCheckResult,
   ScaleConsistencyIssue,
@@ -278,7 +279,7 @@ export function AdminConsole({
   const [splittingScaleBenchmarkId, setSplittingScaleBenchmarkId] = useState<number | null>(null);
   const [scaleSplitNameDrafts, setScaleSplitNameDrafts] = useState<Record<number, { baseName: string; eloName: string }>>({});
 
-  const [renameEntityType, setRenameEntityType] = useState<"model" | "benchmark">("model");
+  const [renameEntityType, setRenameEntityType] = useState<RenameEntityType>("model");
   const [renameSearchKeyword, setRenameSearchKeyword] = useState("");
   const [renameSelectedEntityId, setRenameSelectedEntityId] = useState<number | null>(null);
   const [renameNextName, setRenameNextName] = useState("");
@@ -321,6 +322,8 @@ export function AdminConsole({
     existingBenchmarkByNameMap,
     existingBenchmarkModalitiesMap,
     deleteSourceOptions,
+    sourceById,
+    sourceEntityOptions,
     modelById,
     existingModelExactMap,
     existingModelByCanonicalKey,
@@ -523,8 +526,12 @@ export function AdminConsole({
       return modelEntityOptions;
     }
 
-    return benchmarkEntityOptions;
-  }, [renameEntityType, modelEntityOptions, benchmarkEntityOptions]);
+    if (renameEntityType === "benchmark") {
+      return benchmarkEntityOptions;
+    }
+
+    return sourceEntityOptions;
+  }, [renameEntityType, modelEntityOptions, benchmarkEntityOptions, sourceEntityOptions]);
 
   const filteredRenameEntityOptions = useMemo(() => {
     const keyword = renameSearchKeyword.trim().toLowerCase();
@@ -571,10 +578,14 @@ export function AdminConsole({
   const renameSelectedEntityLabel = useMemo(() => {
     if (renameSelectedEntityId === null) return "";
 
+    if (renameEntityType === "source") {
+      return sourceById.get(renameSelectedEntityId) ?? "";
+    }
+
     const selected = renameEntityOptions.find((item) => item.id === renameSelectedEntityId);
     if (!selected) return `#${renameSelectedEntityId}`;
     return `${selected.label} [${selected.id}]`;
-  }, [renameEntityOptions, renameSelectedEntityId]);
+  }, [renameEntityOptions, renameEntityType, renameSelectedEntityId, sourceById]);
 
   const resolvedMergeSourceId = useMemo(
     () => parseMergeEntityId(mergeSourceInput, mergeEntityOptions),
@@ -740,7 +751,7 @@ export function AdminConsole({
     }
   }, [renameEntityType, renameSearchKeyword]);
 
-  function resetRenameStateForEntityType(nextEntityType: "model" | "benchmark") {
+  function resetRenameStateForEntityType(nextEntityType: RenameEntityType) {
     setRenameEntityType(nextEntityType);
     setRenameSearchKeyword("");
     setRenameSelectedEntityId(null);
@@ -2386,6 +2397,13 @@ export function AdminConsole({
       return;
     }
 
+    if (renameEntityType === "source") {
+      setRenameNextName(sourceById.get(entityId) ?? "");
+      setRenameNextProviderInput("");
+      setRenameNextBenchmarkType("");
+      return;
+    }
+
     const matchedBenchmark = benchmarkById.get(entityId);
     setRenameNextName(matchedBenchmark?.benchmarkName ?? "");
     setRenameNextProviderInput("");
@@ -2452,6 +2470,15 @@ export function AdminConsole({
       return;
     }
 
+    const currentSourceName = renameEntityType === "source"
+      ? sourceById.get(renameSelectedEntityId)
+      : undefined;
+
+    if (renameEntityType === "source" && !currentSourceName) {
+      notifyError("请先在上方搜索结果中选择一个 source");
+      return;
+    }
+
     if (renameSubmitResetTimerRef.current) {
       clearTimeout(renameSubmitResetTimerRef.current);
       renameSubmitResetTimerRef.current = null;
@@ -2462,7 +2489,8 @@ export function AdminConsole({
     try {
       const result = await postJson("/api/admin/rename-entity", {
         entityType: renameEntityType,
-        entityId: renameSelectedEntityId,
+        entityId: renameEntityType === "source" ? undefined : renameSelectedEntityId,
+        sourceName: renameEntityType === "source" ? currentSourceName : undefined,
         nextName: normalizedNextName,
         nextProviderId: renameEntityType === "model" ? normalizedNextProviderId : undefined,
         nextBenchmarkType: renameEntityType === "benchmark" ? normalizedNextBenchmarkType : undefined,
@@ -2481,7 +2509,7 @@ export function AdminConsole({
       setRenameNextName(persistedNextName);
       if (renameEntityType === "benchmark") {
         setRenameNextBenchmarkType(persistedNextBenchmarkType);
-      } else if (persistedNextProviderId !== null) {
+      } else if (renameEntityType === "model" && persistedNextProviderId !== null) {
         setRenameNextProviderInput(getProviderInputValue(persistedNextProviderId) || String(persistedNextProviderId));
       }
       setRenameSubmitState("success");
@@ -2497,6 +2525,14 @@ export function AdminConsole({
       }
 
       if (action === "merged-and-renamed") {
+        if (renameEntityType === "source") {
+          notifySuccess("source 名称已更新，并已合并到目标 source", [
+            `${currentSourceName} → ${persistedNextName}`
+          ]);
+          router.refresh();
+          return;
+        }
+
         const mergedSourceId = Number(result?.mergedSourceId);
         const mergedSourceName = typeof result?.mergedSourceName === "string"
           ? result.mergedSourceName
@@ -3103,6 +3139,7 @@ export function AdminConsole({
             modelById={modelById}
             providerById={providerById}
             benchmarkById={benchmarkById}
+            sourceById={sourceById}
             onPickRenameEntity={onPickRenameEntity}
             onRenameEntity={onRenameEntity}
             renameSelectedEntityLabel={renameSelectedEntityLabel}

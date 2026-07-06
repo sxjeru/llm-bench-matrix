@@ -3,14 +3,28 @@ import { z } from "zod";
 import { requireAdmin } from "../../../../lib/admin-auth";
 import { renameEntity } from "../../../../lib/admin-service";
 
-const schema = z.object({
-  entityType: z.enum(["model", "benchmark"]),
-  entityId: z.number().int().positive(),
-  nextName: z.string().trim().min(1),
-  nextProviderId: z.number().int().positive().optional(),
-  nextBenchmarkType: z.string().trim().min(1).optional(),
-  mergeOnConflict: z.boolean().optional()
-});
+const schema = z.discriminatedUnion("entityType", [
+  z.object({
+    entityType: z.literal("model"),
+    entityId: z.number().int().positive(),
+    nextName: z.string().trim().min(1),
+    nextProviderId: z.number().int().positive().optional(),
+    mergeOnConflict: z.boolean().optional()
+  }),
+  z.object({
+    entityType: z.literal("benchmark"),
+    entityId: z.number().int().positive(),
+    nextName: z.string().trim().min(1),
+    nextBenchmarkType: z.string().trim().min(1).optional(),
+    mergeOnConflict: z.boolean().optional()
+  }),
+  z.object({
+    entityType: z.literal("source"),
+    sourceName: z.string().trim().min(1),
+    nextName: z.string().trim().min(1),
+    mergeOnConflict: z.boolean().optional()
+  })
+]);
 
 export async function POST(request: Request) {
   const denied = await requireAdmin(request);

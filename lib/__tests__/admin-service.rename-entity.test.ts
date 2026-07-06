@@ -1,15 +1,16 @@
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 
 type RenameEntityFn = (input: {
-  entityType: "model" | "benchmark";
-  entityId: number;
+  entityType: "model" | "benchmark" | "source";
+  entityId?: number;
+  sourceName?: string;
   nextName: string;
   nextBenchmarkType?: string;
   mergeOnConflict?: boolean;
 }) => Promise<{
   ok: true;
-  entityType: "model" | "benchmark";
-  entityId: number;
+  entityType: "model" | "benchmark" | "source";
+  entityId?: number;
   previousName: string;
   nextName: string;
   previousBenchmarkType?: string;
@@ -17,6 +18,9 @@ type RenameEntityFn = (input: {
   action: "renamed" | "merged-and-renamed" | "unchanged";
   mergedSourceId?: number;
   mergedSourceName?: string;
+  renamedValueCount?: number;
+  renamedSourceMetaCount?: number;
+  mergedSourceMetaCount?: number;
 }>;
 
 type TransactionCallback = (tx: unknown) => Promise<unknown>;
@@ -288,5 +292,63 @@ describe("renameEntity", () => {
     expect(updateSet).toHaveBeenCalledWith(
       expect.objectContaining({ benchmarkName: "Bench Beta", canonicalKey: "benchbeta:typea" })
     );
+  });
+
+  test("source 改名目标已存在时会更新 values 并合并 source meta", async () => {
+    const txSelectWhere = createSelectWhereMock([
+      [{ id: 1 }],
+      [
+        { id: 10, benchmarkId: 101 },
+        { id: 11, benchmarkId: 102 }
+      ],
+      [{ id: 2 }],
+      [{ id: 20, benchmarkId: 102 }]
+    ]);
+    const txSelectFrom = vi.fn(() => ({ where: txSelectWhere }));
+    const txSelect = vi.fn(() => ({ from: txSelectFrom }));
+
+    const updateReturning = vi.fn().mockResolvedValue([{ id: 1 }, { id: 3 }]);
+    const updateWhere = vi.fn(() => ({ returning: updateReturning }));
+    const updateSet = vi.fn<(payload: Record<string, unknown>) => { where: typeof updateWhere }>(
+      () => ({ where: updateWhere })
+    );
+    const update = vi.fn(() => ({ set: updateSet }));
+
+    const deleteWhere = vi.fn().mockResolvedValue(undefined);
+    const deleteFn = vi.fn(() => ({ where: deleteWhere }));
+
+    const tx = {
+      select: txSelect,
+      update,
+      delete: deleteFn
+    };
+
+    const transactionSpy = vi
+      .spyOn(dbForTest, "transaction")
+      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+
+    const result = await renameEntityForTest({
+      entityType: "source",
+      sourceName: "text:old-source",
+      nextName: "text:new-source",
+      mergeOnConflict: true
+    });
+
+    expect(result).toMatchObject({
+      action: "merged-and-renamed",
+      entityType: "source",
+      previousName: "text:old-source",
+      nextName: "text:new-source",
+      renamedValueCount: 2,
+      renamedSourceMetaCount: 1,
+      mergedSourceMetaCount: 1
+    });
+
+    expect(transactionSpy).toHaveBeenCalledTimes(1);
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ source: "text:new-source", updatedAt: expect.any(Date) })
+    );
+    expect(updateSet).toHaveBeenCalledWith({ source: "text:new-source" });
+    expect(deleteFn).toHaveBeenCalledTimes(1);
   });
 });

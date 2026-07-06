@@ -60,6 +60,19 @@ export function useEntityLookups({
     [sourceOptions]
   );
 
+  const sourceEntityOptions = useMemo(
+    () =>
+      deleteSourceOptions.map((item, index) => ({
+        id: index + 1,
+        label: item
+      })),
+    [deleteSourceOptions]
+  );
+
+  const sourceById = useMemo(() => {
+    return new Map(sourceEntityOptions.map((item) => [item.id, item.label]));
+  }, [sourceEntityOptions]);
+
   const modelById = useMemo(() => {
     return new Map(models.map((item) => [item.id, item]));
   }, [models]);
@@ -142,6 +155,8 @@ export function useEntityLookups({
     existingBenchmarkByNameMap,
     existingBenchmarkModalitiesMap,
     deleteSourceOptions,
+    sourceById,
+    sourceEntityOptions,
     modelById,
     existingModelExactMap,
     existingModelByCanonicalKey,

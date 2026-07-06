@@ -3,13 +3,13 @@
 import type { Dispatch, FormEvent, RefObject, SetStateAction } from "react";
 import { Search } from "lucide-react";
 import { RENAME_LIST_ROW_HEIGHT, RENAME_LIST_VIEWPORT_HEIGHT } from "../constants";
-import type { BenchmarkOption, ModelOption, ProviderOption, RenameSubmitState } from "../types";
+import type { BenchmarkOption, ModelOption, ProviderOption, RenameEntityType, RenameSubmitState } from "../types";
 
 type EntityOption = { id: number; label: string };
 
 type RenameTabProps = {
-  renameEntityType: "model" | "benchmark";
-  resetRenameStateForEntityType: (nextEntityType: "model" | "benchmark") => void;
+  renameEntityType: RenameEntityType;
+  resetRenameStateForEntityType: (nextEntityType: RenameEntityType) => void;
   renameSearchKeyword: string;
   updateRenameSearchKeyword: (nextKeyword: string) => void;
   filteredRenameEntityOptions: EntityOption[];
@@ -22,6 +22,7 @@ type RenameTabProps = {
   modelById: Map<number, ModelOption>;
   providerById: Map<number, ProviderOption>;
   benchmarkById: Map<number, BenchmarkOption>;
+  sourceById: Map<number, string>;
   onPickRenameEntity: (entityId: number) => void;
   onRenameEntity: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
   renameSelectedEntityLabel: string;
@@ -52,6 +53,7 @@ export function RenameTab({
   modelById,
   providerById,
   benchmarkById,
+  sourceById,
   onPickRenameEntity,
   onRenameEntity,
   renameSelectedEntityLabel,
@@ -66,6 +68,17 @@ export function RenameTab({
   setRenameMergeOnConflict,
   renameSubmitState
 }: RenameTabProps) {
+  const detailHeader = renameEntityType === "model"
+    ? "Provider"
+    : renameEntityType === "benchmark"
+      ? "Type"
+      : "类型";
+  const nextNamePlaceholder = renameEntityType === "model"
+    ? "输入新的 model 名称"
+    : renameEntityType === "benchmark"
+      ? "输入新的 benchmark 名称"
+      : "输入新的 source 名称";
+
   return (
     <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
       <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold">
@@ -73,7 +86,7 @@ export function RenameTab({
         实体名称维护
       </h3>
       <p className="mb-3 text-sm opacity-80">
-        支持搜索并更改已有 model 名称与 provider / benchmark 名称与 type。若命中重名冲突，可自动合并并保留当前选中实体。
+        支持搜索并更改已有 model 名称与 provider、benchmark 名称与 type，以及 source 名称。若命中重名冲突，可自动合并并保留当前选中实体。
       </p>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
@@ -81,10 +94,11 @@ export function RenameTab({
           <select
             className="select select-bordered w-full"
             value={renameEntityType}
-            onChange={(event) => resetRenameStateForEntityType(event.target.value as "model" | "benchmark")}
+            onChange={(event) => resetRenameStateForEntityType(event.target.value as RenameEntityType)}
           >
             <option value="model">model</option>
             <option value="benchmark">benchmark</option>
+            <option value="source">source</option>
           </select>
         </div>
         <div className="md:col-span-9">
@@ -105,7 +119,7 @@ export function RenameTab({
           <div className="grid grid-cols-[80px_minmax(0,1fr)_180px] border-b border-base-300 bg-base-100/60 px-1 py-2 text-xs font-semibold">
             <span className="px-2">ID</span>
             <span className="px-2">名称</span>
-            <span className="px-2">{renameEntityType === "model" ? "Provider" : "Type"}</span>
+            <span className="px-2">{detailHeader}</span>
           </div>
           <div
             ref={renameListViewportRef}
@@ -124,7 +138,9 @@ export function RenameTab({
                       if (!model) return "-";
                       return providerById.get(model.providerId)?.config?.displayName?.trim() || providerById.get(model.providerId)?.name || "-";
                     })()
-                  : (benchmarkById.get(item.id)?.benchmarkType ?? "-");
+                  : renameEntityType === "benchmark"
+                    ? (benchmarkById.get(item.id)?.benchmarkType ?? "-")
+                    : (sourceById.get(item.id) ? "source" : "-");
 
                 return (
                   <div
@@ -176,7 +192,7 @@ export function RenameTab({
             className="input input-bordered w-full"
             value={renameNextName}
             onChange={(event) => setRenameNextName(event.target.value)}
-            placeholder={renameEntityType === "model" ? "输入新的 model 名称" : "输入新的 benchmark 名称"}
+            placeholder={nextNamePlaceholder}
             required
           />
         </div>
