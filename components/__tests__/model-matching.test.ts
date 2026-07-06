@@ -55,6 +55,19 @@ describe("model-matching variant sorting", () => {
     expect(compareModelNameByColumnOrder("Nemotron 3 Super", "Nemotron 3 Nano", collator)).toBeLessThan(0);
   });
 
+  test("comparators should keep preview models after the matching stable model", () => {
+    const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+
+    expect(compareSourceTabKeysByVersion("text:HY3", "text:HY3 Preview")).toBeLessThan(0);
+    expect(compareModelNameByColumnOrder("HY3", "HY3 Preview", collator)).toBeLessThan(0);
+    expect(compareModelNameByColumnOrder("HY3 Preview", "HY3", collator)).toBeGreaterThan(0);
+
+    const sorted = ["HY2", "HY3 Preview", "HY3"].sort((left, right) => (
+      compareModelNameByColumnOrder(left, right, collator)
+    ));
+    expect(sorted).toEqual(["HY3", "HY3 Preview", "HY2"]);
+  });
+
   test("compareModelNameByColumnOrder should sort Claude tier models by version before tier", () => {
     const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 

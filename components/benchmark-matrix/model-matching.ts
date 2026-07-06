@@ -10,6 +10,34 @@ const MODEL_TIER_PRIORITY: Record<ModelTierToken["tier"], number> = {
   haiku: 1
 };
 
+function normalizePreviewOrderToken(modelName: string): string {
+  return modelName
+    .toLowerCase()
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function comparePreviewModelOrder(left: string, right: string): number {
+  const leftNormalized = normalizePreviewOrderToken(left);
+  const rightNormalized = normalizePreviewOrderToken(right);
+  const leftIsPreview = /\bpreview\b/.test(leftNormalized);
+  const rightIsPreview = /\bpreview\b/.test(rightNormalized);
+
+  if (leftIsPreview === rightIsPreview) {
+    return 0;
+  }
+
+  const leftBase = leftNormalized.replace(/\bpreview\b/g, " ").replace(/\s+/g, " ").trim();
+  const rightBase = rightNormalized.replace(/\bpreview\b/g, " ").replace(/\s+/g, " ").trim();
+  if (!leftBase || leftBase !== rightBase) {
+    return 0;
+  }
+
+  return leftIsPreview ? 1 : -1;
+}
+
 export function extractModelVersionToken(modelName: string): ModelVersionToken | null {
   const trimmed = modelName.trim();
   const match = MODEL_VERSION_TOKEN_PATTERN.exec(trimmed)
@@ -76,6 +104,11 @@ export function compareSourceTabKeysByVersion(leftKey: string, rightKey: string)
     const scaleCompare = compareModelScaleSize(leftLabel, rightLabel);
     if (scaleCompare !== 0) {
       return scaleCompare;
+    }
+
+    const previewCompare = comparePreviewModelOrder(leftLabel, rightLabel);
+    if (previewCompare !== 0) {
+      return previewCompare;
     }
   }
 
@@ -315,6 +348,11 @@ export function compareModelNameByColumnOrder(left: string, right: string, colla
   const scaleCompare = compareModelScaleSize(left, right);
   if (scaleCompare !== 0) {
     return scaleCompare;
+  }
+
+  const previewCompare = comparePreviewModelOrder(left, right);
+  if (previewCompare !== 0) {
+    return previewCompare;
   }
 
   const leftFamily = getModelFamilyMatchKey(left);
