@@ -35,6 +35,47 @@ export function buildModelCompareKey(input: string): string {
     .trim();
 }
 
+export function getModelSearchCandidateIds(
+  input: string,
+  models: Array<{ id: number; modelName: string }>,
+  limit = 30
+): number[] {
+  const normalizedInput = input.trim().toLowerCase();
+  const compareInput = buildModelCompareKey(input);
+
+  if (!normalizedInput && !compareInput) {
+    return [];
+  }
+
+  return models
+    .map((model) => {
+      const normalizedName = model.modelName.trim().toLowerCase();
+      const compareName = buildModelCompareKey(model.modelName);
+
+      let score = Number.POSITIVE_INFINITY;
+      if (normalizedName === normalizedInput || compareName === compareInput) {
+        score = 0;
+      } else if (normalizedName.startsWith(normalizedInput)) {
+        score = 1;
+      } else if (compareInput && compareName.startsWith(compareInput)) {
+        score = 2;
+      } else if (normalizedName.includes(normalizedInput)) {
+        score = 3;
+      } else if (compareInput && compareName.includes(compareInput)) {
+        score = 4;
+      }
+
+      return { model, score };
+    })
+    .filter((item) => Number.isFinite(item.score))
+    .sort((a, b) => {
+      if (a.score !== b.score) return a.score - b.score;
+      return a.model.modelName.localeCompare(b.model.modelName, "zh-Hans-CN");
+    })
+    .slice(0, limit)
+    .map((item) => item.model.id);
+}
+
 export function normalizeModelNameByDedupeRule(input: string, rule: ModelDedupeRule): string {
   let normalized = input.trim().replace(MODEL_HYPHEN_VARIANT_REGEX, "-");
 

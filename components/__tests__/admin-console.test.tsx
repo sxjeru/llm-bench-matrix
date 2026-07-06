@@ -1124,6 +1124,80 @@ describe("AdminConsole text import", () => {
     expect(secondPayload.csvText).toContain("Model A Prime");
   });
 
+  test("矩阵 Model 输入可展开库内前缀候选并覆盖预览", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "Qwen",
+          modelName: "qwen3.6-3b",
+          benchmarkName: "Bench-1",
+          benchmarkType: "Type-A",
+          rawValue: "70.1",
+          valueNum: 70.1,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    const importResponse = {
+      format: "structured-csv",
+      total: 1,
+      skipped: 0,
+      inserted: 1,
+      warningCount: 0,
+      warnings: []
+    };
+
+    const fetchMock = mockFetchSequence(previewResponse, importResponse);
+    const props = buildProps();
+    props.models = [
+      ...props.models,
+      { id: 3, providerId: 1, modelName: "qwen3.6-3b-1b", canonicalKey: "qwen3.6-3b-1b" }
+    ];
+
+    render(<AdminConsole {...props} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const matrixTable = await findMatrixPreviewTable();
+    const modelInput = within(matrixTable).getByDisplayValue("qwen3.6-3b") as HTMLInputElement;
+
+    await user.click(modelInput);
+
+    const candidate = await screen.findByRole("option", {
+      name: /qwen3\.6-3b-1b \[3\]/
+    });
+    await user.click(candidate);
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("qwen3.6-3b-1b")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const secondCall = fetchMock.mock.calls[1];
+    const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
+      csvText?: string;
+    };
+
+    expect(secondPayload.csvText).toContain("qwen3.6-3b-1b");
+  });
+
   test("矩阵 Benchmark 输入编辑时保持焦点，失焦后才提交重命名", async () => {
     const user = userEvent.setup();
 

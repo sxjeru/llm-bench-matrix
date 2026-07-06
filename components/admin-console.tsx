@@ -195,6 +195,7 @@ export function AdminConsole({
   const [matrixBenchmarkNameDrafts, setMatrixBenchmarkNameDrafts] = useState<Record<string, string>>({});
   const [matrixBenchmarkTypeDrafts, setMatrixBenchmarkTypeDrafts] = useState<Record<string, string>>({});
   const [matrixModelNameDrafts, setMatrixModelNameDrafts] = useState<Record<string, string>>({});
+  const [openMatrixModelCandidateFor, setOpenMatrixModelCandidateFor] = useState<string | null>(null);
   const [openMatrixBenchmarkCandidateFor, setOpenMatrixBenchmarkCandidateFor] = useState<string | null>(null);
   const [globalStarSupplement, setGlobalStarSupplement] = useState("");
   const [benchmarkMergeTargets, setBenchmarkMergeTargets] = useState<Record<string, string>>({});
@@ -811,6 +812,10 @@ export function AdminConsole({
       });
 
       const targetElement = target instanceof Element ? target : null;
+      if (!targetElement || !targetElement.closest('[data-matrix-model-candidate-container="true"]')) {
+        setOpenMatrixModelCandidateFor(null);
+      }
+
       if (!targetElement || !targetElement.closest('[data-matrix-benchmark-candidate-container="true"]')) {
         setOpenMatrixBenchmarkCandidateFor(null);
       }
@@ -922,6 +927,7 @@ export function AdminConsole({
     setMatrixBenchmarkNameDrafts({});
     setMatrixBenchmarkTypeDrafts({});
     setMatrixModelNameDrafts({});
+    setOpenMatrixModelCandidateFor(null);
     setOpenMatrixBenchmarkCandidateFor(null);
     setTextImportPreviewMeta({
       format: "workbook-table",
@@ -1674,6 +1680,7 @@ export function AdminConsole({
       setMatrixBenchmarkNameDrafts({});
       setMatrixBenchmarkTypeDrafts({});
       setMatrixModelNameDrafts({});
+      setOpenMatrixModelCandidateFor(null);
       setOpenMatrixBenchmarkCandidateFor(null);
       setTextImportPreviewMeta({
         format: result.format ?? "matrix-table",
@@ -2938,6 +2945,8 @@ export function AdminConsole({
             modelWarningMap={modelWarningMap}
             modelWarningSet={modelWarningSet}
             matrixModelNameDrafts={matrixModelNameDrafts}
+            setOpenMatrixModelCandidateFor={setOpenMatrixModelCandidateFor}
+            openMatrixModelCandidateFor={openMatrixModelCandidateFor}
             applyModelOverwriteByTargetId={applyModelOverwriteByTargetId}
             onMatrixModelNameInputChange={onMatrixModelNameInputChange}
             onMatrixModelNameInputBlur={onMatrixModelNameInputBlur}

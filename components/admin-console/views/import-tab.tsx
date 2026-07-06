@@ -20,6 +20,7 @@ import { getOmniDocBenchNormalizeHint, getBenchmarkSearchCandidateIds } from "..
 import { toDomSafeId } from "../utils/dom";
 import { formatPreviewNumericValue } from "../utils/import-values";
 import { parseExplicitMergeEntityId } from "../utils/merge";
+import { getModelSearchCandidateIds } from "../utils/model";
 import { normalizeModalityList, normalizeModalityName } from "../utils/modality";
 import { ModalityBadge } from "./shared/modality-badge";
 
@@ -51,6 +52,11 @@ type BenchmarkParenthesesItem = {
 };
 
 type BenchmarkCandidateOption = {
+  targetId: number;
+  label: string;
+};
+
+type ModelCandidateOption = {
   targetId: number;
   label: string;
 };
@@ -244,6 +250,133 @@ function MatrixBenchmarkCandidateField({
   );
 }
 
+type MatrixModelCandidateFieldProps = {
+  modelName: string;
+  inputValue: string;
+  hasExactMatch: boolean;
+  candidateOptions: ModelCandidateOption[];
+  isOpen: boolean;
+  setOpenMatrixModelCandidateFor: Dispatch<SetStateAction<string | null>>;
+  applyModelOverwriteByTargetId: (modelName: string, targetId: number) => boolean;
+  onMatrixModelNameInputChange: (modelName: string, nextModelName: string) => void;
+  onMatrixModelNameInputBlur: (modelName: string, inputValue: string) => void;
+};
+
+function MatrixModelCandidateField({
+  modelName,
+  inputValue,
+  hasExactMatch,
+  candidateOptions,
+  isOpen,
+  setOpenMatrixModelCandidateFor,
+  applyModelOverwriteByTargetId,
+  onMatrixModelNameInputChange,
+  onMatrixModelNameInputBlur
+}: MatrixModelCandidateFieldProps) {
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<FloatingPosition | null>(null);
+
+  const updatePosition = useCallback(() => {
+    const rect = anchorRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    setPosition({
+      left: rect.left,
+      top: rect.bottom + 4,
+      width: rect.width,
+      maxHeight: Math.min(260, Math.max(140, window.innerHeight - rect.bottom - 12))
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [isOpen, updatePosition]);
+
+  const dropdown =
+    isOpen && position && typeof document !== "undefined"
+      ? createPortal(
+          <div
+            role="listbox"
+            data-matrix-model-candidate-container="true"
+            className="fixed z-[9999] overflow-auto rounded-md border border-base-300 bg-base-100/95 p-1 shadow-xl backdrop-blur"
+            style={{
+              left: position.left,
+              top: position.top,
+              width: position.width,
+              maxHeight: position.maxHeight
+            }}
+          >
+            {candidateOptions.map((option) => (
+              <div
+                key={`matrix-model-override-option-${modelName}-${option.targetId}`}
+                role="option"
+                aria-selected={false}
+                tabIndex={-1}
+                className="cursor-pointer rounded-sm px-2 py-1 text-left text-xs leading-5 text-base-content hover:bg-base-200/90"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  applyModelOverwriteByTargetId(modelName, option.targetId);
+                  setOpenMatrixModelCandidateFor(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") {
+                    return;
+                  }
+                  event.preventDefault();
+                  applyModelOverwriteByTargetId(modelName, option.targetId);
+                  setOpenMatrixModelCandidateFor(null);
+                }}
+              >
+                <span className="font-medium">{`${option.label} [${option.targetId}]`}</span>
+              </div>
+            ))}
+          </div>,
+          document.body
+        )
+      : null;
+
+  return (
+    <div ref={anchorRef} className="relative" data-matrix-model-candidate-container="true">
+      <input
+        className="input input-bordered input-xs w-full min-w-[120px] pr-6"
+        value={inputValue}
+        onFocus={() => {
+          if (candidateOptions.length > 0) {
+            setOpenMatrixModelCandidateFor(modelName);
+          }
+        }}
+        onChange={(e) => {
+          const nextInput = e.target.value;
+          const parsedTargetId = parseExplicitMergeEntityId(nextInput);
+          if (parsedTargetId !== null && applyModelOverwriteByTargetId(modelName, parsedTargetId)) {
+            setOpenMatrixModelCandidateFor(null);
+            return;
+          }
+          onMatrixModelNameInputChange(modelName, nextInput);
+          setOpenMatrixModelCandidateFor(modelName);
+        }}
+        onBlur={(e) => {
+          onMatrixModelNameInputBlur(modelName, e.target.value);
+          setOpenMatrixModelCandidateFor((current) =>
+            current === modelName ? null : current
+          );
+        }}
+      />
+      {hasExactMatch ? <ExactMatchDot title="已匹配库内同名 model" /> : null}
+      {dropdown}
+    </div>
+  );
+}
+
 function ExactMatchDot({ title }: { title: string }) {
   return (
     <span
@@ -321,6 +454,8 @@ type ImportTabProps = {
   modelWarningMap: Map<string, ModelWarningItem>;
   modelWarningSet: Set<string>;
   matrixModelNameDrafts: Record<string, string>;
+  setOpenMatrixModelCandidateFor: Dispatch<SetStateAction<string | null>>;
+  openMatrixModelCandidateFor: string | null;
   applyModelOverwriteByTargetId: (modelName: string, targetId: number) => boolean;
   onMatrixModelNameInputChange: (modelName: string, nextModelName: string) => void;
   onMatrixModelNameInputBlur: (modelName: string, inputValue: string) => void;
@@ -433,6 +568,8 @@ export function ImportTab({
   modelWarningMap,
   modelWarningSet,
   matrixModelNameDrafts,
+  setOpenMatrixModelCandidateFor,
+  openMatrixModelCandidateFor,
   applyModelOverwriteByTargetId,
   onMatrixModelNameInputChange,
   onMatrixModelNameInputBlur,
@@ -499,6 +636,8 @@ export function ImportTab({
       item.benchmarkName.trim().toLowerCase() === normalizedInput
     ));
   }
+
+  const modelCandidateSearchOptions = modelEntityOptions.map((item) => ({ id: item.id, modelName: item.label }));
 
   return (
     <div className="grid grid-cols-1 gap-4">
@@ -866,55 +1005,34 @@ export function ImportTab({
                       const modelInputValue = matrixModelNameDrafts[modelName] ?? modelName;
                       const modelCandidateTargetIds = Array.from(new Set([
                         ...(modelWarning?.candidateTargetIds ?? []),
-                        ...(modelWarning?.suggestedTargetId ? [modelWarning.suggestedTargetId] : [])
-                      ]));
-                      const modelInputListId = `matrix-model-override-${toDomSafeId(modelName)}`;
+                        ...(modelWarning?.suggestedTargetId ? [modelWarning.suggestedTargetId] : []),
+                        ...getModelSearchCandidateIds(modelInputValue, modelCandidateSearchOptions)
+                      ])).slice(0, 30);
                       const hasModelMatch = hasExactModelMatch(modelInputValue);
+                      const modelCandidateOptions = modelCandidateTargetIds.map((targetId) => {
+                        const target = modelEntityOptions.find((item) => String(item.id) === String(targetId));
+                        return {
+                          targetId,
+                          label: target?.label ?? `#${targetId}`
+                        };
+                      });
 
                       return (
                         <th
                           key={`matrix-model-${modelName}`}
                           className={modelWarningSet.has(modelName) ? "bg-warning/20 text-warning-content" : ""}
                         >
-                          <div className="relative">
-                            <input
-                              className="input input-bordered input-xs w-full min-w-[120px] pr-6"
-                              list={modelCandidateTargetIds.length > 0 ? modelInputListId : undefined}
-                              value={modelInputValue}
-                              onChange={(e) => {
-                                const nextInput = e.target.value;
-                                const parsedTargetId = parseExplicitMergeEntityId(nextInput);
-                                if (parsedTargetId !== null && applyModelOverwriteByTargetId(modelName, parsedTargetId)) {
-                                  return;
-                                }
-                                onMatrixModelNameInputChange(modelName, nextInput);
-                              }}
-                              onBlur={(e) => onMatrixModelNameInputBlur(modelName, e.target.value)}
-                            />
-                            {hasModelMatch ? <ExactMatchDot title="已匹配库内同名 model" /> : null}
-                          </div>
-                          {modelCandidateTargetIds.length > 0 ? (
-                            <datalist id={modelInputListId}>
-                              {modelCandidateTargetIds.map((targetId) => {
-                                const target = modelEntityOptions.find((item) => String(item.id) === String(targetId));
-                                if (!target) {
-                                  return (
-                                    <option
-                                      key={`matrix-model-override-option-${modelName}-${targetId}`}
-                                      value={`#${targetId} [${targetId}]`}
-                                    />
-                                  );
-                                }
-
-                                return (
-                                  <option
-                                    key={`matrix-model-override-option-${modelName}-${targetId}`}
-                                    value={`${target.label} [${targetId}]`}
-                                  />
-                                );
-                              })}
-                            </datalist>
-                          ) : null}
+                          <MatrixModelCandidateField
+                            modelName={modelName}
+                            inputValue={modelInputValue}
+                            hasExactMatch={hasModelMatch}
+                            candidateOptions={modelCandidateOptions}
+                            isOpen={modelCandidateOptions.length > 0 && openMatrixModelCandidateFor === modelName}
+                            setOpenMatrixModelCandidateFor={setOpenMatrixModelCandidateFor}
+                            applyModelOverwriteByTargetId={applyModelOverwriteByTargetId}
+                            onMatrixModelNameInputChange={onMatrixModelNameInputChange}
+                            onMatrixModelNameInputBlur={onMatrixModelNameInputBlur}
+                          />
                         </th>
                       );
                     })}
