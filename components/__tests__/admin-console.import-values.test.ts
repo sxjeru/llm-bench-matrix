@@ -19,8 +19,8 @@ describe("admin console import value helpers", () => {
     });
   });
 
-  test("成对值星号后的明确文本才会作为注释", () => {
-    const parsed = parsePairRawValue("81/77.3* paper");
+  test("成对值星号后的紧贴明确文本会作为注释", () => {
+    const parsed = parsePairRawValue("81/77.3*paper");
 
     expect(parsed).toEqual({
       first: "81",
@@ -35,6 +35,24 @@ describe("admin console import value helpers", () => {
       first: "81",
       second: "77.3*",
       note: "https://paper.example"
+    });
+  });
+
+  test("成对值短脚注标记不作为注释", () => {
+    expect(parsePairRawValue("81/77.3*1")).toEqual({
+      first: "81",
+      second: "77.3*1",
+      note: null
+    });
+    expect(parsePairRawValue("81/77.3*a")).toEqual({
+      first: "81",
+      second: "77.3*a",
+      note: null
+    });
+    expect(parsePairRawValue("81/77.3^2")).toEqual({
+      first: "81",
+      second: "77.3^2",
+      note: null
     });
   });
 });

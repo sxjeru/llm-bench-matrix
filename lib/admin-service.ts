@@ -9,7 +9,8 @@ import {
   toProviderSlug
 } from "@/lib/db/normalize";
 import { parseBenchmarkValue, type ParsedBenchmarkValue } from "@/lib/db/parse-value";
-import { IMPORT_VALUE_PAIR_REGEX, IMPORT_VALUE_RANK_PREFIX_REGEX, IMPORT_VALUE_SINGLE_REGEX } from "@/lib/import/value-patterns";
+import { IMPORT_VALUE_RANK_PREFIX_REGEX, IMPORT_VALUE_SINGLE_REGEX } from "@/lib/import/value-patterns";
+import { composeImportPairValueRaw, parseImportPairValue } from "@/lib/import/pair-value";
 import type { ParsedImportRecord } from "@/lib/import/xlsm";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 import type { ProviderConfig } from "@/lib/db/schema";
@@ -394,20 +395,6 @@ function mergeImportValueNotes(primaryNote: string | null | undefined, secondary
   return null;
 }
 
-function startsWithImportStarMarker(input: string): boolean {
-  return /^[*∗﹡✱✳✻]/.test(input.trim());
-}
-
-function hasAttachedImportStarMarker(input: string): boolean {
-  return /[*∗﹡✱✳✻](?:[0-9A-Za-z]*)?$/.test(input.trim());
-}
-
-function appendSpacedImportStarMarker(segment: string, tail: string): string {
-  if (!startsWithImportStarMarker(tail)) return segment;
-  if (hasAttachedImportStarMarker(segment)) return segment;
-  return `${segment}*`;
-}
-
 function normalizeImportedValueAndExtractNote(rawInput: string, explicitNoteInput?: string | null): {
   valueRaw: string;
   valueNote: string | null;
@@ -429,18 +416,11 @@ function normalizeImportedValueAndExtractNote(rawInput: string, explicitNoteInpu
   let valueRaw = normalizedRaw;
   const valueNote = mergeImportValueNotes(explicitNote, parsedNote);
 
-  const pairMatch = normalizedRaw.match(IMPORT_VALUE_PAIR_REGEX);
-  if (pairMatch) {
-    const [, first, second, tail] = pairMatch;
-    const tailText = tail.trim();
-
-    if (tailText.length > 0) {
-      valueRaw = `${first.trim()} / ${appendSpacedImportStarMarker(second.trim(), tailText)}`;
-    }
-
+  const pairValue = parseImportPairValue(normalizedRaw);
+  if (pairValue) {
     return {
-      valueRaw,
-      valueNote
+      valueRaw: composeImportPairValueRaw(pairValue),
+      valueNote: mergeImportValueNotes(explicitNote, pairValue.valueNote)
     };
   }
 

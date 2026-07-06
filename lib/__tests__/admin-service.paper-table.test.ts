@@ -99,19 +99,38 @@ describe("paper-table 文本解析", () => {
 
   test("成对值段内星号不会被解析为注释", async () => {
     const inputText = [
-      "Benchmark M1 M2 M3",
-      "PairBench 81/77.3* 91*/83 81/77.3*paper"
+      "Benchmark M1 M2 M3 M4 M5",
+      "PairBench 81/77.3* 91*/83 81/77.3*1 81/77.3*a 81/77.3^2"
     ].join("\n");
 
     const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
     const byModel = new Map(parsed.rows.map((row) => [row.modelName, row]));
 
-    expect(byModel.get("M1")?.valueRaw).toBe("81/77.3*");
+    expect(byModel.get("M1")?.valueRaw).toBe("81 / 77.3*");
     expect(byModel.get("M1")?.valueNote).toBeNull();
-    expect(byModel.get("M2")?.valueRaw).toBe("91*/83");
+    expect(byModel.get("M2")?.valueRaw).toBe("91* / 83");
     expect(byModel.get("M2")?.valueNote).toBeNull();
-    expect(byModel.get("M3")?.valueRaw).toBe("81/77.3*paper");
+    expect(byModel.get("M3")?.valueRaw).toBe("81 / 77.3*1");
     expect(byModel.get("M3")?.valueNote).toBeNull();
+    expect(byModel.get("M4")?.valueRaw).toBe("81 / 77.3*a");
+    expect(byModel.get("M4")?.valueNote).toBeNull();
+    expect(byModel.get("M5")?.valueRaw).toBe("81 / 77.3^2");
+    expect(byModel.get("M5")?.valueNote).toBeNull();
+  });
+
+  test("成对值星号后的紧贴明确文本会作为注释", async () => {
+    const inputText = [
+      "Benchmark M1 M2",
+      "PairBench 81/77.3*paper 91*source/83"
+    ].join("\n");
+
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const byModel = new Map(parsed.rows.map((row) => [row.modelName, row]));
+
+    expect(byModel.get("M1")?.valueRaw).toBe("81 / 77.3*");
+    expect(byModel.get("M1")?.valueNote).toBe("paper");
+    expect(byModel.get("M2")?.valueRaw).toBe("91* / 83");
+    expect(byModel.get("M2")?.valueNote).toBe("source");
   });
 
   test("三值指标标签会自动拆成多个 benchmark", async () => {

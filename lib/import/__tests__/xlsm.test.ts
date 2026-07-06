@@ -78,10 +78,28 @@ describe("parseWorkbookBuffer", () => {
 
     expect(row).toBeDefined();
     expect(row?.valid).toBe(true);
-    expect(row?.rawValue).toBe("91*/83");
+    expect(row?.rawValue).toBe("91* / 83");
     expect(row?.valueNum).toBeCloseTo(91);
     expect(row?.valueNum2).toBeCloseTo(83);
     expect(row?.valueNote).toBeNull();
+    expect(parsed.warnings).toHaveLength(0);
+  });
+
+  test("双值星号后的紧贴明确文本会作为注释", async () => {
+    const buffer = buildWorkbookBuffer([
+      ["Category", "Benchmark", "Model A"],
+      ["Business", "Pair Bench", "81/77.3*paper"]
+    ]);
+
+    const parsed = await parseWorkbookBuffer(buffer, "Sheet1");
+    const row = parsed.records.find((item) => item.benchmarkName === "Pair Bench");
+
+    expect(row).toBeDefined();
+    expect(row?.valid).toBe(true);
+    expect(row?.rawValue).toBe("81 / 77.3*");
+    expect(row?.valueNum).toBeCloseTo(81);
+    expect(row?.valueNum2).toBeCloseTo(77.3);
+    expect(row?.valueNote).toBe("paper");
     expect(parsed.warnings).toHaveLength(0);
   });
 

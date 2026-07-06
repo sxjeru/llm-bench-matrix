@@ -280,7 +280,7 @@ export async function parseWorkbookBuffer(buffer: Buffer, sheetName?: string): P
           category,
           benchmarkName: cell.benchmarkName,
           modelName,
-          rawValue: cell.rawValue,
+          rawValue: parsed.valueRaw,
           valueNum: parsed.valueNum,
           valueNum2: parsed.valueNum2,
           valueNote: mergedValueNote ?? (parsed.valueNote === "non-numeric" ? "non-numeric" : null),

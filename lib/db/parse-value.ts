@@ -1,4 +1,5 @@
-import { IMPORT_VALUE_PAIR_REGEX, IMPORT_VALUE_SINGLE_REGEX } from "@/lib/import/value-patterns";
+import { composeImportPairValueRaw, isStarMarkerOnly, parseImportPairValue } from "@/lib/import/pair-value";
+import { IMPORT_VALUE_SINGLE_REGEX } from "@/lib/import/value-patterns";
 
 export type ParsedBenchmarkValue = {
   valueRaw: string;
@@ -10,10 +11,6 @@ export type ParsedBenchmarkValue = {
 function toNumber(input: string): number | null {
   const parsed = Number.parseFloat(input.replace(/[$¥€£,#＃\s]/g, ""));
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function isStarMarkerOnly(input: string): boolean {
-  return /^[*∗﹡✱✳✻]+$/.test(input.trim());
 }
 
 function normalizeStarPrefixedNote(tail: string): string | null {
@@ -53,16 +50,13 @@ export function parseBenchmarkValue(rawInput: string): ParsedBenchmarkValue {
     };
   }
 
-  const pairMatch = raw.match(IMPORT_VALUE_PAIR_REGEX);
-  if (pairMatch) {
-    const [, first, second, tail] = pairMatch;
-    const note = normalizeStarPrefixedNote(tail);
-
+  const pairValue = parseImportPairValue(raw);
+  if (pairValue) {
     return {
-      valueRaw: raw,
-      valueNum: toNumber(first),
-      valueNum2: toNumber(second),
-      valueNote: note || null
+      valueRaw: composeImportPairValueRaw(pairValue),
+      valueNum: toNumber(pairValue.first),
+      valueNum2: toNumber(pairValue.second),
+      valueNote: pairValue.valueNote
     };
   }
 

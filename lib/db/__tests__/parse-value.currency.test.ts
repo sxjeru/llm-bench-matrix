@@ -33,16 +33,16 @@ describe("parseBenchmarkValue currency", () => {
   test("支持首个双值段带星号格式", () => {
     const parsed = parseBenchmarkValue("91*/83");
 
-    expect(parsed.valueRaw).toBe("91*/83");
+    expect(parsed.valueRaw).toBe("91* / 83");
     expect(parsed.valueNum).toBeCloseTo(91);
     expect(parsed.valueNum2).toBeCloseTo(83);
     expect(parsed.valueNote).toBeNull();
   });
 
-  test("双值星号后的明确文本才会作为注释", () => {
-    const parsed = parseBenchmarkValue("81/77.3* paper");
+  test("双值星号后的紧贴明确文本会作为注释", () => {
+    const parsed = parseBenchmarkValue("81/77.3*paper");
 
-    expect(parsed.valueRaw).toBe("81/77.3* paper");
+    expect(parsed.valueRaw).toBe("81 / 77.3*");
     expect(parsed.valueNum).toBeCloseTo(81);
     expect(parsed.valueNum2).toBeCloseTo(77.3);
     expect(parsed.valueNote).toBe("paper");
@@ -51,10 +51,23 @@ describe("parseBenchmarkValue currency", () => {
   test("双值星号 URL 语法仍可作为显式注释", () => {
     const parsed = parseBenchmarkValue("81/77.3*://https://paper.example");
 
-    expect(parsed.valueRaw).toBe("81/77.3*://https://paper.example");
+    expect(parsed.valueRaw).toBe("81 / 77.3*");
     expect(parsed.valueNum).toBeCloseTo(81);
     expect(parsed.valueNum2).toBeCloseTo(77.3);
     expect(parsed.valueNote).toBe("https://paper.example");
+  });
+
+  test("双值短脚注标记不作为注释", () => {
+    const starNumber = parseBenchmarkValue("81/77.3*1");
+    const starLetter = parseBenchmarkValue("81/77.3*a");
+    const caretNumber = parseBenchmarkValue("81/77.3^2");
+
+    expect(starNumber.valueRaw).toBe("81 / 77.3*1");
+    expect(starNumber.valueNote).toBeNull();
+    expect(starLetter.valueRaw).toBe("81 / 77.3*a");
+    expect(starLetter.valueNote).toBeNull();
+    expect(caretNumber.valueRaw).toBe("81 / 77.3^2");
+    expect(caretNumber.valueNote).toBeNull();
   });
 
   test("支持 #3.4 这类名次值", () => {
