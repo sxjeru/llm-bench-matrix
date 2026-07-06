@@ -294,6 +294,7 @@ export function AdminConsole({
   const [settingKey, setSettingKey] = useState("");
   const [settingValue, setSettingValue] = useState("{}");
   const [settingNote, setSettingNote] = useState("");
+  const [isRefreshingCaches, setIsRefreshingCaches] = useState(false);
   const [deleteModelInput, setDeleteModelInput] = useState("");
   const [deleteSourceInput, setDeleteSourceInput] = useState("");
   const [confirmDeleteSourceOpen, setConfirmDeleteSourceOpen] = useState(false);
@@ -2605,6 +2606,21 @@ export function AdminConsole({
     setClearDatabaseConfirmOpen(true);
   }
 
+  async function onRefreshCaches() {
+    if (isRefreshingCaches) return;
+
+    setIsRefreshingCaches(true);
+    try {
+      await postJson("/api/admin/cache/refresh", {});
+      notifySuccess("缓存已更新，前台数据会在下次请求时重新读取。");
+      router.refresh();
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "更新缓存失败");
+    } finally {
+      setIsRefreshingCaches(false);
+    }
+  }
+
   function closeClearDatabaseConfirm() {
     if (isClearingDatabase) return;
     setClearDatabaseConfirmOpen(false);
@@ -3258,6 +3274,8 @@ export function AdminConsole({
             settingNote={settingNote}
             setSettingNote={setSettingNote}
             onSaveSetting={onSaveSetting}
+            onRefreshCaches={onRefreshCaches}
+            isRefreshingCaches={isRefreshingCaches}
             onClearDatabase={onClearDatabase}
             sortedSettings={sortedSettings}
             notifySuccess={notifySuccess}

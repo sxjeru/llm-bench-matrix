@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type Dispatch, type FormEvent, type SetStateAction } from "react";
-import { Settings2, HelpCircle } from "lucide-react";
+import { Settings2, HelpCircle, RefreshCw } from "lucide-react";
 import type { ModelDedupeRule } from "../types";
 import { postJson } from "../api";
 
@@ -24,6 +24,8 @@ type SettingsTabProps = {
   settingNote: string;
   setSettingNote: Dispatch<SetStateAction<string>>;
   onSaveSetting: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
+  onRefreshCaches: () => void | Promise<void>;
+  isRefreshingCaches: boolean;
   onClearDatabase: () => void;
   sortedSettings: [string, unknown][];
   notifySuccess: (message: string, details?: string[]) => void;
@@ -49,6 +51,8 @@ export function SettingsTab({
   settingNote,
   setSettingNote,
   onSaveSetting,
+  onRefreshCaches,
+  isRefreshingCaches,
   onClearDatabase,
   sortedSettings,
   notifySuccess,
@@ -104,6 +108,26 @@ export function SettingsTab({
         <Settings2 size={18} />
         Settings
       </h3>
+
+      <div className="mb-5 rounded-box border border-base-300 bg-base-200/50 p-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h4 className="mb-1 font-semibold">缓存维护</h4>
+            <p className="text-sm opacity-80">
+              手动修改数据库后，点击更新缓存让前台重新读取最新数据。
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary md:w-auto"
+            onClick={onRefreshCaches}
+            disabled={isRefreshingCaches}
+          >
+            <RefreshCw size={16} className={isRefreshingCaches ? "animate-spin" : undefined} />
+            {isRefreshingCaches ? "更新中..." : "更新缓存"}
+          </button>
+        </div>
+      </div>
 
       <div className="mb-5 rounded-box border border-base-300 bg-base-200/50 p-4">
         <h4 className="mb-2 flex items-center gap-2 font-semibold">
