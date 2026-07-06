@@ -4218,6 +4218,13 @@ function getTrailingMatrixValueCellCount(cells: string[]): number {
   return count;
 }
 
+function joinMatrixLabelFragments(fragments: string[]): string {
+  return fragments
+    .map((fragment) => fragment.trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
 function inferMatrixModelCountFromDataLines(lines: string[], startLineIndex: number): number | null {
   const trailingValueCounts = lines
     .slice(startLineIndex)
@@ -4261,11 +4268,11 @@ function hasImplicitMatrixBenchmarkColumn(
     .some((line) => {
       const cells = splitTableLine(line);
       const trailingValueCount = getTrailingMatrixValueCellCount(cells);
-      if (trailingValueCount !== expectedModelCount || cells.length !== expectedModelCount + 1) {
+      if (trailingValueCount !== expectedModelCount || cells.length < expectedModelCount + 1) {
         return false;
       }
 
-      const leadingCell = (cells[0] || "").trim();
+      const leadingCell = joinMatrixLabelFragments(cells.slice(0, cells.length - expectedModelCount));
       return Boolean(leadingCell) && !isMatrixValueLikeCell(leadingCell);
     });
 }
@@ -4312,6 +4319,60 @@ function getMatrixRowValues(cells: string[], startIndex: number, count: number):
   if (count <= 0) return [];
 
   return Array.from({ length: count }, (_, offset) => (cells[startIndex + offset] || "").trim());
+}
+
+function rebalanceMatrixRowCells(
+  cells: string[],
+  layout: {
+    benchmarkColumnIndex: number;
+    modelValueStartIndex: number;
+    modelCount: number;
+  }
+): string[] {
+  const { benchmarkColumnIndex, modelValueStartIndex, modelCount } = layout;
+  const expectedCellCount = modelValueStartIndex + modelCount;
+
+  if (
+    modelCount <= 0
+    || modelValueStartIndex <= 0
+    || cells.length <= expectedCellCount
+    || benchmarkColumnIndex < 0
+    || benchmarkColumnIndex >= modelValueStartIndex
+  ) {
+    return cells;
+  }
+
+  const labelCellCount = cells.length - modelCount;
+  if (
+    labelCellCount <= modelValueStartIndex
+    || getTrailingMatrixValueCellCount(cells) !== modelCount
+  ) {
+    return cells;
+  }
+
+  const extraLabelCellCount = labelCellCount - modelValueStartIndex;
+  const mergeStartIndex = benchmarkColumnIndex;
+  const mergeEndIndex = mergeStartIndex + extraLabelCellCount + 1;
+  if (mergeEndIndex > labelCellCount) {
+    return cells;
+  }
+
+  const leadingCells: string[] = [];
+  for (let index = 0; index < modelValueStartIndex; index += 1) {
+    if (index < mergeStartIndex) {
+      leadingCells.push(cells[index] ?? "");
+      continue;
+    }
+
+    if (index === mergeStartIndex) {
+      leadingCells.push(joinMatrixLabelFragments(cells.slice(mergeStartIndex, mergeEndIndex)));
+      continue;
+    }
+
+    leadingCells.push(cells[index + extraLabelCellCount] ?? "");
+  }
+
+  return [...leadingCells, ...cells.slice(labelCellCount)];
 }
 
 function hasAnyMatrixValue(values: string[]): boolean {
@@ -4451,9 +4512,14 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
     ? inferModalitiesFromCategory(currentBenchmarkType)
     : defaultModalities;
   let pendingBenchmarkPrefix: string | null = null;
+  const matrixRowLayout = {
+    benchmarkColumnIndex,
+    modelValueStartIndex,
+    modelCount: modelNames.length
+  };
 
   for (let lineIndex = headerLineIndex + 1; lineIndex < rawLines.length; lineIndex += 1) {
-    const cells = splitTableLine(rawLines[lineIndex]);
+    const cells = rebalanceMatrixRowCells(splitTableLine(rawLines[lineIndex]), matrixRowLayout);
     const categoryInput = categoryColumnIndex >= 0
       ? normalizeNameParenthesisSpacing(cells[categoryColumnIndex] || "")
       : "";
@@ -4482,10 +4548,10 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
     if (allModelValuesEmpty && !categoryInput && rawBenchmarkInput && !knownTypeMarker) {
       const nextRawLine = rawLines[lineIndex + 1];
       if (nextRawLine) {
-        const nextCells = splitTableLine(nextRawLine);
+        const nextCells = rebalanceMatrixRowCells(splitTableLine(nextRawLine), matrixRowLayout);
         const nextBenchmarkInput = normalizeNameParenthesisSpacing(nextCells[benchmarkColumnIndex] || "");
-        const nextHasAnyModelValue = modelNames.some((_, modelIndex) =>
-          !isEmptyImportValue((nextCells[modelValueStartIndex + modelIndex] || "").trim())
+        const nextHasAnyModelValue = hasAnyMatrixValue(
+          getMatrixRowValues(nextCells, modelValueStartIndex, modelNames.length)
         );
 
         if (nextHasAnyModelValue && isMatrixBenchmarkContinuationFragment(nextBenchmarkInput)) {

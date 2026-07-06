@@ -752,6 +752,27 @@ describe("paper-table 文本解析", () => {
     expect(new Set(superGpqaRows.map((row) => row.benchmarkType))).toEqual(new Set(["Knowledge"]));
   });
 
+  test("逗号分隔矩阵会合并 benchmark 名中未加引号的逗号片段", async () => {
+    const inputText = [
+      "Capability,Benchmark,M1,M2,M3,M4,M5,M6,M7,M8,M9,M10,M11",
+      ",WildClawBench (35, text-only),45.3,53.6,48.7*,59.2*,43.5*,50.5*,61.7/47.1*,41.5*,46.2*,58.4*,63.2*"
+    ].join("\n");
+
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+
+    expect(parsed.format).toBe("matrix-table");
+
+    const rows = parsed.rows.filter((row) => row.benchmarkName === "WildClawBench (35, text-only)");
+    expect(rows).toHaveLength(11);
+    expect(parsed.rows.some((row) => row.benchmarkName === "WildClawBench (35")).toBe(false);
+    expect(parsed.rows.some((row) => row.valueRaw === "text-only)")).toBe(false);
+
+    const valueByModel = new Map(rows.map((row) => [row.modelName, row.valueRaw]));
+    expect(valueByModel.get("M1")).toBe("45.3");
+    expect(valueByModel.get("M7")).toBe("61.7 / 47.1*");
+    expect(valueByModel.get("M11")).toBe("63.2*");
+  });
+
   test("逗号分隔矩阵首列为评测维度时不会被当作模型", async () => {
     const inputText = [
       "评测维度,Claude Opus 4.7,Claude Opus 4.6,GPT-5.4,GPT-5.4 Pro,Gemini 3.1 Pro",
