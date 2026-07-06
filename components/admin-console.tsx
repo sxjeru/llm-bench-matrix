@@ -44,6 +44,7 @@ import {
 } from "./admin-console/utils/benchmark";
 import { buildStructuredCsvText } from "./admin-console/utils/csv";
 import {
+  composePairRawValue,
   parseSingleRawValue,
   parsePairRawValue,
   parseStarSingleRawValue
@@ -1182,10 +1183,19 @@ export function AdminConsole({
     setTextImportDraftRows((prev) =>
       prev.map((row, idx) =>
         idx === rowIndex
-          ? {
-              ...row,
-              valueNote: valueNote.length > 0 ? valueNote : null
-            }
+          ? (() => {
+              const normalizedNote = valueNote.trim();
+              const parsedPair = parsePairRawValue(row.rawValue);
+
+              return {
+                ...row,
+                rawValue:
+                  parsedPair && normalizedNote.length === 0
+                    ? composePairRawValue(parsedPair.first, parsedPair.second, null)
+                    : row.rawValue,
+                valueNote: normalizedNote.length > 0 ? valueNote : null
+              };
+            })()
           : row
       )
     );

@@ -1042,6 +1042,79 @@ describe("AdminConsole text import", () => {
     expect(secondPayload.csvText).toContain("70 / 80 paired.note");
   });
 
+  test("清空原始成对星号注释后导入时不会恢复星号", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "MultiTask",
+          benchmarkType: "General",
+          rawValue: "70/80*",
+          valueNum: 70,
+          valueNum2: 80,
+          valueNote: "*",
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    const importResponse = {
+      format: "structured-csv",
+      total: 1,
+      skipped: 0,
+      inserted: 1,
+      warningCount: 0,
+      warnings: []
+    };
+
+    const fetchMock = mockFetchSequence(previewResponse, importResponse);
+    render(<AdminConsole {...buildProps()} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const pairInput = document.querySelector(
+      'input[list="pair-note-history-options"]'
+    ) as HTMLInputElement | null;
+    if (!pairInput) {
+      throw new Error("Pair note input not found");
+    }
+
+    expect(pairInput).toHaveValue("*");
+
+    await user.clear(pairInput);
+    await user.tab();
+
+    await waitFor(() => {
+      expect(pairInput).toHaveValue("");
+    });
+
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const secondCall = fetchMock.mock.calls[1];
+    const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
+      rows?: Array<{ rawValue: string; valueNote: string | null }>;
+    };
+
+    expect(secondPayload.rows?.[0]).toMatchObject({
+      rawValue: "70 / 80",
+      valueNote: null
+    });
+  });
+
   test("矩阵 Model 输入编辑时保持焦点，失焦后才提交重命名", async () => {
     const user = userEvent.setup();
 
