@@ -767,6 +767,13 @@ export function AdminConsole({
     setRenameListScrollTop(0);
   }
 
+  function clearRenameSelection() {
+    setRenameSelectedEntityId(null);
+    setRenameNextName("");
+    setRenameNextProviderInput("");
+    setRenameNextBenchmarkType("");
+  }
+
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(PAIR_NOTE_HISTORY_STORAGE_KEY);
@@ -2526,6 +2533,7 @@ export function AdminConsole({
 
       if (action === "merged-and-renamed") {
         if (renameEntityType === "source") {
+          clearRenameSelection();
           notifySuccess("source 名称已更新，并已合并到目标 source", [
             `${currentSourceName} → ${persistedNextName}`
           ]);
@@ -2562,6 +2570,9 @@ export function AdminConsole({
         return;
       }
 
+      if (renameEntityType === "source") {
+        clearRenameSelection();
+      }
       notifySuccess("名称已更新并写入数据库");
       router.refresh();
     } catch (error) {

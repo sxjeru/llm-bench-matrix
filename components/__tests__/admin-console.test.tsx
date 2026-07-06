@@ -2906,6 +2906,8 @@ describe("AdminConsole rename tab", () => {
     expect(payload.entityId).toBeUndefined();
 
     expect(await screen.findByText(/名称已更新并写入数据库/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("请先在上方列表选中实体")).toHaveValue("");
+    expect(screen.getByPlaceholderText("输入新的 source 名称")).toHaveValue("");
   });
 
   test("benchmark 改名命中冲突时会提示自动合并并写入合并记录", async () => {
