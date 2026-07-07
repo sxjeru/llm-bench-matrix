@@ -282,6 +282,56 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(mergedCell).toHaveTextContent("82");
   });
 
+  test("开启 Source 原值后，双值单元格仍按解析后的数值对分段展示", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <BenchmarkMatrix
+        rows={[
+          {
+            providerName: "OpenAI",
+            modelName: "Model A",
+            benchmarkName: "Pair Bench",
+            benchmarkType: "Reasoning",
+            benchmarkCanonicalKey: "pair-bench:reasoning",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "22 / 33",
+            valueNum: 22,
+            valueNum2: 33,
+            valueNote: null,
+            source: "text:S1"
+          },
+          {
+            providerName: "OpenAI",
+            modelName: "Model A",
+            benchmarkName: "Pair Bench",
+            benchmarkType: "Reasoning",
+            benchmarkCanonicalKey: "pair-bench:reasoning",
+            benchTime: "2026-04-06T01:00:00.000Z",
+            valueRaw: "44 / 55",
+            valueNum: 44,
+            valueNum2: 55,
+            valueNote: null,
+            source: "text:S2"
+          }
+        ]}
+        sourceOptions={["text:S1", "text:S2"]}
+      />
+    );
+
+    await user.click(screen.getByRole("tab", { name: "S1" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "显示原始值" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "显示原始值" }));
+
+    const valueCell = screen.getByText("22").closest("td");
+    expect(valueCell).not.toBeNull();
+    expect(valueCell).toHaveTextContent("22/33");
+    expect(screen.getByText("33")).toBeInTheDocument();
+  });
+
   test("Source 差值徽标仅在修饰键点击时出现，且方向和文案与底层数值一致", async () => {
     const user = userEvent.setup();
 

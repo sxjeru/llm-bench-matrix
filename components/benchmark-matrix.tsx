@@ -2246,14 +2246,14 @@ export function BenchmarkMatrix({
                           ...(modelIndex === modelColumnMeta.length - 1 ? rowRightEdgeStyle ?? {} : {})
                         }}
                       >
-                        {shouldRenderSourceValues ? (
-                          <span style={singleCellScoreStyle}>{formatFrontendTableCellText(sourceValueItem!.displayValue)}</span>
-                        ) : isPairNumericDisplay && pairDisplayParts ? (
+                        {isPairNumericDisplay && pairDisplayParts ? (
                           <span className="inline-flex items-center gap-0 leading-none">
                             <span style={isTopCellFirst ? topRankSegmentStyle : isSecondCellFirst ? secondRankSegmentStyle : undefined}>{pairDisplayParts.first}</span>
                             <span className="mx-[2px] opacity-85">/</span>
                             <span style={isTopCellSecond ? topRankSegmentStyle : isSecondCellSecond ? secondRankSegmentStyle : undefined}>{pairDisplayParts.second}</span>
                           </span>
+                        ) : shouldRenderSourceValues ? (
+                          <span style={singleCellScoreStyle}>{formatFrontendTableCellText(sourceValueItem!.displayValue)}</span>
                         ) : (
                           <span style={singleCellScoreStyle}>{rawText}</span>
                         )}
