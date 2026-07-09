@@ -1680,6 +1680,80 @@ describe("AdminConsole text import", () => {
     expect(secondPayload.csvText).toContain("Bench-1,Professional");
   });
 
+  test("在矩阵预览里修改 type 类别（即使未失焦 blur）导入也能正确应用并入库", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "Bench 1",
+          benchmarkType: "Professional",
+          rawValue: "70.1",
+          valueNum: 70.1,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    const importResponse = {
+      format: "structured-csv",
+      total: 1,
+      skipped: 0,
+      inserted: 1,
+      warningCount: 0,
+      warnings: []
+    };
+
+    const fetchMock = mockFetchSequence(previewResponse, importResponse);
+    render(<AdminConsole {...buildProps()} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const matrixTable = await findMatrixPreviewTable();
+    const benchmarkInput = within(matrixTable).getByDisplayValue("Bench 1") as HTMLInputElement;
+    const benchmarkRow = benchmarkInput.closest("tr");
+    if (!benchmarkRow) {
+      throw new Error("Benchmark row not found");
+    }
+
+    // 找到 type 输入框并修改
+    const typeInput = within(benchmarkRow).getByDisplayValue("Professional") as HTMLInputElement;
+    await user.clear(typeInput);
+    await user.type(typeInput, "NewCategory");
+
+    // 直接点击执行导入按钮
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some((call) => call[0] === "/api/admin/import-csv")).toBe(true);
+    });
+
+    const importCall = fetchMock.mock.calls.find((call) => call[0] === "/api/admin/import-csv");
+    const payload = JSON.parse(((importCall?.[1] as RequestInit).body ?? "{}") as string) as {
+      csvText?: string;
+      rows?: any[];
+    };
+
+    // 验证 csvText 和 rows 中修改后的类别均正确存在
+    expect(payload.csvText).toContain("Bench 1,NewCategory");
+    expect(payload.rows?.[0]).toMatchObject({
+      benchmarkName: "Bench 1",
+      benchmarkType: "NewCategory",
+      benchmarkTypeProvided: true
+    });
+  });
+
   test("重复嫌疑与快捷合并按原始文本顺序展示", async () => {
     const user = userEvent.setup();
 

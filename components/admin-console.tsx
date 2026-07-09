@@ -371,6 +371,8 @@ export function AdminConsole({
     modelParenthesesCustomNames,
     modelMergeTargets,
     benchmarkMergeTargets,
+    matrixBenchmarkNameDrafts,
+    matrixBenchmarkTypeDrafts,
     modelById,
     providerById,
     benchmarkById,
@@ -1392,55 +1394,41 @@ export function AdminConsole({
       )
     );
 
-    if (nextKey === benchmarkKey) return;
+    migrateTextImportBenchmarkKeyState(benchmarkKey, nextKey);
+  }
 
-    setBenchmarkMergeTargets((prev) => {
-      if (!(benchmarkKey in prev)) return prev;
-      const next = { ...prev };
-      next[nextKey] = prev[benchmarkKey];
-      delete next[benchmarkKey];
-      return next;
-    });
+  function migrateTextImportBenchmarkKeyState(fromKey: string, toKey: string) {
+    if (fromKey === toKey) return;
 
-    setBenchmarkMergeFilters((prev) => {
-      if (!(benchmarkKey in prev)) return prev;
+    // 注意：matrixBenchmarkNameDrafts 和 matrixBenchmarkTypeDrafts 不在此迁移，
+    // 因为它们代表未提交的临时编辑，key 变化时应由调用方决定清除或迁移策略。
+    const migrateRecord = <T,>(prev: Record<string, T>): Record<string, T> => {
+      if (!(fromKey in prev)) return prev;
       const next = { ...prev };
-      next[nextKey] = prev[benchmarkKey];
-      delete next[benchmarkKey];
+      next[toKey] = prev[fromKey];
+      delete next[fromKey];
       return next;
-    });
+    };
 
-    setIgnoredBenchmarkKeys((prev) => {
-      if (!(benchmarkKey in prev)) return prev;
-      const next = { ...prev };
-      next[nextKey] = prev[benchmarkKey];
-      delete next[benchmarkKey];
-      return next;
-    });
+    setBenchmarkMergeTargets(migrateRecord);
+    setBenchmarkMergeFilters(migrateRecord);
+    setIgnoredBenchmarkKeys(migrateRecord);
+    setParenthesesModes(migrateRecord);
+    setParenthesesCustomNames(migrateRecord);
+    setPairNoteAutoFillAppliedByBenchmark(migrateRecord);
+  }
 
-    setParenthesesModes((prev) => {
-      if (!(benchmarkKey in prev)) return prev;
+  function clearMatrixDrafts(oldKey: string, newKey: string) {
+    const clearKeys = <T,>(prev: Record<string, T>): Record<string, T> => {
+      if (!(oldKey in prev) && !(newKey in prev)) return prev;
       const next = { ...prev };
-      next[nextKey] = prev[benchmarkKey];
-      delete next[benchmarkKey];
+      delete next[oldKey];
+      delete next[newKey];
       return next;
-    });
+    };
 
-    setParenthesesCustomNames((prev) => {
-      if (!(benchmarkKey in prev)) return prev;
-      const next = { ...prev };
-      next[nextKey] = prev[benchmarkKey];
-      delete next[benchmarkKey];
-      return next;
-    });
-
-    setPairNoteAutoFillAppliedByBenchmark((prev) => {
-      if (!(benchmarkKey in prev)) return prev;
-      const next = { ...prev };
-      next[nextKey] = prev[benchmarkKey];
-      delete next[benchmarkKey];
-      return next;
-    });
+    setMatrixBenchmarkNameDrafts(clearKeys);
+    setMatrixBenchmarkTypeDrafts(clearKeys);
   }
 
   function onRenameTextImportBenchmarkType(benchmarkKey: string, nextBenchmarkType: string) {
@@ -1448,68 +1436,23 @@ export function AdminConsole({
     if (splitIndex < 0) return;
 
     const benchmarkName = benchmarkKey.slice(0, splitIndex);
-    const nextKey = getTextImportBenchmarkKey(benchmarkName, nextBenchmarkType);
+    const normalizedType = nextBenchmarkType.trim() || "general";
+    const nextKey = getTextImportBenchmarkKey(benchmarkName, normalizedType);
 
     setTextImportDraftRows((prev) =>
       prev.map((row) =>
         getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType) === benchmarkKey
           ? {
               ...row,
-              benchmarkType: nextBenchmarkType
+              benchmarkType: normalizedType,
+              // 预览表格里显式改 type 视为用户提供了类别，导入时需写入 source_meta
+              benchmarkTypeProvided: true
             }
           : row
       )
     );
 
-    if (nextKey === benchmarkKey) return;
-
-    setBenchmarkMergeTargets((prev) => {
-      if (!(benchmarkKey in prev)) return prev;
-      const next = { ...prev };
-      next[nextKey] = prev[benchmarkKey];
-      delete next[benchmarkKey];
-      return next;
-    });
-
-    setBenchmarkMergeFilters((prev) => {
-      if (!(benchmarkKey in prev)) return prev;
-      const next = { ...prev };
-      next[nextKey] = prev[benchmarkKey];
-      delete next[benchmarkKey];
-      return next;
-    });
-
-    setIgnoredBenchmarkKeys((prev) => {
-      if (!(benchmarkKey in prev)) return prev;
-      const next = { ...prev };
-      next[nextKey] = prev[benchmarkKey];
-      delete next[benchmarkKey];
-      return next;
-    });
-
-    setParenthesesModes((prev) => {
-      if (!(benchmarkKey in prev)) return prev;
-      const next = { ...prev };
-      next[nextKey] = prev[benchmarkKey];
-      delete next[benchmarkKey];
-      return next;
-    });
-
-    setParenthesesCustomNames((prev) => {
-      if (!(benchmarkKey in prev)) return prev;
-      const next = { ...prev };
-      next[nextKey] = prev[benchmarkKey];
-      delete next[benchmarkKey];
-      return next;
-    });
-
-    setPairNoteAutoFillAppliedByBenchmark((prev) => {
-      if (!(benchmarkKey in prev)) return prev;
-      const next = { ...prev };
-      next[nextKey] = prev[benchmarkKey];
-      delete next[benchmarkKey];
-      return next;
-    });
+    migrateTextImportBenchmarkKeyState(benchmarkKey, nextKey);
   }
 
   function onRenameTextImportModel(modelName: string, nextModelName: string) {
@@ -1573,8 +1516,34 @@ export function AdminConsole({
       return false;
     }
 
-    onRenameTextImportBenchmark(benchmarkKey, target.benchmarkName);
-    onRenameTextImportBenchmarkType(benchmarkKey, target.benchmarkType);
+    const splitIndex = benchmarkKey.lastIndexOf("@@");
+    if (splitIndex < 0) return false;
+    // 快捷合并保留导入文件中的原始 type，而非库中 target 的 type，
+    // 确保 source_meta 记录的是本次导入时声称的分类，而非历史分类。
+    const originalType = benchmarkKey.slice(splitIndex + 2);
+
+    const nextName = target.benchmarkName;
+    const nextKey = getTextImportBenchmarkKey(nextName, originalType);
+
+    setTextImportDraftRows((prev) =>
+      prev.map((row) =>
+        getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType) === benchmarkKey
+          ? {
+              ...row,
+              benchmarkName: nextName,
+              benchmarkType: originalType,
+              benchmarkTypeProvided: true,
+              modalities: target.modalities?.length ? normalizeModalityList(target.modalities) : row.modalities
+            }
+          : row
+      )
+    );
+
+    migrateTextImportBenchmarkKeyState(benchmarkKey, nextKey);
+
+    // 清除旧 key 和新 key 对应的未提交草稿，避免合并后遗留脏状态
+    clearMatrixDrafts(benchmarkKey, nextKey);
+
     return true;
   }
 

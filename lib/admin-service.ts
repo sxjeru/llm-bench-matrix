@@ -3972,10 +3972,14 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
         const normalizedSourceOrNull = normalizedSource.length > 0 ? normalizedSource : null;
 
         if (normalizedSourceOrNull) {
-          const sourceBenchmarkType = hasImportedBenchmarkType
+          // 与 benchmark 选择逻辑一致：显式提供的 type，或解析出的非 general type，
+          // 都应写入 source_meta，否则同名 benchmark 复用时预览里改的类别不会落库展示。
+          const shouldApplyImportedBenchmarkType =
+            hasImportedBenchmarkType || hasNonGeneralParsedBenchmarkType;
+          const sourceBenchmarkType = shouldApplyImportedBenchmarkType
             ? benchmarkType
             : benchmark.benchmarkType;
-          const sourceModalities = hasImportedBenchmarkType
+          const sourceModalities = shouldApplyImportedBenchmarkType
             ? normalizeModalities(
               row.modalities?.length ? row.modalities : [sourceBenchmarkType]
             )

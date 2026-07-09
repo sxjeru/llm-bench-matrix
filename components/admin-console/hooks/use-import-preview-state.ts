@@ -45,6 +45,10 @@ type UseImportPreviewStateOptions = {
   modelParenthesesCustomNames: Record<string, string>;
   modelMergeTargets: Record<string, string>;
   benchmarkMergeTargets: Record<string, string>;
+  /** 预览矩阵中尚未 blur 提交的 name 编辑，导入时需一并生效 */
+  matrixBenchmarkNameDrafts?: Record<string, string>;
+  /** 预览矩阵中尚未 blur 提交的 type 编辑，导入时需一并生效 */
+  matrixBenchmarkTypeDrafts?: Record<string, string>;
   modelById: Map<number, ModelOption>;
   providerById: Map<number, ProviderOption>;
   benchmarkById: Map<number, BenchmarkOption>;
@@ -57,6 +61,63 @@ type UseImportPreviewStateOptions = {
   existingBenchmarkByNameMap: Map<string, BenchmarkOption[]>;
   existingBenchmarkModalitiesMap: Map<string, string[]>;
 };
+
+/**
+ * 将矩阵预览中尚未 blur 的 name/type 草稿叠到 draft rows 上。
+ * 解决「改 type 后直接点导入」时 blur 的 setState 尚未进入 finalized 行的竞态。
+ */
+function applyPendingMatrixDraftsToRows(
+  rows: TextImportPreviewRow[],
+  nameDrafts: Record<string, string>,
+  typeDrafts: Record<string, string>
+): TextImportPreviewRow[] {
+  if (Object.keys(nameDrafts).length === 0 && Object.keys(typeDrafts).length === 0) {
+    return rows;
+  }
+
+  return rows.map((row) => {
+    // 注意：drafts 的 key 必须与当前 row 的 name/type 匹配。
+    // 当用户先 blur name、再修改 type 未 blur 时，drafts 记录时应已用新 name 生成 key，
+    // 否则这里无法查找到对应草稿。这依赖输入框 onChange 时用最新的 row 状态生成 key。
+    const key = getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType);
+    const nameDraft = nameDrafts[key];
+    const typeDraft = typeDrafts[key];
+
+    let benchmarkName = row.benchmarkName;
+    let benchmarkType = row.benchmarkType;
+    let benchmarkTypeProvided = row.benchmarkTypeProvided;
+
+    if (typeof nameDraft === "string") {
+      const nextName = nameDraft.trim();
+      if (nextName) {
+        benchmarkName = nextName;
+      }
+    }
+
+    if (typeof typeDraft === "string") {
+      const nextType = typeDraft.trim();
+      if (nextType) {
+        benchmarkType = nextType;
+        benchmarkTypeProvided = true;
+      }
+    }
+
+    if (
+      benchmarkName === row.benchmarkName
+      && benchmarkType === row.benchmarkType
+      && benchmarkTypeProvided === row.benchmarkTypeProvided
+    ) {
+      return row;
+    }
+
+    return {
+      ...row,
+      benchmarkName,
+      benchmarkType,
+      benchmarkTypeProvided
+    };
+  });
+}
 
 function hasEloBenchmarkSuffix(benchmarkName: string): boolean {
   return /\s*[（(]\s*elo\s*[)）]\s*$/i.test(benchmarkName.trim());
@@ -85,6 +146,8 @@ export function useImportPreviewState({
   modelParenthesesCustomNames,
   modelMergeTargets,
   benchmarkMergeTargets,
+  matrixBenchmarkNameDrafts = {},
+  matrixBenchmarkTypeDrafts = {},
   modelById,
   providerById,
   benchmarkById,
@@ -621,8 +684,14 @@ export function useImportPreviewState({
 
   const finalizedTextImportRows = useMemo(() => {
     const latestSourceInput = csvSource.trim();
+    // 导入路径必须包含尚未 blur 的矩阵 type/name 草稿，否则点导入时会丢修改
+    const rowsForFinalize = applyPendingMatrixDraftsToRows(
+      textImportDraftRows,
+      matrixBenchmarkNameDrafts,
+      matrixBenchmarkTypeDrafts
+    );
 
-    return textImportDraftRows
+    return rowsForFinalize
       .map<StructuredCsvImportRow | null>((row) => {
         const benchmarkKey = getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType);
         const originalModelKey = row.modelName;
@@ -775,6 +844,8 @@ export function useImportPreviewState({
   }, [
     csvSource,
     textImportDraftRows,
+    matrixBenchmarkNameDrafts,
+    matrixBenchmarkTypeDrafts,
     ignoredBenchmarkKeys,
     parenthesesModes,
     parenthesesCustomNames,
