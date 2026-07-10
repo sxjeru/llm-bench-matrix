@@ -206,7 +206,7 @@ export type ModelVersionToken = {
 
 export type ModelVariantToken = {
   familyKey: string;
-  variant: "pro" | "base" | "flash" | "flash-lite" | "mini" | "nano" | "ultra" | "super";
+  variant: "pro" | "base" | "flash" | "flash-lite" | "mini" | "nano" | "ultra" | "super" | "sol-ultra" | "sol" | "terra" | "luna";
 };
 
 export type ModelTierToken = {

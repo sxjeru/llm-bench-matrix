@@ -177,7 +177,15 @@ export function extractModelVariantToken(modelName: string): ModelVariantToken |
 
   if (!normalized) return null;
 
+  const isGpt = normalized.includes("gpt");
+
   const variant: ModelVariantToken["variant"] = (() => {
+    if (isGpt) {
+      if (/\bsol\s+ultra\b/.test(normalized)) return "sol-ultra";
+      if (/\bsol\b/.test(normalized)) return "sol";
+      if (/\bterra\b/.test(normalized)) return "terra";
+      if (/\bluna\b/.test(normalized)) return "luna";
+    }
     if (/\bultra\b/.test(normalized)) return "ultra";
     if (/\bsuper\b/.test(normalized)) return "super";
     if (/\bpro\b/.test(normalized)) return "pro";
@@ -188,7 +196,14 @@ export function extractModelVariantToken(modelName: string): ModelVariantToken |
     return "base";
   })();
 
-  const variantMatch = normalized.match(MODEL_FLASH_LITE_PATTERN) ?? normalized.match(/\b(?:ultra|super|pro|flash|mini|nano)\b/);
+  const variantMatch = (isGpt
+    ? (normalized.match(/\bsol\s+ultra\b/) ??
+       normalized.match(/\bsol\b/) ??
+       normalized.match(/\bterra\b/) ??
+       normalized.match(/\bluna\b/))
+    : null) ??
+    normalized.match(MODEL_FLASH_LITE_PATTERN) ??
+    normalized.match(/\b(?:ultra|super|pro|flash|mini|nano)\b/);
 
   const familyKey = normalized
     .slice(0, variantMatch?.index ?? normalized.length)
@@ -209,9 +224,13 @@ export function compareModelVariantPriority(
   rightVariant: ModelVariantToken["variant"]
 ): number {
   const priority: Record<ModelVariantToken["variant"], number> = {
+    "sol-ultra": 9,
     ultra: 8,
     super: 7,
     pro: 6,
+    sol: 5.8,
+    terra: 5.5,
+    luna: 5.2,
     base: 5,
     flash: 4,
     mini: 3,
@@ -260,6 +279,27 @@ function compareTieredModelByVersionThenTier(left: string, right: string): numbe
     leftTierToken.familyKey !== rightTierToken.familyKey
   ) {
     return 0;
+  }
+
+  // Handle Claude "mythos preview" special case
+  if (leftTierToken.familyKey === "claude") {
+    const isLeftMythosPreview = left.toLowerCase().includes("mythos") && left.toLowerCase().includes("preview");
+    const isRightMythosPreview = right.toLowerCase().includes("mythos") && right.toLowerCase().includes("preview");
+
+    if (isLeftMythosPreview && !isRightMythosPreview) {
+      const rightTier = rightTierToken.tier;
+      if (rightTier === "mythos" || rightTier === "fable") {
+        return 1; // "mythos preview" comes after mythos and fable
+      }
+      return -1; // "mythos preview" comes before others (opus, sonnet, haiku)
+    }
+    if (!isLeftMythosPreview && isRightMythosPreview) {
+      const leftTier = leftTierToken.tier;
+      if (leftTier === "mythos" || leftTier === "fable") {
+        return -1; // mythos and fable come before "mythos preview"
+      }
+      return 1; // others come after "mythos preview"
+    }
   }
 
   const leftVersionToken = extractModelVersionToken(left);
