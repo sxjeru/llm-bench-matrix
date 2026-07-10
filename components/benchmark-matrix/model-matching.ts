@@ -330,6 +330,10 @@ export function getModelFamilyMatchKey(modelName: string): string {
 
   const compact = normalized.replace(/\s+/g, "");
 
+  if (compact.startsWith("musespark")) {
+    return "musespark";
+  }
+
   // Special handling for Anthropic/Claude tiers: if the name contains mythos, fable, opus, sonnet, or haiku,
   // we extract the prefix before that tier as the family key.
   const tierIndex = compact.search(/(mythos|fable|opus|sonnet|haiku)/);

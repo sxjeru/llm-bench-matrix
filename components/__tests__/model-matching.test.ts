@@ -136,4 +136,19 @@ describe("model-matching variant sorting", () => {
     expect(compareSourceTabKeysByVersion("text:GPT-4-terra", "text:GPT-4-luna")).toBeLessThan(0);
     expect(compareSourceTabKeysByVersion("text:GPT-4-luna", "text:GPT-4")).toBeLessThan(0);
   });
+
+  test("Muse Spark models should be grouped in the same family and sorted with 1.1 before base/thinking", () => {
+    const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+
+    // Grouping checks
+    expect(getModelFamilyMatchKey("Muse Spark Thinking")).toBe("musespark");
+    expect(getModelFamilyMatchKey("Muse Spark 1.1")).toBe("musespark");
+    expect(getModelFamilyMatchKey("Muse Spark")).toBe("musespark");
+
+    // Sorting checks: Muse Spark 1.1 should come before Muse Spark / Muse Spark Thinking
+    expect(compareModelNameByColumnOrder("Muse Spark 1.1", "Muse Spark Thinking", collator)).toBeLessThan(0);
+    expect(compareModelNameByColumnOrder("Muse Spark 1.1", "Muse Spark", collator)).toBeLessThan(0);
+    expect(compareModelNameByColumnOrder("Muse Spark Thinking", "Muse Spark", collator)).toBeLessThan(0);
+  });
 });
+
