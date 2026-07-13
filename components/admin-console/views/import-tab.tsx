@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import { FileSpreadsheet, ShieldAlert, Table2, Upload } from "lucide-react";
@@ -17,6 +17,7 @@ import type {
   TextImportPreviewRow
 } from "../types";
 import { getOmniDocBenchNormalizeHint, getBenchmarkSearchCandidateIds } from "../utils/benchmark";
+import { buildStructuredCsvText } from "../utils/csv";
 import { toDomSafeId } from "../utils/dom";
 import { formatPreviewNumericValue } from "../utils/import-values";
 import { parseExplicitMergeEntityId } from "../utils/merge";
@@ -638,6 +639,10 @@ export function ImportTab({
   }
 
   const modelCandidateSearchOptions = modelEntityOptions.map((item) => ({ id: item.id, modelName: item.label }));
+  const latestPreviewTableText = useMemo(
+    () => finalizedTextImportRows.length > 0 ? buildStructuredCsvText(finalizedTextImportRows) : "",
+    [finalizedTextImportRows]
+  );
 
   return (
     <div className="grid grid-cols-1 gap-4">
@@ -1541,6 +1546,28 @@ export function ImportTab({
                 加载更多（+200）
               </button>
             ) : null}
+          </div>
+        ) : null}
+
+        {latestPreviewTableText ? (
+          <div className="mt-4 space-y-2">
+            <div className="flex flex-wrap items-end justify-between gap-2">
+              <div>
+                <h4 className="font-semibold">最新预览表格内容（可回贴导入）</h4>
+                <p className="mt-1 text-xs opacity-70">
+                  内容会随上方编辑实时更新；完整复制后可直接粘贴回文本导入框，保留 Provider、Type、排序方向、模态、备注与 Source。
+                </p>
+              </div>
+              <span className="text-xs opacity-70">结构化 CSV · {finalizedTextImportRows.length} 条</span>
+            </div>
+            <textarea
+              className="textarea textarea-bordered min-h-48 w-full resize-y font-mono text-xs leading-5"
+              aria-label="最新预览表格内容"
+              value={latestPreviewTableText}
+              readOnly
+              spellCheck={false}
+              onFocus={(event) => event.currentTarget.select()}
+            />
           </div>
         ) : null}
       </section>

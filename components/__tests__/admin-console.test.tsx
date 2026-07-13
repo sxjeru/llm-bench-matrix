@@ -1742,7 +1742,11 @@ describe("AdminConsole text import", () => {
     const importCall = fetchMock.mock.calls.find((call) => call[0] === "/api/admin/import-csv");
     const payload = JSON.parse(((importCall?.[1] as RequestInit).body ?? "{}") as string) as {
       csvText?: string;
-      rows?: any[];
+      rows?: Array<{
+        benchmarkName: string;
+        benchmarkType: string;
+        benchmarkTypeProvided: boolean;
+      }>;
     };
 
     // 验证 csvText 和 rows 中修改后的类别均正确存在
