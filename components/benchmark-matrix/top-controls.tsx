@@ -85,7 +85,7 @@ function SourceTabLabel({
 
   return (
     <span
-      className="source-tab-label"
+      className="source-tab-label text-sm"
       data-label={text}
       style={!isActive && textColor ? { color: textColor } : undefined}
     >
@@ -174,7 +174,7 @@ export function BenchmarkMatrixTopControls({
               className="tabs tabs-boxed w-full overflow-hidden whitespace-nowrap rounded-2xl border border-white/10 bg-[radial-gradient(140%_180%_at_0%_0%,rgba(255,255,255,0.14)_0%,rgba(255,255,255,0)_35%),radial-gradient(120%_160%_at_100%_100%,rgba(72,140,255,0.18)_0%,rgba(72,140,255,0)_42%),linear-gradient(135deg,rgba(21,36,64,0.58),rgba(14,24,43,0.38))] p-0.5 shadow-[0_10px_30px_rgba(2,8,20,0.24),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md"
             >
               <div className="flex min-w-0 items-center justify-between gap-1 w-full relative">
-                <div className="flex flex-1 min-w-0 items-center overflow-hidden">
+                <div className="tabs flex flex-1 min-w-0 flex-nowrap items-center overflow-hidden">
                   {visibleSourceOptions.map((source) => (
                     <button
                       key={source.key}
@@ -201,7 +201,7 @@ export function BenchmarkMatrixTopControls({
                 </div>
 
                 {overflowSourceOptions.length > 0 ? (
-                  <div className="absolute right-0 top-0 bottom-0 flex items-center bg-gradient-to-l from-[#19243a]/90 via-[#19243a]/80 to-transparent pl-4 pr-1">
+                  <div className="tabs absolute right-0 top-0 bottom-0 flex items-center bg-gradient-to-l from-[#19243a]/90 via-[#19243a]/80 to-transparent pl-4 pr-1">
                     <button
                       type="button"
                       className="tab h-9 min-h-0 w-7 shrink-0 !rounded-lg bg-transparent px-0 text-xs font-medium text-base-content/65 hover:bg-white/8 hover:text-base-content"
@@ -236,7 +236,7 @@ export function BenchmarkMatrixTopControls({
                   }}
                 >
                   <div className="overflow-hidden border-t border-white/8 mt-0.5">
-                    <div className="flex flex-wrap items-center gap-1 py-1">
+                    <div className="tabs flex flex-wrap items-center gap-1 py-1">
                       {overflowSourceMenuOptions.map((source) => (
                         source.key === promotedOverflowSourceKey ? (
                           <span
