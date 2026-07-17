@@ -155,7 +155,9 @@ describe("BenchmarkMatrix source tabs", () => {
     const visibleText = sourceTab.querySelector(".source-tab-label-text");
     const firstCharacter = sourceTab.querySelector("span.font-bold");
 
+    expect(sourceTab.parentElement).toHaveClass("tabs");
     expect(coloredLabel).toHaveTextContent("Claude Opus 4.7");
+    expect(coloredLabel).toHaveClass("text-sm");
     expect(coloredLabel).toHaveStyle({ color: "rgb(240, 240, 240)" });
     expect(visibleText).toHaveClass("font-medium");
     expect(firstCharacter).toHaveTextContent("C");
