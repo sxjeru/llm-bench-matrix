@@ -26,7 +26,7 @@
     "html2canvas-pro": "^2.0.4",
     "lucide-react": "^1.25.0",
     "next": "16.2.10",
-    "pg": "^8.21.0",
+    "pg": "^8.22.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "recharts": "^3.10.0",
