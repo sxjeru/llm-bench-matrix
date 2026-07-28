@@ -43,6 +43,7 @@ export type MatrixCell = {
   noteText: string;
   displayValue: string;
   hasMeaningfulMultipleValues: boolean;
+  hasMultipleActiveSourceValues: boolean;
   shouldShowQuestionMark: boolean;
 };
 

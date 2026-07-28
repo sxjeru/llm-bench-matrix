@@ -128,6 +128,7 @@ describe("BenchmarkMatrix 总评行", () => {
       noteText: "",
       displayValue: String(valueNum),
       hasMeaningfulMultipleValues: false,
+      hasMultipleActiveSourceValues: false,
       shouldShowQuestionMark: false
     });
 

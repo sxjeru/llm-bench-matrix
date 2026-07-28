@@ -2059,6 +2059,7 @@ export function BenchmarkMatrix({
                     const rawText = formatFrontendTableCellText(cell?.displayValue ?? "--");
                     const noteText = cell?.noteText ?? "";
                     const shouldShowQuestionMark = cell?.shouldShowQuestionMark ?? false;
+                    const hasMultipleActiveSourceValues = cell?.hasMultipleActiveSourceValues ?? false;
                     const uniqueEntries = cell?.uniqueEntries ?? [];
                     const sourceValueItem = displaySourceValuesInCells && cell?.hasMeaningfulMultipleValues
                       ? getSourceValueDisplayItem(uniqueEntries, activeSource, matrixRow.higherIsBetter)
@@ -2167,7 +2168,11 @@ export function BenchmarkMatrix({
                       ? `相对基准 ${compareBaselineModelName} 的差值`
                       : "相对表格默认取值的差值";
                     const showAnyDeltaBadge = showCompareBadge || showSourceValueDeltaBadge;
-                    const showQuestionMarkIcon = (shouldRenderSourceValues ? (noteText.length > 0 && noteText.toLowerCase() !== "x") : shouldShowQuestionMark) && !showAnyDeltaBadge;
+                    // 展示 source 原值时，注释之外，当前 source 内部存在多条不同取值也要保留问号与 tooltip
+                    const hasSourceValueNote = noteText.length > 0 && noteText.toLowerCase() !== "x";
+                    const showQuestionMarkIcon = (shouldRenderSourceValues
+                      ? (hasSourceValueNote || hasMultipleActiveSourceValues)
+                      : shouldShowQuestionMark) && !showAnyDeltaBadge;
 
                     const basePadding = showQuestionMarkIcon
                       ? (isPairNumericDisplay ? 18 : 22)

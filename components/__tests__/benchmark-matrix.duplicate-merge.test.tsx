@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -132,6 +132,49 @@ const duplicateSourceCompareRows = [
     valueNum: 78,
     valueNote: null,
     source: "text:S2"
+  }
+] as const;
+
+// 同一 source（S1）下两次导入，较新的一次分数更低；另有一个 source 作为对照
+const repeatedSourceImportRows = [
+  {
+    recordId: 3,
+    providerName: "OpenAI",
+    modelName: "Model A",
+    benchmarkName: "MMLU-Pro",
+    benchmarkType: "Knowledge",
+    benchmarkCanonicalKey: "mmlu-pro:knowledge",
+    benchTime: "2026-06-01T00:00:00.000Z",
+    valueRaw: "70",
+    valueNum: 70,
+    valueNote: null,
+    source: "text:S2"
+  },
+  {
+    recordId: 2,
+    providerName: "OpenAI",
+    modelName: "Model A",
+    benchmarkName: "MMLU-Pro",
+    benchmarkType: "Knowledge",
+    benchmarkCanonicalKey: "mmlu-pro:knowledge",
+    benchTime: "2026-05-01T00:00:00.000Z",
+    valueRaw: "80",
+    valueNum: 80,
+    valueNote: null,
+    source: "text:S1"
+  },
+  {
+    recordId: 1,
+    providerName: "OpenAI",
+    modelName: "Model A",
+    benchmarkName: "MMLU-Pro",
+    benchmarkType: "Knowledge",
+    benchmarkCanonicalKey: "mmlu-pro:knowledge",
+    benchTime: "2026-04-01T00:00:00.000Z",
+    valueRaw: "85",
+    valueNum: 85,
+    valueNote: null,
+    source: "text:S1"
   }
 ] as const;
 
@@ -285,49 +328,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
   test("同一 source 多次导入时，原始值取最新一次而非该 source 的最优值", async () => {
     const user = userEvent.setup();
 
-    const repeatedImportRows = [
-      {
-        recordId: 3,
-        providerName: "OpenAI",
-        modelName: "Model A",
-        benchmarkName: "MMLU-Pro",
-        benchmarkType: "Knowledge",
-        benchmarkCanonicalKey: "mmlu-pro:knowledge",
-        benchTime: "2026-06-01T00:00:00.000Z",
-        valueRaw: "70",
-        valueNum: 70,
-        valueNote: null,
-        source: "text:S2"
-      },
-      {
-        recordId: 2,
-        providerName: "OpenAI",
-        modelName: "Model A",
-        benchmarkName: "MMLU-Pro",
-        benchmarkType: "Knowledge",
-        benchmarkCanonicalKey: "mmlu-pro:knowledge",
-        benchTime: "2026-05-01T00:00:00.000Z",
-        valueRaw: "80",
-        valueNum: 80,
-        valueNote: null,
-        source: "text:S1"
-      },
-      {
-        recordId: 1,
-        providerName: "OpenAI",
-        modelName: "Model A",
-        benchmarkName: "MMLU-Pro",
-        benchmarkType: "Knowledge",
-        benchmarkCanonicalKey: "mmlu-pro:knowledge",
-        benchTime: "2026-04-01T00:00:00.000Z",
-        valueRaw: "85",
-        valueNum: 85,
-        valueNote: null,
-        source: "text:S1"
-      }
-    ] as const;
-
-    render(<BenchmarkMatrix rows={[...repeatedImportRows]} sourceOptions={["text:S1", "text:S2"]} />);
+    render(<BenchmarkMatrix rows={[...repeatedSourceImportRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
     await user.click(screen.getByRole("tab", { name: "S1" }));
     await waitFor(() => {
@@ -350,6 +351,56 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(deltaBadge).not.toBeNull();
     expect(deltaBadge).toHaveAttribute("data-compare-direction", "down");
     expect(deltaBadge).toHaveTextContent("▼5");
+  });
+
+  test("开启原始值后，同 source 多条记录仍保留问号与 tooltip", async () => {
+    const user = userEvent.setup();
+
+    render(<BenchmarkMatrix rows={[...repeatedSourceImportRows]} sourceOptions={["text:S1", "text:S2"]} />);
+
+    await user.click(screen.getByRole("tab", { name: "S1" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "显示原始值" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "显示原始值" }));
+
+    const mergedCell = screen.getByText("80").closest("td")!;
+    const questionMark = within(mergedCell).getByText("?");
+
+    fireEvent.mouseEnter(questionMark);
+
+    const tooltipBox = (await screen.findByText("存在多条记录")).parentElement!;
+    expect(tooltipBox).toHaveTextContent("85");
+    expect(tooltipBox).toHaveTextContent("text:S1");
+
+    // 差值徽标与问号共用单元格右侧同一位置，徽标出现时问号让位
+    fireEvent.mouseLeave(questionMark);
+    fireEvent.click(screen.getByRole("button", { name: "显示原始值" }), { ctrlKey: true });
+
+    expect(mergedCell.querySelector('[data-source-delta-badge="1"]')).not.toBeNull();
+    expect(within(mergedCell).queryByText("?")).not.toBeInTheDocument();
+  });
+
+  test("开启原始值后，当前 source 只有一条记录时不显示问号", async () => {
+    const user = userEvent.setup();
+
+    render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
+
+    // 关闭原始值时跨 source 存在多个取值，问号可见
+    const defaultCell = screen.getByText("82").closest("td")!;
+    expect(within(defaultCell).getByText("?")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "S1" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "显示原始值" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "显示原始值" }));
+
+    // S1 下只有一条记录，展示的就是它本身，无需提示
+    const sourceCell = screen.getByText("80").closest("td")!;
+    expect(within(sourceCell).queryByText("?")).not.toBeInTheDocument();
   });
 
   test("开启 Source 原值后，双值单元格仍按解析后的数值对分段展示", async () => {

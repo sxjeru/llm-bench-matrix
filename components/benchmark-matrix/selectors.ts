@@ -885,6 +885,7 @@ export function buildMatrixRows(
         noteText,
         displayValue: getMatrixCellDisplayValue(row.valueNum, row.valueNum2 ?? null, row.valueRaw, row.valueNote),
         hasMeaningfulMultipleValues: false,
+        hasMultipleActiveSourceValues: false,
         shouldShowQuestionMark: noteText.length > 0 && noteText.toLowerCase() !== "x"
       });
     } else {
@@ -935,6 +936,9 @@ export function buildMatrixRows(
         const uniqueEntries = Array.from(uniqueEntriesMap.values());
         const valueIdentitySet = new Set(uniqueEntries.map((entry) => getMatrixCellValueIdentity(entry)));
         const hasMeaningfulMultipleValues = uniqueEntries.length > 1 && valueIdentitySet.size > 1;
+        // uniqueEntries 已按「source + 值」去重，当前 source 仍剩多条即代表该 source 内部存在不同取值
+        const hasMultipleActiveSourceValues = activeSource !== SOURCE_ALL
+          && uniqueEntries.filter((entry) => getSourceKey(entry.source) === activeSource).length > 1;
         // 目前 Source 原值展示并非只认当前 activeSource：当前 source 无记录时会回退到跨 source 的最优值；
         // 命中当前 source 时，多次导入取最新一条（见 getSourceValueEntry）
         const sourceEntry = displaySourceValuesInCells && hasMeaningfulMultipleValues
@@ -960,6 +964,7 @@ export function buildMatrixRows(
           noteText,
           displayValue: getMatrixCellDisplayValue(effectiveValueNum, effectiveValueNum2, effectiveValueRaw, effectiveValueNote),
           hasMeaningfulMultipleValues,
+          hasMultipleActiveSourceValues,
           shouldShowQuestionMark: hasMeaningfulMultipleValues || (noteText.length > 0 && noteText.toLowerCase() !== "x")
         });
       });
@@ -1094,6 +1099,7 @@ function createPriceCell(value: number | null, benchTime: string | null): Matrix
     noteText: "",
     displayValue,
     hasMeaningfulMultipleValues: false,
+    hasMultipleActiveSourceValues: false,
     shouldShowQuestionMark: false
   };
 }
@@ -1345,6 +1351,7 @@ export function buildBenchmarkRankingData(
         noteText,
         displayValue: getMatrixCellDisplayValue(rowValueNum, rowValueNum2, row.valueRaw, rowValueNote),
         hasMeaningfulMultipleValues: false,
+        hasMultipleActiveSourceValues: false,
         shouldShowQuestionMark: noteText.length > 0 && noteText.toLowerCase() !== "x"
       };
       cellsByModel.set(row.modelName, rowCell);
