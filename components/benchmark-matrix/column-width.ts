@@ -37,6 +37,7 @@ import { saveColumnWidthBySource } from "./persistence";
 import {
   areColumnWidthMapsEqual,
   clampColumnWidth,
+  compareMatrixCellEntryRecency,
   getColumnWidthOverrideKey,
   getMatrixCellSourceValueDedupKey,
   getMatrixCellValueIdentity,
@@ -161,6 +162,7 @@ export function buildAutoModelWidthMap({
     const groupKey = `${getMatrixGroupingKey(row, showDuplicateRows)}::${row.modelName}`;
 
     const entry: MatrixCellEntry = {
+      recordId: row.recordId ?? null,
       valueRaw: row.valueRaw,
       valueNum: row.valueNum,
       valueNum2: row.valueNum2 ?? null,
@@ -202,7 +204,8 @@ export function buildAutoModelWidthMap({
     const uniqueEntriesMap = new Map<string, MatrixCellEntry>();
     entries.forEach((entry) => {
       const dedupKey = getMatrixCellSourceValueDedupKey(entry);
-      if (!uniqueEntriesMap.has(dedupKey)) {
+      const existing = uniqueEntriesMap.get(dedupKey);
+      if (!existing || compareMatrixCellEntryRecency(entry, existing) > 0) {
         uniqueEntriesMap.set(dedupKey, entry);
       }
     });

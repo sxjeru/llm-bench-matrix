@@ -21,6 +21,7 @@ export type MatrixInputRow = {
 };
 
 export type MatrixCellEntry = {
+  recordId?: number | null;
   valueRaw: string;
   valueNum: number | null;
   valueNum2: number | null;

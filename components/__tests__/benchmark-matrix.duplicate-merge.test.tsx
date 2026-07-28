@@ -282,6 +282,76 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(mergedCell).toHaveTextContent("82");
   });
 
+  test("同一 source 多次导入时，原始值取最新一次而非该 source 的最优值", async () => {
+    const user = userEvent.setup();
+
+    const repeatedImportRows = [
+      {
+        recordId: 3,
+        providerName: "OpenAI",
+        modelName: "Model A",
+        benchmarkName: "MMLU-Pro",
+        benchmarkType: "Knowledge",
+        benchmarkCanonicalKey: "mmlu-pro:knowledge",
+        benchTime: "2026-06-01T00:00:00.000Z",
+        valueRaw: "70",
+        valueNum: 70,
+        valueNote: null,
+        source: "text:S2"
+      },
+      {
+        recordId: 2,
+        providerName: "OpenAI",
+        modelName: "Model A",
+        benchmarkName: "MMLU-Pro",
+        benchmarkType: "Knowledge",
+        benchmarkCanonicalKey: "mmlu-pro:knowledge",
+        benchTime: "2026-05-01T00:00:00.000Z",
+        valueRaw: "80",
+        valueNum: 80,
+        valueNote: null,
+        source: "text:S1"
+      },
+      {
+        recordId: 1,
+        providerName: "OpenAI",
+        modelName: "Model A",
+        benchmarkName: "MMLU-Pro",
+        benchmarkType: "Knowledge",
+        benchmarkCanonicalKey: "mmlu-pro:knowledge",
+        benchTime: "2026-04-01T00:00:00.000Z",
+        valueRaw: "85",
+        valueNum: 85,
+        valueNote: null,
+        source: "text:S1"
+      }
+    ] as const;
+
+    render(<BenchmarkMatrix rows={[...repeatedImportRows]} sourceOptions={["text:S1", "text:S2"]} />);
+
+    await user.click(screen.getByRole("tab", { name: "S1" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "显示原始值" })).toBeInTheDocument();
+    });
+
+    // 表格默认取值仍是跨 source 的最优值
+    expect(screen.getByText("85")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "显示原始值" }));
+
+    // S1 最近一次导入是 80，历史更优的 85 不再顶替它
+    expect(screen.getByText("80")).toBeInTheDocument();
+    expect(screen.queryByText("85")).not.toBeInTheDocument();
+
+    const mergedCell = screen.getByText("80").closest("td")!;
+    fireEvent.click(screen.getByRole("button", { name: "显示原始值" }), { ctrlKey: true });
+
+    const deltaBadge = mergedCell.querySelector('[data-source-delta-badge="1"]') as HTMLElement | null;
+    expect(deltaBadge).not.toBeNull();
+    expect(deltaBadge).toHaveAttribute("data-compare-direction", "down");
+    expect(deltaBadge).toHaveTextContent("▼5");
+  });
+
   test("开启 Source 原值后，双值单元格仍按解析后的数值对分段展示", async () => {
     const user = userEvent.setup();
 

@@ -40,6 +40,7 @@ import type {
 } from "./types";
 import {
   applySourceMeta,
+  compareMatrixCellEntryRecency,
   getMatrixCellSourceValueDedupKey,
   getMatrixCellValueIdentity,
   getMatrixGroupingKey,
@@ -861,6 +862,7 @@ export function buildMatrixRows(
 
     if (!matrixRow.cells.has(row.modelName)) {
       const initialEntry: MatrixCellEntry = {
+        recordId: row.recordId ?? null,
         valueRaw: row.valueRaw,
         valueNum: row.valueNum,
         valueNum2: row.valueNum2 ?? null,
@@ -888,6 +890,7 @@ export function buildMatrixRows(
     } else {
       const existingCell = matrixRow.cells.get(row.modelName)!;
       existingCell.allEntries.push({
+        recordId: row.recordId ?? null,
         valueRaw: row.valueRaw,
         valueNum: row.valueNum,
         valueNum2: row.valueNum2 ?? null,
@@ -923,7 +926,8 @@ export function buildMatrixRows(
         const uniqueEntriesMap = new Map<string, MatrixCellEntry>();
         cell.allEntries.forEach((entry) => {
           const dedupKey = getMatrixCellSourceValueDedupKey(entry);
-          if (!uniqueEntriesMap.has(dedupKey)) {
+          const existing = uniqueEntriesMap.get(dedupKey);
+          if (!existing || compareMatrixCellEntryRecency(entry, existing) > 0) {
             uniqueEntriesMap.set(dedupKey, entry);
           }
         });
@@ -931,7 +935,8 @@ export function buildMatrixRows(
         const uniqueEntries = Array.from(uniqueEntriesMap.values());
         const valueIdentitySet = new Set(uniqueEntries.map((entry) => getMatrixCellValueIdentity(entry)));
         const hasMeaningfulMultipleValues = uniqueEntries.length > 1 && valueIdentitySet.size > 1;
-        // 目前 Source 原值展示并非只认当前 activeSource
+        // 目前 Source 原值展示并非只认当前 activeSource：当前 source 无记录时会回退到跨 source 的最优值；
+        // 命中当前 source 时，多次导入取最新一条（见 getSourceValueEntry）
         const sourceEntry = displaySourceValuesInCells && hasMeaningfulMultipleValues
           ? getSourceValueEntry(uniqueEntries, activeSource, matrixRow.higherIsBetter)
           : null;

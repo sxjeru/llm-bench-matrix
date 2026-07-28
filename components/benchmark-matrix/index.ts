@@ -64,6 +64,8 @@ export {
   areColumnWidthMapsEqual,
   areStringArraysEqual,
   getPreferredMatrixCellEntry,
+  compareMatrixCellEntryRecency,
+  getLatestMatrixCellEntry,
   getSourceValueEntry,
   getSourceValueDeltaRaw,
   getSourceValueDisplayItem,

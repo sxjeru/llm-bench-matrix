@@ -107,12 +107,47 @@ export function getPreferredMatrixCellEntry(entries: MatrixCellEntry[], higherIs
   });
 }
 
+export function compareMatrixCellEntryRecency(left: MatrixCellEntry, right: MatrixCellEntry): number {
+  const leftTime = parseTimestampMs(left.benchTime);
+  const rightTime = parseTimestampMs(right.benchTime);
+
+  if (leftTime !== rightTime) {
+    if (leftTime === null) return -1;
+    if (rightTime === null) return 1;
+    return leftTime - rightTime;
+  }
+
+  const leftId = typeof left.recordId === "number" ? left.recordId : null;
+  const rightId = typeof right.recordId === "number" ? right.recordId : null;
+
+  if (leftId !== rightId) {
+    if (leftId === null) return -1;
+    if (rightId === null) return 1;
+    return leftId - rightId;
+  }
+
+  return 0;
+}
+
+export function getLatestMatrixCellEntry(entries: MatrixCellEntry[]): MatrixCellEntry | null {
+  if (entries.length === 0) return null;
+
+  // 占位记录（"-"、"N/A" 等）不应遮住更早的有效值，全是占位时才回退到全量
+  const meaningful = entries.filter((entry) => hasMeaningfulMatrixRawValue(entry.valueRaw));
+  const candidates = meaningful.length > 0 ? meaningful : entries;
+
+  return candidates.reduce((latest, entry) =>
+    compareMatrixCellEntryRecency(entry, latest) > 0 ? entry : latest
+  );
+}
+
 export function getSourceValueEntry(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): MatrixCellEntry | null {
   if (activeSource === SOURCE_ALL) {
     return getPreferredMatrixCellEntry(entries, higherIsBetter);
   }
   const filtered = entries.filter((item) => getSourceKey(item.source) === activeSource);
-  return getPreferredMatrixCellEntry(filtered, higherIsBetter);
+  // 同一 source 下多次导入时取最新一次，而非指标方向上的最优值
+  return getLatestMatrixCellEntry(filtered);
 }
 
 export function getSourceValueDeltaRaw(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): number | null {

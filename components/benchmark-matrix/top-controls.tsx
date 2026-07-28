@@ -488,7 +488,7 @@ export function BenchmarkMatrixTopControls({
           <button
             type="button"
             className="btn btn-xs btn-ghost"
-            title="普通点击切换当前 source 值；按住 Ctrl 点击切换差值徽标"
+            title="普通点击切换当前 source 最新值；按住 Ctrl 点击切换差值徽标"
             onClick={onSourceValuesButtonClick}
           >
             {displaySourceValuesInCells ? <Eye size={14} /> : <EyeOff size={14} />}
