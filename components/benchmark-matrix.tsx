@@ -124,7 +124,8 @@ import {
   buildCompareBaselineShadows,
   enqueueStateUpdate,
   getSourceValueDeltaRaw,
-  getSourceValueDisplayItem
+  getSourceValueDisplayItem,
+  getSourceKey
 } from "./benchmark-matrix/index";
 
 const PRICE_ROW_KEY_SET = new Set([
@@ -2068,6 +2069,10 @@ export function BenchmarkMatrix({
                       ? getSourceValueDeltaRaw(uniqueEntries, activeSource, matrixRow.higherIsBetter)
                       : null;
                     const shouldRenderSourceValues = Boolean(sourceValueItem);
+                    // 展示 source 原值时，tooltip 收敛到当前 source 的记录，与单元格里的取值范围一致
+                    const tooltipEntries = shouldRenderSourceValues
+                      ? uniqueEntries.filter((entry) => getSourceKey(entry.source) === activeSource)
+                      : uniqueEntries;
                     const isTopCellFirst =
                       comparableCellNum !== null &&
                       primaryComparableTop !== null &&
@@ -2312,7 +2317,7 @@ export function BenchmarkMatrix({
                               setActiveCellTooltip({
                                 x: rect.left + rect.width / 2,
                                 y: rect.top - 6,
-                                entries: uniqueEntries,
+                                entries: tooltipEntries,
                                 note: noteText.length > 0 ? noteText : null,
                                 targetHeight: rect.height
                               });

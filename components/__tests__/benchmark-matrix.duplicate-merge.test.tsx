@@ -373,6 +373,9 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     const tooltipBox = (await screen.findByText("存在多条记录")).parentElement!;
     expect(tooltipBox).toHaveTextContent("85");
     expect(tooltipBox).toHaveTextContent("text:S1");
+    // 开启原始值后 tooltip 收敛到当前 source，不再列出 S2 的记录
+    expect(tooltipBox).not.toHaveTextContent("text:S2");
+    expect(tooltipBox).not.toHaveTextContent("70");
 
     // 差值徽标与问号共用单元格右侧同一位置，徽标出现时问号让位
     fireEvent.mouseLeave(questionMark);
