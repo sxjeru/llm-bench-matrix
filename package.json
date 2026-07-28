@@ -30,7 +30,7 @@
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "recharts": "^3.10.0",
-    "ws": "^8.21.0",
+    "ws": "^8.21.1",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^4.4.3"
   },
