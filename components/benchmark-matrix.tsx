@@ -1429,7 +1429,7 @@ export function BenchmarkMatrix({
           overflow: "auto",
           maxHeight: isFullscreen
             ? `calc(100vh - ${isModelFilterExpanded ? 170 : 120}px)`
-            : "98vh",
+            : "95.5vh",
           borderRadius: 10,
           border: "1px solid rgba(53, 73, 116, 0.35)"
         }}
@@ -2578,17 +2578,19 @@ export function BenchmarkMatrix({
         </div>
       ) : null}
 
-      <HeatmapPanel
-        heatmapPalette={heatmapPalette}
-        heatmapAlpha={heatmapAlpha}
-        heatmapPresetSelection={heatmapPresetSelection}
-        heatmapGradientPreview={heatmapGradientPreview}
-        setHeatmapAlpha={setHeatmapAlpha}
-        setHeatmapPresetSelection={setHeatmapPresetSelection}
-        updateHeatmapPaletteColor={updateHeatmapPaletteColor}
-        applyHeatmapPreset={applyHeatmapPreset}
-        resetHeatmapPaletteToDefault={resetHeatmapPaletteToDefault}
-      />
+      {isFullscreen ? null : (
+        <HeatmapPanel
+          heatmapPalette={heatmapPalette}
+          heatmapAlpha={heatmapAlpha}
+          heatmapPresetSelection={heatmapPresetSelection}
+          heatmapGradientPreview={heatmapGradientPreview}
+          setHeatmapAlpha={setHeatmapAlpha}
+          setHeatmapPresetSelection={setHeatmapPresetSelection}
+          updateHeatmapPaletteColor={updateHeatmapPaletteColor}
+          applyHeatmapPreset={applyHeatmapPreset}
+          resetHeatmapPaletteToDefault={resetHeatmapPaletteToDefault}
+        />
+      )}
 
       <MatrixCellTooltip tooltip={activeCellTooltip} />
 
