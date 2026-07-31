@@ -81,6 +81,23 @@ function hasTextSelectionInside(element: HTMLElement) {
   );
 }
 
+// 双击页签时切换会重排列表、冲掉浏览器刚选好的词，这里在重渲染后主动把整段标签文字重新选中
+function selectTabLabelText(button: HTMLElement) {
+  if (typeof window === "undefined") return;
+  const label = button.querySelector(".source-tab-label-text");
+  const selection = window.getSelection();
+  if (!label || !selection || !button.isConnected) return;
+  const range = document.createRange();
+  range.selectNodeContents(label);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function selectTabLabelTextAfterRerender(button: HTMLElement) {
+  selectTabLabelText(button);
+  window.requestAnimationFrame(() => selectTabLabelText(button));
+}
+
 function SourceTabLabel({
   text,
   textColor,
@@ -201,6 +218,7 @@ export function BenchmarkMatrixTopControls({
                         if (hasTextSelectionInside(event.currentTarget)) return;
                         setSourceAndUrl(source.key);
                       }}
+                      onDoubleClick={(event) => selectTabLabelTextAfterRerender(event.currentTarget)}
                       title={getSourceTabTitle(source)}
                     >
                       {renderSourceTabLabel(source)}
@@ -278,6 +296,7 @@ export function BenchmarkMatrixTopControls({
                               if (hasTextSelectionInside(event.currentTarget)) return;
                               setSourceAndUrl(source.key);
                             }}
+                            onDoubleClick={(event) => selectTabLabelTextAfterRerender(event.currentTarget)}
                             title={getSourceTabTitle(source)}
                           >
                             {renderSourceTabLabel(source)}
