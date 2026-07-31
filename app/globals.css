@@ -101,11 +101,16 @@ a {
   visibility: hidden;
   font-weight: 700;
   white-space: pre;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
+/* 页签按钮默认继承 button 的 user-select: none，这里单独放开标签文字，允许拖选复制 */
 .source-tab-label-text {
   grid-area: 1 / 1;
   white-space: pre;
+  -webkit-user-select: text;
+  user-select: text;
   text-shadow:
     0 0 6px color-mix(in srgb, currentColor 35%, transparent),
     0 0 12px color-mix(in srgb, currentColor 16%, transparent);

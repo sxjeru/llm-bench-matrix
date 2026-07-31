@@ -71,6 +71,16 @@ type TopControlsProps = {
   onSourceValuesButtonClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 };
 
+function hasTextSelectionInside(element: HTMLElement) {
+  if (typeof window === "undefined") return false;
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed) return false;
+  const { anchorNode, focusNode } = selection;
+  return Boolean(
+    (anchorNode && element.contains(anchorNode)) || (focusNode && element.contains(focusNode))
+  );
+}
+
 function SourceTabLabel({
   text,
   textColor,
@@ -186,7 +196,11 @@ export function BenchmarkMatrixTopControls({
                           ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
                           : "hover:!rounded-xl hover:bg-white/10 hover:text-base-content"
                       }`}
-                      onClick={() => setSourceAndUrl(source.key)}
+                      onClick={(event) => {
+                        // 拖选页签文字后松开鼠标会触发 click，此时不切换数据源
+                        if (hasTextSelectionInside(event.currentTarget)) return;
+                        setSourceAndUrl(source.key);
+                      }}
                       title={getSourceTabTitle(source)}
                     >
                       {renderSourceTabLabel(source)}
@@ -259,7 +273,11 @@ export function BenchmarkMatrixTopControls({
                                 ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
                                 : "hover:!rounded-xl hover:bg-white/10 hover:text-base-content"
                             }`}
-                            onClick={() => setSourceAndUrl(source.key)}
+                            onClick={(event) => {
+                              // 拖选页签文字后松开鼠标会触发 click，此时不切换数据源
+                              if (hasTextSelectionInside(event.currentTarget)) return;
+                              setSourceAndUrl(source.key);
+                            }}
                             title={getSourceTabTitle(source)}
                           >
                             {renderSourceTabLabel(source)}
