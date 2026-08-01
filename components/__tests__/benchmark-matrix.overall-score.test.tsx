@@ -308,7 +308,7 @@ describe("BenchmarkMatrix 总评行", () => {
     expect(screen.getByTitle("该项目为低值更优")).toBeInTheDocument();
   });
 
-  test("显示价格后在 benchmark 前插入三行价格并参与总评覆盖率", () => {
+  test("显示价格后在 benchmark 前插入三行价格，默认不计入总评覆盖率", () => {
     const { container } = render(
       <BenchmarkMatrix
         rows={[...rows]}
@@ -370,10 +370,11 @@ describe("BenchmarkMatrix 总评行", () => {
     expect(trigger).not.toBeNull();
     fireEvent.mouseEnter(trigger!);
 
-    expect(screen.getByText(/覆盖率：/)).toHaveTextContent("3/6");
+    // 价格默认只作展示，不进总评分母：Model C 仅覆盖 Bench-01 / Bench-02
+    expect(screen.getByText(/覆盖率：/)).toHaveTextContent("2/3");
   });
 
-  test("Ctrl 点击价格开关把价格行移出总评，行名压暗但仍然显示", () => {
+  test("Ctrl 点击价格开关把价格行纳入总评，未纳入时行名压暗", () => {
     window.localStorage.clear();
 
     const { container } = render(
@@ -390,24 +391,24 @@ describe("BenchmarkMatrix 总评行", () => {
     const priceToggle = screen.getByRole("button", { name: /显示价格/ });
     fireEvent.click(priceToggle);
 
-    // 价格默认计入总评：行名正常显示，覆盖率分母含三行价格
-    expect(screen.getByText("Input Price").style.opacity).toBe("");
+    // 价格默认不计入总评：行名压暗，覆盖率分母只算 benchmark 行
+    expect(screen.getByText("Input Price").style.opacity).toBe("0.5");
 
     const trigger = container.querySelector('[data-overall-tooltip-trigger="Model C"]') as HTMLElement | null;
     expect(trigger).not.toBeNull();
     fireEvent.mouseEnter(trigger!);
-    expect(screen.getByText(/覆盖率：/)).toHaveTextContent("3/6");
+    expect(screen.getByText(/覆盖率：/)).toHaveTextContent("2/3");
 
     fireEvent.click(priceToggle, { ctrlKey: true });
 
-    expect(screen.getByText("Input Price").style.opacity).toBe("0.5");
+    expect(screen.getByText("Input Price").style.opacity).toBe("");
     // Ctrl 点击只切换计入状态，价格行本身仍在表格里
     expect(container.querySelectorAll('[data-metric-type="price"]')).toHaveLength(3);
 
     const triggerAfter = container.querySelector('[data-overall-tooltip-trigger="Model C"]') as HTMLElement | null;
     expect(triggerAfter).not.toBeNull();
     fireEvent.mouseEnter(triggerAfter!);
-    expect(screen.getByText(/覆盖率：/)).toHaveTextContent("2/3");
+    expect(screen.getByText(/覆盖率：/)).toHaveTextContent("3/6");
   });
 
   test("无价格数据时不会因持久化开关渲染空价格行", async () => {

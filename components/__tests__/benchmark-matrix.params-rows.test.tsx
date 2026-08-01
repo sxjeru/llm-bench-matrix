@@ -152,18 +152,53 @@ describe("BenchmarkMatrix 参数量展示", () => {
   });
 
   test("默认不显示参数量，开启后出现 Model Info 行且不带表头徽标", () => {
-    render(<BenchmarkMatrix rows={rows} allRows={rows} modelParams={modelParams} />);
+    const { container } = render(<BenchmarkMatrix rows={rows} allRows={rows} modelParams={modelParams} />);
 
-    expect(screen.queryByText("17B/397B")).toBeNull();
+    expect(container.querySelectorAll('[data-metric-type="info"]')).toHaveLength(0);
 
     fireEvent.click(screen.getByRole("button", { name: /显示参数量/ }));
 
     expect(screen.getByText("Params")).toBeInTheDocument();
     expect(screen.getByText("Activated %")).toBeInTheDocument();
-    expect(screen.getByText("17B/397B")).toBeInTheDocument();
+
+    const paramsCell = container.querySelector(
+      '[data-metric-type="info"] [data-model-name="MoE Model"]'
+    ) as HTMLElement | null;
+    expect(paramsCell?.textContent).toBe("17B/397B");
+    // 斜杠单独成段，靠 mx-[2px] 撑开两侧间距，与 pair 数值单元格一致
+    const slashSpans = Array.from(paramsCell!.querySelectorAll("span")).filter(
+      (node) => node.textContent === "/"
+    );
+    expect(slashSpans).toHaveLength(1);
+    expect(slashSpans[0]!.className).toContain("mx-[2px]");
+
     // 表头徽标已移除，参数量只在 Model Info 行里出现
     expect(screen.queryByText("17B / 397B")).toBeNull();
     expect(screen.queryByText("MoE")).toBeNull();
+  });
+
+  test("名次样式只落在斜杠两侧的数值上", () => {
+    const { container } = render(<BenchmarkMatrix rows={rows} allRows={rows} modelParams={modelParams} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /显示参数量/ }));
+
+    const paramsRow = container.querySelector('[data-metric-type="info"]') as HTMLElement;
+    const moeCell = paramsRow.querySelector('[data-model-name="MoE Model"]') as HTMLElement;
+    const spans = Array.from(moeCell.querySelectorAll("span"));
+    const activatedSpan = spans.find((node) => node.textContent === "17B");
+    const totalSpan = spans.find((node) => node.textContent === "397B");
+    const slashSpan = spans.find((node) => node.textContent === "/");
+
+    // 397B 比 Dense Model 的 120B 大，以小为好下排第二 → 两段数值都带下划线
+    expect(activatedSpan?.style.textDecoration).toBe("underline");
+    expect(totalSpan?.style.textDecoration).toBe("underline");
+    // 斜杠只做分隔，既不加粗也不带下划线，否则会连成一条横穿整格的线
+    expect(slashSpan?.style.textDecoration).toBe("");
+    expect(slashSpan?.style.fontWeight).toBe("");
+
+    // 参数量最小的模型仍然正常加粗
+    const denseCell = paramsRow.querySelector('[data-model-name="Dense Model"]') as HTMLElement;
+    expect(denseCell.querySelector("span")?.style.fontWeight).toBe("800");
   });
 
   test("Ctrl 点击开关切换是否计入总评，未计入时行名压暗", () => {

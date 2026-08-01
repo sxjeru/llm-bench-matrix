@@ -10,7 +10,7 @@ import {
   useRef,
   useState
 } from "react";
-import type { MouseEvent as ReactMouseEvent } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Check,
@@ -147,13 +147,28 @@ const RANKING_POPOVER_MARGIN = 16;
 const RANKING_POPOVER_MAX_WIDTH = 860;
 const FRONTEND_TABLE_PAIR_VALUE_REGEX =
   /^\s*((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?[^\s/]*)\s*\/\s*((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?.*)\s*$/;
+const PAIR_VALUE_SLASH_CLASS_NAME = "mx-[2px] opacity-85";
 
-function formatFrontendTableCellText(value: string): string {
+/**
+ * 单元格里的「A / B」两段值。
+ *
+ * 与 valueNum + valueNum2 的 pair 单元格渲染保持一致：去掉原始空格避免占宽，
+ * 再由斜杠自己带 2px 外边距，这样 `13B / 284B` 两段仍然分得开。
+ * 名次样式只落在两侧的数值上，斜杠保持中性 —— 否则加粗会把分隔符也吃进去，
+ * 第二名的下划线还会连成一条横穿整格的线。
+ */
+function renderFrontendTableCellText(value: string, segmentStyle?: CSSProperties): ReactNode {
   const pairMatch = value.match(FRONTEND_TABLE_PAIR_VALUE_REGEX);
-  if (!pairMatch) return value;
+  if (!pairMatch) return <span style={segmentStyle}>{value}</span>;
 
   const [, first, second] = pairMatch;
-  return `${first.trim()}/${second.trim()}`;
+  return (
+    <span className="inline-flex items-center gap-0 leading-none">
+      <span style={segmentStyle}>{first.trim()}</span>
+      <span className={PAIR_VALUE_SLASH_CLASS_NAME}>/</span>
+      <span style={segmentStyle}>{second.trim()}</span>
+    </span>
+  );
 }
 
 export function BenchmarkMatrix({
@@ -199,8 +214,8 @@ export function BenchmarkMatrix({
   const [showSourceValueDeltas, setShowSourceValueDeltas] = useState(false);
   const [showPriceRows, setShowPriceRows] = useState(false);
   const [showParamsRows, setShowParamsRows] = useState(false);
-  // 价格默认计入总评，参数量默认只作参考：参数规模小并不直接等于模型更好
-  const [priceRowsInOverall, setPriceRowsInOverall] = useState(true);
+  // 价格与参数量默认都只作参考：便宜或参数小并不直接等于模型更好，需要 Ctrl 点击开关显式纳入
+  const [priceRowsInOverall, setPriceRowsInOverall] = useState(false);
   const [paramsRowsInOverall, setParamsRowsInOverall] = useState(false);
   const [showLowCoverageRows, setShowLowCoverageRows] = useState(false);
   const [isClientReady, setIsClientReady] = useState(false);
@@ -2122,7 +2137,6 @@ export function BenchmarkMatrix({
                     const comparableCellNum2 = cellNum2 !== null
                       ? getMatrixRowComparableScore(matrixRow, cellNum2)
                       : null;
-                    const rawText = formatFrontendTableCellText(cell?.displayValue ?? "--");
                     const noteText = cell?.noteText ?? "";
                     const shouldShowQuestionMark = cell?.shouldShowQuestionMark ?? false;
                     const hasMultipleActiveSourceValues = cell?.hasMultipleActiveSourceValues ?? false;
@@ -2254,6 +2268,7 @@ export function BenchmarkMatrix({
                     const singleCellScoreStyle = !isPairNumericDisplay
                       ? (isTopCellFirst ? topRankSegmentStyle : isSecondCellFirst ? secondRankSegmentStyle : undefined)
                       : undefined;
+                    const cellText = renderFrontendTableCellText(cell?.displayValue ?? "--", singleCellScoreStyle);
                     const heatStyle = getHeatCellStyle(
                       comparableCellNum,
                       matrixRow.minComparable,
@@ -2324,13 +2339,13 @@ export function BenchmarkMatrix({
                         {isPairNumericDisplay && pairDisplayParts ? (
                           <span className="inline-flex items-center gap-0 leading-none">
                             <span style={isTopCellFirst ? topRankSegmentStyle : isSecondCellFirst ? secondRankSegmentStyle : undefined}>{pairDisplayParts.first}</span>
-                            <span className="mx-[2px] opacity-85">/</span>
+                            <span className={PAIR_VALUE_SLASH_CLASS_NAME}>/</span>
                             <span style={isTopCellSecond ? topRankSegmentStyle : isSecondCellSecond ? secondRankSegmentStyle : undefined}>{pairDisplayParts.second}</span>
                           </span>
                         ) : shouldRenderSourceValues ? (
-                          <span style={singleCellScoreStyle}>{formatFrontendTableCellText(sourceValueItem!.displayValue)}</span>
+                          renderFrontendTableCellText(sourceValueItem!.displayValue, singleCellScoreStyle)
                         ) : (
-                          <span style={singleCellScoreStyle}>{rawText}</span>
+                          cellText
                         )}
                         {showAnyDeltaBadge && activeDeltaBadgeStyle ? (
                           <span
