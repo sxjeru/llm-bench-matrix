@@ -22,6 +22,7 @@ import {
   getBenchmarkBestComparableScore,
   getBenchmarkComparableScore,
   getMatrixCellDisplayValue,
+  getMatrixRowComparableScore,
   getSortedQuantile,
   isLowerBetterBenchmark
 } from "./scoring";
@@ -1258,7 +1259,7 @@ export function buildParamsMatrixRows(
     build: (params: ModelParamsInfo | undefined) => MatrixCell;
   }> = [
     { rowKey: PARAMS_ROW_KEY, benchmark: "Params", build: createParamsCell },
-    { rowKey: PARAMS_ACTIVE_RATIO_ROW_KEY, benchmark: "激活占比", build: createActiveRatioCell }
+    { rowKey: PARAMS_ACTIVE_RATIO_ROW_KEY, benchmark: "Activated %", build: createActiveRatioCell }
   ];
 
   return definitions.map((definition, index) => {
@@ -1270,12 +1271,14 @@ export function buildParamsMatrixRows(
     const numericValues = Array.from(cells.values())
       .map((cell) => cell.valueNum)
       .filter((value): value is number => value !== null && Number.isFinite(value));
+    const comparableValues = numericValues.map((value) => -value);
 
     return {
       rowKey: definition.rowKey,
       category: MODEL_INFO_CATEGORY_LABEL,
       benchmark: definition.benchmark,
-      higherIsBetter: true,
+      // 参数量与激活占比都以小为好：同等水位下更小的模型更划算
+      higherIsBetter: false,
       modalities: ["Text"],
       cells,
       // 排在价格行（-100）之前
@@ -1283,9 +1286,8 @@ export function buildParamsMatrixRows(
       sourceOrderKey: null,
       rowDataCount: cells.size,
       rowNumericCount: numericValues.length,
-      // 置 null 让 getHeatCellStyle 直接返回空样式：参数量大不等于好，不该着色
-      minComparable: null,
-      maxComparable: null,
+      minComparable: comparableValues.length > 0 ? Math.min(...comparableValues) : null,
+      maxComparable: comparableValues.length > 0 ? Math.max(...comparableValues) : null,
       minComparable2: null,
       maxComparable2: null,
       minNum: numericValues.length > 0 ? Math.min(...numericValues) : null,
@@ -1295,14 +1297,6 @@ export function buildParamsMatrixRows(
       isInfoRow: true
     };
   });
-}
-
-function getBenchmarkRankingComparableScore(matrixRow: MatrixRow, valueNum: number): number {
-  return matrixRow.isPriceRow || matrixRow.isInfoRow
-    ? matrixRow.isPriceRow
-      ? -valueNum
-      : valueNum
-    : getBenchmarkComparableScore(matrixRow.benchmark, valueNum, matrixRow.category, matrixRow.higherIsBetter);
 }
 
 function buildRankingDataFromMatrixRow(
@@ -1324,7 +1318,7 @@ function buildRankingDataFromMatrixRow(
         modelName,
         displayValue: cell?.displayValue ?? String(valueNum),
         valueNum,
-        comparableScore: getBenchmarkRankingComparableScore(matrixRow, valueNum),
+        comparableScore: getMatrixRowComparableScore(matrixRow, valueNum),
         rank: 0,
         barPercent: 0,
         isVisibleColumn: visibleModelSet.has(modelName),
@@ -1383,7 +1377,7 @@ function buildRankingDataFromMatrixRow(
           if (val === null || !Number.isFinite(val)) return null;
           return {
             rawVal: val,
-            scoreVal: getBenchmarkRankingComparableScore(matrixRow, val)
+            scoreVal: getMatrixRowComparableScore(matrixRow, val)
           };
         })
         .filter((e): e is NonNullable<typeof e> => e !== null);
@@ -1517,8 +1511,8 @@ export function buildBenchmarkRankingData(
           previous.benchTime = row.benchTime;
           previous.displayValue = getMatrixCellDisplayValue(rowValueNum, rowValueNum2, row.valueRaw, rowValueNote);
         } else {
-          const previousScore = getBenchmarkRankingComparableScore(matrixRow, previous.valueNum);
-          const nextScore = getBenchmarkRankingComparableScore(matrixRow, rowValueNum);
+          const previousScore = getMatrixRowComparableScore(matrixRow, previous.valueNum);
+          const nextScore = getMatrixRowComparableScore(matrixRow, rowValueNum);
           if (nextScore > previousScore) {
             previous.valueRaw = row.valueRaw;
             previous.valueNum = rowValueNum;
@@ -1676,11 +1670,6 @@ export function buildOverallSummaryByModel(
   let totalComparableRows = 0;
 
   presenceFilteredMatrixRows.forEach((row) => {
-    // 模型属性行（参数量等）只是信息展示，不该计入综合分
-    if (row.isInfoRow) {
-      return;
-    }
-
     const rowEntries: Array<{ modelName: string; original: number; comparable: number }> = [];
 
     modelColumns.forEach((modelName) => {
@@ -1694,9 +1683,7 @@ export function buildOverallSummaryByModel(
       rowEntries.push({
         modelName,
         original: valueNum,
-        comparable: row.isPriceRow
-          ? -valueNum
-          : getBenchmarkComparableScore(row.benchmark, valueNum, row.category, row.higherIsBetter)
+        comparable: getMatrixRowComparableScore(row, valueNum)
       });
     });
 
@@ -1710,8 +1697,10 @@ export function buildOverallSummaryByModel(
     const minOriginal = Math.min(...originalValues);
     const maxOriginal = Math.max(...originalValues);
 
-    const isRatioRow = !row.isPriceRow && minOriginal >= 0 && maxOriginal <= 1.2;
-    const isPercentRow = !row.isPriceRow && !isRatioRow && minOriginal >= 0 && maxOriginal <= 100.000001;
+    // 价格与模型属性行不是百分制，值域再小也要走对数压缩，不能当成 ratio / percent
+    const isSyntheticScaleRow = Boolean(row.isPriceRow) || Boolean(row.isInfoRow);
+    const isRatioRow = !isSyntheticScaleRow && minOriginal >= 0 && maxOriginal <= 1.2;
+    const isPercentRow = !isSyntheticScaleRow && !isRatioRow && minOriginal >= 0 && maxOriginal <= 100.000001;
 
     const transformedByEntry = (() => {
       if (isRatioRow) {

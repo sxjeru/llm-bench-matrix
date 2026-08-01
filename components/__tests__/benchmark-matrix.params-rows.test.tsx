@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
 import { buildOverallSummaryByModel, buildParamsMatrixRows } from "@/components/benchmark-matrix/selectors";
@@ -102,13 +102,17 @@ describe("buildParamsMatrixRows", () => {
     expect(ratioRow.cells.get("Dense Model")?.valueNum).toBeNull();
   });
 
-  test("不参与热力着色：minComparable / maxComparable 恒为 null", () => {
+  test("参与热力着色：以小为好，comparable 取负值", () => {
     const paramsRows = buildParamsMatrixRows(modelColumns, modelParams);
 
     for (const row of paramsRows) {
-      expect(row.minComparable).toBeNull();
-      expect(row.maxComparable).toBeNull();
+      expect(row.higherIsBetter).toBe(false);
     }
+
+    const [paramsRow] = paramsRows;
+    // 4B ~ 397B → comparable -397 ~ -4，参数量最小的模型落在热力图高分端
+    expect(paramsRow.minComparable).toBe(-397);
+    expect(paramsRow.maxComparable).toBe(-4);
   });
 
   test("估算值与 MoE 写进 noteText 供 tooltip 使用", () => {
@@ -128,30 +132,54 @@ describe("buildParamsMatrixRows", () => {
 });
 
 describe("参数量行与 Overall 打分", () => {
-  test("info 行不计入综合分", () => {
-    const paramsRows = buildParamsMatrixRows(modelColumns, modelParams);
+  test("计入综合分时以小为好", () => {
+    const [paramsRow] = buildParamsMatrixRows(modelColumns, modelParams);
     const columns = ["MoE Model", "Dense Model"];
 
-    const withoutParams = buildOverallSummaryByModel([], columns);
-    const withParams = buildOverallSummaryByModel(paramsRows, columns);
+    const summary = buildOverallSummaryByModel([paramsRow], columns);
 
-    expect(withParams.get("MoE Model")?.rawScore).toEqual(withoutParams.get("MoE Model")?.rawScore);
-    expect(withParams.get("MoE Model")?.totalRows).toBe(withoutParams.get("MoE Model")?.totalRows);
+    // 120B 的稠密模型比 397B 的 MoE 更小，因此得分更高
+    expect(summary.get("Dense Model")?.rawScore).toBe(100);
+    expect(summary.get("Dense Model")?.rawRank).toBe(1);
+    expect(summary.get("MoE Model")?.rawScore).toBe(0);
+    expect(summary.get("MoE Model")?.rawRank).toBe(2);
   });
 });
 
 describe("BenchmarkMatrix 参数量展示", () => {
-  test("默认不显示参数量，开启后表头徽标与 Model Info 行出现", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  test("默认不显示参数量，开启后出现 Model Info 行且不带表头徽标", () => {
     render(<BenchmarkMatrix rows={rows} allRows={rows} modelParams={modelParams} />);
 
-    expect(screen.queryByText("17B / 397B")).toBeNull();
+    expect(screen.queryByText("17B/397B")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /显示参数量/ }));
 
-    expect(screen.getByText("17B / 397B")).toBeInTheDocument();
-    expect(screen.getByText("MoE")).toBeInTheDocument();
     expect(screen.getByText("Params")).toBeInTheDocument();
-    expect(screen.getByText("激活占比")).toBeInTheDocument();
+    expect(screen.getByText("Activated %")).toBeInTheDocument();
+    expect(screen.getByText("17B/397B")).toBeInTheDocument();
+    // 表头徽标已移除，参数量只在 Model Info 行里出现
+    expect(screen.queryByText("17B / 397B")).toBeNull();
+    expect(screen.queryByText("MoE")).toBeNull();
+  });
+
+  test("Ctrl 点击开关切换是否计入总评，未计入时行名压暗", () => {
+    render(<BenchmarkMatrix rows={rows} allRows={rows} modelParams={modelParams} />);
+
+    const paramsToggle = screen.getByRole("button", { name: /显示参数量/ });
+    fireEvent.click(paramsToggle);
+
+    // 默认不计入总评
+    expect(screen.getByText("Params").style.opacity).toBe("0.5");
+
+    fireEvent.click(paramsToggle, { ctrlKey: true });
+
+    expect(screen.getByText("Params").style.opacity).toBe("");
+    // Ctrl 点击只切换计入状态，不应把参数量行隐藏
+    expect(screen.getByText("Activated %")).toBeInTheDocument();
   });
 
   test("没有参数量数据时不渲染开关", () => {

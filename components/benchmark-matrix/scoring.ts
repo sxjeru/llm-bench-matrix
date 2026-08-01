@@ -1,5 +1,5 @@
 import { LOWER_IS_BETTER_ASR_TYPE_REGEX, LOWER_IS_BETTER_RULES } from "./constants";
-import type { OverallScoreDisplayItem } from "./types";
+import type { MatrixRow, OverallScoreDisplayItem } from "./types";
 import { formatValueNumForDisplay } from "./formatters";
 
 function isFleursZhTranslationBenchmark(benchmarkName: string): boolean {
@@ -41,6 +41,29 @@ export function getBenchmarkComparableScore(
   }
 
   return valueNum;
+}
+
+/**
+ * 行级可比分数。
+ *
+ * 价格行与模型属性行（参数量等）都是「越小越好」，但量纲远超百分制，
+ * 走 `100 - value` 会把 397B 压成 -297 这类无意义的分数，所以直接取负，
+ * 让同一行内部的大小关系保持正确即可。
+ */
+export function getMatrixRowComparableScore(
+  matrixRow: Pick<MatrixRow, "benchmark" | "category" | "higherIsBetter" | "isPriceRow" | "isInfoRow">,
+  valueNum: number
+): number {
+  if (matrixRow.isPriceRow || matrixRow.isInfoRow) {
+    return -valueNum;
+  }
+
+  return getBenchmarkComparableScore(
+    matrixRow.benchmark,
+    valueNum,
+    matrixRow.category,
+    matrixRow.higherIsBetter
+  );
 }
 
 export function getBenchmarkBestComparableScore(

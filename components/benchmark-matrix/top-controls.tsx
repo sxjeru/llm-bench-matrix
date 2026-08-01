@@ -17,6 +17,7 @@ import {
 import { isExportPresetKey } from "./export-image";
 import type { ExportPresetKey } from "./types";
 import type { SourceOption } from "./selectors";
+import { isCompareModifierClick } from "./utils";
 
 type TopControlsProps = {
   sourceTabsMenuRef: RefObject<HTMLDivElement | null>;
@@ -66,9 +67,13 @@ type TopControlsProps = {
   showPriceRows: boolean;
   setShowPriceRows: Dispatch<SetStateAction<boolean>>;
   hasPriceData: boolean;
+  priceRowsInOverall: boolean;
+  setPriceRowsInOverall: Dispatch<SetStateAction<boolean>>;
   showParamsRows: boolean;
   setShowParamsRows: Dispatch<SetStateAction<boolean>>;
   hasParamsData: boolean;
+  paramsRowsInOverall: boolean;
+  setParamsRowsInOverall: Dispatch<SetStateAction<boolean>>;
   hasSourceData: boolean;
   displaySourceValuesInCells: boolean;
   onSourceValuesButtonClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
@@ -175,9 +180,13 @@ export function BenchmarkMatrixTopControls({
   showPriceRows,
   setShowPriceRows,
   hasPriceData,
+  priceRowsInOverall,
+  setPriceRowsInOverall,
   showParamsRows,
   setShowParamsRows,
   hasParamsData,
+  paramsRowsInOverall,
+  setParamsRowsInOverall,
   hasSourceData,
   displaySourceValuesInCells,
   onSourceValuesButtonClick
@@ -520,7 +529,14 @@ export function BenchmarkMatrixTopControls({
           <button
             type="button"
             className="btn btn-xs btn-ghost"
-            onClick={() => setShowPriceRows((prev) => !prev)}
+            title={`普通点击切换价格行显示；按住 Ctrl 点击切换是否计入总评（当前${priceRowsInOverall ? "计入" : "不计入"}）`}
+            onClick={(event) => {
+              if (isCompareModifierClick(event)) {
+                setPriceRowsInOverall((prev) => !prev);
+                return;
+              }
+              setShowPriceRows((prev) => !prev);
+            }}
           >
             {showPriceRows ? <Eye size={14} /> : <EyeOff size={14} />}
             显示价格
@@ -531,8 +547,14 @@ export function BenchmarkMatrixTopControls({
           <button
             type="button"
             className="btn btn-xs btn-ghost"
-            title="同时显示模型列表头的参数量徽标与 Model Info 行"
-            onClick={() => setShowParamsRows((prev) => !prev)}
+            title={`普通点击切换参数量行显示；按住 Ctrl 点击切换是否计入总评（当前${paramsRowsInOverall ? "计入" : "不计入"}）`}
+            onClick={(event) => {
+              if (isCompareModifierClick(event)) {
+                setParamsRowsInOverall((prev) => !prev);
+                return;
+              }
+              setShowParamsRows((prev) => !prev);
+            }}
           >
             {showParamsRows ? <Eye size={14} /> : <EyeOff size={14} />}
             显示参数量

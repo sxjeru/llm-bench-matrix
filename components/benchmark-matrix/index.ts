@@ -10,6 +10,7 @@ export * from "./constants";
 export {
   isLowerBetterBenchmark,
   getBenchmarkComparableScore,
+  getMatrixRowComparableScore,
   getBenchmarkBestComparableScore,
   getSortedQuantile,
   buildDenseRankMap,
