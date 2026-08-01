@@ -646,7 +646,7 @@ export function ModelScatter({
               已缩放 · 点击重置（或在图上双击）
             </button>
           ) : (
-            <span className="scatter-note scatter-note-hint">滚轮以光标为中心缩放</span>
+            <span className="scatter-note scatter-note-hint">拖拽平移 · 滚轮以光标为中心放大</span>
           )}
           {activeSource === SOURCE_ALL ? (
             <label className="scatter-note scatter-note-toggle">

@@ -138,15 +138,35 @@ export function computeMedian(values: readonly number[]): number | null {
 
 /** 相对基准值域的最深放大倍数（跨度缩到 1/40） */
 export const MAX_ZOOM_IN_RATIO = 1 / 40;
-/** 相对基准值域的最大缩小倍数（跨度撑到 4 倍） */
-export const MAX_ZOOM_OUT_RATIO = 4;
+
+type AxisSpace = {
+  toSpace: (value: number) => number;
+  fromSpace: (value: number) => number;
+};
+
+function resolveAxisSpace(
+  scale: ScatterAxisScale,
+  ...domains: ReadonlyArray<readonly [number, number]>
+): AxisSpace {
+  const isLog = scale === "log" && domains.every((domain) => domain[0] > 0 && domain[1] > 0);
+
+  return isLog
+    ? { toSpace: (value) => Math.log10(value), fromSpace: (value) => 10 ** value }
+    : { toSpace: (value) => value, fromSpace: (value) => value };
+}
 
 /**
- * 以光标位置为锚点缩放坐标轴值域。
+ * 缩放坐标轴值域。
  *
- * `anchorRatio` 是光标在该轴上的相对位置（0 = 轴起点，1 = 轴终点）；
- * 锚点两侧按同一比例伸缩，所以光标底下的那个数据点在缩放前后始终贴着光标。
- * 对数轴在 log 空间做同样的运算，视觉上才是等比的。
+ * 放大以光标为锚点：光标底下的那个数据点在缩放前后始终贴着光标，这是最跟手的手感。
+ *
+ * 缩小则不锚定光标 —— 那会让画面朝光标反方向甩出去，越缩越偏，而且缩到底时停在
+ * 一个歪掉的视图上。这里改成「朝基准视图收敛」：跨度每往回退一分，视图中心就朝
+ * 初始中心挪一分，跨度退满时恰好精确还原初始视图。既保留了缩放的连续感，
+ * 又保证「一直往回滚 = 回到最初那张图」。
+ *
+ * `anchorRatio` 是光标在该轴上的相对位置（0 = 轴起点，1 = 轴终点）。
+ * 对数轴的全部运算都在 log 空间进行，视觉上才是等比的。
  */
 export function zoomAxisDomain(
   domain: readonly [number, number],
@@ -155,25 +175,84 @@ export function zoomAxisDomain(
   anchorRatio: number,
   factor: number
 ): [number, number] {
-  const isLog = scale === "log" && domain[0] > 0 && domain[1] > 0 && baseDomain[0] > 0 && baseDomain[1] > 0;
-  const toSpace = (value: number) => (isLog ? Math.log10(value) : value);
-  const fromSpace = (value: number) => (isLog ? 10 ** value : value);
+  const { toSpace, fromSpace } = resolveAxisSpace(scale, domain, baseDomain);
 
   const low = toSpace(domain[0]);
   const high = toSpace(domain[1]);
   const span = high - low;
   if (!Number.isFinite(span) || span <= 0) return [domain[0], domain[1]];
 
-  const baseSpan = toSpace(baseDomain[1]) - toSpace(baseDomain[0]);
-  const ratio = Math.min(1, Math.max(0, anchorRatio));
-  const anchor = low + span * ratio;
+  const baseLow = toSpace(baseDomain[0]);
+  const baseHigh = toSpace(baseDomain[1]);
+  const baseSpan = baseHigh - baseLow;
+  if (!Number.isFinite(baseSpan) || baseSpan <= 0) return [domain[0], domain[1]];
 
-  let nextSpan = span * factor;
-  if (Number.isFinite(baseSpan) && baseSpan > 0) {
-    nextSpan = Math.min(baseSpan * MAX_ZOOM_OUT_RATIO, Math.max(baseSpan * MAX_ZOOM_IN_RATIO, nextSpan));
+  // 缩小的尽头就是基准视图本身，不再往外撑
+  const nextSpan = Math.min(baseSpan, Math.max(baseSpan * MAX_ZOOM_IN_RATIO, span * factor));
+
+  if (nextSpan <= span) {
+    const ratio = Math.min(1, Math.max(0, anchorRatio));
+    const anchor = low + span * ratio;
+    return [fromSpace(anchor - nextSpan * ratio), fromSpace(anchor + nextSpan * (1 - ratio))];
   }
 
-  return [fromSpace(anchor - nextSpan * ratio), fromSpace(anchor + nextSpan * (1 - ratio))];
+  // 朝基准收敛：跨度走完剩余距离的多少，中心就朝基准中心挪多少
+  const progress = baseSpan === span ? 1 : (nextSpan - span) / (baseSpan - span);
+  const center = low + span / 2;
+  const baseCenter = baseLow + baseSpan / 2;
+  const nextCenter = center + (baseCenter - center) * Math.min(1, Math.max(0, progress));
+
+  return [fromSpace(nextCenter - nextSpan / 2), fromSpace(nextCenter + nextSpan / 2)];
+}
+
+/**
+ * 拖拽平移。
+ *
+ * `shiftRatio` 是数据空间上的位移占当前跨度的比例，由调用方按像素位移换算并定好符号，
+ * 平移逻辑本身因此与绘图区几何无关。
+ */
+export function panAxisDomain(
+  domain: readonly [number, number],
+  scale: ScatterAxisScale,
+  shiftRatio: number
+): [number, number] {
+  if (!Number.isFinite(shiftRatio) || shiftRatio === 0) return [domain[0], domain[1]];
+
+  const { toSpace, fromSpace } = resolveAxisSpace(scale, domain);
+  const low = toSpace(domain[0]);
+  const high = toSpace(domain[1]);
+  const span = high - low;
+  if (!Number.isFinite(span) || span <= 0) return [domain[0], domain[1]];
+
+  const shift = span * shiftRatio;
+  return [fromSpace(low + shift), fromSpace(high + shift)];
+}
+
+/**
+ * 限制平移范围。
+ *
+ * 视图中心必须留在基准值域之内 —— 再怎么拖也不会把所有点甩出画面、
+ * 只剩一片空白让人不知道该往哪拖回来。
+ */
+export function clampPannedDomain(
+  domain: readonly [number, number],
+  baseDomain: readonly [number, number],
+  scale: ScatterAxisScale
+): [number, number] {
+  const { toSpace, fromSpace } = resolveAxisSpace(scale, domain, baseDomain);
+
+  const low = toSpace(domain[0]);
+  const high = toSpace(domain[1]);
+  const span = high - low;
+  if (!Number.isFinite(span) || span <= 0) return [domain[0], domain[1]];
+
+  const baseLow = toSpace(baseDomain[0]);
+  const baseHigh = toSpace(baseDomain[1]);
+  const center = low + span / 2;
+  const clampedCenter = Math.min(baseHigh, Math.max(baseLow, center));
+  if (clampedCenter === center) return [domain[0], domain[1]];
+
+  return [fromSpace(clampedCenter - span / 2), fromSpace(clampedCenter + span / 2)];
 }
 
 /** 判断当前值域是否已偏离基准（决定要不要显示「重置缩放」）。 */

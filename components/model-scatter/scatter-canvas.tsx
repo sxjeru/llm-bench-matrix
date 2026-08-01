@@ -17,7 +17,14 @@ import {
   SCATTER_X_AXIS_HEIGHT,
   SCATTER_Y_AXIS_WIDTH
 } from "./constants";
-import { computeAxisDomain, computeMedian, isDomainZoomed, zoomAxisDomain } from "./dataset";
+import {
+  clampPannedDomain,
+  computeAxisDomain,
+  computeMedian,
+  isDomainZoomed,
+  panAxisDomain,
+  zoomAxisDomain
+} from "./dataset";
 import { ScatterGuideLayer } from "./guide-layer";
 import { getPlacedLabelBox, layoutScatterLabels } from "./label-layout";
 import { formatScatterAxisTick, getMetricAxisLabel } from "./metrics";
@@ -67,6 +74,16 @@ type ZoomState = {
   x: [number, number];
   y: [number, number];
 };
+
+type PanSession = {
+  pointerId: number;
+  lastX: number;
+  lastY: number;
+  travelled: number;
+};
+
+/** 位移超过这个像素数就算拖拽，之后那一次 click 不应再被当成「钉住模型」 */
+const PAN_CLICK_SUPPRESS_THRESHOLD = 4;
 
 /**
  * 标签放置优先级。
@@ -120,7 +137,10 @@ export function ScatterCanvas({
   resetZoomSignal = 0
 }: ScatterCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const panSessionRef = useRef<PanSession | null>(null);
+  const suppressClickRef = useRef(false);
   const [zoom, setZoom] = useState<ZoomState | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
 
   const xValues = useMemo(() => dataset.points.map((point) => point.x), [dataset.points]);
   const yValues = useMemo(() => dataset.points.map((point) => point.y), [dataset.points]);
@@ -273,6 +293,86 @@ export function ScatterCanvas({
 
   const shouldDim = showPareto && dimNonPareto;
 
+  const isInsidePlot = useCallback(
+    (pointerX: number, pointerY: number) =>
+      Boolean(
+        plotArea &&
+          pointerX >= plotArea.left &&
+          pointerX <= plotArea.right &&
+          pointerY >= plotArea.top &&
+          pointerY <= plotArea.bottom
+      ),
+    [plotArea]
+  );
+
+  const handlePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0 || !plotArea || !containerRef.current) return;
+
+      const rect = containerRef.current.getBoundingClientRect();
+      if (!isInsidePlot(event.clientX - rect.left, event.clientY - rect.top)) return;
+
+      panSessionRef.current = {
+        pointerId: event.pointerId,
+        lastX: event.clientX,
+        lastY: event.clientY,
+        travelled: 0
+      };
+      suppressClickRef.current = false;
+      setIsPanning(true);
+      containerRef.current.setPointerCapture?.(event.pointerId);
+    },
+    [plotArea, isInsidePlot]
+  );
+
+  const handlePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const session = panSessionRef.current;
+      if (!session || session.pointerId !== event.pointerId || !plotArea) return;
+
+      const deltaX = event.clientX - session.lastX;
+      const deltaY = event.clientY - session.lastY;
+      if (deltaX === 0 && deltaY === 0) return;
+
+      session.lastX = event.clientX;
+      session.lastY = event.clientY;
+      session.travelled += Math.abs(deltaX) + Math.abs(deltaY);
+
+      const plotWidth = plotArea.right - plotArea.left;
+      const plotHeight = plotArea.bottom - plotArea.top;
+      if (plotWidth <= 0 || plotHeight <= 0) return;
+
+      // 往右拖，画面跟着往右走，看到的是更小的值 → 值域左移；
+      // 纵向屏幕坐标向下增长而数值向上增长，所以 Y 的符号不用再取反
+      const xShiftRatio = -deltaX / plotWidth;
+      const yShiftRatio = deltaY / plotHeight;
+
+      setZoom((previous) => {
+        const current = previous && previous.key === domainKey ? previous : null;
+        const currentX = current?.x ?? baseXDomain;
+        const currentY = current?.y ?? baseYDomain;
+
+        return {
+          key: domainKey,
+          x: clampPannedDomain(panAxisDomain(currentX, xScale, xShiftRatio), baseXDomain, xScale),
+          y: clampPannedDomain(panAxisDomain(currentY, yScale, yShiftRatio), baseYDomain, yScale)
+        };
+      });
+    },
+    [plotArea, domainKey, baseXDomain, baseYDomain, xScale, yScale]
+  );
+
+  const endPan = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const session = panSessionRef.current;
+    if (!session || session.pointerId !== event.pointerId) return;
+
+    // 拖过一段距离后紧跟着的 click 是拖拽的余波，不该被当成点选模型
+    suppressClickRef.current = session.travelled > PAN_CLICK_SUPPRESS_THRESHOLD;
+    panSessionRef.current = null;
+    setIsPanning(false);
+    containerRef.current?.releasePointerCapture?.(event.pointerId);
+  }, []);
+
   const renderDot = useCallback(
     (dotProps: ScatterDotRenderProps) => {
       const { cx, cy, payload } = dotProps;
@@ -288,7 +388,17 @@ export function ScatterCanvas({
       return (
         <g opacity={opacity}>
           {isHighlighted ? (
-            <circle cx={cx} cy={cy} r={radius + 5} fill="none" stroke="#ffffff" strokeWidth={1.5} opacity={0.85} />
+            // 钉住标记用该模型自己的品牌色描一圈淡环。早先用的是纯白硬边，
+            // 看起来跟浏览器的焦点框一模一样，会被误读成点击留下的脏东西。
+            <circle
+              cx={cx}
+              cy={cy}
+              r={radius + 4}
+              fill="none"
+              stroke={payload.color}
+              strokeWidth={2}
+              opacity={0.5}
+            />
           ) : null}
           <circle
             cx={cx}
@@ -335,6 +445,11 @@ export function ScatterCanvas({
 
   const handleSelect = useCallback(
     (point: unknown) => {
+      if (suppressClickRef.current) {
+        suppressClickRef.current = false;
+        return;
+      }
+
       const modelName = (point as { modelName?: string } | undefined)?.modelName;
       if (modelName) onSelectModel?.(modelName);
     },
@@ -344,9 +459,13 @@ export function ScatterCanvas({
   return (
     <div
       ref={containerRef}
-      className="scatter-chart-surface"
+      className={`scatter-chart-surface ${isPanning ? "is-panning" : ""}`}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={endPan}
+      onPointerCancel={endPan}
       onDoubleClick={() => setZoom(null)}
-      title={isZoomed ? "双击可重置缩放" : undefined}
+      title={isZoomed ? "拖拽平移 · 滚轮缩放 · 双击重置" : "拖拽平移 · 滚轮缩放"}
     >
       <ScatterChart width={width} height={height} margin={{ ...SCATTER_CHART_MARGIN }}>
         <CartesianGrid strokeDasharray="3 3" stroke={SCATTER_GRID_STROKE} />

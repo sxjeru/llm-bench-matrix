@@ -23,7 +23,15 @@ import {
   toMetricSlug,
   toScatterMetric
 } from "@/components/model-scatter/metrics";
-import { buildScatterDataset, computeAxisDomain, computeMedian, isDomainZoomed, zoomAxisDomain } from "@/components/model-scatter/dataset";
+import {
+  buildScatterDataset,
+  clampPannedDomain,
+  computeAxisDomain,
+  computeMedian,
+  isDomainZoomed,
+  panAxisDomain,
+  zoomAxisDomain
+} from "@/components/model-scatter/dataset";
 import {
   buildPointProjections,
   computePlotArea,
@@ -422,7 +430,7 @@ describe("computeAxisDomain / computeMedian", () => {
 describe("zoomAxisDomain", () => {
   const base: [number, number] = [0, 100];
 
-  test("放大后光标底下的数值仍停在同一相对位置", () => {
+  test("放大以光标为锚点：光标底下的数值原地不动", () => {
     const anchorRatio = 0.25;
     const zoomed = zoomAxisDomain(base, base, "linear", anchorRatio, 0.5);
 
@@ -430,24 +438,44 @@ describe("zoomAxisDomain", () => {
     const anchorAfter = zoomed[0] + (zoomed[1] - zoomed[0]) * anchorRatio;
 
     expect(anchorAfter).toBeCloseTo(anchorBefore, 6);
+    expect(zoomed[1] - zoomed[0]).toBeCloseTo(50, 6);
   });
 
-  test("缩小同样锚定光标位置", () => {
-    const anchorRatio = 0.8;
-    const zoomed = zoomAxisDomain(base, base, "linear", anchorRatio, 2);
+  test("缩小不锚定光标，而是朝基准视图收敛", () => {
+    // 先放大到右上角一小块
+    const zoomedIn = zoomAxisDomain(base, base, "linear", 0.9, 0.25);
+    expect(zoomedIn[1] - zoomedIn[0]).toBeCloseTo(25, 6);
 
-    const anchorBefore = base[0] + (base[1] - base[0]) * anchorRatio;
-    const anchorAfter = zoomed[0] + (zoomed[1] - zoomed[0]) * anchorRatio;
+    const centerBefore = (zoomedIn[0] + zoomedIn[1]) / 2;
+    const baseCenter = (base[0] + base[1]) / 2;
+    expect(centerBefore).toBeGreaterThan(baseCenter);
 
-    expect(anchorAfter).toBeCloseTo(anchorBefore, 6);
+    // 缩小时无论光标在哪，中心都朝基准中心靠拢
+    const zoomedOut = zoomAxisDomain(zoomedIn, base, "linear", 0.1, 2);
+    const centerAfter = (zoomedOut[0] + zoomedOut[1]) / 2;
+
+    expect(Math.abs(centerAfter - baseCenter)).toBeLessThan(Math.abs(centerBefore - baseCenter));
   });
 
-  test("factor < 1 收窄跨度，factor > 1 放宽跨度", () => {
-    const zoomedIn = zoomAxisDomain(base, base, "linear", 0.5, 0.5);
-    const zoomedOut = zoomAxisDomain(base, base, "linear", 0.5, 2);
+  test("一直缩小最终精确还原初始视图", () => {
+    let domain = zoomAxisDomain(base, base, "linear", 0.85, 0.2);
+    expect(domain).not.toEqual(base);
 
-    expect(zoomedIn[1] - zoomedIn[0]).toBeCloseTo(50, 6);
-    expect(zoomedOut[1] - zoomedOut[0]).toBeCloseTo(200, 6);
+    for (let step = 0; step < 40; step += 1) {
+      domain = zoomAxisDomain(domain, base, "linear", 0.3, 1.18);
+    }
+
+    expect(domain[0]).toBeCloseTo(base[0], 6);
+    expect(domain[1]).toBeCloseTo(base[1], 6);
+  });
+
+  test("缩小的尽头就是基准视图，不会再往外撑", () => {
+    let domain: [number, number] = [...base];
+    for (let step = 0; step < 20; step += 1) {
+      domain = zoomAxisDomain(domain, base, "linear", 0.5, 2);
+    }
+
+    expect(domain[1] - domain[0]).toBeCloseTo(100, 6);
   });
 
   test("对数轴在 log 空间等比缩放，结果保持为正", () => {
@@ -461,6 +489,18 @@ describe("zoomAxisDomain", () => {
     expect(Math.log10(zoomed[1]) - Math.log10(zoomed[0])).toBeCloseTo(1.5, 6);
   });
 
+  test("对数轴缩小同样收敛回基准", () => {
+    const logBase: [number, number] = [0.1, 100];
+    let domain = zoomAxisDomain(logBase, logBase, "log", 0.9, 0.3);
+
+    for (let step = 0; step < 40; step += 1) {
+      domain = zoomAxisDomain(domain, logBase, "log", 0.2, 1.18);
+    }
+
+    expect(domain[0]).toBeCloseTo(logBase[0], 6);
+    expect(domain[1]).toBeCloseTo(logBase[1], 6);
+  });
+
   test("放大有下限，不会无限缩到一个点", () => {
     let domain: [number, number] = [...base];
     for (let step = 0; step < 60; step += 1) {
@@ -469,15 +509,6 @@ describe("zoomAxisDomain", () => {
 
     expect(domain[1] - domain[0]).toBeGreaterThan(0);
     expect(domain[1] - domain[0]).toBeCloseTo(100 / 40, 6);
-  });
-
-  test("缩小有上限，不会把数据缩成一团", () => {
-    let domain: [number, number] = [...base];
-    for (let step = 0; step < 60; step += 1) {
-      domain = zoomAxisDomain(domain, base, "linear", 0.5, 2);
-    }
-
-    expect(domain[1] - domain[0]).toBeCloseTo(400, 6);
   });
 
   test("退化值域原样返回", () => {
@@ -491,6 +522,61 @@ describe("zoomAxisDomain", () => {
     expect(zoomAxisDomain(base, base, "linear", 9, 0.5)).toEqual(
       zoomAxisDomain(base, base, "linear", 1, 0.5)
     );
+  });
+});
+
+describe("panAxisDomain / clampPannedDomain", () => {
+  const base: [number, number] = [0, 100];
+
+  test("按跨度比例整体平移，跨度不变", () => {
+    const panned = panAxisDomain([20, 60], "linear", 0.25);
+
+    expect(panned).toEqual([30, 70]);
+    expect(panned[1] - panned[0]).toBe(40);
+  });
+
+  test("负向平移方向相反", () => {
+    expect(panAxisDomain([20, 60], "linear", -0.25)).toEqual([10, 50]);
+  });
+
+  test("零位移原样返回", () => {
+    expect(panAxisDomain([20, 60], "linear", 0)).toEqual([20, 60]);
+  });
+
+  test("对数轴在 log 空间平移，比例关系保持不变", () => {
+    const panned = panAxisDomain([1, 100], "log", 0.5);
+
+    // log 空间跨度 2，位移 1 个数量级
+    expect(panned[0]).toBeCloseTo(10, 6);
+    expect(panned[1]).toBeCloseTo(1000, 6);
+    expect(panned[1] / panned[0]).toBeCloseTo(100, 6);
+  });
+
+  test("视图中心留在基准值域内时不做限制", () => {
+    expect(clampPannedDomain([20, 60], base, "linear")).toEqual([20, 60]);
+  });
+
+  test("拖过头时把中心拉回基准值域边界", () => {
+    const clamped = clampPannedDomain([500, 540], base, "linear");
+
+    const center = (clamped[0] + clamped[1]) / 2;
+    expect(center).toBeCloseTo(100, 6);
+    // 跨度不受影响
+    expect(clamped[1] - clamped[0]).toBeCloseTo(40, 6);
+  });
+
+  test("反方向拖过头同样被拉回", () => {
+    const clamped = clampPannedDomain([-500, -460], base, "linear");
+    const center = (clamped[0] + clamped[1]) / 2;
+
+    expect(center).toBeCloseTo(0, 6);
+  });
+
+  test("对数轴的限制在 log 空间生效且结果为正", () => {
+    const clamped = clampPannedDomain([10000, 100000], [0.1, 100] as [number, number], "log");
+
+    expect(clamped[0]).toBeGreaterThan(0);
+    expect(Math.log10(clamped[0] * clamped[1]) / 2).toBeCloseTo(2, 6);
   });
 });
 

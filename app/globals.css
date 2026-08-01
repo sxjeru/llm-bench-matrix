@@ -1082,14 +1082,35 @@ input.heatmap-alpha-range::-moz-range-track {
   position: relative;
 }
 
-/* 滚轮缩放的接管区：默认不让浏览器把手势当页面滚动 */
+/* 滚轮缩放与拖拽平移的接管区：默认不让浏览器把手势当页面滚动 */
 .scatter-chart-surface {
   position: relative;
   touch-action: pan-y;
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.scatter-chart-surface.is-panning {
+  cursor: grabbing;
 }
 
 .scatter-chart-surface .recharts-scatter-symbol {
   cursor: pointer;
+}
+
+/* 焦点框的来源有两处：Recharts 的 accessibilityLayer 给根 svg 加了 tabIndex=0，
+   它的 z-index 分层 <g> 还各自带着 tabIndex=-1。后者在 Chrome 里照样能被鼠标点中
+   并获得焦点，而焦点框是套在这个 <g> 的包围盒上的 —— 那个盒子罩着全部散点，
+   看起来就是「整张图被框住」。所以图表区域内的焦点一律压掉默认框，
+   再单独给根 svg 的键盘焦点补一个明确指示，可访问性不丢。 */
+.scatter-chart-surface :focus {
+  outline: none;
+}
+
+.scatter-chart-surface .recharts-surface:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary) 65%, transparent);
+  outline-offset: -2px;
 }
 
 .scatter-chart-placeholder,

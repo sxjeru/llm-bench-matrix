@@ -539,6 +539,31 @@ describe("ScatterCanvas", () => {
     expect(onZoomChange).toHaveBeenLastCalledWith(false);
   });
 
+  test("图表内除根 svg 外还有 tabindex=-1 的分层容器（焦点框压制必须覆盖后代）", () => {
+    const { container } = renderCanvas();
+
+    const surface = container.querySelector(".recharts-surface");
+    expect(surface?.getAttribute("tabindex")).toBe("0");
+
+    // 这些 <g> 只是 Recharts 的 z-index 排版容器，却带着 tabindex=-1。
+    // Chrome 里它们能被鼠标点中并获得焦点，焦点框套在其包围盒上就成了「整张图被框住」。
+    // globals.css 里的压制规则因此必须写成 `.scatter-chart-surface :focus`，
+    // 只盯着 .recharts-surface 是不够的 —— 这条测试就是为了守住这个前提。
+    const focusableLayers = container.querySelectorAll('.recharts-surface [tabindex="-1"]');
+    expect(focusableLayers.length).toBeGreaterThan(0);
+  });
+
+  test("钉住标记用模型自己的品牌色，不画白环", () => {
+    const { container } = renderCanvas({ highlightedModel: "Alpha" });
+
+    const strokes = Array.from(container.querySelectorAll(".recharts-scatter-symbol circle"))
+      .map((node) => (node.getAttribute("stroke") ?? "").toLowerCase());
+
+    // 纯白硬边会被误读成浏览器焦点框
+    expect(strokes.some((stroke) => stroke === "#ffffff" || stroke === "white")).toBe(false);
+    expect(strokes).toContain("#ff5533");
+  });
+
   test("反复切换标签模式不会触发渲染循环", () => {
     const { container, rerender } = render(
       <ScatterCanvas {...canvasProps} labelMode="auto" />
@@ -551,6 +576,109 @@ describe("ScatterCanvas", () => {
     }
 
     expect(container.querySelectorAll(".recharts-scatter-symbol").length).toBe(dataset.points.length);
+  });
+});
+
+describe("ScatterCanvas 拖拽平移", () => {
+  function setupSurface(overrides: Partial<React.ComponentProps<typeof ScatterCanvas>> = {}) {
+    const view = render(<ScatterCanvas {...canvasProps} {...overrides} />);
+    const surface = view.container.querySelector(".scatter-chart-surface") as HTMLElement;
+    stubSurfaceRect(surface);
+    surface.setPointerCapture = () => {};
+    surface.releasePointerCapture = () => {};
+    return { ...view, surface };
+  }
+
+  function dotPositions(container: HTMLElement): string {
+    return Array.from(container.querySelectorAll(".recharts-scatter-symbol circle"))
+      .map((node) => `${node.getAttribute("cx")},${node.getAttribute("cy")}`)
+      .join("|");
+  }
+
+  test("在绘图区内按住拖动会平移视图", () => {
+    const { container, surface } = setupSurface();
+    const before = dotPositions(container);
+
+    fireEvent.pointerDown(surface, { pointerId: 1, button: 0, clientX: 300, clientY: 200 });
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: 360, clientY: 230 });
+    fireEvent.pointerUp(surface, { pointerId: 1 });
+
+    expect(dotPositions(container)).not.toBe(before);
+  });
+
+  test("拖拽期间标记 is-panning，松手后恢复", () => {
+    const { surface } = setupSurface();
+
+    fireEvent.pointerDown(surface, { pointerId: 1, button: 0, clientX: 300, clientY: 200 });
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: 340, clientY: 200 });
+    expect(surface.classList.contains("is-panning")).toBe(true);
+
+    fireEvent.pointerUp(surface, { pointerId: 1 });
+    expect(surface.classList.contains("is-panning")).toBe(false);
+  });
+
+  test("绘图区之外按下不启动平移", () => {
+    const { container, surface } = setupSurface();
+    const before = dotPositions(container);
+
+    // 落在底部坐标轴区域
+    fireEvent.pointerDown(surface, { pointerId: 1, button: 0, clientX: 300, clientY: 415 });
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: 360, clientY: 415 });
+    fireEvent.pointerUp(surface, { pointerId: 1 });
+
+    expect(dotPositions(container)).toBe(before);
+    expect(surface.classList.contains("is-panning")).toBe(false);
+  });
+
+  test("右键按下不触发平移", () => {
+    const { container, surface } = setupSurface();
+    const before = dotPositions(container);
+
+    fireEvent.pointerDown(surface, { pointerId: 1, button: 2, clientX: 300, clientY: 200 });
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: 360, clientY: 230 });
+
+    expect(dotPositions(container)).toBe(before);
+  });
+
+  test("平移会被判为已缩放，从而给出重置入口", () => {
+    const onZoomChange = vi.fn();
+    const { surface } = setupSurface({ onZoomChange });
+
+    fireEvent.pointerDown(surface, { pointerId: 1, button: 0, clientX: 300, clientY: 200 });
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: 360, clientY: 200 });
+    fireEvent.pointerUp(surface, { pointerId: 1 });
+
+    expect(onZoomChange).toHaveBeenLastCalledWith(true);
+
+    fireEvent.doubleClick(surface);
+    expect(onZoomChange).toHaveBeenLastCalledWith(false);
+  });
+
+  test("原地轻点仍然可以钉住模型", () => {
+    const onSelectModel = vi.fn();
+    const { container, surface } = setupSurface({ onSelectModel });
+
+    fireEvent.pointerDown(surface, { pointerId: 1, button: 0, clientX: 300, clientY: 200 });
+    fireEvent.pointerUp(surface, { pointerId: 1 });
+
+    const symbol = container.querySelector(".recharts-scatter-symbol") as HTMLElement;
+    fireEvent.click(symbol);
+
+    expect(onSelectModel).toHaveBeenCalledTimes(1);
+  });
+
+  test("拖拽之后紧跟的点击不会误钉模型", () => {
+    const onSelectModel = vi.fn();
+    const { container, surface } = setupSurface({ onSelectModel });
+
+    fireEvent.pointerDown(surface, { pointerId: 1, button: 0, clientX: 300, clientY: 200 });
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: 360, clientY: 240 });
+    fireEvent.pointerUp(surface, { pointerId: 1 });
+
+    const symbol = container.querySelector(".recharts-scatter-symbol") as HTMLElement;
+    fireEvent.click(symbol);
+
+    expect(onSelectModel).not.toHaveBeenCalled();
   });
 });
 
