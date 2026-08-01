@@ -6,14 +6,20 @@
  * value_num -> activated、value_num2 -> total 的既有约定搬到模型属性上。
  *
  * 用法：
- *   node scripts/backfill-model-params.mjs            # dry-run，只打印将要写入的内容
+ *   node scripts/backfill-model-params.mjs            # dry-run，只打印将要写入/删除的内容
  *   node scripts/backfill-model-params.mjs --apply    # 实际写库
  *   node scripts/backfill-model-params.mjs --apply --force   # 连同已填写的模型一并覆盖
+ *   node scripts/backfill-model-params.mjs --apply --delete-benchmark   # 迁移后删除原 benchmark
+ *
+ * --delete-benchmark 会连带删除该 benchmark 的全部 benchmark_values 与 source 元数据
+ * （外键 ON DELETE CASCADE），不可恢复。只有当该 benchmark 下所有记录都已成功迁移时
+ * 才会执行，存在未迁移记录时会拒绝删除并列出原因，除非同时加 --force。
  *
  * 连接与 SSL 逻辑刻意与 scripts/migrate.mjs 保持一致：该脚本同样要在
  * 没有 TypeScript 编译与 Next.js 运行时的环境下直接跑。
  */
 import "dotenv/config";
+import { pathToFileURL } from "node:url";
 
 const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL || "";
 
@@ -24,6 +30,7 @@ const useNeon =
 const args = new Set(process.argv.slice(2));
 const shouldApply = args.has("--apply");
 const shouldForce = args.has("--force");
+const shouldDeleteBenchmark = args.has("--delete-benchmark");
 
 const PG_SSL_QUERY_KEYS = [
   "ssl", "sslmode", "sslcert", "sslkey",
@@ -66,11 +73,6 @@ function getSSLOptions() {
   return { ca: normalizeEnvMultiline(decoded), rejectUnauthorized: true };
 }
 
-if (!connectionString) {
-  console.error("[backfill-params] 缺少数据库连接串，请设置 DATABASE_URL 或 POSTGRES_URL。");
-  process.exit(1);
-}
-
 async function createClient() {
   if (useNeon) {
     const { Pool, neonConfig } = await import("@neondatabase/serverless");
@@ -100,7 +102,86 @@ function formatB(value) {
   return value === null ? "--" : `${Number(value.toFixed(3)).toString()}B`;
 }
 
+/**
+ * 判断一个 benchmark 是否还有「删了就会丢」的记录。
+ *
+ * 纯函数，便于单测覆盖：删除是不可逆的，这段判定是唯一的安全闸门。
+ *
+ * modelRows 来自按 model 聚合的查询，且刻意不过滤 merged_into_model_id ——
+ * 主迁移只处理活跃模型，但删除会连带清掉挂在已合并模型上的记录。
+ */
+export function computeDeletionBlocking(modelRows, plannedModelIds) {
+  return modelRows
+    // 已有参数量的模型不算阻塞；本次待写入的模型在 apply 后也会有值
+    .filter((row) => toNumber(row.total_params_b) === null && !plannedModelIds.has(row.model_id))
+    .map((row) => ({
+      modelName: row.model_name,
+      valueCount: Number(row.value_count),
+      reason: row.merged_into_model_id !== null ? "模型已被合并，未参与迁移" : "参数量未迁移成功"
+    }));
+}
+
+/** 统计每个 benchmark 的删除影响面 */
+async function buildBenchmarkDeletionPlans(client, benchmarkIds, plannedModelIds) {
+  const plans = [];
+
+  for (const benchmarkId of benchmarkIds) {
+    const { rows: metaRows } = await client.query(
+      "SELECT benchmark_name, benchmark_type FROM benchmarks WHERE id = $1",
+      [benchmarkId]
+    );
+    if (metaRows.length === 0) continue;
+
+    const { rows: modelRows } = await client.query(
+      `SELECT m.id                  AS model_id,
+              m.model_name          AS model_name,
+              m.merged_into_model_id AS merged_into_model_id,
+              m.total_params_b      AS total_params_b,
+              count(v.id)           AS value_count
+         FROM benchmark_values v
+         JOIN models m ON m.id = v.model_id
+        WHERE v.benchmark_id = $1
+        GROUP BY m.id, m.model_name, m.merged_into_model_id, m.total_params_b`,
+      [benchmarkId]
+    );
+
+    plans.push({
+      benchmarkId,
+      benchmarkName: metaRows[0].benchmark_name,
+      benchmarkType: metaRows[0].benchmark_type,
+      totalValueCount: modelRows.reduce((sum, row) => sum + Number(row.value_count), 0),
+      blocking: computeDeletionBlocking(modelRows, plannedModelIds)
+    });
+  }
+
+  return plans;
+}
+
+function printBenchmarkDeletionPlans(plans) {
+  console.log("待删除的原 benchmark：");
+  for (const plan of plans) {
+    const label = `${plan.benchmarkName}（${plan.benchmarkType}）[${plan.benchmarkId}]`;
+    if (plan.blocking.length > 0 && !shouldForce) {
+      console.log(`  ✗ ${label} — 存在未迁移记录，将跳过：`);
+      for (const item of plan.blocking) {
+        console.log(`      ${item.modelName}（${item.valueCount} 条）：${item.reason}`);
+      }
+      continue;
+    }
+
+    const forcedNote = plan.blocking.length > 0 ? "，其中含未迁移记录（--force 已放行）" : "";
+    console.log(`  ✓ ${label} — 连带删除 ${plan.totalValueCount} 条 benchmark_values${forcedNote}`);
+  }
+  console.log("");
+}
+
 async function run() {
+  if (!connectionString) {
+    console.error("[backfill-params] 缺少数据库连接串，请设置 DATABASE_URL 或 POSTGRES_URL。");
+    process.exitCode = 1;
+    return;
+  }
+
   const client = await createClient();
 
   try {
@@ -126,7 +207,9 @@ async function run() {
         v.value_num     AS value_num,
         v.value_num2    AS value_num2,
         v.bench_time    AS bench_time,
-        b.benchmark_name AS benchmark_name
+        b.id            AS benchmark_id,
+        b.benchmark_name AS benchmark_name,
+        b.benchmark_type AS benchmark_type
       FROM benchmark_values v
       JOIN benchmarks b ON b.id = v.benchmark_id
       JOIN models m ON m.id = v.model_id
@@ -209,35 +292,79 @@ async function run() {
       console.log("");
     }
 
+    const benchmarkIds = Array.from(new Set(sourceRows.map((row) => row.benchmark_id)));
+    const plannedModelIds = new Set(planned.map((item) => item.modelId));
+    const deletionPlans = shouldDeleteBenchmark
+      ? await buildBenchmarkDeletionPlans(client, benchmarkIds, plannedModelIds)
+      : [];
+
+    if (shouldDeleteBenchmark) {
+      printBenchmarkDeletionPlans(deletionPlans);
+    }
+
     if (!shouldApply) {
-      console.log("[backfill-params] dry-run 结束，未写入任何数据。确认无误后加 --apply 执行。");
+      console.log("[backfill-params] dry-run 结束，未写入或删除任何数据。确认无误后加 --apply 执行。");
       return;
     }
 
     if (planned.length === 0) {
-      console.log("[backfill-params] 没有需要写入的数据。");
+      console.log("[backfill-params] 没有需要写入的参数量。");
+    } else {
+      for (const item of planned) {
+        await client.query(
+          `UPDATE models
+             SET total_params_b = $1,
+                 activated_params_b = $2,
+                 params_note = COALESCE(params_note, $3)
+           WHERE id = $4`,
+          [item.total, item.activated, `迁移自 benchmark「${item.valueRaw}」`, item.modelId]
+        );
+      }
+
+      console.log(`[backfill-params] 已写入 ${planned.length} 个模型的参数量。`);
+    }
+
+    if (!shouldDeleteBenchmark) {
+      console.log("[backfill-params] 提示：旧的 Params benchmark 仍在库中，可加 --delete-benchmark 或在后台「数据库设置 → 删除单个 benchmark」清理。");
       return;
     }
 
-    for (const item of planned) {
-      await client.query(
-        `UPDATE models
-           SET total_params_b = $1,
-               activated_params_b = $2,
-               params_note = COALESCE(params_note, $3)
-         WHERE id = $4`,
-        [item.total, item.activated, `迁移自 benchmark「${item.valueRaw}」`, item.modelId]
+    let deletedBenchmarkCount = 0;
+    let deletedValueCount = 0;
+
+    for (const plan of deletionPlans) {
+      if (plan.blocking.length > 0 && !shouldForce) {
+        console.log(`[backfill-params] 跳过删除 ${plan.benchmarkName}：存在 ${plan.blocking.length} 个模型的记录未迁移。`);
+        continue;
+      }
+
+      // merged_into_benchmark_id 是 ON DELETE SET NULL，benchmark_values 与
+      // benchmark_source_meta 是 ON DELETE CASCADE，单条 DELETE 即可原子完成，
+      // 不必在连接池上手动开事务
+      const { rows } = await client.query(
+        "DELETE FROM benchmarks WHERE id = $1 RETURNING id, benchmark_name",
+        [plan.benchmarkId]
       );
+
+      if (rows.length > 0) {
+        deletedBenchmarkCount += 1;
+        deletedValueCount += plan.totalValueCount;
+        console.log(`[backfill-params] 已删除 benchmark：${rows[0].benchmark_name}（连带 ${plan.totalValueCount} 条记录）`);
+      }
     }
 
-    console.log(`[backfill-params] 已写入 ${planned.length} 个模型的参数量。`);
-    console.log("[backfill-params] 提示：旧的 Params benchmark 仍在库中，可在后台「数据库设置 → 删除单个 benchmark」清理。");
+    console.log(`[backfill-params] 共删除 ${deletedBenchmarkCount} 个 benchmark、${deletedValueCount} 条 benchmark_values。`);
   } finally {
     await client.end();
   }
 }
 
-run().catch((error) => {
-  console.error("[backfill-params] 执行失败：", error);
-  process.exit(1);
-});
+// 被测试 import 时不自动执行，只在直接 node 运行时跑
+const isDirectRun = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectRun) {
+  run().catch((error) => {
+    console.error("[backfill-params] 执行失败：", error);
+    process.exit(1);
+  });
+}
