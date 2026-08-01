@@ -24,6 +24,12 @@ import {
   toScatterMetric
 } from "@/components/model-scatter/metrics";
 import { buildScatterDataset, computeAxisDomain, computeMedian, isDomainZoomed, zoomAxisDomain } from "@/components/model-scatter/dataset";
+import {
+  buildPointProjections,
+  computePlotArea,
+  pixelToAxisRatio,
+  projectToPixel
+} from "@/components/model-scatter/projection";
 import { OVERALL_METRIC_SLUG } from "@/components/model-scatter/constants";
 
 function createCell(valueNum: number | null): MatrixCell {
@@ -500,5 +506,82 @@ describe("isDomainZoomed", () => {
 
   test("浮点误差不算缩放", () => {
     expect(isDomainZoomed([0, 100 + 1e-9], [0, 100])).toBe(false);
+  });
+});
+
+describe("投影", () => {
+  const margin = { top: 24, right: 32, bottom: 48, left: 16 };
+
+  test("绘图区扣掉边距与两根坐标轴", () => {
+    const plotArea = computePlotArea({ width: 640, height: 420, margin, yAxisWidth: 64, xAxisHeight: 30 });
+
+    expect(plotArea).toEqual({ left: 80, top: 24, right: 608, bottom: 342 });
+  });
+
+  test("尺寸不足以容纳坐标轴时返回 null", () => {
+    expect(computePlotArea({ width: 60, height: 420, margin, yAxisWidth: 64, xAxisHeight: 30 })).toBeNull();
+    expect(computePlotArea({ width: 640, height: 40, margin, yAxisWidth: 64, xAxisHeight: 30 })).toBeNull();
+  });
+
+  test("线性投影把值域两端映到像素两端", () => {
+    expect(projectToPixel(0, [0, 100], "linear", 80, 608)).toBeCloseTo(80, 6);
+    expect(projectToPixel(100, [0, 100], "linear", 80, 608)).toBeCloseTo(608, 6);
+    expect(projectToPixel(50, [0, 100], "linear", 80, 608)).toBeCloseTo(344, 6);
+  });
+
+  test("对数投影在 log 空间线性", () => {
+    // 0.1 → 100 共 3 个数量级，中点 10 应落在正中
+    expect(projectToPixel(10, [0.1, 100], "log", 0, 300)).toBeCloseTo(200, 6);
+    expect(projectToPixel(0.1, [0.1, 100], "log", 0, 300)).toBeCloseTo(0, 6);
+  });
+
+  test("对数轴下非正值无法投影", () => {
+    expect(projectToPixel(0, [0.1, 100], "log", 0, 300)).toBeNull();
+    expect(projectToPixel(-5, [0.1, 100], "log", 0, 300)).toBeNull();
+  });
+
+  test("退化值域与非有限值返回 null", () => {
+    expect(projectToPixel(5, [5, 5], "linear", 0, 300)).toBeNull();
+    expect(projectToPixel(Number.NaN, [0, 10], "linear", 0, 300)).toBeNull();
+  });
+
+  test("Y 轴以底边为起点，数值越大像素越小", () => {
+    const plotArea = { left: 80, top: 24, right: 608, bottom: 342 };
+    const projections = buildPointProjections({
+      points: [
+        { modelName: "high", providerName: "p", color: "#fff", x: 1, y: 100, isPareto: false },
+        { modelName: "low", providerName: "p", color: "#fff", x: 1, y: 0, isPareto: false }
+      ],
+      xDomain: [0, 10],
+      yDomain: [0, 100],
+      xScale: "linear",
+      yScale: "linear",
+      plotArea
+    });
+
+    expect(projections.get("high")!.cy).toBeCloseTo(plotArea.top, 6);
+    expect(projections.get("low")!.cy).toBeCloseTo(plotArea.bottom, 6);
+  });
+
+  test("没有绘图区时不产出任何投影", () => {
+    const projections = buildPointProjections({
+      points: [{ modelName: "a", providerName: "p", color: "#fff", x: 1, y: 1, isPareto: false }],
+      xDomain: [0, 10],
+      yDomain: [0, 10],
+      xScale: "linear",
+      yScale: "linear",
+      plotArea: null
+    });
+
+    expect(projections.size).toBe(0);
+  });
+
+  test("像素换算回轴上的相对位置", () => {
+    expect(pixelToAxisRatio(80, 80, 608)).toBeCloseTo(0, 6);
+    expect(pixelToAxisRatio(608, 80, 608)).toBeCloseTo(1, 6);
+    expect(pixelToAxisRatio(344, 80, 608)).toBeCloseTo(0.5, 6);
+    // 起终点互换（Y 轴用法）时方向随之翻转
+    expect(pixelToAxisRatio(342, 342, 24)).toBeCloseTo(0, 6);
+    expect(pixelToAxisRatio(24, 342, 24)).toBeCloseTo(1, 6);
   });
 });

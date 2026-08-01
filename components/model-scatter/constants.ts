@@ -50,6 +50,14 @@ export const SCATTER_CHART_HEIGHT = 520;
 export const SCATTER_CHART_HEIGHT_COMPACT = 400;
 export const SCATTER_CHART_COMPACT_BREAKPOINT = 768;
 export const SCATTER_CHART_MARGIN = { top: 24, right: 32, bottom: 48, left: 16 } as const;
+/**
+ * 坐标轴尺寸显式固定。
+ *
+ * 不用 `width="auto"`：那会让 Recharts 依据渲染内容反复测量并改写布局，
+ * 绘图区因此会在两个值之间抖动。固定下来，外部才能同步算出同一个绘图区。
+ */
+export const SCATTER_Y_AXIS_WIDTH = 64;
+export const SCATTER_X_AXIS_HEIGHT = 30;
 /** 全屏时图表之外（控件、说明行、图例）大致占用的高度 */
 export const SCATTER_CHART_FULLSCREEN_CHROME = 210;
 export const SCATTER_CHART_MIN_HEIGHT = 320;

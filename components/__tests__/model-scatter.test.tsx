@@ -4,7 +4,13 @@ import { describe, expect, test, vi, beforeEach } from "vitest";
 import { ModelScatter } from "@/components/model-scatter";
 import { ScatterCanvas } from "@/components/model-scatter/scatter-canvas";
 import { toScatterMetric } from "@/components/model-scatter/metrics";
-import { buildScatterDataset } from "@/components/model-scatter/dataset";
+import { buildScatterDataset, computeAxisDomain } from "@/components/model-scatter/dataset";
+import { buildPointProjections, computePlotArea } from "@/components/model-scatter/projection";
+import {
+  SCATTER_CHART_MARGIN,
+  SCATTER_X_AXIS_HEIGHT,
+  SCATTER_Y_AXIS_WIDTH
+} from "@/components/model-scatter/constants";
 import type { MatrixCell, MatrixInputRow, MatrixRow } from "@/components/benchmark-matrix/types";
 
 const replaceMock = vi.fn();
@@ -352,51 +358,66 @@ function createRow(rowKey: string, benchmark: string, values: Record<string, num
   };
 }
 
+const canvasYMetric = toScatterMetric(
+  createRow("y", "Score", { Alpha: 100, Beta: 67, Gamma: 33, Delta: 0 })
+);
+const canvasXMetric = toScatterMetric(
+  createRow("x", "Output Price", { Alpha: 10, Beta: 4, Gamma: 1, Delta: 20 }, {
+    higherIsBetter: false,
+    isPriceRow: true
+  })
+);
+
+const dataset = buildScatterDataset({
+  xMetric: canvasXMetric,
+  yMetric: canvasYMetric,
+  modelNames: ["Alpha", "Beta", "Gamma", "Delta"],
+  providerNameByModel: new Map([
+    ["Alpha", "OpenAI"],
+    ["Beta", "OpenAI"],
+    ["Gamma", "Anthropic"],
+    ["Delta", "Anthropic"]
+  ]),
+  colorByModel: new Map([["Alpha", "#ff5533"]]),
+  xScale: "linear",
+  yScale: "linear"
+});
+
+const canvasProps: React.ComponentProps<typeof ScatterCanvas> = {
+  width: 640,
+  height: 420,
+  xMetric: canvasXMetric,
+  yMetric: canvasYMetric,
+  dataset,
+  xScale: "linear",
+  yScale: "linear",
+  showPareto: true,
+  dimNonPareto: false,
+  paretoLineStyle: "linear",
+  labelMode: "auto",
+  showGuides: false,
+  highlightedModel: null
+};
+
+// jsdom 的 getBoundingClientRect 恒为 0，滚轮换算需要一个真实的矩形
+function stubSurfaceRect(surface: HTMLElement) {
+  surface.getBoundingClientRect = () =>
+    ({
+      left: 0,
+      top: 0,
+      right: canvasProps.width,
+      bottom: canvasProps.height,
+      width: canvasProps.width,
+      height: canvasProps.height,
+      x: 0,
+      y: 0,
+      toJSON: () => ({})
+    }) as DOMRect;
+}
+
 describe("ScatterCanvas", () => {
-  const yMetric = toScatterMetric(
-    createRow("y", "Score", { Alpha: 100, Beta: 67, Gamma: 33, Delta: 0 })
-  );
-  const xMetric = toScatterMetric(
-    createRow("x", "Output Price", { Alpha: 10, Beta: 4, Gamma: 1, Delta: 20 }, {
-      higherIsBetter: false,
-      isPriceRow: true
-    })
-  );
-
-  const dataset = buildScatterDataset({
-    xMetric,
-    yMetric,
-    modelNames: ["Alpha", "Beta", "Gamma", "Delta"],
-    providerNameByModel: new Map([
-      ["Alpha", "OpenAI"],
-      ["Beta", "OpenAI"],
-      ["Gamma", "Anthropic"],
-      ["Delta", "Anthropic"]
-    ]),
-    colorByModel: new Map([["Alpha", "#ff5533"]]),
-    xScale: "linear",
-    yScale: "linear"
-  });
-
   function renderCanvas(overrides: Partial<React.ComponentProps<typeof ScatterCanvas>> = {}) {
-    return render(
-      <ScatterCanvas
-        width={640}
-        height={420}
-        xMetric={xMetric}
-        yMetric={yMetric}
-        dataset={dataset}
-        xScale="linear"
-        yScale="linear"
-        showPareto
-        dimNonPareto={false}
-        paretoLineStyle="linear"
-        labelMode="auto"
-        showGuides={false}
-        highlightedModel={null}
-        {...overrides}
-      />
-    );
+    return render(<ScatterCanvas {...canvasProps} {...overrides} />);
   }
 
   test("每个数据点都画出一个散点", () => {
@@ -445,25 +466,20 @@ describe("ScatterCanvas", () => {
   });
 
   test("滚轮在绘图区内缩放并阻止页面滚动", () => {
-    const { container } = renderCanvas();
+    const onZoomChange = vi.fn();
+    const { container } = renderCanvas({ onZoomChange });
     const surface = container.querySelector(".scatter-chart-surface") as HTMLElement;
     expect(surface).not.toBeNull();
 
-    const tickTextBefore = Array.from(container.querySelectorAll(".recharts-xAxis .recharts-cartesian-axis-tick-value"))
-      .map((node) => node.textContent)
-      .join("|");
+    const dotPositions = () =>
+      Array.from(container.querySelectorAll(".recharts-scatter-symbol circle"))
+        .map((node) => `${node.getAttribute("cx")},${node.getAttribute("cy")}`)
+        .join("|");
 
-    surface.getBoundingClientRect = () => ({
-      left: 0,
-      top: 0,
-      right: 640,
-      bottom: 420,
-      width: 640,
-      height: 420,
-      x: 0,
-      y: 0,
-      toJSON: () => ({})
-    }) as DOMRect;
+    const before = dotPositions();
+    expect(before).not.toBe("");
+
+    stubSurfaceRect(surface);
 
     const wheelEvent = new WheelEvent("wheel", {
       deltaY: -120,
@@ -478,29 +494,16 @@ describe("ScatterCanvas", () => {
     });
 
     expect(wheelEvent.defaultPrevented).toBe(true);
-
-    const tickTextAfter = Array.from(container.querySelectorAll(".recharts-xAxis .recharts-cartesian-axis-tick-value"))
-      .map((node) => node.textContent)
-      .join("|");
-
-    expect(tickTextAfter).not.toBe(tickTextBefore);
+    expect(onZoomChange).toHaveBeenLastCalledWith(true);
+    // 缩放必须真的挪动落点，而不只是改了内部状态
+    expect(dotPositions()).not.toBe(before);
   });
 
   test("绘图区之外的滚轮不拦截页面滚动", () => {
     const { container } = renderCanvas();
     const surface = container.querySelector(".scatter-chart-surface") as HTMLElement;
 
-    surface.getBoundingClientRect = () => ({
-      left: 0,
-      top: 0,
-      right: 640,
-      bottom: 420,
-      width: 640,
-      height: 420,
-      x: 0,
-      y: 0,
-      toJSON: () => ({})
-    }) as DOMRect;
+    stubSurfaceRect(surface);
 
     // 落在下方坐标轴标题区域，不属于绘图区
     const wheelEvent = new WheelEvent("wheel", {
@@ -523,17 +526,7 @@ describe("ScatterCanvas", () => {
     const { container } = renderCanvas({ onZoomChange });
     const surface = container.querySelector(".scatter-chart-surface") as HTMLElement;
 
-    surface.getBoundingClientRect = () => ({
-      left: 0,
-      top: 0,
-      right: 640,
-      bottom: 420,
-      width: 640,
-      height: 420,
-      x: 0,
-      y: 0,
-      toJSON: () => ({})
-    }) as DOMRect;
+    stubSurfaceRect(surface);
 
     act(() => {
       surface.dispatchEvent(
@@ -544,5 +537,61 @@ describe("ScatterCanvas", () => {
 
     fireEvent.doubleClick(surface);
     expect(onZoomChange).toHaveBeenLastCalledWith(false);
+  });
+
+  test("反复切换标签模式不会触发渲染循环", () => {
+    const { container, rerender } = render(
+      <ScatterCanvas {...canvasProps} labelMode="auto" />
+    );
+
+    for (let round = 0; round < 5; round += 1) {
+      rerender(<ScatterCanvas {...canvasProps} labelMode="none" />);
+      rerender(<ScatterCanvas {...canvasProps} labelMode="all" />);
+      rerender(<ScatterCanvas {...canvasProps} labelMode="auto" />);
+    }
+
+    expect(container.querySelectorAll(".recharts-scatter-symbol").length).toBe(dataset.points.length);
+  });
+});
+
+describe("散点投影", () => {
+  test("自算的像素位置与 Recharts 实际渲染的落点一致", () => {
+    // 标签靠这套投影定位；一旦与 Recharts 的布局脱节，标签就会飘到别的点旁边
+    const { container } = render(<ScatterCanvas {...canvasProps} labelMode="none" />);
+
+    const plotArea = computePlotArea({
+      width: canvasProps.width,
+      height: canvasProps.height,
+      margin: SCATTER_CHART_MARGIN,
+      yAxisWidth: SCATTER_Y_AXIS_WIDTH,
+      xAxisHeight: SCATTER_X_AXIS_HEIGHT
+    });
+    expect(plotArea).not.toBeNull();
+
+    const projections = buildPointProjections({
+      points: dataset.points,
+      xDomain: computeAxisDomain(dataset.points.map((point) => point.x), "linear"),
+      yDomain: computeAxisDomain(dataset.points.map((point) => point.y), "linear"),
+      xScale: "linear",
+      yScale: "linear",
+      plotArea
+    });
+
+    const renderedDots = Array.from(container.querySelectorAll(".recharts-scatter-symbol circle"));
+    expect(renderedDots.length).toBe(dataset.points.length);
+
+    const renderedPositions = renderedDots
+      .map((node) => ({
+        cx: Number(node.getAttribute("cx")),
+        cy: Number(node.getAttribute("cy"))
+      }))
+      .sort((left, right) => left.cx - right.cx);
+
+    const projectedPositions = Array.from(projections.values()).sort((left, right) => left.cx - right.cx);
+
+    projectedPositions.forEach((projected, index) => {
+      expect(projected.cx).toBeCloseTo(renderedPositions[index]!.cx, 1);
+      expect(projected.cy).toBeCloseTo(renderedPositions[index]!.cy, 1);
+    });
   });
 });
