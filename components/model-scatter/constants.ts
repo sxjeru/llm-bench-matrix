@@ -89,7 +89,13 @@ export const SCATTER_CURSOR_WIDTH = 1.25;
 export const SCATTER_CURSOR_DASH = "4 3";
 /** 最优象限底色：两轴都优于中位数的那一块，取 --success 的极淡版本 */
 export const SCATTER_BEST_QUADRANT_FILL = "rgba(101, 212, 143, 0.08)";
-export const SCATTER_LABEL_COLOR = "#dbe3f5";
+/**
+ * 标签描边：深色底上给彩色字描一圈晕边，压过网格线。
+ * 描边保持偏细，清晰度主要靠字重与品牌色本身的对比度。
+ */
+export const SCATTER_LABEL_STROKE = "rgba(11, 16, 32, 0.88)";
+export const SCATTER_LABEL_STROKE_WIDTH = 2.25;
+export const SCATTER_LABEL_STROKE_WIDTH_HIGHLIGHTED = 2.75;
 export const SCATTER_DIMMED_OPACITY = 0.28;
 
 /** 对数轴 domain 在 log 空间的两端留白比例 */

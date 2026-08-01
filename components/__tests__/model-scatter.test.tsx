@@ -506,7 +506,12 @@ const dataset = buildScatterDataset({
     ["Gamma", "Anthropic"],
     ["Delta", "Anthropic"]
   ]),
-  colorByModel: new Map([["Alpha", "#ff5533"]]),
+  colorByModel: new Map([
+    ["Alpha", "#ff5533"],
+    ["Beta", "#34d399"],
+    ["Gamma", "#e09a0e"],
+    ["Delta", "#a16dfa"]
+  ]),
   xScale: "linear",
   yScale: "linear"
 });
@@ -571,6 +576,22 @@ describe("ScatterCanvas", () => {
     const { container } = renderCanvas({ labelMode: "none" });
 
     expect(container.querySelectorAll(".recharts-scatter-symbol text").length).toBe(0);
+  });
+
+  test("模型名标签跟散点同色，并带深色描边", () => {
+    const { container } = renderCanvas({ labelMode: "all" });
+    const colorByModel = new Map(dataset.points.map((point) => [point.modelName, point.color]));
+
+    const labels = Array.from(container.querySelectorAll(".recharts-scatter-symbol text"));
+    expect(labels.length).toBe(dataset.points.length);
+
+    labels.forEach((node) => {
+      const modelName = node.textContent ?? "";
+      expect(node.getAttribute("fill")?.toLowerCase()).toBe(colorByModel.get(modelName)?.toLowerCase());
+      expect(node.getAttribute("stroke")).toBe("rgba(11, 16, 32, 0.88)");
+      expect(Number(node.getAttribute("stroke-width"))).toBeGreaterThanOrEqual(2.25);
+      expect(node.getAttribute("paint-order")).toBe("stroke");
+    });
   });
 
   test("标签画进散点的命中区内，鼠标移到文字上也能触发浮窗", () => {

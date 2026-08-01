@@ -13,9 +13,11 @@ import {
   SCATTER_DOT_RADIUS,
   SCATTER_DOT_RADIUS_PARETO,
   SCATTER_GRID_STROKE,
-  SCATTER_LABEL_COLOR,
   SCATTER_LABEL_FONT_SIZE,
   SCATTER_LABEL_GAP,
+  SCATTER_LABEL_STROKE,
+  SCATTER_LABEL_STROKE_WIDTH,
+  SCATTER_LABEL_STROKE_WIDTH_HIGHLIGHTED,
   SCATTER_WHEEL_ZOOM_STEP,
   SCATTER_X_AXIS_HEIGHT,
   SCATTER_Y_AXIS_WIDTH
@@ -479,11 +481,13 @@ export function ScatterCanvas({
                 textAnchor={label.textAnchor}
                 dominantBaseline="central"
                 fontSize={SCATTER_LABEL_FONT_SIZE}
-                fill={isHighlighted ? "#ffffff" : SCATTER_LABEL_COLOR}
-                fontWeight={isHighlighted ? 700 : 500}
-                // 深色底上给文字描一圈底色，压过网格线与散点边缘
-                stroke="rgba(11, 16, 32, 0.85)"
-                strokeWidth={2.5}
+                // 标签跟散点同色，一眼能把名字和点对上；品牌色本身已按深色主题抬过对比度
+                fill={payload.color}
+                fontWeight={isHighlighted ? 700 : 600}
+                stroke={SCATTER_LABEL_STROKE}
+                strokeWidth={
+                  isHighlighted ? SCATTER_LABEL_STROKE_WIDTH_HIGHLIGHTED : SCATTER_LABEL_STROKE_WIDTH
+                }
                 paintOrder="stroke"
                 strokeLinejoin="round"
               >
