@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db/client";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 import { normalizeProviderConfig } from "@/lib/provider-config";
-import { bumpCacheVersions, getCacheVersion } from "@/lib/cache-versions";
+import { bumpCacheVersions, getCacheVersion, type CacheVersionDomain } from "@/lib/cache-versions";
 import { createVersionedCacheStore, invalidateVersionedCacheStore, withVersionedCache } from "@/lib/server-cache";
 import { invalidateModelPricingCaches } from "@/lib/model-pricing";
 
@@ -56,11 +56,18 @@ export function registerCacheInvalidator(fn: () => void) {
   cacheInvalidators.push(fn);
 }
 
+/** invalidateAllCaches 默认会 bump 的缓存版本域 */
+const ALL_CACHE_VERSION_DOMAINS: CacheVersionDomain[] = ["dashboard", "pricing", "admin_entities"];
+
 /**
  * Clear dashboard caches after admin write operations
  * (import, merge, delete, etc.) so subsequent reads reflect updated data.
+ *
+ * skipVersionBump 用于调用链上已经 bump 过的域：lib/model-pricing 的写函数内部会
+ * 自行 bump "pricing"，价格相关路由再无条件走这里就会重复写一次 settings 表。
+ * 只跳过版本号 bump，进程内缓存仍然照常清空（清 Map 是幂等的，成本可忽略）。
  */
-export async function invalidateAllCaches() {
+export async function invalidateAllCaches(options?: { skipVersionBump?: CacheVersionDomain[] }) {
   invalidateVersionedCacheStore(dashboardRowsStore);
   invalidateVersionedCacheStore(dashboardStatsStore);
   invalidateVersionedCacheStore(sourceOptionsStore);
@@ -70,10 +77,14 @@ export async function invalidateAllCaches() {
     fn();
   }
 
-  await bumpCacheVersions(["dashboard", "pricing", "admin_entities"]);
+  const skipped = new Set(options?.skipVersionBump ?? []);
+  await bumpCacheVersions(ALL_CACHE_VERSION_DOMAINS.filter((domain) => !skipped.has(domain)));
 
   try {
-    revalidatePath("/");
+    // "/" 和 "/scatter" 都声明了 revalidate = false，且共用同一批 dashboard/价格/参数量数据。
+    // 单参数的 revalidatePath("/") 只作用于首页，会把 /scatter 留在陈旧的静态输出上，
+    // 故用 layout 形式一次覆盖 root layout 下的全部路由。
+    revalidatePath("/", "layout");
   } catch (error) {
     if (error instanceof Error && error.message.includes("static generation store missing")) {
       return;

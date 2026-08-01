@@ -16,11 +16,6 @@ type MetricComboboxProps = {
   onQueryChange?: (query: string) => void;
 };
 
-type FlatOption = {
-  metric: ScatterMetric;
-  index: number;
-};
-
 function matchesQuery(metric: ScatterMetric, category: string, query: string): boolean {
   if (!query) return true;
   return (
@@ -63,14 +58,16 @@ export function MetricCombobox({
       .filter((group) => group.metrics.length > 0);
   }, [metricGroups, normalizedQuery]);
 
-  const flatOptions = useMemo<FlatOption[]>(() => {
-    const options: FlatOption[] = [];
-    filteredGroups.forEach((group) => {
-      group.metrics.forEach((item) => {
-        options.push({ metric: item, index: options.length });
-      });
+  // 分组渲染顺序与扁平顺序逐项一致，于是每组记一个起始下标，渲染时累加即可拿到
+  // 全局序号 —— 不必反过来按 key 回查扁平表。
+  const { renderGroups, flatOptions } = useMemo(() => {
+    const flat: ScatterMetric[] = [];
+    const groups = filteredGroups.map((group) => {
+      const startIndex = flat.length;
+      flat.push(...group.metrics);
+      return { ...group, startIndex };
     });
-    return options;
+    return { renderGroups: groups, flatOptions: flat };
   }, [filteredGroups]);
 
   // 结果集变小后旧下标可能越界，渲染期直接钳一下即可，不必再多走一轮 setState
@@ -136,7 +133,7 @@ export function MetricCombobox({
       const option = flatOptions[activeOptionIndex];
       if (option) {
         event.preventDefault();
-        selectOption(option.metric.key);
+        selectOption(option.key);
       }
       return;
     }
@@ -188,13 +185,12 @@ export function MetricCombobox({
               没有匹配的指标
             </li>
           ) : (
-            filteredGroups.map((group) => (
+            renderGroups.map((group) => (
               <li key={group.category} role="presentation">
                 <div className="scatter-combobox-group">{group.category}</div>
                 <ul role="group" aria-label={group.category}>
-                  {group.metrics.map((item) => {
-                    const option = flatOptions.find((entry) => entry.metric.key === item.key);
-                    const optionIndex = option?.index ?? -1;
+                  {group.metrics.map((item, itemIndex) => {
+                    const optionIndex = group.startIndex + itemIndex;
                     const isActive = optionIndex === activeOptionIndex;
                     const isSelected = item.key === metric?.key;
 
