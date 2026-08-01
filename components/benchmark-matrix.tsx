@@ -10,7 +10,7 @@ import {
   useRef,
   useState
 } from "react";
-import type { MouseEvent as ReactMouseEvent } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Check,
@@ -57,6 +57,7 @@ import {
   buildOverallHeatRange,
   buildOverallScoreDisplayDecimalsByModel,
   buildOverallSummaryByModel,
+  buildParamsMatrixRows,
   buildPriceMatrixRows,
   buildProviderAverageCoveragePercentMap,
   buildProviderGroups,
@@ -84,6 +85,8 @@ import {
   type BenchmarkRankingScope,
   SOURCE_ALL,
   OVERALL_ROW_KEY,
+  PARAMS_ACTIVE_RATIO_ROW_KEY,
+  PARAMS_ROW_KEY,
   PRICE_CACHE_INPUT_ROW_KEY,
   PRICE_INPUT_ROW_KEY,
   PRICE_OUTPUT_ROW_KEY,
@@ -103,7 +106,7 @@ import {
   DEFAULT_EXPORT_PRESET,
   DEFAULT_HEATMAP_PALETTE_HEX,
   isLowerBetterBenchmark,
-  getBenchmarkComparableScore,
+  getMatrixRowComparableScore,
   getSortedQuantile,
   formatComparisonDeltaValue,
   getMatrixCellPairDisplayParts,
@@ -134,18 +137,38 @@ const PRICE_ROW_KEY_SET = new Set([
   PRICE_CACHE_INPUT_ROW_KEY
 ]);
 
+const PARAMS_ROW_KEY_SET = new Set([
+  PARAMS_ROW_KEY,
+  PARAMS_ACTIVE_RATIO_ROW_KEY
+]);
+
 const RANKING_POPOVER_GAP = 8;
 const RANKING_POPOVER_MARGIN = 16;
 const RANKING_POPOVER_MAX_WIDTH = 860;
 const FRONTEND_TABLE_PAIR_VALUE_REGEX =
   /^\s*((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?[^\s/]*)\s*\/\s*((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?.*)\s*$/;
+const PAIR_VALUE_SLASH_CLASS_NAME = "mx-[2px] opacity-85";
 
-function formatFrontendTableCellText(value: string): string {
+/**
+ * 单元格里的「A / B」两段值。
+ *
+ * 与 valueNum + valueNum2 的 pair 单元格渲染保持一致：去掉原始空格避免占宽，
+ * 再由斜杠自己带 2px 外边距，这样 `13B / 284B` 两段仍然分得开。
+ * 名次样式只落在两侧的数值上，斜杠保持中性 —— 否则加粗会把分隔符也吃进去，
+ * 第二名的下划线还会连成一条横穿整格的线。
+ */
+function renderFrontendTableCellText(value: string, segmentStyle?: CSSProperties): ReactNode {
   const pairMatch = value.match(FRONTEND_TABLE_PAIR_VALUE_REGEX);
-  if (!pairMatch) return value;
+  if (!pairMatch) return <span style={segmentStyle}>{value}</span>;
 
   const [, first, second] = pairMatch;
-  return `${first.trim()}/${second.trim()}`;
+  return (
+    <span className="inline-flex items-center gap-0 leading-none">
+      <span style={segmentStyle}>{first.trim()}</span>
+      <span className={PAIR_VALUE_SLASH_CLASS_NAME}>/</span>
+      <span style={segmentStyle}>{second.trim()}</span>
+    </span>
+  );
 }
 
 export function BenchmarkMatrix({
@@ -153,6 +176,7 @@ export function BenchmarkMatrix({
   allRows = rows,
   sourceOptions: allSourceOptions = [],
   modelPrices = [],
+  modelParams = [],
   exportFootnoteText,
   exportFootnoteAlign
 }: Props) {
@@ -167,6 +191,9 @@ export function BenchmarkMatrix({
   const showDuplicateLoadedRef = useRef(false);
   const showSourceValuesLoadedRef = useRef(false);
   const showPriceRowsLoadedRef = useRef(false);
+  const showParamsRowsLoadedRef = useRef(false);
+  const priceRowsInOverallLoadedRef = useRef(false);
+  const paramsRowsInOverallLoadedRef = useRef(false);
   const modelSelectionBySourceRef = useRef<Record<string, string[]>>({});
   const isSyncingSelectionFromSourceRef = useRef(false);
   const skipSelectionPersistenceOnceRef = useRef(false);
@@ -186,6 +213,10 @@ export function BenchmarkMatrix({
   const [showSourceValues, setShowSourceValues] = useState(false);
   const [showSourceValueDeltas, setShowSourceValueDeltas] = useState(false);
   const [showPriceRows, setShowPriceRows] = useState(false);
+  const [showParamsRows, setShowParamsRows] = useState(false);
+  // 价格与参数量默认都只作参考：便宜或参数小并不直接等于模型更好，需要 Ctrl 点击开关显式纳入
+  const [priceRowsInOverall, setPriceRowsInOverall] = useState(false);
+  const [paramsRowsInOverall, setParamsRowsInOverall] = useState(false);
   const [showLowCoverageRows, setShowLowCoverageRows] = useState(false);
   const [isClientReady, setIsClientReady] = useState(false);
   const [isModelSelectionLoaded, setIsModelSelectionLoaded] = useState(false);
@@ -301,6 +332,8 @@ export function BenchmarkMatrix({
   const displaySourceValuesInCells = showSourceValues && hasSourceData && activeSource !== SOURCE_ALL;
   const displaySourceValueDeltasInCells = displaySourceValuesInCells && showSourceValueDeltas;
   const effectiveShowPriceRows = showPriceRows && modelPrices.length > 0;
+  const hasParamsData = modelParams.length > 0;
+  const effectiveShowParamsRows = showParamsRows && hasParamsData;
 
   useEffect(() => {
     enqueueStateUpdate(() => setIsClientReady(true));
@@ -334,7 +367,16 @@ export function BenchmarkMatrix({
     setShowSourceValues,
     showPriceRowsLoadedRef,
     showPriceRows,
-    setShowPriceRows
+    setShowPriceRows,
+    showParamsRowsLoadedRef,
+    showParamsRows,
+    setShowParamsRows,
+    priceRowsInOverallLoadedRef,
+    priceRowsInOverall,
+    setPriceRowsInOverall,
+    paramsRowsInOverallLoadedRef,
+    paramsRowsInOverall,
+    setParamsRowsInOverall
   });
 
   useEffect(() => {
@@ -792,18 +834,19 @@ export function BenchmarkMatrix({
     [activeSource, filteredRows, showDuplicateRows, showLowCoverageRows]
   );
 
-  const isPriceRowSortKey = columnSortBenchmarkKey !== null && PRICE_ROW_KEY_SET.has(columnSortBenchmarkKey);
+  const isSyntheticRowSortKey = columnSortBenchmarkKey !== null
+    && (PRICE_ROW_KEY_SET.has(columnSortBenchmarkKey) || PARAMS_ROW_KEY_SET.has(columnSortBenchmarkKey));
 
   const baseModelColumns = useMemo<readonly string[]>(
     () => buildModelColumns(
       coveragePrunedRows,
       sourceModelHint,
-      columnSortBenchmarkKey === OVERALL_ROW_KEY || isPriceRowSortKey ? null : columnSortBenchmarkKey,
+      columnSortBenchmarkKey === OVERALL_ROW_KEY || isSyntheticRowSortKey ? null : columnSortBenchmarkKey,
       showDuplicateRows,
       modelOrderBySource,
       activeSource
     ),
-    [coveragePrunedRows, sourceModelHint, columnSortBenchmarkKey, isPriceRowSortKey, showDuplicateRows, modelOrderBySource, activeSource]
+    [coveragePrunedRows, sourceModelHint, columnSortBenchmarkKey, isSyntheticRowSortKey, showDuplicateRows, modelOrderBySource, activeSource]
   );
 
   const matrixRows = useMemo(
@@ -879,6 +922,18 @@ export function BenchmarkMatrix({
     [priceMatrixRows, temporarilyHiddenRowKeySet]
   );
 
+  const paramsMatrixRows = useMemo(
+    () => effectiveShowParamsRows ? buildParamsMatrixRows(baseModelColumns, modelParams) : [],
+    [effectiveShowParamsRows, baseModelColumns, modelParams]
+  );
+
+  const visibleParamsMatrixRows = useMemo(
+    () => temporarilyHiddenRowKeySet.size === 0
+      ? paramsMatrixRows
+      : paramsMatrixRows.filter((row) => !temporarilyHiddenRowKeySet.has(row.rowKey)),
+    [paramsMatrixRows, temporarilyHiddenRowKeySet]
+  );
+
   const benchmarkRankingModelNames = useMemo(
     () => Array.from(baseModelNameSet),
     [baseModelNameSet]
@@ -895,17 +950,37 @@ export function BenchmarkMatrix({
       }
     });
 
+    modelParams.forEach((params) => {
+      if (!seen.has(params.modelName)) {
+        seen.add(params.modelName);
+        ordered.push(params.modelName);
+      }
+    });
+
     return ordered;
-  }, [allRowsWithSourceMeta, modelPrices]);
+  }, [allRowsWithSourceMeta, modelPrices, modelParams]);
+
+  // 只有「显示 + 计入总评」同时成立的合成行才进入 Overall 打分
+  const includePriceRowsInOverall = effectiveShowPriceRows && priceRowsInOverall;
+  const includeParamsRowsInOverall = effectiveShowParamsRows && paramsRowsInOverall;
 
   const summaryMatrixRows = useMemo(
-    () => effectiveShowPriceRows ? [...visiblePriceMatrixRows, ...visiblePresenceFilteredMatrixRows] : visiblePresenceFilteredMatrixRows,
-    [effectiveShowPriceRows, visiblePriceMatrixRows, visiblePresenceFilteredMatrixRows]
+    () => [
+      ...(includeParamsRowsInOverall ? visibleParamsMatrixRows : []),
+      ...(includePriceRowsInOverall ? visiblePriceMatrixRows : []),
+      ...visiblePresenceFilteredMatrixRows
+    ],
+    [includeParamsRowsInOverall, visibleParamsMatrixRows, includePriceRowsInOverall, visiblePriceMatrixRows, visiblePresenceFilteredMatrixRows]
   );
 
   const displayedCoverageMetaByModel = useMemo(
-    () => buildDisplayedCoverageMetaByModel(allModelNames, coveredModelsByGroupingKey, visiblePresenceFilteredMatrixRows, visiblePriceMatrixRows),
-    [allModelNames, coveredModelsByGroupingKey, visiblePresenceFilteredMatrixRows, visiblePriceMatrixRows]
+    () => buildDisplayedCoverageMetaByModel(
+      allModelNames,
+      coveredModelsByGroupingKey,
+      visiblePresenceFilteredMatrixRows,
+      [...visibleParamsMatrixRows, ...visiblePriceMatrixRows]
+    ),
+    [allModelNames, coveredModelsByGroupingKey, visiblePresenceFilteredMatrixRows, visibleParamsMatrixRows, visiblePriceMatrixRows]
   );
 
   const modelCoveragePercentMap = useMemo(
@@ -924,8 +999,12 @@ export function BenchmarkMatrix({
   );
 
   const displayMatrixRows = useMemo(
-    () => effectiveShowPriceRows ? [...visiblePriceMatrixRows, ...sortedMatrixRows] : sortedMatrixRows,
-    [effectiveShowPriceRows, visiblePriceMatrixRows, sortedMatrixRows]
+    () => [
+      ...(effectiveShowParamsRows ? visibleParamsMatrixRows : []),
+      ...(effectiveShowPriceRows ? visiblePriceMatrixRows : []),
+      ...sortedMatrixRows
+    ],
+    [effectiveShowParamsRows, visibleParamsMatrixRows, effectiveShowPriceRows, visiblePriceMatrixRows, sortedMatrixRows]
   );
 
   const displayMatrixRowKeySet = useMemo(
@@ -953,15 +1032,17 @@ export function BenchmarkMatrix({
   );
 
   const modelColumns = useMemo<readonly string[]>(() => {
-    if (isPriceRowSortKey) {
-      const priceRow = priceMatrixRows.find((row) => row.rowKey === columnSortBenchmarkKey);
-      if (!priceRow) return baseModelColumns;
+    if (isSyntheticRowSortKey) {
+      // 价格与参数量都以小为好，按升序排；缺值的模型沉到末尾
+      const syntheticRow = [...priceMatrixRows, ...paramsMatrixRows]
+        .find((row) => row.rowKey === columnSortBenchmarkKey);
+      if (!syntheticRow) return baseModelColumns;
 
       const baseOrderIndex = new Map(baseModelColumns.map((modelName, index) => [modelName, index]));
 
       return [...baseModelColumns].sort((leftModel, rightModel) => {
-        const leftValue = priceRow.cells.get(leftModel)?.valueNum;
-        const rightValue = priceRow.cells.get(rightModel)?.valueNum;
+        const leftValue = syntheticRow.cells.get(leftModel)?.valueNum;
+        const rightValue = syntheticRow.cells.get(rightModel)?.valueNum;
 
         if (leftValue === null || leftValue === undefined) {
           if (rightValue === null || rightValue === undefined) {
@@ -1011,7 +1092,7 @@ export function BenchmarkMatrix({
 
       return (baseOrderIndex.get(leftModel) ?? 0) - (baseOrderIndex.get(rightModel) ?? 0);
     });
-  }, [baseModelColumns, columnSortBenchmarkKey, isPriceRowSortKey, overallSummaryByModel, priceMatrixRows]);
+  }, [baseModelColumns, columnSortBenchmarkKey, isSyntheticRowSortKey, overallSummaryByModel, priceMatrixRows, paramsMatrixRows]);
 
   const activeRankingData = useMemo(() => {
     if (!expandedRankingRowKey) return null;
@@ -1027,7 +1108,9 @@ export function BenchmarkMatrix({
       : baseSourceRows;
     const rankingMatrixRow = matrixRow.isPriceRow
       ? buildPriceMatrixRows(candidateModelNames, modelPrices).find((row) => row.rowKey === matrixRow.rowKey) ?? matrixRow
-      : matrixRow;
+      : matrixRow.isInfoRow
+        ? buildParamsMatrixRows(candidateModelNames, modelParams).find((row) => row.rowKey === matrixRow.rowKey) ?? matrixRow
+        : matrixRow;
 
     return buildBenchmarkRankingData(
       rankingMatrixRow,
@@ -1046,6 +1129,7 @@ export function BenchmarkMatrix({
     expandedRankingRowKey,
     modelColumns,
     modelPrices,
+    modelParams,
     rankingScaleMode,
     rankingScope,
     showDuplicateRows
@@ -1379,6 +1463,13 @@ export function BenchmarkMatrix({
         showPriceRows={showPriceRows}
         setShowPriceRows={setShowPriceRows}
         hasPriceData={modelPrices.length > 0}
+        priceRowsInOverall={priceRowsInOverall}
+        setPriceRowsInOverall={setPriceRowsInOverall}
+        showParamsRows={showParamsRows}
+        setShowParamsRows={setShowParamsRows}
+        hasParamsData={hasParamsData}
+        paramsRowsInOverall={paramsRowsInOverall}
+        setParamsRowsInOverall={setParamsRowsInOverall}
         hasSourceData={hasSourceData}
         displaySourceValuesInCells={displaySourceValuesInCells}
         onSourceValuesButtonClick={(event) => {
@@ -1797,6 +1888,12 @@ export function BenchmarkMatrix({
                 matrixRow.category,
                 matrixRow.higherIsBetter
               );
+              // 合成行可以只做展示不进总评，此时把行名压暗以示区分
+              const isRowExcludedFromOverall = matrixRow.isPriceRow
+                ? !priceRowsInOverall
+                : matrixRow.isInfoRow
+                  ? !paramsRowsInOverall
+                  : false;
               const isSelectedRow = selectedRowKey === rowKey;
               const selectedRowColor = "rgba(94, 234, 212, 0)";
               const rowFrameStyle = isSelectedRow
@@ -1827,14 +1924,7 @@ export function BenchmarkMatrix({
                     return null;
                   }
 
-                  return matrixRow.isPriceRow
-                    ? -valueNum
-                    : getBenchmarkComparableScore(
-                        matrixRow.benchmark,
-                        valueNum,
-                        matrixRow.category,
-                        matrixRow.higherIsBetter
-                      );
+                  return getMatrixRowComparableScore(matrixRow, valueNum);
                 })
                 .filter((value): value is number => value !== null && Number.isFinite(value));
               const secondaryComparableValues = modelColumnMeta
@@ -1844,14 +1934,7 @@ export function BenchmarkMatrix({
                     return null;
                   }
 
-                  return matrixRow.isPriceRow
-                    ? -valueNum2
-                    : getBenchmarkComparableScore(
-                        matrixRow.benchmark,
-                        valueNum2,
-                        matrixRow.category,
-                        matrixRow.higherIsBetter
-                      );
+                  return getMatrixRowComparableScore(matrixRow, valueNum2);
                 })
                 .filter((value): value is number => value !== null && Number.isFinite(value));
               const primaryComparableDistinctDesc = Array.from(new Set(primaryComparableValues)).sort((a, b) => b - a);
@@ -1925,7 +2008,7 @@ export function BenchmarkMatrix({
               return (
                 <tr
                   key={rowKey}
-                  data-metric-type={matrixRow.isPriceRow ? "price" : undefined}
+                  data-metric-type={matrixRow.isPriceRow ? "price" : matrixRow.isInfoRow ? "info" : undefined}
                   data-ranking-expanded={expandedRankingRowKey === rowKey ? "1" : undefined}
                   className={isSelectedRow ? "matrix-row-selected" : "matrix-row-hover"}
                   onMouseDown={preventTemporaryRowHideTextSelection}
@@ -1991,7 +2074,7 @@ export function BenchmarkMatrix({
                   ) : null}
 
                   <td
-                    title={matrixRow.benchmark}
+                    title={isRowExcludedFromOverall ? `${matrixRow.benchmark}（未计入总评）` : matrixRow.benchmark}
                     style={{
                       position: "sticky",
                       left: 0,
@@ -2024,7 +2107,8 @@ export function BenchmarkMatrix({
                           minWidth: 0,
                           overflow: "hidden",
                           textOverflow: "ellipsis",
-                          whiteSpace: "nowrap"
+                          whiteSpace: "nowrap",
+                          opacity: isRowExcludedFromOverall ? 0.5 : undefined
                         }}
                       >
                         {matrixRow.benchmark}
@@ -2048,16 +2132,11 @@ export function BenchmarkMatrix({
                     const isCompareBaseline = compareBaselineModelName === model.modelName;
                     const isCompareSelected = compareModelSet.has(model.modelName);
                     const comparableCellNum = cellNum !== null
-                      ? matrixRow.isPriceRow
-                        ? -cellNum
-                        : getBenchmarkComparableScore(matrixRow.benchmark, cellNum, matrixRow.category, matrixRow.higherIsBetter)
+                      ? getMatrixRowComparableScore(matrixRow, cellNum)
                       : null;
                     const comparableCellNum2 = cellNum2 !== null
-                      ? matrixRow.isPriceRow
-                        ? -cellNum2
-                        : getBenchmarkComparableScore(matrixRow.benchmark, cellNum2, matrixRow.category, matrixRow.higherIsBetter)
+                      ? getMatrixRowComparableScore(matrixRow, cellNum2)
                       : null;
-                    const rawText = formatFrontendTableCellText(cell?.displayValue ?? "--");
                     const noteText = cell?.noteText ?? "";
                     const shouldShowQuestionMark = cell?.shouldShowQuestionMark ?? false;
                     const hasMultipleActiveSourceValues = cell?.hasMultipleActiveSourceValues ?? false;
@@ -2189,6 +2268,7 @@ export function BenchmarkMatrix({
                     const singleCellScoreStyle = !isPairNumericDisplay
                       ? (isTopCellFirst ? topRankSegmentStyle : isSecondCellFirst ? secondRankSegmentStyle : undefined)
                       : undefined;
+                    const cellText = renderFrontendTableCellText(cell?.displayValue ?? "--", singleCellScoreStyle);
                     const heatStyle = getHeatCellStyle(
                       comparableCellNum,
                       matrixRow.minComparable,
@@ -2259,13 +2339,13 @@ export function BenchmarkMatrix({
                         {isPairNumericDisplay && pairDisplayParts ? (
                           <span className="inline-flex items-center gap-0 leading-none">
                             <span style={isTopCellFirst ? topRankSegmentStyle : isSecondCellFirst ? secondRankSegmentStyle : undefined}>{pairDisplayParts.first}</span>
-                            <span className="mx-[2px] opacity-85">/</span>
+                            <span className={PAIR_VALUE_SLASH_CLASS_NAME}>/</span>
                             <span style={isTopCellSecond ? topRankSegmentStyle : isSecondCellSecond ? secondRankSegmentStyle : undefined}>{pairDisplayParts.second}</span>
                           </span>
                         ) : shouldRenderSourceValues ? (
-                          <span style={singleCellScoreStyle}>{formatFrontendTableCellText(sourceValueItem!.displayValue)}</span>
+                          renderFrontendTableCellText(sourceValueItem!.displayValue, singleCellScoreStyle)
                         ) : (
-                          <span style={singleCellScoreStyle}>{rawText}</span>
+                          cellText
                         )}
                         {showAnyDeltaBadge && activeDeltaBadgeStyle ? (
                           <span

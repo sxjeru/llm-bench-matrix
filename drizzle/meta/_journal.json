@@ -43,6 +43,13 @@
       "when": 1780185600000,
       "tag": "0005_benchmark_value_read_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785456000000,
+      "tag": "0006_model_params",
+      "breakpoints": true
     }
   ]
 }

@@ -8,8 +8,11 @@ import {
   HEATMAP_PRESETS,
   MODEL_ORDER_BY_SOURCE_STORAGE_KEY,
   MODEL_SELECTION_BY_SOURCE_STORAGE_KEY,
+  PARAMS_ROWS_IN_OVERALL_STORAGE_KEY,
+  PRICE_ROWS_IN_OVERALL_STORAGE_KEY,
   SHOW_CATEGORY_STORAGE_KEY,
   SHOW_DUPLICATE_STORAGE_KEY,
+  SHOW_PARAMS_ROWS_STORAGE_KEY,
   SHOW_PRICE_ROWS_STORAGE_KEY,
   SHOW_SOURCE_VALUES_STORAGE_KEY,
   EXPORT_FOOTNOTE_ENABLED_STORAGE_KEY
@@ -52,6 +55,15 @@ type MatrixPreferenceStorageOptions = {
   showPriceRowsLoadedRef: MutableRefValue<boolean>;
   showPriceRows: boolean;
   setShowPriceRows: Dispatch<SetStateAction<boolean>>;
+  showParamsRowsLoadedRef: MutableRefValue<boolean>;
+  showParamsRows: boolean;
+  setShowParamsRows: Dispatch<SetStateAction<boolean>>;
+  priceRowsInOverallLoadedRef: MutableRefValue<boolean>;
+  priceRowsInOverall: boolean;
+  setPriceRowsInOverall: Dispatch<SetStateAction<boolean>>;
+  paramsRowsInOverallLoadedRef: MutableRefValue<boolean>;
+  paramsRowsInOverall: boolean;
+  setParamsRowsInOverall: Dispatch<SetStateAction<boolean>>;
 };
 
 type ExportPresetStorageOptions = {
@@ -261,7 +273,16 @@ export function useMatrixPreferenceStorage({
   setShowSourceValues,
   showPriceRowsLoadedRef,
   showPriceRows,
-  setShowPriceRows
+  setShowPriceRows,
+  showParamsRowsLoadedRef,
+  showParamsRows,
+  setShowParamsRows,
+  priceRowsInOverallLoadedRef,
+  priceRowsInOverall,
+  setPriceRowsInOverall,
+  paramsRowsInOverallLoadedRef,
+  paramsRowsInOverall,
+  setParamsRowsInOverall
 }: MatrixPreferenceStorageOptions) {
   useEffect(() => {
     const nextSelectionBySource = loadModelSelectionBySource();
@@ -347,6 +368,39 @@ export function useMatrixPreferenceStorage({
   }, [setShowPriceRows, showPriceRowsLoadedRef]);
 
   useEffect(() => {
+    const nextShowParamsRows = loadStoredBoolean(SHOW_PARAMS_ROWS_STORAGE_KEY);
+
+    enqueueStateUpdate(() => {
+      if (nextShowParamsRows !== null) {
+        setShowParamsRows(nextShowParamsRows);
+      }
+      showParamsRowsLoadedRef.current = true;
+    });
+  }, [setShowParamsRows, showParamsRowsLoadedRef]);
+
+  useEffect(() => {
+    const nextPriceRowsInOverall = loadStoredBoolean(PRICE_ROWS_IN_OVERALL_STORAGE_KEY);
+
+    enqueueStateUpdate(() => {
+      if (nextPriceRowsInOverall !== null) {
+        setPriceRowsInOverall(nextPriceRowsInOverall);
+      }
+      priceRowsInOverallLoadedRef.current = true;
+    });
+  }, [setPriceRowsInOverall, priceRowsInOverallLoadedRef]);
+
+  useEffect(() => {
+    const nextParamsRowsInOverall = loadStoredBoolean(PARAMS_ROWS_IN_OVERALL_STORAGE_KEY);
+
+    enqueueStateUpdate(() => {
+      if (nextParamsRowsInOverall !== null) {
+        setParamsRowsInOverall(nextParamsRowsInOverall);
+      }
+      paramsRowsInOverallLoadedRef.current = true;
+    });
+  }, [setParamsRowsInOverall, paramsRowsInOverallLoadedRef]);
+
+  useEffect(() => {
     if (!showCategoryLoadedRef.current) return;
 
     saveStoredBoolean(SHOW_CATEGORY_STORAGE_KEY, showCategory);
@@ -369,6 +423,24 @@ export function useMatrixPreferenceStorage({
 
     saveStoredBoolean(SHOW_PRICE_ROWS_STORAGE_KEY, showPriceRows);
   }, [showPriceRows, showPriceRowsLoadedRef]);
+
+  useEffect(() => {
+    if (!showParamsRowsLoadedRef.current) return;
+
+    saveStoredBoolean(SHOW_PARAMS_ROWS_STORAGE_KEY, showParamsRows);
+  }, [showParamsRows, showParamsRowsLoadedRef]);
+
+  useEffect(() => {
+    if (!priceRowsInOverallLoadedRef.current) return;
+
+    saveStoredBoolean(PRICE_ROWS_IN_OVERALL_STORAGE_KEY, priceRowsInOverall);
+  }, [priceRowsInOverall, priceRowsInOverallLoadedRef]);
+
+  useEffect(() => {
+    if (!paramsRowsInOverallLoadedRef.current) return;
+
+    saveStoredBoolean(PARAMS_ROWS_IN_OVERALL_STORAGE_KEY, paramsRowsInOverall);
+  }, [paramsRowsInOverall, paramsRowsInOverallLoadedRef]);
 }
 
 export function useExportPresetStorage({

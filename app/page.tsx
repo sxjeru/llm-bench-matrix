@@ -1,5 +1,5 @@
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
-import { getDashboardRows, getDashboardStats, getSourceOptions, getSettings } from "@/lib/db/queries";
+import { getDashboardRows, getDashboardStats, getModelParamsRows, getSourceOptions, getSettings } from "@/lib/db/queries";
 import { getModelPricingRows } from "@/lib/model-pricing";
 import { Suspense } from "react";
 
@@ -8,11 +8,12 @@ export const revalidate = false;
 export default async function HomePage() {
   const rowsPromise = getDashboardRows(null, null);
 
-  const [rows, sourceOptions, stats, modelPrices, settings] = await Promise.all([
+  const [rows, sourceOptions, stats, modelPrices, modelParams, settings] = await Promise.all([
     rowsPromise,
     getSourceOptions(),
     getDashboardStats(null),
     getModelPricingRows(),
+    getModelParamsRows(),
     getSettings()
   ]);
 
@@ -92,6 +93,7 @@ export default async function HomePage() {
           rows={mappedRows}
           allRows={mappedRows}
           modelPrices={modelPrices}
+          modelParams={modelParams}
           exportFootnoteText={exportFootnoteText}
           exportFootnoteAlign={exportFootnoteAlign}
         />

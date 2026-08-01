@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { type ClipboardEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { formatDateTimeLocalInputValue } from "@/components/benchmark-matrix/formatters";
+import { MAX_PARAMS_B, MIN_PARAMS_B } from "@/lib/model-params-parse";
 import { getJson, postFormData, postJson } from "./admin-console/api";
 import { useEntityLookups } from "./admin-console/hooks/use-entity-lookups";
 import { useImportPreviewState } from "./admin-console/hooks/use-import-preview-state";
@@ -27,6 +28,7 @@ import type {
   MergedRecord,
   ModelDedupeRule,
   ModelOption,
+  ModelParamsRow,
   ModelPricingRow,
   ModelPricingSyncResult,
   PreviewRow,
@@ -77,6 +79,11 @@ import { MergeTab } from "./admin-console/views/merge-tab";
 import { AdminConsoleNotices } from "./admin-console/views/notices";
 import { ProvidersTab } from "./admin-console/views/providers-tab";
 import { PricingTab, type ModelPricingDraft } from "./admin-console/views/pricing-tab";
+import {
+  ParamsTab,
+  type ModelParamsDraft,
+  type ModelParamsStatusFilter
+} from "./admin-console/views/params-tab";
 import { RenameTab } from "./admin-console/views/rename-tab";
 import { SettingsTab } from "./admin-console/views/settings-tab";
 import { AdminConsoleTabNav } from "./admin-console/views/tab-nav";
@@ -297,6 +304,7 @@ export function AdminConsole({
   const [settingNote, setSettingNote] = useState("");
   const [isRefreshingCaches, setIsRefreshingCaches] = useState(false);
   const [deleteModelInput, setDeleteModelInput] = useState("");
+  const [deleteBenchmarkInput, setDeleteBenchmarkInput] = useState("");
   const [deleteSourceInput, setDeleteSourceInput] = useState("");
   const [confirmDeleteSourceOpen, setConfirmDeleteSourceOpen] = useState(false);
   const [isDeletingSourceData, setIsDeletingSourceData] = useState(false);
@@ -312,6 +320,14 @@ export function AdminConsole({
   const [pricingSearchQuery, setPricingSearchQuery] = useState("");
   const [pricingStatusFilter, setPricingStatusFilter] = useState<"all" | "matched" | "unmatched" | "manual" | "missing">("all");
   const [pricingSyncResult, setPricingSyncResult] = useState<ModelPricingSyncResult | null>(null);
+  const [modelParamsRows, setModelParamsRows] = useState<ModelParamsRow[]>([]);
+  const [paramsDrafts, setParamsDrafts] = useState<Record<number, ModelParamsDraft>>({});
+  const [loadingParams, setLoadingParams] = useState(false);
+  const [hasLoadedParams, setHasLoadedParams] = useState(false);
+  const [applyingParamsSuggestions, setApplyingParamsSuggestions] = useState(false);
+  const [savingParamsModelId, setSavingParamsModelId] = useState<number | null>(null);
+  const [paramsSearchQuery, setParamsSearchQuery] = useState("");
+  const [paramsStatusFilter, setParamsStatusFilter] = useState<ModelParamsStatusFilter>("all");
 
   const sortedSettings = useMemo(() => {
     return Object.entries(initialSettings).sort(([a], [b]) => a.localeCompare(b));
@@ -2644,6 +2660,36 @@ export function AdminConsole({
     }
   }
 
+  async function onDeleteBenchmarkData() {
+    const benchmarkId = parseMergeEntityId(deleteBenchmarkInput, benchmarkEntityOptions);
+    if (benchmarkId === null) {
+      notifyError("请先选择有效 benchmark（可输入名称后从下拉候选选择）");
+      return;
+    }
+
+    const selected = benchmarks.find((item) => item.id === benchmarkId);
+    const selectedLabel = selected
+      ? `${selected.benchmarkName}（${selected.benchmarkType}）`
+      : `#${benchmarkId}`;
+    // 列表数据已带 valueCount，确认框直接复用，无需额外请求
+    const valueCountText = selected ? `\n将连带删除 ${selected.valueCount} 条 benchmark_values。` : "";
+
+    const confirmed = window.confirm(
+      `确认删除 benchmark ${selectedLabel} 吗？${valueCountText}\n此操作不可恢复。`
+    );
+    if (!confirmed) return;
+
+    try {
+      const result = await postJson("/api/admin/debug/delete-benchmark", { benchmarkId });
+      notifySuccess(
+        `已删除 benchmark：${result.benchmarkName ?? selectedLabel}，连带删除 ${result.deletedValueCount ?? 0} 条记录。若下拉项未更新，请刷新页面。`
+      );
+      setDeleteBenchmarkInput("");
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "删除 benchmark 失败");
+    }
+  }
+
   async function onDeleteSourceData() {
     if (isDeletingSourceData) {
       return;
@@ -2773,6 +2819,13 @@ export function AdminConsole({
       }, 0);
       return () => clearTimeout(timer);
     }
+
+    if (initialTab === "params") {
+      const timer = setTimeout(() => {
+        void loadModelParams();
+      }, 0);
+      return () => clearTimeout(timer);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2784,6 +2837,10 @@ export function AdminConsole({
 
     if (tab === "pricing" && !hasLoadedPrices && !loadingPrices) {
       void loadModelPrices();
+    }
+
+    if (tab === "params" && !hasLoadedParams && !loadingParams) {
+      void loadModelParams();
     }
   }
 
@@ -2874,6 +2931,137 @@ export function AdminConsole({
       notifyError(error instanceof Error ? error.message : "保存模型价格失败");
     } finally {
       setSavingPriceModelId(null);
+    }
+  }
+
+  function toParamsDraft(row: ModelParamsRow): ModelParamsDraft {
+    return {
+      totalParamsB: row.totalParamsB === null ? "" : String(row.totalParamsB),
+      activatedParamsB: row.activatedParamsB === null ? "" : String(row.activatedParamsB),
+      isEstimated: row.isEstimated,
+      note: row.note ?? ""
+    };
+  }
+
+  async function loadModelParams() {
+    setLoadingParams(true);
+    try {
+      const result = await getJson("/api/admin/model-params");
+      const rows = Array.isArray(result?.params) ? result.params as ModelParamsRow[] : [];
+      setModelParamsRows(rows);
+      setParamsDrafts(
+        rows.reduce<Record<number, ModelParamsDraft>>((acc, row) => {
+          acc[row.modelId] = toParamsDraft(row);
+          return acc;
+        }, {})
+      );
+      setHasLoadedParams(true);
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "加载模型参数量失败");
+    } finally {
+      setLoadingParams(false);
+    }
+  }
+
+  function updateParamsDraft(modelId: number, updater: (draft: ModelParamsDraft) => ModelParamsDraft) {
+    const sourceRow = modelParamsRows.find((row) => row.modelId === modelId);
+    if (!sourceRow) return;
+
+    setParamsDrafts((prev) => ({
+      ...prev,
+      [modelId]: updater(prev[modelId] ?? toParamsDraft(sourceRow))
+    }));
+  }
+
+  function parseOptionalParams(raw: string): number | null {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(trimmed)) {
+      throw new Error("参数量必须是正数");
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      throw new Error("参数量必须是正数");
+    }
+    // 与后端 schema 同源。这里先拦一道是为了给出中文提示：交给后端会得到一串 ZodError JSON
+    if (parsed < MIN_PARAMS_B || parsed > MAX_PARAMS_B) {
+      throw new Error(`参数量需在 ${MIN_PARAMS_B}B ~ ${MAX_PARAMS_B}B 之间`);
+    }
+    return parsed;
+  }
+
+  /** 把名称解析建议填进草稿，不直接落库，管理员确认后再点保存 */
+  function applyParamsSuggestionToDraft(modelId: number) {
+    const sourceRow = modelParamsRows.find((row) => row.modelId === modelId);
+    const suggestion = sourceRow?.suggestion;
+    if (!sourceRow || !suggestion || suggestion.totalParamsB === null) return;
+
+    setParamsDrafts((prev) => ({
+      ...prev,
+      [modelId]: {
+        ...(prev[modelId] ?? toParamsDraft(sourceRow)),
+        totalParamsB: String(suggestion.totalParamsB),
+        activatedParamsB: suggestion.activatedParamsB === null ? "" : String(suggestion.activatedParamsB),
+        isEstimated: suggestion.isEstimated
+      }
+    }));
+  }
+
+  async function saveModelParams(modelId: number) {
+    const draft = paramsDrafts[modelId];
+    if (!draft || savingParamsModelId !== null) return;
+
+    setSavingParamsModelId(modelId);
+    try {
+      const totalParamsB = parseOptionalParams(draft.totalParamsB);
+      const activatedParamsB = parseOptionalParams(draft.activatedParamsB);
+
+      if (totalParamsB !== null && activatedParamsB !== null && activatedParamsB > totalParamsB) {
+        throw new Error("激活参数量不能大于总参数量");
+      }
+
+      await postJson(
+        "/api/admin/model-params",
+        {
+          modelId,
+          totalParamsB,
+          activatedParamsB,
+          isEstimated: draft.isEstimated,
+          note: draft.note.trim() || null
+        },
+        "PATCH"
+      );
+      notifySuccess("模型参数量已保存");
+      await loadModelParams();
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "保存模型参数量失败");
+    } finally {
+      setSavingParamsModelId(null);
+    }
+  }
+
+  async function applyAllParamsSuggestions() {
+    if (applyingParamsSuggestions) return;
+
+    const applicableCount = modelParamsRows.filter(
+      (row) => row.totalParamsB === null && row.activatedParamsB === null && row.suggestion?.totalParamsB != null
+    ).length;
+    if (applicableCount === 0) return;
+
+    const confirmed = window.confirm(
+      `将根据模型名为 ${applicableCount} 个尚未填写的模型写入参数量建议值。\n已填写的模型不会被覆盖。是否继续？`
+    );
+    if (!confirmed) return;
+
+    setApplyingParamsSuggestions(true);
+    try {
+      const result = await postJson("/api/admin/model-params", {});
+      notifySuccess(`已写入 ${result.appliedCount ?? 0} 个模型的参数量，跳过 ${result.skippedCount ?? 0} 个`);
+      await loadModelParams();
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "采纳参数量建议失败");
+    } finally {
+      setApplyingParamsSuggestions(false);
     }
   }
 
@@ -3129,6 +3317,25 @@ export function AdminConsole({
           />
         ) : null}
 
+        {activeTab === "params" ? (
+          <ParamsTab
+            params={modelParamsRows}
+            loadingParams={loadingParams}
+            applyingSuggestions={applyingParamsSuggestions}
+            savingParamsModelId={savingParamsModelId}
+            paramsSearchQuery={paramsSearchQuery}
+            setParamsSearchQuery={setParamsSearchQuery}
+            paramsStatusFilter={paramsStatusFilter}
+            setParamsStatusFilter={setParamsStatusFilter}
+            paramsDrafts={paramsDrafts}
+            updateParamsDraft={updateParamsDraft}
+            onLoadParams={loadModelParams}
+            onSaveParams={saveModelParams}
+            onApplyAllSuggestions={applyAllParamsSuggestions}
+            onApplySuggestion={applyParamsSuggestionToDraft}
+          />
+        ) : null}
+
         {activeTab === "rename" ? (
           <RenameTab
             renameEntityType={renameEntityType}
@@ -3242,6 +3449,10 @@ export function AdminConsole({
             setDeleteModelInput={setDeleteModelInput}
             modelEntityOptions={modelEntityOptions}
             onDeleteModelData={onDeleteModelData}
+            deleteBenchmarkInput={deleteBenchmarkInput}
+            setDeleteBenchmarkInput={setDeleteBenchmarkInput}
+            benchmarkEntityOptions={benchmarkEntityOptions}
+            onDeleteBenchmarkData={onDeleteBenchmarkData}
             deleteSourceInput={deleteSourceInput}
             setDeleteSourceInput={setDeleteSourceInput}
             deleteSourceOptions={deleteSourceOptions}

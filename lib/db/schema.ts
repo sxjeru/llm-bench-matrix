@@ -49,6 +49,10 @@ export const models = pgTable(
     canonicalKey: text("canonical_key").notNull(),
     sourceModelId: text("source_model_id"),
     mergedIntoModelId: integer("merged_into_model_id"),
+    totalParamsB: numeric("total_params_b", { precision: 10, scale: 3 }),
+    activatedParamsB: numeric("activated_params_b", { precision: 10, scale: 3 }),
+    paramsIsEstimated: boolean("params_is_estimated").notNull().default(false),
+    paramsNote: text("params_note"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
   },
   (table) => ({

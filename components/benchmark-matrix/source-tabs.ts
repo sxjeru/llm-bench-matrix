@@ -391,7 +391,8 @@ export function useMatrixSourceTabs({
   function setSourceAndUrl(nextSource: string) {
     setIsSourceOverflowMenuOpen(false);
 
-    if (activeSourceRef.current !== nextSource) {
+    const isSameSource = activeSourceRef.current === nextSource;
+    if (!isSameSource) {
       skipSelectionPersistenceOnceRef.current = true;
       pendingSourceSyncRef.current = nextSource;
       setActiveSource(nextSource);
@@ -400,10 +401,15 @@ export function useMatrixSourceTabs({
     }
 
     const params = new URLSearchParams(searchParams.toString());
-    if (nextSource === SOURCE_ALL) {
+    const nextSourceParam = nextSource === SOURCE_ALL ? null : nextSource;
+
+    // 点击已选中的页签且 URL 已一致时，跳过 router.replace，避免无效的路由更新与重渲染
+    if (isSameSource && params.get("source") === nextSourceParam) return;
+
+    if (nextSourceParam === null) {
       params.delete("source");
     } else {
-      params.set("source", nextSource);
+      params.set("source", nextSourceParam);
     }
 
     const query = params.toString();

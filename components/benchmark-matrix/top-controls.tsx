@@ -17,6 +17,7 @@ import {
 import { isExportPresetKey } from "./export-image";
 import type { ExportPresetKey } from "./types";
 import type { SourceOption } from "./selectors";
+import { isCompareModifierClick } from "./utils";
 
 type TopControlsProps = {
   sourceTabsMenuRef: RefObject<HTMLDivElement | null>;
@@ -66,10 +67,44 @@ type TopControlsProps = {
   showPriceRows: boolean;
   setShowPriceRows: Dispatch<SetStateAction<boolean>>;
   hasPriceData: boolean;
+  priceRowsInOverall: boolean;
+  setPriceRowsInOverall: Dispatch<SetStateAction<boolean>>;
+  showParamsRows: boolean;
+  setShowParamsRows: Dispatch<SetStateAction<boolean>>;
+  hasParamsData: boolean;
+  paramsRowsInOverall: boolean;
+  setParamsRowsInOverall: Dispatch<SetStateAction<boolean>>;
   hasSourceData: boolean;
   displaySourceValuesInCells: boolean;
   onSourceValuesButtonClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 };
+
+function hasTextSelectionInside(element: HTMLElement) {
+  if (typeof window === "undefined") return false;
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed) return false;
+  const { anchorNode, focusNode } = selection;
+  return Boolean(
+    (anchorNode && element.contains(anchorNode)) || (focusNode && element.contains(focusNode))
+  );
+}
+
+// 双击页签时切换会重排列表、冲掉浏览器刚选好的词，这里在重渲染后主动把整段标签文字重新选中
+function selectTabLabelText(button: HTMLElement) {
+  if (typeof window === "undefined") return;
+  const label = button.querySelector(".source-tab-label-text");
+  const selection = window.getSelection();
+  if (!label || !selection || !button.isConnected) return;
+  const range = document.createRange();
+  range.selectNodeContents(label);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function selectTabLabelTextAfterRerender(button: HTMLElement) {
+  selectTabLabelText(button);
+  window.requestAnimationFrame(() => selectTabLabelText(button));
+}
 
 function SourceTabLabel({
   text,
@@ -145,6 +180,13 @@ export function BenchmarkMatrixTopControls({
   showPriceRows,
   setShowPriceRows,
   hasPriceData,
+  priceRowsInOverall,
+  setPriceRowsInOverall,
+  showParamsRows,
+  setShowParamsRows,
+  hasParamsData,
+  paramsRowsInOverall,
+  setParamsRowsInOverall,
   hasSourceData,
   displaySourceValuesInCells,
   onSourceValuesButtonClick
@@ -186,7 +228,12 @@ export function BenchmarkMatrixTopControls({
                           ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
                           : "hover:!rounded-xl hover:bg-white/10 hover:text-base-content"
                       }`}
-                      onClick={() => setSourceAndUrl(source.key)}
+                      onClick={(event) => {
+                        // 拖选页签文字后松开鼠标会触发 click，此时不切换数据源
+                        if (hasTextSelectionInside(event.currentTarget)) return;
+                        setSourceAndUrl(source.key);
+                      }}
+                      onDoubleClick={(event) => selectTabLabelTextAfterRerender(event.currentTarget)}
                       title={getSourceTabTitle(source)}
                     >
                       {renderSourceTabLabel(source)}
@@ -259,7 +306,12 @@ export function BenchmarkMatrixTopControls({
                                 ? "tab-active !rounded-xl !bg-primary/55 !text-primary-content shadow-[0_6px_20px_rgba(93,167,255,0.24)]"
                                 : "hover:!rounded-xl hover:bg-white/10 hover:text-base-content"
                             }`}
-                            onClick={() => setSourceAndUrl(source.key)}
+                            onClick={(event) => {
+                              // 拖选页签文字后松开鼠标会触发 click，此时不切换数据源
+                              if (hasTextSelectionInside(event.currentTarget)) return;
+                              setSourceAndUrl(source.key);
+                            }}
+                            onDoubleClick={(event) => selectTabLabelTextAfterRerender(event.currentTarget)}
                             title={getSourceTabTitle(source)}
                           >
                             {renderSourceTabLabel(source)}
@@ -477,10 +529,35 @@ export function BenchmarkMatrixTopControls({
           <button
             type="button"
             className="btn btn-xs btn-ghost"
-            onClick={() => setShowPriceRows((prev) => !prev)}
+            title={`普通点击切换价格行显示；按住 Ctrl 点击切换是否计入总评（当前${priceRowsInOverall ? "计入" : "不计入"}）`}
+            onClick={(event) => {
+              if (isCompareModifierClick(event)) {
+                setPriceRowsInOverall((prev) => !prev);
+                return;
+              }
+              setShowPriceRows((prev) => !prev);
+            }}
           >
             {showPriceRows ? <Eye size={14} /> : <EyeOff size={14} />}
             显示价格
+          </button>
+        ) : null}
+
+        {hasParamsData ? (
+          <button
+            type="button"
+            className="btn btn-xs btn-ghost"
+            title={`普通点击切换参数量行显示；按住 Ctrl 点击切换是否计入总评（当前${paramsRowsInOverall ? "计入" : "不计入"}）`}
+            onClick={(event) => {
+              if (isCompareModifierClick(event)) {
+                setParamsRowsInOverall((prev) => !prev);
+                return;
+              }
+              setShowParamsRows((prev) => !prev);
+            }}
+          >
+            {showParamsRows ? <Eye size={14} /> : <EyeOff size={14} />}
+            显示参数量
           </button>
         ) : null}
 

@@ -38,6 +38,7 @@ vi.mock("@/lib/db/queries", () => ({
     totalRecords: 36
   })),
   getSourceOptions: vi.fn(async () => ["text:only", "text:another"]),
+  getModelParamsRows: vi.fn(async () => []),
   getSettings: vi.fn(async () => [])
 }));
 

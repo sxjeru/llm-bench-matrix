@@ -48,6 +48,7 @@ const DEFAULT_MAX_DASHBOARD_ROWS = 50_000;
 const dashboardRowsStore = createVersionedCacheStore<DashboardRow[]>();
 const dashboardStatsStore = createVersionedCacheStore<DashboardStats>();
 const sourceOptionsStore = createVersionedCacheStore<string[]>();
+const modelParamsStore = createVersionedCacheStore<ModelParamsInfo[]>();
 
 const cacheInvalidators: Array<() => void> = [];
 
@@ -63,6 +64,7 @@ export async function invalidateAllCaches() {
   invalidateVersionedCacheStore(dashboardRowsStore);
   invalidateVersionedCacheStore(dashboardStatsStore);
   invalidateVersionedCacheStore(sourceOptionsStore);
+  invalidateVersionedCacheStore(modelParamsStore);
   invalidateModelPricingCaches();
   for (const fn of cacheInvalidators) {
     fn();
@@ -342,6 +344,60 @@ export async function getSourceOptions(): Promise<string[]> {
       staleIfErrorMs: CACHE_STALE_IF_ERROR_MS,
       getVersion: getDashboardCacheVersion,
       loader: loadSourceOptions
+    }
+  );
+}
+
+export type ModelParamsInfo = {
+  modelId: number;
+  modelName: string;
+  /** 总参数量（B）。null 表示未填写 */
+  totalParamsB: number | null;
+  /** 激活参数量（B）。null 表示稠密模型或未填写 */
+  activatedParamsB: number | null;
+  isEstimated: boolean;
+  note: string | null;
+};
+
+/**
+ * 参数量是模型自身属性，与 benchmark_values 无关，因此不能复用 dashboard rows
+ * （那是 benchmark_values 驱动的，尚无测评值的模型不会出现在里面）。
+ */
+async function loadModelParamsRows(): Promise<ModelParamsInfo[]> {
+  const rows = await db
+    .select({
+      modelId: models.id,
+      modelName: models.modelName,
+      totalParamsB: models.totalParamsB,
+      activatedParamsB: models.activatedParamsB,
+      paramsIsEstimated: models.paramsIsEstimated,
+      paramsNote: models.paramsNote
+    })
+    .from(models)
+    .where(isNull(models.mergedIntoModelId))
+    .orderBy(models.modelName);
+
+  return rows
+    .map((row) => ({
+      modelId: row.modelId,
+      modelName: row.modelName,
+      totalParamsB: toNullableNumber(row.totalParamsB),
+      activatedParamsB: toNullableNumber(row.activatedParamsB),
+      isEstimated: row.paramsIsEstimated,
+      note: row.paramsNote
+    }))
+    .filter((row) => row.totalParamsB !== null || row.activatedParamsB !== null);
+}
+
+export async function getModelParamsRows(): Promise<ModelParamsInfo[]> {
+  return withVersionedCache(
+    modelParamsStore,
+    "all",
+    {
+      versionProbeTtlMs: CACHE_VERSION_PROBE_TTL_MS,
+      staleIfErrorMs: CACHE_STALE_IF_ERROR_MS,
+      getVersion: getDashboardCacheVersion,
+      loader: loadModelParamsRows
     }
   );
 }

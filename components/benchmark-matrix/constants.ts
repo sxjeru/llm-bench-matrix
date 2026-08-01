@@ -15,6 +15,9 @@ export const SHOW_CATEGORY_STORAGE_KEY = "benchmark-matrix:show-category";
 export const SHOW_DUPLICATE_STORAGE_KEY = "benchmark-matrix:show-duplicate";
 export const SHOW_SOURCE_VALUES_STORAGE_KEY = "benchmark-matrix:show-source-values";
 export const SHOW_PRICE_ROWS_STORAGE_KEY = "benchmark-matrix:show-price-rows";
+export const SHOW_PARAMS_ROWS_STORAGE_KEY = "benchmark-matrix:show-params-rows";
+export const PRICE_ROWS_IN_OVERALL_STORAGE_KEY = "benchmark-matrix:price-rows-in-overall";
+export const PARAMS_ROWS_IN_OVERALL_STORAGE_KEY = "benchmark-matrix:params-rows-in-overall";
 export const MODEL_SELECTION_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:model-selection-by-source";
 export const MODEL_ORDER_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:model-order-by-source";
 export const COLUMN_WIDTH_BY_SOURCE_STORAGE_KEY = "benchmark-matrix:column-width-by-source";
@@ -47,6 +50,9 @@ export const PRICE_CATEGORY_LABEL = "Pricing";
 export const PRICE_INPUT_ROW_KEY = "__PRICE_INPUT__";
 export const PRICE_OUTPUT_ROW_KEY = "__PRICE_OUTPUT__";
 export const PRICE_CACHE_INPUT_ROW_KEY = "__PRICE_CACHE_INPUT__";
+export const MODEL_INFO_CATEGORY_LABEL = "Model Info";
+export const PARAMS_ROW_KEY = "__PARAMS__";
+export const PARAMS_ACTIVE_RATIO_ROW_KEY = "__PARAMS_ACTIVE_RATIO__";
 
 export const HEATMAP_PRESETS = {
   classic: {
