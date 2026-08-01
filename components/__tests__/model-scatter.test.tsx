@@ -108,10 +108,38 @@ function paretoCount(): string {
   return note ? note.replace(/^帕累托前沿\s*/, "").trim() : "--";
 }
 
+function axisInput(container: HTMLElement, axis: "x" | "y"): HTMLInputElement {
+  const input = container.querySelector<HTMLInputElement>(`#scatter-axis-${axis}`);
+  if (!input) throw new Error(`未找到 ${axis} 轴选择器`);
+  return input;
+}
+
+// 组合框收起时输入框里显示的就是当前选中的指标
 function axisLabel(container: HTMLElement, axis: "x" | "y"): string {
-  const select = container.querySelector<HTMLSelectElement>(`#scatter-axis-${axis}`);
-  if (!select) throw new Error(`未找到 ${axis} 轴选择器`);
-  return select.selectedOptions[0]?.text ?? "";
+  return axisInput(container, axis).value;
+}
+
+/** 展开组合框并返回当前可见的选项文本 */
+function openAxisOptions(container: HTMLElement, axis: "x" | "y", query?: string): string[] {
+  const input = axisInput(container, axis);
+  fireEvent.focus(input);
+  if (query !== undefined) fireEvent.change(input, { target: { value: query } });
+
+  return Array.from(container.querySelectorAll(".scatter-combobox-option-label")).map(
+    (node) => node.textContent ?? ""
+  );
+}
+
+function pickAxisOption(container: HTMLElement, axis: "x" | "y", label: string) {
+  const input = axisInput(container, axis);
+  fireEvent.focus(input);
+  fireEvent.change(input, { target: { value: label } });
+
+  const option = Array.from(container.querySelectorAll(".scatter-combobox-option")).find(
+    (node) => node.querySelector(".scatter-combobox-option-label")?.textContent === label
+  );
+  if (!option) throw new Error(`选项未出现在下拉里：${label}`);
+  fireEvent.click(option);
 }
 
 beforeEach(() => {
@@ -127,8 +155,7 @@ describe("ModelScatter", () => {
     expect(axisLabel(container, "y")).toBe("Overall Score");
     expect(axisLabel(container, "x")).toBe("Output Price");
 
-    const xSelect = container.querySelector<HTMLSelectElement>("#scatter-axis-x");
-    expect(xSelect?.value).toBe("price-output");
+    expect(axisInput(container, "x").getAttribute("role")).toBe("combobox");
   });
 
   test("统计出可比模型数与帕累托前沿数", () => {
@@ -164,11 +191,7 @@ describe("ModelScatter", () => {
   test("切换 Y 轴指标后卡片与前沿同步更新", () => {
     const { container } = renderScatter();
 
-    const ySelect = container.querySelector<HTMLSelectElement>("#scatter-axis-y")!;
-    const paramsOption = Array.from(ySelect.options).find((option) => option.text === "Params");
-    expect(paramsOption).toBeDefined();
-
-    fireEvent.change(ySelect, { target: { value: paramsOption!.value } });
+    pickAxisOption(container, "y", "Params");
 
     expect(axisLabel(container, "y")).toBe("Params");
     // 参数量与价格都是越小越好，Gamma（1 美元 / 300B）与 Alpha（10 美元 / 100B）等构成前沿
@@ -178,8 +201,10 @@ describe("ModelScatter", () => {
   test("轴选择器按分类分组，且总评排在最前", () => {
     const { container } = renderScatter();
 
-    const ySelect = container.querySelector<HTMLSelectElement>("#scatter-axis-y")!;
-    const groups = Array.from(ySelect.querySelectorAll("optgroup")).map((group) => group.label);
+    fireEvent.focus(axisInput(container, "y"));
+    const groups = Array.from(container.querySelectorAll(".scatter-combobox-group")).map(
+      (node) => node.textContent
+    );
 
     expect(groups[0]).toBe("Summary");
     expect(groups).toContain("Pricing");
@@ -309,6 +334,109 @@ describe("ModelScatter", () => {
     const { container } = renderScatter();
 
     expect(container.querySelector(".home-metric-card")).toBeNull();
+  });
+});
+
+describe("轴选择器（可输入下拉）", () => {
+  test("聚焦即展开，按分类分组列出全部指标", () => {
+    const { container } = renderScatter();
+    const labels = openAxisOptions(container, "y");
+
+    expect(labels).toContain("Overall Score");
+    expect(labels).toContain("Output Price");
+    expect(labels).toContain("Bench-One");
+  });
+
+  test("输入关键词即时筛选", () => {
+    const { container } = renderScatter();
+    const labels = openAxisOptions(container, "y", "price");
+
+    expect(labels).toContain("Output Price");
+    expect(labels).toContain("Input Price");
+    expect(labels).not.toContain("Overall Score");
+  });
+
+  test("按分类名也能搜到", () => {
+    const { container } = renderScatter();
+    const labels = openAxisOptions(container, "x", "Model Info");
+
+    expect(labels).toContain("Params");
+  });
+
+  test("无匹配时给出空态而不是空白列表", () => {
+    const { container } = renderScatter();
+    openAxisOptions(container, "x", "zzz-not-a-metric");
+
+    expect(container.querySelector(".scatter-combobox-empty")?.textContent).toBe("没有匹配的指标");
+  });
+
+  test("点击选项完成切换并收起", () => {
+    const { container } = renderScatter();
+
+    pickAxisOption(container, "x", "Params");
+
+    expect(axisLabel(container, "x")).toBe("Params");
+    expect(container.querySelector(".scatter-combobox-list")).toBeNull();
+  });
+
+  test("方向键 + 回车可选中", () => {
+    const { container } = renderScatter();
+    const input = axisInput(container, "y");
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "Input Price" } });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(axisLabel(container, "y")).toBe("Input Price");
+  });
+
+  test("Esc 关闭并还原成当前选中项", () => {
+    const { container } = renderScatter();
+    const input = axisInput(container, "y");
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "price" } });
+    expect(container.querySelector(".scatter-combobox-list")).not.toBeNull();
+
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(container.querySelector(".scatter-combobox-list")).toBeNull();
+    expect(input.value).toBe("Overall Score");
+  });
+
+  test("输入时自动放开低覆盖指标", () => {
+    const { container } = renderScatter();
+
+    const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+
+    fireEvent.focus(axisInput(container, "x"));
+    fireEvent.change(axisInput(container, "x"), { target: { value: "bench" } });
+
+    expect(toggle.checked).toBe(true);
+  });
+
+  test("仅聚焦不输入时不改动低覆盖开关", () => {
+    const { container } = renderScatter();
+    const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
+
+    fireEvent.focus(axisInput(container, "x"));
+
+    expect(toggle.checked).toBe(false);
+  });
+
+  test("清空输入不会把低覆盖开关又关回去", () => {
+    const { container } = renderScatter();
+    const input = axisInput(container, "x");
+    const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "bench" } });
+    fireEvent.change(input, { target: { value: "" } });
+
+    // 开关是可见、可手动撤销的，自动关回去反而会让刚搜到的指标突然消失
+    expect(toggle.checked).toBe(true);
   });
 });
 

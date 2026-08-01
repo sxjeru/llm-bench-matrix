@@ -497,6 +497,17 @@ export function ModelScatter({
     });
   }, []);
 
+  /**
+   * 轴选择器里一开始输入，就顺带放开低覆盖指标。
+   *
+   * 低覆盖指标默认被剪掉，用户搜一个名字却搜不到会以为数据不存在；
+   * 这里主动打开开关，说明行里的复选框也会同步勾上，改动是可见、可撤销的。
+   */
+  const handleAxisQueryChange = useCallback((query: string) => {
+    if (query.trim().length === 0) return;
+    setShowLowCoverageRows((previous) => (previous ? previous : true));
+  }, []);
+
   const toggleFullscreen = useCallback(async () => {
     if (!sectionRef.current) return;
 
@@ -528,6 +539,7 @@ export function ModelScatter({
           yMetric={yMetric}
           onChangeAxis={handleChangeAxis}
           onSwapAxes={handleSwapAxes}
+          onAxisQueryChange={handleAxisQueryChange}
           xScale={viewState.xScale}
           yScale={viewState.yScale}
           onChangeScale={handleChangeScale}

@@ -978,6 +978,138 @@ input.heatmap-alpha-range::-moz-range-track {
   border-color: #4b6fb9;
 }
 
+/* ===== 可输入筛选的指标选择器 ===== */
+
+.scatter-combobox {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.scatter-combobox-icon {
+  position: absolute;
+  left: 10px;
+  color: var(--subtext);
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.scatter-combobox-caret {
+  position: absolute;
+  right: 9px;
+  color: var(--subtext);
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.scatter-combobox-input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 28px 0 30px;
+  border-radius: 10px;
+  border: 1px solid #2f3d63;
+  background: #121b31;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.scatter-combobox-input::placeholder {
+  color: var(--subtext);
+  opacity: 0.75;
+}
+
+.scatter-combobox-input:focus {
+  outline: none;
+  border-color: #4b6fb9;
+  background: #16203a;
+}
+
+.scatter-combobox-list {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border-radius: 12px;
+  border: 1px solid #33436c;
+  background: rgba(13, 20, 37, 0.98);
+  box-shadow: 0 16px 34px rgba(3, 8, 20, 0.55);
+  backdrop-filter: blur(6px);
+}
+
+.scatter-combobox-list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scatter-combobox-group {
+  position: sticky;
+  top: 0;
+  padding: 6px 8px 3px;
+  background: rgba(13, 20, 37, 0.98);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--subtext);
+  opacity: 0.8;
+}
+
+.scatter-combobox-option {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 9px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.scatter-combobox-option.is-active {
+  background: rgba(93, 167, 255, 0.16);
+}
+
+.scatter-combobox-option.is-selected {
+  color: #9ec8ff;
+  font-weight: 600;
+}
+
+.scatter-combobox-option-label {
+  overflow-wrap: anywhere;
+}
+
+.scatter-combobox-option-direction {
+  flex: 0 0 auto;
+  font-size: 10px;
+  opacity: 0.65;
+}
+
+.scatter-combobox-option-direction.is-up {
+  color: #8fe0b4;
+}
+
+.scatter-combobox-option-direction.is-down {
+  color: #ffc48a;
+}
+
+.scatter-combobox-empty {
+  padding: 10px 9px;
+  font-size: 12px;
+  color: var(--subtext);
+  text-align: center;
+}
+
 .scatter-swap-btn {
   display: inline-flex;
   align-items: center;

@@ -14,6 +14,7 @@ import type { ExportPresetKey } from "@/components/benchmark-matrix/types";
 import type { SourceOption } from "@/components/benchmark-matrix/selectors";
 import { EXPORT_PRESET_MAP, SOURCE_ALL } from "@/components/benchmark-matrix/constants";
 import { sourceTabDisplayLabel } from "@/components/benchmark-matrix/utils";
+import { MetricCombobox } from "./metric-combobox";
 import { describeMetricDirection } from "./metrics";
 import type {
   ScatterAxisScale,
@@ -29,6 +30,8 @@ type ScatterControlsProps = {
   yMetric: ScatterMetric | null;
   onChangeAxis: (axis: "x" | "y", key: string) => void;
   onSwapAxes: () => void;
+  /** 轴选择器里输入了搜索词，供上层顺带放开低覆盖指标 */
+  onAxisQueryChange?: (query: string) => void;
 
   xScale: ScatterAxisScale;
   yScale: ScatterAxisScale;
@@ -75,7 +78,8 @@ function AxisSelect({
   metricGroups,
   scale,
   onChangeAxis,
-  onChangeScale
+  onChangeScale,
+  onAxisQueryChange
 }: {
   axis: "x" | "y";
   metric: ScatterMetric | null;
@@ -83,6 +87,7 @@ function AxisSelect({
   scale: ScatterAxisScale;
   onChangeAxis: (axis: "x" | "y", key: string) => void;
   onChangeScale: (axis: "x" | "y", scale: ScatterAxisScale) => void;
+  onAxisQueryChange?: (query: string) => void;
 }) {
   const axisLabel = axis === "x" ? "X 轴" : "Y 轴";
 
@@ -98,23 +103,14 @@ function AxisSelect({
       </label>
 
       <div className="scatter-axis-row">
-        <select
+        <MetricCombobox
           id={`scatter-axis-${axis}`}
-          className="select select-sm scatter-axis-select"
-          value={metric?.key ?? ""}
-          onChange={(event) => onChangeAxis(axis, event.target.value)}
-        >
-          {metric ? null : <option value="">选择指标…</option>}
-          {metricGroups.map((group) => (
-            <optgroup key={group.category} label={group.category}>
-              {group.metrics.map((item) => (
-                <option key={item.key} value={item.key}>
-                  {item.label}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+          axisName={axisLabel}
+          metric={metric}
+          metricGroups={metricGroups}
+          onChange={(key) => onChangeAxis(axis, key)}
+          onQueryChange={onAxisQueryChange}
+        />
 
         <div className="scatter-segment" role="group" aria-label={`${axisLabel}刻度`}>
           <button
@@ -146,6 +142,7 @@ export function ScatterControls(props: ScatterControlsProps) {
     yMetric,
     onChangeAxis,
     onSwapAxes,
+    onAxisQueryChange,
     xScale,
     yScale,
     onChangeScale,
@@ -203,6 +200,7 @@ export function ScatterControls(props: ScatterControlsProps) {
           scale={yScale}
           onChangeAxis={onChangeAxis}
           onChangeScale={onChangeScale}
+          onAxisQueryChange={onAxisQueryChange}
         />
 
         <button
@@ -222,6 +220,7 @@ export function ScatterControls(props: ScatterControlsProps) {
           scale={xScale}
           onChangeAxis={onChangeAxis}
           onChangeScale={onChangeScale}
+          onAxisQueryChange={onAxisQueryChange}
         />
       </div>
 
