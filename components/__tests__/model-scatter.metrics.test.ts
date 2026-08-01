@@ -1,0 +1,414 @@
+import { describe, expect, test } from "vitest";
+
+import {
+  MODEL_INFO_CATEGORY_LABEL,
+  OVERALL_ROW_KEY,
+  PARAMS_ACTIVE_RATIO_ROW_KEY,
+  PARAMS_ROW_KEY,
+  PRICE_CATEGORY_LABEL,
+  PRICE_INPUT_ROW_KEY,
+  PRICE_OUTPUT_ROW_KEY
+} from "@/components/benchmark-matrix/constants";
+import { buildParamsMatrixRows, buildPriceMatrixRows } from "@/components/benchmark-matrix/selectors";
+import { getMatrixRowComparableScore } from "@/components/benchmark-matrix/scoring";
+import type { MatrixCell, MatrixRow } from "@/components/benchmark-matrix/types";
+import {
+  buildScatterMetrics,
+  findScatterMetric,
+  formatScatterAxisTick,
+  formatScatterValue,
+  groupScatterMetrics,
+  isMetricHigherBetter,
+  resolveDefaultAxisKeys,
+  toMetricSlug,
+  toScatterMetric
+} from "@/components/model-scatter/metrics";
+import { buildScatterDataset, computeAxisDomain, computeMedian } from "@/components/model-scatter/dataset";
+import { OVERALL_METRIC_SLUG } from "@/components/model-scatter/constants";
+
+function createCell(valueNum: number | null): MatrixCell {
+  const displayValue = valueNum === null ? "--" : String(valueNum);
+  return {
+    valueRaw: displayValue,
+    valueNum,
+    valueNum2: null,
+    valueNote: null,
+    source: "test",
+    benchTime: null,
+    allEntries: [],
+    hasMultipleValues: false,
+    uniqueEntries: [],
+    noteText: "",
+    displayValue,
+    hasMeaningfulMultipleValues: false,
+    hasMultipleActiveSourceValues: false,
+    shouldShowQuestionMark: false
+  };
+}
+
+function createBenchmarkRow(
+  overrides: Partial<MatrixRow> & { rowKey: string; benchmark: string },
+  cellValues: Record<string, number | null> = {}
+): MatrixRow {
+  const cells = new Map<string, MatrixCell>();
+  Object.entries(cellValues).forEach(([modelName, value]) => {
+    cells.set(modelName, createCell(value));
+  });
+
+  return {
+    category: "General",
+    higherIsBetter: true,
+    modalities: ["Text"],
+    cells,
+    firstSeenIndex: 0,
+    sourceOrderKey: null,
+    rowDataCount: cells.size,
+    rowNumericCount: cells.size,
+    minComparable: null,
+    maxComparable: null,
+    minComparable2: null,
+    maxComparable2: null,
+    minNum: null,
+    maxNum: null,
+    minNum2: null,
+    maxNum2: null,
+    ...overrides
+  };
+}
+
+const modelPrices = [
+  { modelName: "Alpha", inputCost: 1, outputCost: 4, cacheReadCost: 0.1 },
+  { modelName: "Beta", inputCost: 3, outputCost: 12, cacheReadCost: 0.3 },
+  { modelName: "Gamma", inputCost: 0.2, outputCost: 0.8, cacheReadCost: null }
+];
+
+const modelParams = [
+  { modelName: "Alpha", totalParamsB: 397, activatedParamsB: 17, isEstimated: false, note: null },
+  { modelName: "Beta", totalParamsB: 120, activatedParamsB: null, isEstimated: false, note: null },
+  { modelName: "Gamma", totalParamsB: null, activatedParamsB: null, isEstimated: false, note: null }
+];
+
+const modelColumns = ["Alpha", "Beta", "Gamma"];
+
+describe("isMetricHigherBetter", () => {
+  test("方向判定与 getMatrixRowComparableScore 完全一致", () => {
+    const rows: MatrixRow[] = [
+      createBenchmarkRow({ rowKey: "merged::gpqa", benchmark: "GPQA", higherIsBetter: true }),
+      createBenchmarkRow({ rowKey: "merged::wer", benchmark: "WER", higherIsBetter: false }),
+      createBenchmarkRow({ rowKey: "merged::rmse", benchmark: "RMSE", category: "Regression", higherIsBetter: false }),
+      ...buildPriceMatrixRows(modelColumns, modelPrices),
+      ...buildParamsMatrixRows(modelColumns, modelParams)
+    ];
+
+    rows.forEach((row) => {
+      // 探针法必须与真正的可比分函数同号，否则帕累托方向会与矩阵热力方向脱节
+      const expected = getMatrixRowComparableScore(row, 1) > getMatrixRowComparableScore(row, 0);
+      expect(isMetricHigherBetter(row)).toBe(expected);
+    });
+  });
+
+  test("普通 benchmark 越大越好，越小越好的 benchmark 翻转", () => {
+    expect(isMetricHigherBetter(createBenchmarkRow({ rowKey: "a", benchmark: "GPQA", higherIsBetter: true }))).toBe(true);
+    expect(isMetricHigherBetter(createBenchmarkRow({ rowKey: "b", benchmark: "WER", higherIsBetter: false }))).toBe(false);
+  });
+
+  test("价格行与参数量行都是越小越好", () => {
+    buildPriceMatrixRows(modelColumns, modelPrices).forEach((row) => {
+      expect(isMetricHigherBetter(row)).toBe(false);
+    });
+    buildParamsMatrixRows(modelColumns, modelParams).forEach((row) => {
+      expect(isMetricHigherBetter(row)).toBe(false);
+    });
+  });
+});
+
+describe("toMetricSlug", () => {
+  test("合成行使用固定短名", () => {
+    expect(toMetricSlug(OVERALL_ROW_KEY)).toBe(OVERALL_METRIC_SLUG);
+    expect(toMetricSlug(PRICE_INPUT_ROW_KEY)).toBe("price-input");
+    expect(toMetricSlug(PRICE_OUTPUT_ROW_KEY)).toBe("price-output");
+    expect(toMetricSlug(PARAMS_ROW_KEY)).toBe("params");
+    expect(toMetricSlug(PARAMS_ACTIVE_RATIO_ROW_KEY)).toBe("params-activated");
+  });
+
+  test("benchmark 行 slug 稳定且可读", () => {
+    expect(toMetricSlug("merged::gpqa")).toBe(toMetricSlug("merged::gpqa"));
+    expect(toMetricSlug("merged::gpqa")).toMatch(/^gpqa~[a-z0-9]+$/);
+  });
+
+  test("slug 化后会撞车的 rowKey 靠哈希后缀区分", () => {
+    expect(toMetricSlug("raw::Coding::A/B")).not.toBe(toMetricSlug("raw::Coding::A-B"));
+  });
+
+  test("全中文名不会塌成空 slug", () => {
+    const slug = toMetricSlug("raw::综合::中文理解");
+    expect(slug).toMatch(/^metric~[a-z0-9]+$/);
+    expect(slug).toBe(toMetricSlug("raw::综合::中文理解"));
+  });
+
+  test("URL 安全：只含字母数字与 - ~ 三类字符", () => {
+    expect(toMetricSlug("raw::Coding::HumanEval+ (pass@1)")).toMatch(/^[a-z0-9~-]+$/);
+  });
+});
+
+describe("toScatterMetric", () => {
+  test("单元格数值汇总成 valueByModel，缺数被跳过", () => {
+    const metric = toScatterMetric(
+      createBenchmarkRow(
+        { rowKey: "merged::gpqa", benchmark: "GPQA" },
+        { Alpha: 88, Beta: 71, Gamma: null }
+      )
+    );
+
+    expect(metric.valueByModel.get("Alpha")).toBe(88);
+    expect(metric.valueByModel.get("Beta")).toBe(71);
+    expect(metric.valueByModel.has("Gamma")).toBe(false);
+  });
+
+  test("价格行单位为 usd 且建议对数轴", () => {
+    const [inputPrice] = buildPriceMatrixRows(modelColumns, modelPrices);
+    const metric = toScatterMetric(inputPrice);
+
+    expect(metric.kind).toBe("price");
+    expect(metric.unit).toBe("usd");
+    expect(metric.preferLogScale).toBe(true);
+    expect(metric.category).toBe(PRICE_CATEGORY_LABEL);
+  });
+
+  test("参数量行单位为 billions、激活占比为 percent", () => {
+    const [paramsRow, ratioRow] = buildParamsMatrixRows(modelColumns, modelParams);
+
+    expect(toScatterMetric(paramsRow).unit).toBe("billions");
+    expect(toScatterMetric(paramsRow).preferLogScale).toBe(true);
+    expect(toScatterMetric(ratioRow).unit).toBe("percent");
+    // 百分比本身量纲有限，不需要对数轴
+    expect(toScatterMetric(ratioRow).preferLogScale).toBe(false);
+    expect(toScatterMetric(paramsRow).category).toBe(MODEL_INFO_CATEGORY_LABEL);
+  });
+
+  test("参数量取总参数量而非激活量，与矩阵列排序口径一致", () => {
+    const [paramsRow] = buildParamsMatrixRows(modelColumns, modelParams);
+    const metric = toScatterMetric(paramsRow);
+
+    expect(metric.valueByModel.get("Alpha")).toBe(397);
+  });
+});
+
+describe("buildScatterMetrics", () => {
+  const benchmarkRows = [
+    createBenchmarkRow({ rowKey: "merged::gpqa", benchmark: "GPQA", category: "Reasoning" }, { Alpha: 88, Beta: 71 }),
+    createBenchmarkRow({ rowKey: "merged::aime", benchmark: "AIME", category: "Math" }, { Alpha: 90, Gamma: 40 }),
+    // 全空行不该出现在轴选择器里
+    createBenchmarkRow({ rowKey: "merged::empty", benchmark: "Empty", category: "Math" }, { Alpha: null })
+  ];
+
+  function build(overallScore: Map<string, number | null> | null = new Map([["Alpha", 82], ["Beta", 60], ["Gamma", 41]])) {
+    return buildScatterMetrics({
+      benchmarkRows,
+      priceRows: buildPriceMatrixRows(modelColumns, modelPrices),
+      paramsRows: buildParamsMatrixRows(modelColumns, modelParams),
+      overallScoreByModel: overallScore
+    });
+  }
+
+  test("总评分作为独立指标，且越大越好", () => {
+    const overall = findScatterMetric(build(), OVERALL_METRIC_SLUG);
+
+    expect(overall).not.toBeNull();
+    expect(overall?.kind).toBe("overall");
+    expect(overall?.higherIsBetter).toBe(true);
+    expect(overall?.rowKey).toBe(OVERALL_ROW_KEY);
+    expect(overall?.valueByModel.get("Alpha")).toBe(82);
+  });
+
+  test("不提供总评时不生成该轴", () => {
+    expect(findScatterMetric(build(null), OVERALL_METRIC_SLUG)).toBeNull();
+  });
+
+  test("总评全为空时同样不生成该轴", () => {
+    expect(findScatterMetric(build(new Map([["Alpha", null]])), OVERALL_METRIC_SLUG)).toBeNull();
+  });
+
+  test("过滤掉没有任何数值的指标", () => {
+    expect(build().some((metric) => metric.label === "Empty")).toBe(false);
+    // Cache Input Price 只有 Alpha / Beta 有值，应当保留
+    expect(build().some((metric) => metric.label === "Cache Input Price")).toBe(true);
+  });
+
+  test("排序为 总评 → 模型属性 → 价格 → 其余分类", () => {
+    const categories = build().map((metric) => metric.category);
+    const firstIndexOf = (category: string) => categories.indexOf(category);
+
+    expect(firstIndexOf("Summary")).toBe(0);
+    expect(firstIndexOf(MODEL_INFO_CATEGORY_LABEL)).toBeLessThan(firstIndexOf(PRICE_CATEGORY_LABEL));
+    expect(firstIndexOf(PRICE_CATEGORY_LABEL)).toBeLessThan(firstIndexOf("Math"));
+  });
+
+  test("指标 key 唯一", () => {
+    const keys = build().map((metric) => metric.key);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  test("groupScatterMetrics 按分类聚合且保持优先级顺序", () => {
+    const groups = groupScatterMetrics(build());
+
+    expect(groups[0]?.category).toBe("Summary");
+    expect(groups.map((group) => group.category)).toContain(PRICE_CATEGORY_LABEL);
+    expect(groups.every((group) => group.metrics.length > 0)).toBe(true);
+  });
+
+  test("默认双轴取 总评 × 输出价格", () => {
+    const metrics = build();
+    expect(resolveDefaultAxisKeys(metrics)).toEqual({ xKey: "price-output", yKey: OVERALL_METRIC_SLUG });
+  });
+
+  test("没有总评与价格时退化为覆盖最广的指标，且两轴不重复", () => {
+    const metrics = buildScatterMetrics({
+      benchmarkRows,
+      priceRows: [],
+      paramsRows: [],
+      overallScoreByModel: null
+    });
+    const { xKey, yKey } = resolveDefaultAxisKeys(metrics);
+
+    expect(yKey).not.toBeNull();
+    expect(xKey).not.toBeNull();
+    expect(xKey).not.toBe(yKey);
+  });
+
+  test("空指标列表返回空轴", () => {
+    expect(resolveDefaultAxisKeys([])).toEqual({ xKey: null, yKey: null });
+  });
+});
+
+describe("formatScatterValue / formatScatterAxisTick", () => {
+  test("价格保留有效位且不补零", () => {
+    expect(formatScatterValue({ unit: "usd" }, 12)).toBe("$12");
+    expect(formatScatterValue({ unit: "usd" }, 1.25)).toBe("$1.25");
+    expect(formatScatterValue({ unit: "usd" }, 0.075)).toBe("$0.075");
+  });
+
+  test("参数量、百分比、分数各自格式化", () => {
+    expect(formatScatterValue({ unit: "billions" }, 397)).toBe("397B");
+    expect(formatScatterValue({ unit: "percent" }, 4.28)).toBe("4.3%");
+    expect(formatScatterValue({ unit: "score" }, 82.456)).toBe("82.46");
+  });
+
+  test("非有限值统一显示为 --", () => {
+    expect(formatScatterValue({ unit: "score" }, Number.NaN)).toBe("--");
+  });
+
+  test("刻度文本比数值文本更紧凑", () => {
+    expect(formatScatterAxisTick({ unit: "usd" }, 12)).toBe("$12");
+    expect(formatScatterAxisTick({ unit: "usd" }, 0.1)).toBe("$0.1");
+    expect(formatScatterAxisTick({ unit: "billions" }, 1200)).toBe("1.2T");
+    expect(formatScatterAxisTick({ unit: "score" }, 82.456)).toBe("82");
+  });
+});
+
+describe("buildScatterDataset", () => {
+  const xMetric = toScatterMetric(
+    createBenchmarkRow({ rowKey: "x", benchmark: "Price", higherIsBetter: false, isPriceRow: true },
+      { Alpha: 4, Beta: 12, Gamma: 0.8, Delta: 30 })
+  );
+  const yMetric = toScatterMetric(
+    createBenchmarkRow({ rowKey: "y", benchmark: "Score" },
+      { Alpha: 82, Beta: 90, Gamma: 55, Delta: 60 })
+  );
+
+  const providerNameByModel = new Map([
+    ["Alpha", "OpenAI"],
+    ["Beta", "Anthropic"],
+    ["Gamma", "Google"],
+    ["Delta", "Meta"]
+  ]);
+  const colorByModel = new Map([["Alpha", "#ff0000"]]);
+
+  function build(overrides: Partial<Parameters<typeof buildScatterDataset>[0]> = {}) {
+    return buildScatterDataset({
+      xMetric,
+      yMetric,
+      modelNames: ["Alpha", "Beta", "Gamma", "Delta", "Missing"],
+      providerNameByModel,
+      colorByModel,
+      xScale: "linear",
+      yScale: "linear",
+      ...overrides
+    });
+  }
+
+  test("缺任一轴数值的模型被计入 missingCount", () => {
+    const dataset = build();
+    expect(dataset.points).toHaveLength(4);
+    expect(dataset.missingCount).toBe(1);
+  });
+
+  test("帕累托前沿标注到点上", () => {
+    const dataset = build();
+    const paretoNames = dataset.points.filter((point) => point.isPareto).map((point) => point.modelName).sort();
+
+    // Delta（30/60）被 Beta（12/90）全面压制；Alpha（4/82）没有更便宜又更强的对手，留在前沿
+    expect(paretoNames).toEqual(["Alpha", "Beta", "Gamma"]);
+    expect(dataset.paretoKeys.has("Delta")).toBe(false);
+  });
+
+  test("paretoPath 按支配序排列，可直接连线", () => {
+    const dataset = build();
+    // X 越小越好 ⇒ 支配序为价格降序
+    expect(dataset.paretoPath.map((point) => point.modelName)).toEqual(["Beta", "Alpha", "Gamma"]);
+  });
+
+  test("对数轴下非正值单独计数", () => {
+    const zeroPriceMetric = toScatterMetric(
+      createBenchmarkRow({ rowKey: "x0", benchmark: "Price", higherIsBetter: false, isPriceRow: true },
+        { Alpha: 0, Beta: 12 })
+    );
+    const dataset = build({ xMetric: zeroPriceMetric, xScale: "log", modelNames: ["Alpha", "Beta"] });
+
+    expect(dataset.nonPositiveCount).toBe(1);
+    expect(dataset.missingCount).toBe(0);
+    expect(dataset.points.map((point) => point.modelName)).toEqual(["Beta"]);
+  });
+
+  test("未配置品牌色时回落到默认色", () => {
+    const dataset = build();
+    expect(dataset.points.find((point) => point.modelName === "Alpha")?.color).toBe("#ff0000");
+    expect(dataset.points.find((point) => point.modelName === "Beta")?.color).toBe("#5da7ff");
+  });
+
+  test("空模型列表返回空数据集", () => {
+    const dataset = build({ modelNames: [] });
+    expect(dataset.points).toEqual([]);
+    expect(dataset.paretoPath).toEqual([]);
+  });
+});
+
+describe("computeAxisDomain / computeMedian", () => {
+  test("线性轴两端留白，非负数据不会被推到负值", () => {
+    const [min, max] = computeAxisDomain([0.5, 10], "linear");
+    expect(min).toBeGreaterThanOrEqual(0);
+    expect(max).toBeGreaterThan(10);
+  });
+
+  test("线性轴单值不产生退化 domain", () => {
+    const [min, max] = computeAxisDomain([7], "linear");
+    expect(max).toBeGreaterThan(min);
+  });
+
+  test("对数轴 domain 落在正数区并包住极值", () => {
+    const [min, max] = computeAxisDomain([0.1, 100], "log");
+    expect(min).toBeGreaterThan(0);
+    expect(min).toBeLessThan(0.1);
+    expect(max).toBeGreaterThan(100);
+  });
+
+  test("对数轴没有正值时给出安全兜底", () => {
+    expect(computeAxisDomain([0, -3], "log")).toEqual([1, 10]);
+  });
+
+  test("中位数支持奇偶长度", () => {
+    expect(computeMedian([3, 1, 2])).toBe(2);
+    expect(computeMedian([4, 1, 2, 3])).toBe(2.5);
+    expect(computeMedian([])).toBeNull();
+  });
+});
