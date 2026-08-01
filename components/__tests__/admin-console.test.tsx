@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 
 import { AdminConsole } from "@/components/admin-console";
-import type { ModelPricingRow } from "@/components/admin-console/types";
+import type { ModelParamsRow, ModelPricingRow } from "@/components/admin-console/types";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -124,6 +124,21 @@ function buildPropsWithDisplayNameAndPrefixRule(): AdminConsoleProps {
       },
       { id: 2, name: "Google", slug: "google" }
     ]
+  };
+}
+
+function buildParamsRow(overrides: Partial<ModelParamsRow> = {}): ModelParamsRow {
+  return {
+    modelId: 1,
+    modelName: "Model A",
+    providerName: "OpenAI",
+    modelCreatedAt: "2026-05-26T00:00:00.000Z",
+    totalParamsB: null,
+    activatedParamsB: null,
+    isEstimated: false,
+    note: null,
+    suggestion: null,
+    ...overrides
   };
 }
 
@@ -3367,5 +3382,255 @@ describe("AdminConsole rename tab", () => {
       const dropdown = document.body.querySelector('[role="listbox"]') as HTMLElement | null;
       expect(dropdown).toBeInTheDocument();
     });
+  });
+});
+
+describe("AdminConsole 批量保存", () => {
+  test("价格管理批量保存只提交改动过的行，且不受搜索筛选影响", async () => {
+    const user = userEvent.setup();
+    const priceRows = [
+      buildPriceRow({ modelId: 1, modelName: "Alpha Model", sourceModelId: "alpha", inputCost: 1 }),
+      buildPriceRow({ modelId: 2, modelName: "Beta Model", sourceModelId: "beta", inputCost: 2 }),
+      buildPriceRow({ modelId: 3, modelName: "Gamma Model", sourceModelId: "gamma", inputCost: 3 })
+    ];
+    const fetchMock = mockFetchSequence(
+      { prices: priceRows },
+      { ok: true, updatedCount: 2 },
+      { prices: priceRows }
+    );
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await user.click(screen.getByRole("tab", { name: "价格管理" }));
+    expect(await screen.findByText("Alpha Model")).toBeInTheDocument();
+
+    const alphaRow = screen.getByText("Alpha Model").closest("tr");
+    const gammaRow = screen.getByText("Gamma Model").closest("tr");
+    if (!alphaRow || !gammaRow) throw new Error("price rows not found");
+
+    const alphaInput = within(alphaRow).getByPlaceholderText("$1");
+    await user.clear(alphaInput);
+    await user.type(alphaInput, "1.5");
+
+    const gammaInput = within(gammaRow).getByPlaceholderText("$3");
+    await user.clear(gammaInput);
+    await user.type(gammaInput, "3.5");
+
+    // 把改过的两行用搜索藏起来，批量保存仍应把它们提交上去
+    await user.type(screen.getByPlaceholderText("搜索模型、Provider 或 models.dev ID"), "beta");
+    await waitFor(() => {
+      expect(screen.queryByText("Alpha Model")).not.toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /保存全部修改（2）/ }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([input, init]) => input === "/api/admin/model-prices" && init?.method === "PATCH")
+      ).toBe(true);
+    });
+
+    const patchCall = fetchMock.mock.calls.find(
+      ([input, init]) => input === "/api/admin/model-prices" && init?.method === "PATCH"
+    );
+    const body = JSON.parse(String(patchCall?.[1]?.body)) as {
+      updates: Array<{ modelId: number; inputCost: number | null; manualOverride: boolean; matchStatus: string }>;
+    };
+
+    expect(body.updates).toHaveLength(2);
+    expect(body.updates.map((item) => item.modelId)).toEqual([1, 3]);
+    expect(body.updates[0]).toEqual(
+      expect.objectContaining({ modelId: 1, inputCost: 1.5, manualOverride: true, matchStatus: "manual" })
+    );
+    expect(body.updates[1]).toEqual(expect.objectContaining({ modelId: 3, inputCost: 3.5 }));
+  });
+
+  test("价格管理批量保存在任一行非法时整批不提交", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetchSequence({
+      prices: [
+        buildPriceRow({ modelId: 1, modelName: "Alpha Model", sourceModelId: "alpha", inputCost: 1 }),
+        buildPriceRow({ modelId: 2, modelName: "Beta Model", sourceModelId: "beta", inputCost: 2, outputCost: 20 })
+      ]
+    });
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await user.click(screen.getByRole("tab", { name: "价格管理" }));
+    expect(await screen.findByText("Alpha Model")).toBeInTheDocument();
+
+    const alphaRow = screen.getByText("Alpha Model").closest("tr");
+    const betaRow = screen.getByText("Beta Model").closest("tr");
+    if (!alphaRow || !betaRow) throw new Error("price rows not found");
+
+    const alphaInput = within(alphaRow).getByPlaceholderText("$1");
+    await user.clear(alphaInput);
+    await user.type(alphaInput, "1abc");
+
+    const betaInput = within(betaRow).getByPlaceholderText("$2");
+    await user.clear(betaInput);
+    await user.type(betaInput, "2.5");
+
+    await user.click(screen.getByRole("button", { name: /保存全部修改/ }));
+
+    expect(await screen.findByText("有 1 个模型的价格填写有误，已取消保存")).toBeInTheDocument();
+    expect(screen.getByText("Alpha Model：价格必须是非负数字")).toBeInTheDocument();
+    // 只有最初的 GET，没有任何 PATCH
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("价格管理没有改动时批量保存按钮为禁用，改动后计数并标记未保存", async () => {
+    const user = userEvent.setup();
+    mockFetchSequence({ prices: [buildPriceRow({ modelId: 1, modelName: "Model A", inputCost: 1 })] });
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await user.click(screen.getByRole("tab", { name: "价格管理" }));
+    expect(await screen.findByText("Model A")).toBeInTheDocument();
+
+    expect(screen.getByRole("button", { name: /保存全部修改/ })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "撤销修改" })).not.toBeInTheDocument();
+
+    const row = screen.getByText("Model A").closest("tr");
+    if (!row) throw new Error("Model A row not found");
+
+    const inputCost = within(row).getByPlaceholderText("$1");
+    await user.clear(inputCost);
+    await user.type(inputCost, "1.5");
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /保存全部修改（1）/ })).toBeEnabled();
+    });
+    expect(within(row).getByText("未保存")).toBeInTheDocument();
+  });
+
+  test("价格管理仅改写数字格式不算改动", async () => {
+    const user = userEvent.setup();
+    // 手动覆盖已开启，改数字格式不会连带翻转 manualOverride，剩下的差异只有写法
+    mockFetchSequence({
+      prices: [
+        buildPriceRow({ modelId: 1, modelName: "Model A", inputCost: 1.5, manualOverride: true, matchStatus: "manual" })
+      ]
+    });
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await user.click(screen.getByRole("tab", { name: "价格管理" }));
+    expect(await screen.findByText("Model A")).toBeInTheDocument();
+
+    const row = screen.getByText("Model A").closest("tr");
+    if (!row) throw new Error("Model A row not found");
+
+    const inputCost = within(row).getByPlaceholderText("$1.5");
+    await user.clear(inputCost);
+    await user.type(inputCost, "1.50");
+
+    expect(screen.getByRole("button", { name: /保存全部修改/ })).toBeDisabled();
+    expect(within(row).queryByText("未保存")).not.toBeInTheDocument();
+  });
+
+  test("价格管理撤销修改在确认后恢复草稿", async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    mockFetchSequence({ prices: [buildPriceRow({ modelId: 1, modelName: "Model A", inputCost: 1 })] });
+
+    try {
+      render(<AdminConsole {...buildProps()} />);
+
+      await user.click(screen.getByRole("tab", { name: "价格管理" }));
+      expect(await screen.findByText("Model A")).toBeInTheDocument();
+
+      const row = screen.getByText("Model A").closest("tr");
+      if (!row) throw new Error("Model A row not found");
+
+      const inputCost = within(row).getByPlaceholderText("$1") as HTMLInputElement;
+      await user.clear(inputCost);
+      await user.type(inputCost, "9.9");
+
+      await user.click(await screen.findByRole("button", { name: "撤销修改" }));
+
+      await waitFor(() => {
+        expect(inputCost.value).toBe("1");
+      });
+      expect(confirmSpy).toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: /保存全部修改/ })).toBeDisabled();
+    } finally {
+      confirmSpy.mockRestore();
+    }
+  });
+
+  test("模型参数批量保存把所有改动合并成一次请求", async () => {
+    const user = userEvent.setup();
+    const paramsRows = [
+      buildParamsRow({ modelId: 1, modelName: "Alpha Model" }),
+      buildParamsRow({ modelId: 2, modelName: "Beta Model", totalParamsB: 70 }),
+      buildParamsRow({ modelId: 3, modelName: "Gamma Model", totalParamsB: 8 })
+    ];
+    const fetchMock = mockFetchSequence(
+      { params: paramsRows },
+      { ok: true, updatedCount: 2 },
+      { params: paramsRows }
+    );
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await user.click(screen.getByRole("tab", { name: "模型参数" }));
+    expect(await screen.findByText("Alpha Model")).toBeInTheDocument();
+
+    const alphaRow = screen.getByText("Alpha Model").closest("tr");
+    const betaRow = screen.getByText("Beta Model").closest("tr");
+    if (!alphaRow || !betaRow) throw new Error("params rows not found");
+
+    await user.type(within(alphaRow).getByPlaceholderText("--"), "235");
+    await user.type(within(alphaRow).getByPlaceholderText("稠密"), "22");
+
+    const betaTotal = within(betaRow).getByPlaceholderText("70B");
+    await user.clear(betaTotal);
+    await user.type(betaTotal, "72");
+
+    await user.click(screen.getByRole("button", { name: /保存全部修改（2）/ }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([input, init]) => input === "/api/admin/model-params" && init?.method === "PATCH")
+      ).toBe(true);
+    });
+
+    const patchCall = fetchMock.mock.calls.find(
+      ([input, init]) => input === "/api/admin/model-params" && init?.method === "PATCH"
+    );
+    const body = JSON.parse(String(patchCall?.[1]?.body)) as {
+      updates: Array<{ modelId: number; totalParamsB: number | null; activatedParamsB: number | null }>;
+    };
+
+    expect(body.updates).toHaveLength(2);
+    expect(body.updates[0]).toEqual(
+      expect.objectContaining({ modelId: 1, totalParamsB: 235, activatedParamsB: 22 })
+    );
+    expect(body.updates[1]).toEqual(expect.objectContaining({ modelId: 2, totalParamsB: 72 }));
+  });
+
+  test("模型参数批量保存拦下激活参数量大于总参数量的行", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetchSequence({
+      params: [buildParamsRow({ modelId: 1, modelName: "Alpha Model" })]
+    });
+
+    render(<AdminConsole {...buildProps()} />);
+
+    await user.click(screen.getByRole("tab", { name: "模型参数" }));
+    expect(await screen.findByText("Alpha Model")).toBeInTheDocument();
+
+    const alphaRow = screen.getByText("Alpha Model").closest("tr");
+    if (!alphaRow) throw new Error("params row not found");
+
+    await user.type(within(alphaRow).getByPlaceholderText("--"), "20");
+    await user.type(within(alphaRow).getByPlaceholderText("稠密"), "30");
+
+    await user.click(screen.getByRole("button", { name: /保存全部修改/ }));
+
+    expect(await screen.findByText("有 1 个模型的参数量填写有误，已取消保存")).toBeInTheDocument();
+    expect(screen.getByText("Alpha Model：激活参数量不能大于总参数量")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

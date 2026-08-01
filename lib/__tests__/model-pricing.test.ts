@@ -86,12 +86,17 @@ function createDbMock(activeModels: ActiveModelRow[], existingRows: ExistingPric
   const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
   const values = vi.fn(() => ({ onConflictDoUpdate }));
   const insert = vi.fn(() => ({ values }));
+  // 价格写入统一走事务（批量保存复用同一条路径），事务客户端直接复用同一组 insert mock
+  const transaction = vi.fn(async (callback: (tx: { insert: typeof insert }) => Promise<unknown>) =>
+    callback({ insert })
+  );
 
   return {
-    db: { select, insert },
+    db: { select, insert, transaction },
     insert,
     values,
-    onConflictDoUpdate
+    onConflictDoUpdate,
+    transaction
   };
 }
 
@@ -367,6 +372,62 @@ describe("model pricing module", () => {
         outputCost: -0.2,
       })
     ).rejects.toBeInstanceOf(ZodError);
+  });
+
+  test("updateModelPricingBatch upserts every entry inside one transaction", async () => {
+    const { db, onConflictDoUpdate, transaction } = createDbMock([], []);
+    const { updateModelPricingBatch } = await importPricingModule(db);
+
+    const result = await updateModelPricingBatch([
+      { modelId: 1, inputCost: 0.1 },
+      { modelId: 2, outputCost: 0.2 }
+    ]);
+
+    expect(result).toEqual({ updatedCount: 2 });
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(onConflictDoUpdate).toHaveBeenCalledTimes(2);
+
+    const sets = onConflictDoUpdate.mock.calls.map(([arg]) => arg.set);
+    expect(sets[0]).toEqual(expect.objectContaining({ inputCost: "0.1" }));
+    expect(sets[1]).toEqual(expect.objectContaining({ outputCost: "0.2" }));
+  });
+
+  test("updateModelPricingBatch rejects the whole batch when one entry is invalid", async () => {
+    const { db, onConflictDoUpdate, transaction } = createDbMock([], []);
+    const { updateModelPricingBatch } = await importPricingModule(db);
+
+    await expect(
+      updateModelPricingBatch([
+        { modelId: 1, inputCost: 0.1 },
+        { modelId: 7, inputCost: -1 }
+      ])
+    ).rejects.toThrow(/模型 #7/);
+
+    // 校验在写库之前完成，合法的那条也不应落库
+    expect(transaction).not.toHaveBeenCalled();
+    expect(onConflictDoUpdate).not.toHaveBeenCalled();
+  });
+
+  test("updateModelPricingBatch keeps the last entry when a modelId repeats", async () => {
+    const { db, onConflictDoUpdate } = createDbMock([], []);
+    const { updateModelPricingBatch } = await importPricingModule(db);
+
+    const result = await updateModelPricingBatch([
+      { modelId: 1, inputCost: 0.1 },
+      { modelId: 1, inputCost: 0.9 }
+    ]);
+
+    expect(result).toEqual({ updatedCount: 1 });
+    expect(onConflictDoUpdate).toHaveBeenCalledTimes(1);
+    expect(onConflictDoUpdate.mock.calls[0][0].set).toEqual(expect.objectContaining({ inputCost: "0.9" }));
+  });
+
+  test("updateModelPricingBatch skips the database entirely for an empty list", async () => {
+    const { db, transaction } = createDbMock([], []);
+    const { updateModelPricingBatch } = await importPricingModule(db);
+
+    await expect(updateModelPricingBatch([])).resolves.toEqual({ updatedCount: 0 });
+    expect(transaction).not.toHaveBeenCalled();
   });
 
   test("updateModelPricing respects explicit overrides for matchStatus and manualOverride", async () => {

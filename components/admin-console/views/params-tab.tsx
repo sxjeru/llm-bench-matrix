@@ -1,15 +1,9 @@
 "use client";
 
 import type { Dispatch, SetStateAction } from "react";
-import { Cpu, RefreshCw, Save, Wand2 } from "lucide-react";
-import type { ModelParamsRow } from "../types";
-
-export type ModelParamsDraft = {
-  totalParamsB: string;
-  activatedParamsB: string;
-  isEstimated: boolean;
-  note: string;
-};
+import { Cpu, RefreshCw, RotateCcw, Save, Wand2 } from "lucide-react";
+import type { ModelParamsDraft, ModelParamsRow } from "../types";
+import { isParamsDraftDirty } from "../utils/params-draft";
 
 export type ModelParamsStatusFilter = "all" | "filled" | "missing" | "suggested";
 
@@ -18,6 +12,9 @@ type ParamsTabProps = {
   loadingParams: boolean;
   applyingSuggestions: boolean;
   savingParamsModelId: number | null;
+  savingAllParams: boolean;
+  /** 全表未保存的行数，不受搜索与状态筛选影响 */
+  dirtyParamsCount: number;
   paramsSearchQuery: string;
   setParamsSearchQuery: Dispatch<SetStateAction<string>>;
   paramsStatusFilter: ModelParamsStatusFilter;
@@ -26,6 +23,8 @@ type ParamsTabProps = {
   updateParamsDraft: (modelId: number, updater: (draft: ModelParamsDraft) => ModelParamsDraft) => void;
   onLoadParams: () => void | Promise<void>;
   onSaveParams: (modelId: number) => void | Promise<void>;
+  onSaveAllParams: () => void | Promise<void>;
+  onDiscardParamsDrafts: () => void;
   onApplyAllSuggestions: () => void | Promise<void>;
   onApplySuggestion: (modelId: number) => void;
 };
@@ -67,6 +66,8 @@ export function ParamsTab({
   loadingParams,
   applyingSuggestions,
   savingParamsModelId,
+  savingAllParams,
+  dirtyParamsCount,
   paramsSearchQuery,
   setParamsSearchQuery,
   paramsStatusFilter,
@@ -75,6 +76,8 @@ export function ParamsTab({
   updateParamsDraft,
   onLoadParams,
   onSaveParams,
+  onSaveAllParams,
+  onDiscardParamsDrafts,
   onApplyAllSuggestions,
   onApplySuggestion
 }: ParamsTabProps) {
@@ -96,6 +99,8 @@ export function ParamsTab({
   const filledCount = params.filter(isParamsFilled).length;
   const missingCount = params.length - filledCount;
   const suggestionCount = params.filter(hasApplicableSuggestion).length;
+  const busy = loadingParams || applyingSuggestions || savingAllParams;
+  const hasDirtyDrafts = dirtyParamsCount > 0;
 
   return (
     <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
@@ -105,11 +110,33 @@ export function ParamsTab({
           模型参数量
         </h3>
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          {hasDirtyDrafts ? (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={onDiscardParamsDrafts}
+              disabled={busy || savingParamsModelId !== null}
+              title="放弃所有未保存的改动，恢复为服务端当前值"
+            >
+              <RotateCcw size={14} />
+              撤销修改
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className={`btn btn-sm ${hasDirtyDrafts ? "btn-warning" : "btn-primary btn-outline"}`}
+            onClick={onSaveAllParams}
+            disabled={busy || savingParamsModelId !== null || !hasDirtyDrafts}
+            title="保存全表所有改动，不受当前搜索与筛选影响"
+          >
+            {savingAllParams ? <span className="loading loading-spinner loading-xs" /> : <Save size={14} />}
+            保存全部修改{hasDirtyDrafts ? `（${dirtyParamsCount}）` : ""}
+          </button>
           <button
             type="button"
             className="btn btn-outline btn-sm"
             onClick={onLoadParams}
-            disabled={loadingParams || applyingSuggestions}
+            disabled={busy}
           >
             <RefreshCw size={14} />
             刷新
@@ -118,7 +145,7 @@ export function ParamsTab({
             type="button"
             className="btn btn-primary btn-sm"
             onClick={onApplyAllSuggestions}
-            disabled={loadingParams || applyingSuggestions || suggestionCount === 0}
+            disabled={busy || suggestionCount === 0}
             title="仅填充当前为空的模型，不会覆盖已录入的值"
           >
             {applyingSuggestions ? <span className="loading loading-spinner loading-xs" /> : <Wand2 size={14} />}
@@ -153,6 +180,14 @@ export function ParamsTab({
           </div>
         </div>
       </div>
+
+      {hasDirtyDrafts ? (
+        <div className="alert alert-warning mb-4 text-sm">
+          <span>
+            有 {dirtyParamsCount} 个模型的参数量已修改但未保存（含被当前搜索/筛选隐藏的行），点击「保存全部修改」一次提交。
+          </span>
+        </div>
+      ) : null}
 
       <div className="alert alert-info mb-4 text-sm">
         <span>
@@ -205,11 +240,15 @@ export function ParamsTab({
                 if (!draft) return null;
                 const isSaving = savingParamsModelId === row.modelId;
                 const suggestionText = formatSuggestion(row);
+                const isDirty = isParamsDraftDirty(row, draft);
 
                 return (
                   <tr key={row.modelId}>
                     <td className="min-w-[220px]">
-                      <div className="font-semibold">{row.modelName}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold">{row.modelName}</span>
+                        {isDirty ? <span className="badge badge-warning badge-xs whitespace-nowrap">未保存</span> : null}
+                      </div>
                       <div className="text-xs opacity-60">{row.providerName}</div>
                     </td>
                     <td>
@@ -274,9 +313,9 @@ export function ParamsTab({
                     <td className="min-w-20 whitespace-nowrap">
                       <button
                         type="button"
-                        className="btn btn-primary btn-xs min-w-16 whitespace-nowrap px-3"
+                        className={`btn btn-xs min-w-16 whitespace-nowrap px-3 ${isDirty ? "btn-warning" : "btn-primary"}`}
                         onClick={() => onSaveParams(row.modelId)}
-                        disabled={isSaving}
+                        disabled={isSaving || savingAllParams}
                       >
                         {isSaving ? <span className="loading loading-spinner loading-xs" /> : <Save size={12} />}
                         保存

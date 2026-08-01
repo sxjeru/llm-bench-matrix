@@ -3,7 +3,6 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { type ClipboardEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { formatDateTimeLocalInputValue } from "@/components/benchmark-matrix/formatters";
-import { MAX_PARAMS_B, MIN_PARAMS_B } from "@/lib/model-params-parse";
 import { getJson, postFormData, postJson } from "./admin-console/api";
 import { useEntityLookups } from "./admin-console/hooks/use-entity-lookups";
 import { useImportPreviewState } from "./admin-console/hooks/use-import-preview-state";
@@ -28,7 +27,9 @@ import type {
   MergedRecord,
   ModelDedupeRule,
   ModelOption,
+  ModelParamsDraft,
   ModelParamsRow,
+  ModelPricingDraft,
   ModelPricingRow,
   ModelPricingSyncResult,
   PreviewRow,
@@ -58,6 +59,18 @@ import {
 } from "./admin-console/utils/model";
 import { normalizeModalityList } from "./admin-console/utils/modality";
 import {
+  buildParamsUpdatePayload,
+  countDirtyParamsDrafts,
+  isParamsDraftDirty,
+  toParamsDraft
+} from "./admin-console/utils/params-draft";
+import {
+  buildPricingUpdatePayload,
+  countDirtyPricingDrafts,
+  isPricingDraftDirty,
+  toPricingDraft
+} from "./admin-console/utils/pricing-draft";
+import {
   getProviderDisplayNameById,
   getProviderOptionLabel,
   inferProviderNameFromModelName,
@@ -78,10 +91,9 @@ import { MaintenanceTab } from "./admin-console/views/maintenance-tab";
 import { MergeTab } from "./admin-console/views/merge-tab";
 import { AdminConsoleNotices } from "./admin-console/views/notices";
 import { ProvidersTab } from "./admin-console/views/providers-tab";
-import { PricingTab, type ModelPricingDraft } from "./admin-console/views/pricing-tab";
+import { PricingTab } from "./admin-console/views/pricing-tab";
 import {
   ParamsTab,
-  type ModelParamsDraft,
   type ModelParamsStatusFilter
 } from "./admin-console/views/params-tab";
 import { RenameTab } from "./admin-console/views/rename-tab";
@@ -317,6 +329,7 @@ export function AdminConsole({
   const [hasLoadedPrices, setHasLoadedPrices] = useState(false);
   const [syncingPrices, setSyncingPrices] = useState(false);
   const [savingPriceModelId, setSavingPriceModelId] = useState<number | null>(null);
+  const [savingAllPrices, setSavingAllPrices] = useState(false);
   const [pricingSearchQuery, setPricingSearchQuery] = useState("");
   const [pricingStatusFilter, setPricingStatusFilter] = useState<"all" | "matched" | "unmatched" | "manual" | "missing">("all");
   const [pricingSyncResult, setPricingSyncResult] = useState<ModelPricingSyncResult | null>(null);
@@ -326,8 +339,19 @@ export function AdminConsole({
   const [hasLoadedParams, setHasLoadedParams] = useState(false);
   const [applyingParamsSuggestions, setApplyingParamsSuggestions] = useState(false);
   const [savingParamsModelId, setSavingParamsModelId] = useState<number | null>(null);
+  const [savingAllParams, setSavingAllParams] = useState(false);
   const [paramsSearchQuery, setParamsSearchQuery] = useState("");
   const [paramsStatusFilter, setParamsStatusFilter] = useState<ModelParamsStatusFilter>("all");
+
+  // 待保存计数覆盖整张表，不受搜索与状态筛选影响，否则「保存全部修改」会漏掉被隐藏的行
+  const dirtyPricingCount = useMemo(
+    () => countDirtyPricingDrafts(modelPriceRows, pricingDrafts),
+    [modelPriceRows, pricingDrafts]
+  );
+  const dirtyParamsCount = useMemo(
+    () => countDirtyParamsDrafts(modelParamsRows, paramsDrafts),
+    [modelParamsRows, paramsDrafts]
+  );
 
   const sortedSettings = useMemo(() => {
     return Object.entries(initialSettings).sort(([a], [b]) => a.localeCompare(b));
@@ -2768,25 +2792,6 @@ export function AdminConsole({
     && resolvedMergeTargetId !== null
     && resolvedMergeSourceId !== resolvedMergeTargetId;
 
-  function toPricingDraft(row: ModelPricingRow): ModelPricingDraft {
-    const costToString = (value: number | null) => value === null ? "" : String(value);
-    return {
-      inputCost: costToString(row.inputCost),
-      outputCost: costToString(row.outputCost),
-      cacheReadCost: costToString(row.cacheReadCost),
-      reasoningCost: costToString(row.reasoningCost),
-      cacheWriteCost: costToString(row.cacheWriteCost),
-      inputAudioCost: costToString(row.inputAudioCost),
-      outputAudioCost: costToString(row.outputAudioCost),
-      sourceProviderId: row.sourceProviderId ?? "",
-      sourceProviderName: row.sourceProviderName ?? "",
-      sourceModelId: row.sourceModelId ?? "",
-      sourceModelName: row.sourceModelName ?? "",
-      manualOverride: row.manualOverride,
-      note: row.note ?? ""
-    };
-  }
-
   function resetPricingDrafts(rows: ModelPricingRow[]) {
     setPricingDrafts(
       rows.reduce<Record<number, ModelPricingDraft>>((acc, row) => {
@@ -2854,21 +2859,26 @@ export function AdminConsole({
     }));
   }
 
-  function parseOptionalCost(raw: string): number | null {
-    const trimmed = raw.trim();
-    if (!trimmed) return null;
-    if (!/^\+?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(trimmed)) {
-      throw new Error("价格必须是非负数字");
-    }
-    const parsed = Number(trimmed);
-    if (!Number.isFinite(parsed) || parsed < 0) {
-      throw new Error("价格必须是非负数字");
-    }
-    return parsed;
+  /** 刷新/同步会丢弃草稿，有未保存改动时先确认一次 */
+  function confirmDiscardDirtyDrafts(dirtyCount: number, action: string) {
+    if (dirtyCount === 0) return true;
+    return window.confirm(`还有 ${dirtyCount} 处修改未保存，${action}会丢弃这些改动。是否继续？`);
+  }
+
+  function discardPricingDrafts() {
+    if (!confirmDiscardDirtyDrafts(dirtyPricingCount, "撤销")) return;
+    resetPricingDrafts(modelPriceRows);
+  }
+
+  async function refreshModelPrices() {
+    if (!confirmDiscardDirtyDrafts(dirtyPricingCount, "刷新")) return;
+    await loadModelPrices();
   }
 
   async function syncModelPrices() {
     if (syncingPrices) return;
+    if (!confirmDiscardDirtyDrafts(dirtyPricingCount, "同步")) return;
+
     setSyncingPrices(true);
     try {
       const result = await postJson("/api/admin/model-prices/sync", {});
@@ -2884,47 +2894,14 @@ export function AdminConsole({
 
   async function saveModelPrice(modelId: number) {
     const draft = pricingDrafts[modelId];
-    if (!draft || savingPriceModelId !== null) return;
+    if (!draft || savingPriceModelId !== null || savingAllPrices) return;
 
     const sourceRow = modelPriceRows.find((row) => row.modelId === modelId);
 
     setSavingPriceModelId(modelId);
     try {
-      const parsedCosts = {
-        inputCost: parseOptionalCost(draft.inputCost),
-        outputCost: parseOptionalCost(draft.outputCost),
-        cacheReadCost: parseOptionalCost(draft.cacheReadCost),
-        reasoningCost: parseOptionalCost(draft.reasoningCost),
-        cacheWriteCost: parseOptionalCost(draft.cacheWriteCost),
-        inputAudioCost: parseOptionalCost(draft.inputAudioCost),
-        outputAudioCost: parseOptionalCost(draft.outputAudioCost)
-      };
-      const priceChanged = sourceRow
-        ? parsedCosts.inputCost !== sourceRow.inputCost
-          || parsedCosts.outputCost !== sourceRow.outputCost
-          || parsedCosts.cacheReadCost !== sourceRow.cacheReadCost
-          || parsedCosts.reasoningCost !== sourceRow.reasoningCost
-          || parsedCosts.cacheWriteCost !== sourceRow.cacheWriteCost
-          || parsedCosts.inputAudioCost !== sourceRow.inputAudioCost
-          || parsedCosts.outputAudioCost !== sourceRow.outputAudioCost
-        : false;
-      const manualOverride = draft.manualOverride || priceChanged;
-
-      await postJson(
-        "/api/admin/model-prices",
-        {
-          modelId,
-          ...parsedCosts,
-          sourceProviderId: draft.sourceProviderId.trim() || null,
-          sourceProviderName: draft.sourceProviderName.trim() || null,
-          sourceModelId: draft.sourceModelId.trim() || null,
-          sourceModelName: draft.sourceModelName.trim() || null,
-          manualOverride,
-          matchStatus: manualOverride ? "manual" : "matched",
-          note: draft.note.trim() || null
-        },
-        "PATCH"
-      );
+      const payload = buildPricingUpdatePayload(modelId, draft, sourceRow);
+      await postJson("/api/admin/model-prices", payload, "PATCH");
       notifySuccess("模型价格已保存");
       await loadModelPrices();
     } catch (error) {
@@ -2934,13 +2911,56 @@ export function AdminConsole({
     }
   }
 
-  function toParamsDraft(row: ModelParamsRow): ModelParamsDraft {
-    return {
-      totalParamsB: row.totalParamsB === null ? "" : String(row.totalParamsB),
-      activatedParamsB: row.activatedParamsB === null ? "" : String(row.activatedParamsB),
-      isEstimated: row.isEstimated,
-      note: row.note ?? ""
-    };
+  /**
+   * 一次提交所有改动过的价格行。
+   *
+   * 校验在前端整体做完再发请求：任何一行填错就整批不提交，并把出错的模型名列出来，
+   * 避免出现「保存了一半」还要靠用户自己找哪几行没存上。
+   */
+  async function saveAllModelPrices() {
+    if (savingAllPrices || savingPriceModelId !== null) return;
+
+    const dirtyRows = modelPriceRows.filter((row) => isPricingDraftDirty(row, pricingDrafts[row.modelId]));
+    if (dirtyRows.length === 0) return;
+
+    const updates: ReturnType<typeof buildPricingUpdatePayload>[] = [];
+    const invalidDetails: string[] = [];
+
+    for (const row of dirtyRows) {
+      const draft = pricingDrafts[row.modelId];
+      if (!draft) continue;
+
+      try {
+        updates.push(buildPricingUpdatePayload(row.modelId, draft, row));
+      } catch (error) {
+        invalidDetails.push(`${row.modelName}：${error instanceof Error ? error.message : "数据不合法"}`);
+      }
+    }
+
+    if (invalidDetails.length > 0) {
+      notifyError(`有 ${invalidDetails.length} 个模型的价格填写有误，已取消保存`, invalidDetails);
+      return;
+    }
+
+    setSavingAllPrices(true);
+    try {
+      const result = await postJson("/api/admin/model-prices", { updates }, "PATCH");
+      notifySuccess(`已保存 ${result?.updatedCount ?? updates.length} 个模型的价格`);
+      await loadModelPrices();
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "批量保存模型价格失败");
+    } finally {
+      setSavingAllPrices(false);
+    }
+  }
+
+  function resetParamsDrafts(rows: ModelParamsRow[]) {
+    setParamsDrafts(
+      rows.reduce<Record<number, ModelParamsDraft>>((acc, row) => {
+        acc[row.modelId] = toParamsDraft(row);
+        return acc;
+      }, {})
+    );
   }
 
   async function loadModelParams() {
@@ -2949,12 +2969,7 @@ export function AdminConsole({
       const result = await getJson("/api/admin/model-params");
       const rows = Array.isArray(result?.params) ? result.params as ModelParamsRow[] : [];
       setModelParamsRows(rows);
-      setParamsDrafts(
-        rows.reduce<Record<number, ModelParamsDraft>>((acc, row) => {
-          acc[row.modelId] = toParamsDraft(row);
-          return acc;
-        }, {})
-      );
+      resetParamsDrafts(rows);
       setHasLoadedParams(true);
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "加载模型参数量失败");
@@ -2973,21 +2988,14 @@ export function AdminConsole({
     }));
   }
 
-  function parseOptionalParams(raw: string): number | null {
-    const trimmed = raw.trim();
-    if (!trimmed) return null;
-    if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(trimmed)) {
-      throw new Error("参数量必须是正数");
-    }
-    const parsed = Number(trimmed);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      throw new Error("参数量必须是正数");
-    }
-    // 与后端 schema 同源。这里先拦一道是为了给出中文提示：交给后端会得到一串 ZodError JSON
-    if (parsed < MIN_PARAMS_B || parsed > MAX_PARAMS_B) {
-      throw new Error(`参数量需在 ${MIN_PARAMS_B}B ~ ${MAX_PARAMS_B}B 之间`);
-    }
-    return parsed;
+  function discardParamsDrafts() {
+    if (!confirmDiscardDirtyDrafts(dirtyParamsCount, "撤销")) return;
+    resetParamsDrafts(modelParamsRows);
+  }
+
+  async function refreshModelParams() {
+    if (!confirmDiscardDirtyDrafts(dirtyParamsCount, "刷新")) return;
+    await loadModelParams();
   }
 
   /** 把名称解析建议填进草稿，不直接落库，管理员确认后再点保存 */
@@ -3009,34 +3017,56 @@ export function AdminConsole({
 
   async function saveModelParams(modelId: number) {
     const draft = paramsDrafts[modelId];
-    if (!draft || savingParamsModelId !== null) return;
+    if (!draft || savingParamsModelId !== null || savingAllParams) return;
 
     setSavingParamsModelId(modelId);
     try {
-      const totalParamsB = parseOptionalParams(draft.totalParamsB);
-      const activatedParamsB = parseOptionalParams(draft.activatedParamsB);
-
-      if (totalParamsB !== null && activatedParamsB !== null && activatedParamsB > totalParamsB) {
-        throw new Error("激活参数量不能大于总参数量");
-      }
-
-      await postJson(
-        "/api/admin/model-params",
-        {
-          modelId,
-          totalParamsB,
-          activatedParamsB,
-          isEstimated: draft.isEstimated,
-          note: draft.note.trim() || null
-        },
-        "PATCH"
-      );
+      const payload = buildParamsUpdatePayload(modelId, draft);
+      await postJson("/api/admin/model-params", payload, "PATCH");
       notifySuccess("模型参数量已保存");
       await loadModelParams();
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "保存模型参数量失败");
     } finally {
       setSavingParamsModelId(null);
+    }
+  }
+
+  /** 一次提交所有改动过的参数量行，校验与出错处理同 saveAllModelPrices */
+  async function saveAllModelParams() {
+    if (savingAllParams || savingParamsModelId !== null) return;
+
+    const dirtyRows = modelParamsRows.filter((row) => isParamsDraftDirty(row, paramsDrafts[row.modelId]));
+    if (dirtyRows.length === 0) return;
+
+    const updates: ReturnType<typeof buildParamsUpdatePayload>[] = [];
+    const invalidDetails: string[] = [];
+
+    for (const row of dirtyRows) {
+      const draft = paramsDrafts[row.modelId];
+      if (!draft) continue;
+
+      try {
+        updates.push(buildParamsUpdatePayload(row.modelId, draft));
+      } catch (error) {
+        invalidDetails.push(`${row.modelName}：${error instanceof Error ? error.message : "数据不合法"}`);
+      }
+    }
+
+    if (invalidDetails.length > 0) {
+      notifyError(`有 ${invalidDetails.length} 个模型的参数量填写有误，已取消保存`, invalidDetails);
+      return;
+    }
+
+    setSavingAllParams(true);
+    try {
+      const result = await postJson("/api/admin/model-params", { updates }, "PATCH");
+      notifySuccess(`已保存 ${result?.updatedCount ?? updates.length} 个模型的参数量`);
+      await loadModelParams();
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "批量保存模型参数量失败");
+    } finally {
+      setSavingAllParams(false);
     }
   }
 
@@ -3050,6 +3080,7 @@ export function AdminConsole({
 
     const confirmed = window.confirm(
       `将根据模型名为 ${applicableCount} 个尚未填写的模型写入参数量建议值。\n已填写的模型不会被覆盖。是否继续？`
+      + (dirtyParamsCount > 0 ? `\n注意：当前还有 ${dirtyParamsCount} 处未保存的修改会被丢弃。` : "")
     );
     if (!confirmed) return;
 
@@ -3304,15 +3335,19 @@ export function AdminConsole({
             loadingPrices={loadingPrices}
             syncingPrices={syncingPrices}
             savingPriceModelId={savingPriceModelId}
+            savingAllPrices={savingAllPrices}
+            dirtyPricingCount={dirtyPricingCount}
             pricingSearchQuery={pricingSearchQuery}
             setPricingSearchQuery={setPricingSearchQuery}
             pricingStatusFilter={pricingStatusFilter}
             setPricingStatusFilter={setPricingStatusFilter}
             pricingDrafts={pricingDrafts}
             updatePricingDraft={updatePricingDraft}
-            onLoadPrices={loadModelPrices}
+            onLoadPrices={refreshModelPrices}
             onSyncPrices={syncModelPrices}
             onSavePrice={saveModelPrice}
+            onSaveAllPrices={saveAllModelPrices}
+            onDiscardPricingDrafts={discardPricingDrafts}
             syncResult={pricingSyncResult}
           />
         ) : null}
@@ -3323,14 +3358,18 @@ export function AdminConsole({
             loadingParams={loadingParams}
             applyingSuggestions={applyingParamsSuggestions}
             savingParamsModelId={savingParamsModelId}
+            savingAllParams={savingAllParams}
+            dirtyParamsCount={dirtyParamsCount}
             paramsSearchQuery={paramsSearchQuery}
             setParamsSearchQuery={setParamsSearchQuery}
             paramsStatusFilter={paramsStatusFilter}
             setParamsStatusFilter={setParamsStatusFilter}
             paramsDrafts={paramsDrafts}
             updateParamsDraft={updateParamsDraft}
-            onLoadParams={loadModelParams}
+            onLoadParams={refreshModelParams}
             onSaveParams={saveModelParams}
+            onSaveAllParams={saveAllModelParams}
+            onDiscardParamsDrafts={discardParamsDrafts}
             onApplyAllSuggestions={applyAllParamsSuggestions}
             onApplySuggestion={applyParamsSuggestionToDraft}
           />

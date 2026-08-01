@@ -121,9 +121,10 @@ const updateSchema = z
 
 export type ModelParamsUpdateInput = z.input<typeof updateSchema>;
 
-export async function updateModelParams(input: ModelParamsUpdateInput) {
-  const parsed = updateSchema.parse(input);
+type ParsedModelParamsUpdate = z.output<typeof updateSchema>;
 
+/** 把一条校验后的输入展开成 models 表的更新列，单条与批量共用 */
+function buildModelParamsUpdateValues(parsed: ParsedModelParamsUpdate) {
   const updateValues: Partial<typeof models.$inferInsert> = {};
 
   if (parsed.totalParamsB !== undefined) {
@@ -138,6 +139,13 @@ export async function updateModelParams(input: ModelParamsUpdateInput) {
   if (parsed.note !== undefined) {
     updateValues.paramsNote = parsed.note && parsed.note.length > 0 ? parsed.note : null;
   }
+
+  return updateValues;
+}
+
+export async function updateModelParams(input: ModelParamsUpdateInput) {
+  const parsed = updateSchema.parse(input);
+  const updateValues = buildModelParamsUpdateValues(parsed);
 
   if (Object.keys(updateValues).length === 0) {
     return { ok: true, modelId: parsed.modelId, updated: false };
@@ -154,6 +162,64 @@ export async function updateModelParams(input: ModelParamsUpdateInput) {
   }
 
   return { ok: true, modelId: updated.id, modelName: updated.modelName, updated: true };
+}
+
+/** 后台「保存全部修改」一次最多提交的条数 */
+const MAX_MODEL_PARAMS_BATCH_SIZE = 500;
+
+/**
+ * 批量保存参数量：先整体校验，再在一个事务里逐条更新。
+ *
+ * 任何一条不合法或找不到模型就整批回滚，避免出现保存一半的中间态；
+ * 校验错误带上 modelId，前端才能指出是哪个模型填错了。同一 modelId 以最后一条为准。
+ */
+export async function updateModelParamsBatch(inputs: ModelParamsUpdateInput[]) {
+  if (!Array.isArray(inputs)) {
+    throw new Error("批量保存参数量需要传入数组");
+  }
+  if (inputs.length > MAX_MODEL_PARAMS_BATCH_SIZE) {
+    throw new Error(`单次最多批量保存 ${MAX_MODEL_PARAMS_BATCH_SIZE} 条参数量`);
+  }
+
+  const parsedByModelId = new Map<number, ParsedModelParamsUpdate>();
+
+  for (const [index, input] of inputs.entries()) {
+    const result = updateSchema.safeParse(input);
+    if (!result.success) {
+      const rawModelId = (input as { modelId?: unknown } | null | undefined)?.modelId;
+      const label = typeof rawModelId === "number" ? `模型 #${rawModelId}` : `第 ${index + 1} 条`;
+      const detail = result.error.issues
+        .map((issue) => `${issue.path.join(".") || "payload"}: ${issue.message}`)
+        .join("; ");
+      throw new Error(`${label} 的参数量数据不合法（${detail}）`);
+    }
+
+    parsedByModelId.set(result.data.modelId, result.data);
+  }
+
+  const pending = [...parsedByModelId.values()]
+    .map((parsed) => ({ modelId: parsed.modelId, updateValues: buildModelParamsUpdateValues(parsed) }))
+    .filter((item) => Object.keys(item.updateValues).length > 0);
+
+  if (pending.length === 0) {
+    return { ok: true, updatedCount: 0 };
+  }
+
+  await db.transaction(async (tx) => {
+    for (const item of pending) {
+      const [updated] = await tx
+        .update(models)
+        .set(item.updateValues)
+        .where(eq(models.id, item.modelId))
+        .returning({ id: models.id });
+
+      if (!updated) {
+        throw new Error(`model not found: ${item.modelId}`);
+      }
+    }
+  });
+
+  return { ok: true, updatedCount: pending.length };
 }
 
 /**
