@@ -1,9 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { LogOut, Shield } from "lucide-react";
+import { LogOut, ScatterChart, Shield, Table2 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
+
+const PAGE_LINKS = [
+  { href: "/", label: "矩阵", icon: Table2 },
+  { href: "/scatter", label: "散点图", icon: ScatterChart }
+] as const;
 
 export function TopbarActions() {
   const pathname = usePathname();
@@ -11,6 +16,7 @@ export function TopbarActions() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const showLogout = pathname.startsWith("/admin") && pathname !== "/admin/login";
+  const isAdminArea = pathname.startsWith("/admin");
 
   async function handleLogout() {
     if (isLoggingOut) return;
@@ -27,6 +33,23 @@ export function TopbarActions() {
 
   return (
     <nav className="nav">
+      {isAdminArea ? null : (
+        <div className="nav-links">
+          {PAGE_LINKS.map(({ href, label, icon: Icon }) => (
+            <Link
+              key={href}
+              href={href}
+              className={`nav-link ${pathname === href ? "is-active" : ""}`}
+              aria-current={pathname === href ? "page" : undefined}
+              suppressHydrationWarning
+            >
+              <Icon size={15} />
+              <span>{label}</span>
+            </Link>
+          ))}
+        </div>
+      )}
+
       {showLogout ? (
         <button
           type="button"

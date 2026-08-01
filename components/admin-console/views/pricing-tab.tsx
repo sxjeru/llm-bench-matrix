@@ -1,14 +1,18 @@
 "use client";
 
 import type { Dispatch, SetStateAction } from "react";
-import { DollarSign, RefreshCw, Save } from "lucide-react";
-import type { ModelPricingRow, ModelPricingSyncResult } from "../types";
+import { DollarSign, RefreshCw, RotateCcw, Save } from "lucide-react";
+import type { ModelPricingDraft, ModelPricingRow, ModelPricingSyncResult } from "../types";
+import { isPricingDraftDirty } from "../utils/pricing-draft";
 
 type PricingTabProps = {
   prices: ModelPricingRow[];
   loadingPrices: boolean;
   syncingPrices: boolean;
   savingPriceModelId: number | null;
+  savingAllPrices: boolean;
+  /** 全表未保存的行数，不受搜索与状态筛选影响 */
+  dirtyPricingCount: number;
   pricingSearchQuery: string;
   setPricingSearchQuery: Dispatch<SetStateAction<string>>;
   pricingStatusFilter: "all" | "matched" | "unmatched" | "manual" | "missing";
@@ -18,23 +22,9 @@ type PricingTabProps = {
   onLoadPrices: () => void | Promise<void>;
   onSyncPrices: () => void | Promise<void>;
   onSavePrice: (modelId: number) => void | Promise<void>;
+  onSaveAllPrices: () => void | Promise<void>;
+  onDiscardPricingDrafts: () => void;
   syncResult: ModelPricingSyncResult | null;
-};
-
-export type ModelPricingDraft = {
-  inputCost: string;
-  outputCost: string;
-  cacheReadCost: string;
-  reasoningCost: string;
-  cacheWriteCost: string;
-  inputAudioCost: string;
-  outputAudioCost: string;
-  sourceProviderId: string;
-  sourceProviderName: string;
-  sourceModelId: string;
-  sourceModelName: string;
-  manualOverride: boolean;
-  note: string;
 };
 
 type ModelPricingCostDraftKey =
@@ -82,6 +72,8 @@ export function PricingTab({
   loadingPrices,
   syncingPrices,
   savingPriceModelId,
+  savingAllPrices,
+  dirtyPricingCount,
   pricingSearchQuery,
   setPricingSearchQuery,
   pricingStatusFilter,
@@ -91,6 +83,8 @@ export function PricingTab({
   onLoadPrices,
   onSyncPrices,
   onSavePrice,
+  onSaveAllPrices,
+  onDiscardPricingDrafts,
   syncResult
 }: PricingTabProps) {
   function updatePricingCostDraft(modelId: number, field: ModelPricingCostDraftKey, value: string) {
@@ -120,6 +114,8 @@ export function PricingTab({
 
   const matchedCount = prices.filter((item) => item.matchStatus === "matched" || item.matchStatus === "manual").length;
   const missingCoreCount = prices.filter((item) => item.inputCost === null || item.outputCost === null || item.cacheReadCost === null).length;
+  const busy = loadingPrices || syncingPrices || savingAllPrices;
+  const hasDirtyDrafts = dirtyPricingCount > 0;
 
   return (
     <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
@@ -129,11 +125,33 @@ export function PricingTab({
           价格管理
         </h3>
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <button type="button" className="btn btn-outline btn-sm" onClick={onLoadPrices} disabled={loadingPrices || syncingPrices}>
+          {hasDirtyDrafts ? (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={onDiscardPricingDrafts}
+              disabled={busy || savingPriceModelId !== null}
+              title="放弃所有未保存的改动，恢复为服务端当前值"
+            >
+              <RotateCcw size={14} />
+              撤销修改
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className={`btn btn-sm ${hasDirtyDrafts ? "btn-warning" : "btn-primary btn-outline"}`}
+            onClick={onSaveAllPrices}
+            disabled={busy || savingPriceModelId !== null || !hasDirtyDrafts}
+            title="保存全表所有改动，不受当前搜索与筛选影响"
+          >
+            {savingAllPrices ? <span className="loading loading-spinner loading-xs" /> : <Save size={14} />}
+            保存全部修改{hasDirtyDrafts ? `（${dirtyPricingCount}）` : ""}
+          </button>
+          <button type="button" className="btn btn-outline btn-sm" onClick={onLoadPrices} disabled={busy}>
             <RefreshCw size={14} />
             刷新
           </button>
-          <button type="button" className="btn btn-primary btn-sm" onClick={onSyncPrices} disabled={loadingPrices || syncingPrices}>
+          <button type="button" className="btn btn-primary btn-sm" onClick={onSyncPrices} disabled={busy}>
             {syncingPrices ? <span className="loading loading-spinner loading-xs" /> : <RefreshCw size={14} />}
             从 models.dev 同步
           </button>
@@ -166,6 +184,14 @@ export function PricingTab({
           </div>
         </div>
       </div>
+
+      {hasDirtyDrafts ? (
+        <div className="alert alert-warning mb-4 text-sm">
+          <span>
+            有 {dirtyPricingCount} 个模型的价格已修改但未保存（含被当前搜索/筛选隐藏的行），点击「保存全部修改」一次提交。
+          </span>
+        </div>
+      ) : null}
 
       {syncResult ? (
         <div className="alert alert-info mb-4 text-sm">
@@ -221,11 +247,15 @@ export function PricingTab({
                 const isSaving = savingPriceModelId === price.modelId;
                 if (!draft) return null;
                 const draftAwareStatus = getDraftAwareStatus(price, draft);
+                const isDirty = isPricingDraftDirty(price, draft);
 
                 return (
                   <tr key={price.modelId}>
                     <td className="min-w-[220px]">
-                      <div className="font-semibold">{price.modelName}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold">{price.modelName}</span>
+                        {isDirty ? <span className="badge badge-warning badge-xs whitespace-nowrap">未保存</span> : null}
+                      </div>
                       <div className="text-xs opacity-60">{price.providerName}</div>
                     </td>
                     <td className="min-w-[220px]">
@@ -290,7 +320,12 @@ export function PricingTab({
                       </label>
                     </td>
                     <td className="min-w-20 whitespace-nowrap">
-                      <button type="button" className="btn btn-primary btn-xs min-w-16 whitespace-nowrap px-3" onClick={() => onSavePrice(price.modelId)} disabled={isSaving}>
+                      <button
+                        type="button"
+                        className={`btn btn-xs min-w-16 whitespace-nowrap px-3 ${isDirty ? "btn-warning" : "btn-primary"}`}
+                        onClick={() => onSavePrice(price.modelId)}
+                        disabled={isSaving || savingAllPrices}
+                      >
                         {isSaving ? <span className="loading loading-spinner loading-xs" /> : <Save size={12} />}
                         保存
                       </button>

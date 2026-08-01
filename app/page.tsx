@@ -1,4 +1,5 @@
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
+import { toMatrixInputRow } from "@/components/benchmark-matrix/map-row";
 import { getDashboardRows, getDashboardStats, getModelParamsRows, getSourceOptions, getSettings } from "@/lib/db/queries";
 import { getModelPricingRows } from "@/lib/model-pricing";
 import { Suspense } from "react";
@@ -17,29 +18,7 @@ export default async function HomePage() {
     getSettings()
   ]);
 
-  const toMatrixRow = (row: (typeof rows)[number]) => ({
-    recordId: row.id,
-    providerName: row.providerName,
-    providerDisplayName: row.providerDisplayName,
-    providerBrandColor: row.providerBrandColor,
-    modelName: row.modelName,
-    benchmarkName: row.benchmarkName,
-    benchmarkType: row.benchmarkType,
-    sourceBenchmarkType: row.sourceBenchmarkType,
-    higherIsBetter: row.higherIsBetter,
-    benchmarkCanonicalKey: row.benchmarkCanonicalKey,
-    modalities: row.modalities,
-    sourceModalities: row.sourceModalities,
-    benchTime: row.benchTime,
-    valueRaw: row.valueRaw,
-    valueNum: row.valueNum,
-    valueNum2: row.valueNum2,
-    valueNote: row.valueNote,
-    source: row.source,
-    updatedAt: row.updatedAt
-  });
-
-  const mappedRows = rows.map(toMatrixRow);
+  const mappedRows = rows.map(toMatrixInputRow);
   
   const rawFootnote = settings.export_footnote_text;
   let exportFootnoteText: string | undefined = undefined;

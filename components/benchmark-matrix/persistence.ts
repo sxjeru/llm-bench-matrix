@@ -85,7 +85,7 @@ type HeatmapPaletteStorageOptions = {
   setHeatmapPresetSelection: Dispatch<SetStateAction<HeatmapPresetSelection>>;
 };
 
-function loadModelSelectionBySource(): Record<string, string[]> | null {
+export function loadModelSelectionBySource(): Record<string, string[]> | null {
   try {
     const saved = window.localStorage.getItem(MODEL_SELECTION_BY_SOURCE_STORAGE_KEY);
     if (saved) {

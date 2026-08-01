@@ -947,9 +947,10 @@ const pricingNullableTextFields = [
   "note"
 ] as const;
 
-export async function updateModelPricing(input: ModelPricingUpdateInput) {
-  const parsed = updateSchema.parse(input);
-  const updatedAt = new Date();
+type ParsedModelPricingUpdate = z.output<typeof updateSchema>;
+
+/** 单条更新展开成 upsert 的 insert / update 两组值，批量写入时复用同一份规则 */
+function buildModelPricingUpsert(parsed: ParsedModelPricingUpdate, updatedAt: Date) {
   const insertManualOverride = parsed.manualOverride ?? (parsed.matchStatus === undefined || parsed.matchStatus === "manual");
   const insertMatchStatus = parsed.matchStatus ?? (insertManualOverride ? "manual" : "matched");
 
@@ -1006,14 +1007,72 @@ export async function updateModelPricing(input: ModelPricingUpdateInput) {
     }
   }
 
-  await db
-    .insert(modelPricing)
-    .values(values)
-    .onConflictDoUpdate({
-      target: modelPricing.modelId,
-      set: updateValues
-    });
+  return { values, updateValues };
+}
+
+/** 后台「保存全部修改」一次最多提交的条数，防止误传超大数组把事务撑爆 */
+const MAX_MODEL_PRICING_BATCH_SIZE = 500;
+
+/** 在同一个事务里逐条 upsert，全部成功后只失效一次缓存 */
+async function writeModelPricingUpserts(parsedList: ParsedModelPricingUpdate[]) {
+  if (parsedList.length === 0) return 0;
+
+  const updatedAt = new Date();
+  const upserts = parsedList.map((parsed) => buildModelPricingUpsert(parsed, updatedAt));
+
+  await db.transaction(async (tx) => {
+    for (const { values, updateValues } of upserts) {
+      await tx
+        .insert(modelPricing)
+        .values(values)
+        .onConflictDoUpdate({
+          target: modelPricing.modelId,
+          set: updateValues
+        });
+    }
+  });
+
   await invalidateChangedModelPricingCaches();
+  return upserts.length;
+}
+
+export async function updateModelPricing(input: ModelPricingUpdateInput) {
+  await writeModelPricingUpserts([updateSchema.parse(input)]);
+}
+
+/**
+ * 批量保存价格：先整体校验，再一次性落库。
+ *
+ * 任何一条不合法就整批拒绝，避免后台「保存全部修改」出现保存一半的中间态；
+ * 校验错误带上 modelId，前端才能指出是哪个模型填错了（单条路径仍抛原始 ZodError）。
+ * 同一个 modelId 重复出现时以最后一条为准。
+ */
+export async function updateModelPricingBatch(inputs: ModelPricingUpdateInput[]) {
+  if (!Array.isArray(inputs)) {
+    throw new Error("批量保存价格需要传入数组");
+  }
+  if (inputs.length > MAX_MODEL_PRICING_BATCH_SIZE) {
+    throw new Error(`单次最多批量保存 ${MAX_MODEL_PRICING_BATCH_SIZE} 条价格`);
+  }
+
+  const parsedByModelId = new Map<number, ParsedModelPricingUpdate>();
+
+  for (const [index, input] of inputs.entries()) {
+    const result = updateSchema.safeParse(input);
+    if (!result.success) {
+      const rawModelId = (input as { modelId?: unknown } | null | undefined)?.modelId;
+      const label = typeof rawModelId === "number" ? `模型 #${rawModelId}` : `第 ${index + 1} 条`;
+      const detail = result.error.issues
+        .map((issue) => `${issue.path.join(".") || "payload"}: ${issue.message}`)
+        .join("; ");
+      throw new Error(`${label} 的价格数据不合法（${detail}）`);
+    }
+
+    parsedByModelId.set(result.data.modelId, result.data);
+  }
+
+  const updatedCount = await writeModelPricingUpserts([...parsedByModelId.values()]);
+  return { updatedCount };
 }
 
 export async function clearModelPricingManualOverride(modelId: number) {

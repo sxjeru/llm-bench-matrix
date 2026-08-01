@@ -120,6 +120,13 @@ export type ModelParamsRow = {
   } | null;
 };
 
+export type ModelParamsDraft = {
+  totalParamsB: string;
+  activatedParamsB: string;
+  isEstimated: boolean;
+  note: string;
+};
+
 export type ModelPricingRow = {
   modelId: number;
   modelName: string;
@@ -146,6 +153,22 @@ export type ModelPricingRow = {
   note: string | null;
   lastSyncedAt: string | null;
   updatedAt: string;
+};
+
+export type ModelPricingDraft = {
+  inputCost: string;
+  outputCost: string;
+  cacheReadCost: string;
+  reasoningCost: string;
+  cacheWriteCost: string;
+  inputAudioCost: string;
+  outputAudioCost: string;
+  sourceProviderId: string;
+  sourceProviderName: string;
+  sourceModelId: string;
+  sourceModelName: string;
+  manualOverride: boolean;
+  note: string;
 };
 
 export type ModelPricingSyncResult = {
