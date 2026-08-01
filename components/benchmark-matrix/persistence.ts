@@ -10,6 +10,7 @@ import {
   MODEL_SELECTION_BY_SOURCE_STORAGE_KEY,
   SHOW_CATEGORY_STORAGE_KEY,
   SHOW_DUPLICATE_STORAGE_KEY,
+  SHOW_PARAMS_ROWS_STORAGE_KEY,
   SHOW_PRICE_ROWS_STORAGE_KEY,
   SHOW_SOURCE_VALUES_STORAGE_KEY,
   EXPORT_FOOTNOTE_ENABLED_STORAGE_KEY
@@ -52,6 +53,9 @@ type MatrixPreferenceStorageOptions = {
   showPriceRowsLoadedRef: MutableRefValue<boolean>;
   showPriceRows: boolean;
   setShowPriceRows: Dispatch<SetStateAction<boolean>>;
+  showParamsRowsLoadedRef: MutableRefValue<boolean>;
+  showParamsRows: boolean;
+  setShowParamsRows: Dispatch<SetStateAction<boolean>>;
 };
 
 type ExportPresetStorageOptions = {
@@ -261,7 +265,10 @@ export function useMatrixPreferenceStorage({
   setShowSourceValues,
   showPriceRowsLoadedRef,
   showPriceRows,
-  setShowPriceRows
+  setShowPriceRows,
+  showParamsRowsLoadedRef,
+  showParamsRows,
+  setShowParamsRows
 }: MatrixPreferenceStorageOptions) {
   useEffect(() => {
     const nextSelectionBySource = loadModelSelectionBySource();
@@ -347,6 +354,17 @@ export function useMatrixPreferenceStorage({
   }, [setShowPriceRows, showPriceRowsLoadedRef]);
 
   useEffect(() => {
+    const nextShowParamsRows = loadStoredBoolean(SHOW_PARAMS_ROWS_STORAGE_KEY);
+
+    enqueueStateUpdate(() => {
+      if (nextShowParamsRows !== null) {
+        setShowParamsRows(nextShowParamsRows);
+      }
+      showParamsRowsLoadedRef.current = true;
+    });
+  }, [setShowParamsRows, showParamsRowsLoadedRef]);
+
+  useEffect(() => {
     if (!showCategoryLoadedRef.current) return;
 
     saveStoredBoolean(SHOW_CATEGORY_STORAGE_KEY, showCategory);
@@ -369,6 +387,12 @@ export function useMatrixPreferenceStorage({
 
     saveStoredBoolean(SHOW_PRICE_ROWS_STORAGE_KEY, showPriceRows);
   }, [showPriceRows, showPriceRowsLoadedRef]);
+
+  useEffect(() => {
+    if (!showParamsRowsLoadedRef.current) return;
+
+    saveStoredBoolean(SHOW_PARAMS_ROWS_STORAGE_KEY, showParamsRows);
+  }, [showParamsRows, showParamsRowsLoadedRef]);
 }
 
 export function useExportPresetStorage({

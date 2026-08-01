@@ -13,6 +13,10 @@ type SettingsTabProps = {
   setDeleteModelInput: Dispatch<SetStateAction<string>>;
   modelEntityOptions: Array<{ id: number; label: string }>;
   onDeleteModelData: () => void | Promise<void>;
+  deleteBenchmarkInput: string;
+  setDeleteBenchmarkInput: Dispatch<SetStateAction<string>>;
+  benchmarkEntityOptions: Array<{ id: number; label: string }>;
+  onDeleteBenchmarkData: () => void | Promise<void>;
   deleteSourceInput: string;
   setDeleteSourceInput: Dispatch<SetStateAction<string>>;
   deleteSourceOptions: string[];
@@ -40,6 +44,10 @@ export function SettingsTab({
   setDeleteModelInput,
   modelEntityOptions,
   onDeleteModelData,
+  deleteBenchmarkInput,
+  setDeleteBenchmarkInput,
+  benchmarkEntityOptions,
+  onDeleteBenchmarkData,
   deleteSourceInput,
   setDeleteSourceInput,
   deleteSourceOptions,
@@ -252,6 +260,30 @@ export function SettingsTab({
           </datalist>
           <button type="button" className="btn btn-outline btn-error" onClick={onDeleteModelData}>
             删除模型及数据
+          </button>
+        </div>
+      </div>
+
+      <div className="mb-5 rounded-box border border-error/40 bg-base-200/50 p-4">
+        <h4 className="mb-2 font-semibold text-error">删除单个 benchmark</h4>
+        <p className="mb-3 text-sm opacity-80">
+          会删除该 benchmark 记录、其所有 benchmark_values 与 source 元数据（不可恢复）。
+        </p>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(420px,1fr)_auto] md:items-center">
+          <input
+            className="input input-bordered w-full"
+            list="delete-benchmark-options"
+            value={deleteBenchmarkInput}
+            onChange={(e) => setDeleteBenchmarkInput(e.target.value)}
+            placeholder="输入 benchmark 名称或ID后选择候选"
+          />
+          <datalist id="delete-benchmark-options">
+            {benchmarkEntityOptions.map((item) => (
+              <option key={`delete-benchmark-${item.id}`} value={`${item.label} [${item.id}]`} />
+            ))}
+          </datalist>
+          <button type="button" className="btn btn-outline btn-error" onClick={onDeleteBenchmarkData}>
+            删除 benchmark 及数据
           </button>
         </div>
       </div>

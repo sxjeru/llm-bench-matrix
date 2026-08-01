@@ -66,6 +66,9 @@ type TopControlsProps = {
   showPriceRows: boolean;
   setShowPriceRows: Dispatch<SetStateAction<boolean>>;
   hasPriceData: boolean;
+  showParamsRows: boolean;
+  setShowParamsRows: Dispatch<SetStateAction<boolean>>;
+  hasParamsData: boolean;
   hasSourceData: boolean;
   displaySourceValuesInCells: boolean;
   onSourceValuesButtonClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
@@ -172,6 +175,9 @@ export function BenchmarkMatrixTopControls({
   showPriceRows,
   setShowPriceRows,
   hasPriceData,
+  showParamsRows,
+  setShowParamsRows,
+  hasParamsData,
   hasSourceData,
   displaySourceValuesInCells,
   onSourceValuesButtonClick
@@ -518,6 +524,18 @@ export function BenchmarkMatrixTopControls({
           >
             {showPriceRows ? <Eye size={14} /> : <EyeOff size={14} />}
             显示价格
+          </button>
+        ) : null}
+
+        {hasParamsData ? (
+          <button
+            type="button"
+            className="btn btn-xs btn-ghost"
+            title="同时显示模型列表头的参数量徽标与 Model Info 行"
+            onClick={() => setShowParamsRows((prev) => !prev)}
+          >
+            {showParamsRows ? <Eye size={14} /> : <EyeOff size={14} />}
+            显示参数量
           </button>
         ) : null}
 

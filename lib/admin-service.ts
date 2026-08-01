@@ -5163,6 +5163,55 @@ export async function deleteModelAndAllValues(modelId: number) {
   };
 }
 
+/**
+ * 删除单个 benchmark 及其全部数据。
+ *
+ * benchmark_values 与 benchmark_source_meta 的外键都是 ON DELETE CASCADE，
+ * 会随 benchmark 一并清除。合并指针虽然也有 ON DELETE SET NULL 兜底，
+ * 这里仍显式清一次，与 deleteModelAndAllValues 的写法保持一致。
+ */
+export async function deleteBenchmarkAndAllValues(benchmarkId: number) {
+  const [existing] = await db
+    .select({
+      id: benchmarks.id,
+      benchmarkName: benchmarks.benchmarkName,
+      benchmarkType: benchmarks.benchmarkType
+    })
+    .from(benchmarks)
+    .where(eq(benchmarks.id, benchmarkId))
+    .limit(1);
+
+  if (!existing) {
+    throw new Error(`benchmark not found: ${benchmarkId}`);
+  }
+
+  // 删除前统计受影响的记录数，供确认提示展示
+  const [valueStats] = await db
+    .select({ valueCount: sql<number>`count(*)` })
+    .from(benchmarkValues)
+    .where(eq(benchmarkValues.benchmarkId, benchmarkId));
+  const deletedValueCount = Number(valueStats?.valueCount ?? 0);
+
+  await db.transaction(async (tx: DbTransactionClient) => {
+    await tx
+      .update(benchmarks)
+      .set({ mergedIntoBenchmarkId: null })
+      .where(eq(benchmarks.mergedIntoBenchmarkId, benchmarkId));
+
+    await tx.delete(benchmarks).where(eq(benchmarks.id, benchmarkId));
+  });
+
+  await invalidateAllCaches();
+
+  return {
+    ok: true,
+    benchmarkId: existing.id,
+    benchmarkName: existing.benchmarkName,
+    benchmarkType: existing.benchmarkType,
+    deletedValueCount
+  };
+}
+
 export async function deleteBenchmarkValuesBySource(sourceInput: string) {
   const rawSource = sourceInput.trim();
   if (!rawSource) {

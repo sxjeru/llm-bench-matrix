@@ -1,6 +1,9 @@
 import {
   ALL_SOURCE_COLUMN_COVERAGE_THRESHOLD,
   ALL_SOURCE_ROW_COVERAGE_THRESHOLD,
+  MODEL_INFO_CATEGORY_LABEL,
+  PARAMS_ACTIVE_RATIO_ROW_KEY,
+  PARAMS_ROW_KEY,
   PRICE_CACHE_INPUT_ROW_KEY,
   PRICE_CATEGORY_LABEL,
   PRICE_INPUT_ROW_KEY,
@@ -31,6 +34,7 @@ import type {
   MatrixCellEntry,
   MatrixInputRow,
   MatrixRow,
+  ModelParamsInfo,
   ModelPriceInfo,
   OverallModelSummary,
   OverallScoreDisplayItem,
@@ -1152,9 +1156,152 @@ export function buildPriceMatrixRows(
   });
 }
 
+function formatParamsBillions(value: number): string {
+  return `${Number(value.toFixed(3)).toString()}B`;
+}
+
+/**
+ * 参数量单元格。
+ *
+ * `valueNum` 存总参数量而非激活量：列排序、排名弹窗都以它为准，
+ * 稠密与 MoE 模型才能放在同一把尺子上比。展示顺序（激活 / 总量）由
+ * `displayValue` 单独控制，因此 `valueNum2` 保持 null，避免走 pair 渲染
+ * 路径把顺序倒过来。
+ */
+function createParamsCell(params: ModelParamsInfo | undefined): MatrixCell {
+  const total = params?.totalParamsB ?? null;
+  const activated = params?.activatedParamsB ?? null;
+  const primary = total ?? activated;
+
+  const displayValue = primary === null
+    ? "--"
+    : total !== null && activated !== null
+      ? `${formatParamsBillions(activated)} / ${formatParamsBillions(total)}`
+      : formatParamsBillions(primary);
+
+  const noteParts: string[] = [];
+  if (params?.isEstimated) noteParts.push("估算值");
+  if (total !== null && activated !== null) noteParts.push("MoE（激活 / 总量）");
+  if (params?.note) noteParts.push(params.note);
+  const noteText = noteParts.join("；");
+
+  const entry: MatrixCellEntry = {
+    valueRaw: displayValue,
+    valueNum: primary,
+    valueNum2: null,
+    valueNote: noteText || null,
+    source: "model-info",
+    benchTime: null
+  };
+
+  return {
+    valueRaw: displayValue,
+    valueNum: primary,
+    valueNum2: null,
+    valueNote: noteText || null,
+    source: "model-info",
+    benchTime: null,
+    allEntries: [entry],
+    hasMultipleValues: false,
+    uniqueEntries: [entry],
+    noteText,
+    displayValue,
+    hasMeaningfulMultipleValues: false,
+    hasMultipleActiveSourceValues: false,
+    shouldShowQuestionMark: false
+  };
+}
+
+function createActiveRatioCell(params: ModelParamsInfo | undefined): MatrixCell {
+  const total = params?.totalParamsB ?? null;
+  const activated = params?.activatedParamsB ?? null;
+  const ratio = total !== null && activated !== null && total > 0
+    ? (activated / total) * 100
+    : null;
+
+  const displayValue = ratio === null ? "--" : `${ratio.toFixed(1)}%`;
+  const entry: MatrixCellEntry = {
+    valueRaw: displayValue,
+    valueNum: ratio,
+    valueNum2: null,
+    valueNote: null,
+    source: "model-info",
+    benchTime: null
+  };
+
+  return {
+    valueRaw: displayValue,
+    valueNum: ratio,
+    valueNum2: null,
+    valueNote: null,
+    source: "model-info",
+    benchTime: null,
+    allEntries: [entry],
+    hasMultipleValues: false,
+    uniqueEntries: [entry],
+    noteText: "",
+    displayValue,
+    hasMeaningfulMultipleValues: false,
+    hasMultipleActiveSourceValues: false,
+    shouldShowQuestionMark: false
+  };
+}
+
+export function buildParamsMatrixRows(
+  modelColumns: readonly string[],
+  modelParams: readonly ModelParamsInfo[]
+): MatrixRow[] {
+  const paramsByModel = new Map(modelParams.map((params) => [params.modelName, params]));
+  const definitions: Array<{
+    rowKey: string;
+    benchmark: string;
+    build: (params: ModelParamsInfo | undefined) => MatrixCell;
+  }> = [
+    { rowKey: PARAMS_ROW_KEY, benchmark: "Params", build: createParamsCell },
+    { rowKey: PARAMS_ACTIVE_RATIO_ROW_KEY, benchmark: "激活占比", build: createActiveRatioCell }
+  ];
+
+  return definitions.map((definition, index) => {
+    const cells = new Map<string, MatrixCell>();
+    modelColumns.forEach((modelName) => {
+      cells.set(modelName, definition.build(paramsByModel.get(modelName)));
+    });
+
+    const numericValues = Array.from(cells.values())
+      .map((cell) => cell.valueNum)
+      .filter((value): value is number => value !== null && Number.isFinite(value));
+
+    return {
+      rowKey: definition.rowKey,
+      category: MODEL_INFO_CATEGORY_LABEL,
+      benchmark: definition.benchmark,
+      higherIsBetter: true,
+      modalities: ["Text"],
+      cells,
+      // 排在价格行（-100）之前
+      firstSeenIndex: -200 + index,
+      sourceOrderKey: null,
+      rowDataCount: cells.size,
+      rowNumericCount: numericValues.length,
+      // 置 null 让 getHeatCellStyle 直接返回空样式：参数量大不等于好，不该着色
+      minComparable: null,
+      maxComparable: null,
+      minComparable2: null,
+      maxComparable2: null,
+      minNum: numericValues.length > 0 ? Math.min(...numericValues) : null,
+      maxNum: numericValues.length > 0 ? Math.max(...numericValues) : null,
+      minNum2: null,
+      maxNum2: null,
+      isInfoRow: true
+    };
+  });
+}
+
 function getBenchmarkRankingComparableScore(matrixRow: MatrixRow, valueNum: number): number {
-  return matrixRow.isPriceRow
-    ? -valueNum
+  return matrixRow.isPriceRow || matrixRow.isInfoRow
+    ? matrixRow.isPriceRow
+      ? -valueNum
+      : valueNum
     : getBenchmarkComparableScore(matrixRow.benchmark, valueNum, matrixRow.category, matrixRow.higherIsBetter);
 }
 
@@ -1200,6 +1347,7 @@ function buildRankingDataFromMatrixRow(
   const rawValues = numericItems.map((item) => item.valueNum);
   const canUseFixedScale =
     !matrixRow.isPriceRow &&
+    !matrixRow.isInfoRow &&
     rawValues.length > 0 &&
     rawValues.every((value) => value >= 0 && value <= 100);
   const fixedScaleMax = canUseFixedScale && rawValues.every((value) => value >= 0 && value <= 1)
@@ -1312,7 +1460,7 @@ export function buildBenchmarkRankingData(
   showDuplicateRows: boolean,
   scaleMode: BenchmarkRankingScaleMode
 ): BenchmarkRankingData {
-  if (matrixRow.isPriceRow) {
+  if (matrixRow.isPriceRow || matrixRow.isInfoRow) {
     return buildRankingDataFromMatrixRow(matrixRow, candidateModelNames, visibleModelNames, scaleMode);
   }
 
@@ -1528,6 +1676,11 @@ export function buildOverallSummaryByModel(
   let totalComparableRows = 0;
 
   presenceFilteredMatrixRows.forEach((row) => {
+    // 模型属性行（参数量等）只是信息展示，不该计入综合分
+    if (row.isInfoRow) {
+      return;
+    }
+
     const rowEntries: Array<{ modelName: string; original: number; comparable: number }> = [];
 
     modelColumns.forEach((modelName) => {

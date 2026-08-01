@@ -101,7 +101,24 @@ export type ModelDedupeRule = {
   removeDot: boolean;
 };
 
-export type TabKey = "import" | "entry" | "providers" | "pricing" | "rename" | "merge" | "maintenance" | "settings";
+export type TabKey = "import" | "entry" | "providers" | "pricing" | "params" | "rename" | "merge" | "maintenance" | "settings";
+
+export type ModelParamsRow = {
+  modelId: number;
+  modelName: string;
+  providerName: string;
+  modelCreatedAt: string;
+  totalParamsB: number | null;
+  activatedParamsB: number | null;
+  isEstimated: boolean;
+  note: string | null;
+  suggestion: {
+    totalParamsB: number | null;
+    activatedParamsB: number | null;
+    isEstimated: boolean;
+    note: string | null;
+  } | null;
+};
 
 export type ModelPricingRow = {
   modelId: number;

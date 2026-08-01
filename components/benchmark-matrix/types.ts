@@ -72,6 +72,8 @@ export type MatrixRow = {
   minNum2: number | null;
   maxNum2: number | null;
   isPriceRow?: boolean;
+  /** 模型属性行（参数量等），不参与热力着色与 Overall 打分 */
+  isInfoRow?: boolean;
 };
 
 export type BoxPlotPercentStats = {
@@ -144,8 +146,20 @@ export type Props = {
   allRows?: MatrixInputRow[];
   sourceOptions?: string[];
   modelPrices?: ModelPriceInfo[];
+  modelParams?: ModelParamsInfo[];
   exportFootnoteText?: string;
   exportFootnoteAlign?: "left" | "center" | "right";
+};
+
+export type ModelParamsInfo = {
+  modelId?: number;
+  modelName: string;
+  /** 总参数量（B）。null 表示未填写 */
+  totalParamsB: number | null;
+  /** 激活参数量（B）。null 表示稠密模型或未填写 */
+  activatedParamsB: number | null;
+  isEstimated: boolean;
+  note: string | null;
 };
 
 export type ModelPriceInfo = {

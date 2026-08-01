@@ -29,7 +29,7 @@ export default async function AdminPage({
   ]);
 
   const resolvedSearchParams = await searchParams;
-  const VALID_TABS: TabKey[] = ["import", "entry", "providers", "pricing", "rename", "merge", "maintenance", "settings"];
+  const VALID_TABS: TabKey[] = ["import", "entry", "providers", "pricing", "params", "rename", "merge", "maintenance", "settings"];
   const rawTab = resolvedSearchParams.tab ?? "import";
   const initialTab: TabKey = VALID_TABS.includes(rawTab as TabKey) ? (rawTab as TabKey) : "import";
 
