@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, test, vi, beforeEach } from "vitest";
 
 import { ModelScatter } from "@/components/model-scatter";
@@ -201,13 +201,30 @@ describe("ModelScatter", () => {
     expect(comparableModelCount()).toBe("2");
   });
 
-  test("清空模型选择时给出空态引导", () => {
+  test("图例全部隐藏时给出空态引导", () => {
     renderScatter();
 
-    fireEvent.click(screen.getByRole("button", { name: "清空模型" }));
+    fireEvent.click(screen.getByRole("button", { name: /OpenAI/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Anthropic/ }));
 
     expect(screen.getByText("当前条件下没有可绘制的点")).toBeInTheDocument();
     expect(comparableModelCount()).toBe("0");
+  });
+
+  test("不再渲染模型层叠筛选面板", () => {
+    renderScatter();
+
+    expect(screen.queryByText(/模型层叠筛选/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "全选模型" })).toBeNull();
+    expect(screen.queryByPlaceholderText("筛选 Benchmark")).toBeNull();
+  });
+
+  test("提供全屏切换按钮", () => {
+    renderScatter();
+
+    const fullscreenButton = screen.getByRole("button", { name: "全屏" });
+    expect(fullscreenButton).toBeInTheDocument();
+    expect(fullscreenButton.getAttribute("aria-pressed")).toBe("false");
   });
 
   test("视图状态变更会写回 URL", () => {
@@ -401,22 +418,131 @@ describe("ScatterCanvas", () => {
     expect(container.querySelector(".scatter-pareto-layer")).toBeNull();
   });
 
-  test("标签模式为隐藏时不渲染标签层", () => {
+  test("标签模式为隐藏时不渲染标签", () => {
     const { container } = renderCanvas({ labelMode: "none" });
 
-    expect(container.querySelector(".scatter-label-layer")).toBeNull();
+    expect(container.querySelectorAll(".recharts-scatter-symbol text").length).toBe(0);
   });
 
-  test("标签模式为自动时渲染模型名", () => {
+  test("标签画进散点的命中区内，鼠标移到文字上也能触发浮窗", () => {
     const { container } = renderCanvas();
-    const labels = container.querySelectorAll(".scatter-label-layer text");
+    const symbols = Array.from(container.querySelectorAll(".recharts-scatter-symbol"));
 
-    expect(labels.length).toBeGreaterThan(0);
+    // 标签必须是散点 symbol 的后代 —— Recharts 把 onMouseEnter 挂在这层
+    const labelled = symbols.filter((symbol) => symbol.querySelector("text"));
+    expect(labelled.length).toBeGreaterThan(0);
+
+    // 每个标签都配一块透明底板，整块区域可悬浮而不是只有笔画
+    labelled.forEach((symbol) => {
+      expect(symbol.querySelector('rect[fill="transparent"]')).not.toBeNull();
+    });
   });
 
   test("开启中位参考线时画出参考层", () => {
     const { container } = renderCanvas({ showGuides: true });
 
     expect(container.querySelectorAll(".scatter-guide-layer line").length).toBe(2);
+  });
+
+  test("滚轮在绘图区内缩放并阻止页面滚动", () => {
+    const { container } = renderCanvas();
+    const surface = container.querySelector(".scatter-chart-surface") as HTMLElement;
+    expect(surface).not.toBeNull();
+
+    const tickTextBefore = Array.from(container.querySelectorAll(".recharts-xAxis .recharts-cartesian-axis-tick-value"))
+      .map((node) => node.textContent)
+      .join("|");
+
+    surface.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      right: 640,
+      bottom: 420,
+      width: 640,
+      height: 420,
+      x: 0,
+      y: 0,
+      toJSON: () => ({})
+    }) as DOMRect;
+
+    const wheelEvent = new WheelEvent("wheel", {
+      deltaY: -120,
+      clientX: 320,
+      clientY: 210,
+      bubbles: true,
+      cancelable: true
+    });
+
+    act(() => {
+      surface.dispatchEvent(wheelEvent);
+    });
+
+    expect(wheelEvent.defaultPrevented).toBe(true);
+
+    const tickTextAfter = Array.from(container.querySelectorAll(".recharts-xAxis .recharts-cartesian-axis-tick-value"))
+      .map((node) => node.textContent)
+      .join("|");
+
+    expect(tickTextAfter).not.toBe(tickTextBefore);
+  });
+
+  test("绘图区之外的滚轮不拦截页面滚动", () => {
+    const { container } = renderCanvas();
+    const surface = container.querySelector(".scatter-chart-surface") as HTMLElement;
+
+    surface.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      right: 640,
+      bottom: 420,
+      width: 640,
+      height: 420,
+      x: 0,
+      y: 0,
+      toJSON: () => ({})
+    }) as DOMRect;
+
+    // 落在下方坐标轴标题区域，不属于绘图区
+    const wheelEvent = new WheelEvent("wheel", {
+      deltaY: -120,
+      clientX: 320,
+      clientY: 415,
+      bubbles: true,
+      cancelable: true
+    });
+
+    act(() => {
+      surface.dispatchEvent(wheelEvent);
+    });
+
+    expect(wheelEvent.defaultPrevented).toBe(false);
+  });
+
+  test("双击重置缩放", () => {
+    const onZoomChange = vi.fn();
+    const { container } = renderCanvas({ onZoomChange });
+    const surface = container.querySelector(".scatter-chart-surface") as HTMLElement;
+
+    surface.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      right: 640,
+      bottom: 420,
+      width: 640,
+      height: 420,
+      x: 0,
+      y: 0,
+      toJSON: () => ({})
+    }) as DOMRect;
+
+    act(() => {
+      surface.dispatchEvent(
+        new WheelEvent("wheel", { deltaY: -120, clientX: 320, clientY: 210, bubbles: true, cancelable: true })
+      );
+    });
+    expect(onZoomChange).toHaveBeenLastCalledWith(true);
+
+    fireEvent.doubleClick(surface);
+    expect(onZoomChange).toHaveBeenLastCalledWith(false);
   });
 });

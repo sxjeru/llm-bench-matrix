@@ -10,11 +10,6 @@ import {
   SOURCE_ALL
 } from "@/components/benchmark-matrix/constants";
 import { canEncodeCanvasMimeType } from "@/components/benchmark-matrix/export-image";
-import { ModelFilterPanel } from "@/components/benchmark-matrix/model-filter-panel";
-import {
-  loadModelSelectionBySource,
-  saveModelSelectionBySource
-} from "@/components/benchmark-matrix/persistence";
 import {
   buildAllModelNames,
   buildAllRowsIndex,
@@ -22,18 +17,14 @@ import {
   buildBaseModelNameSet,
   buildCoverageMetaByModel,
   buildCoveragePrunedRows,
-  buildCoveredModelsByGroupingKey,
   buildDefaultAllSourceModels,
   buildDefaultSelectedModels,
-  buildDisplayedCoverageMetaByModel,
   buildFilteredRows,
   buildMatrixRows,
   buildModelColumns,
-  buildModelCoveragePercentMap,
   buildOverallSummaryByModel,
   buildParamsMatrixRows,
   buildPriceMatrixRows,
-  buildProviderAverageCoveragePercentMap,
   buildProviderGroups,
   buildRowsBySource,
   buildRowsWithSourceMeta,
@@ -46,8 +37,10 @@ import { resolveProviderBrandColorForDarkTheme } from "@/lib/provider-config";
 import { ScatterChartHost } from "./model-scatter/chart-host";
 import {
   SCATTER_CHART_COMPACT_BREAKPOINT,
+  SCATTER_CHART_FULLSCREEN_CHROME,
   SCATTER_CHART_HEIGHT,
-  SCATTER_CHART_HEIGHT_COMPACT
+  SCATTER_CHART_HEIGHT_COMPACT,
+  SCATTER_CHART_MIN_HEIGHT
 } from "./model-scatter/constants";
 import { ScatterControls } from "./model-scatter/controls";
 import { buildScatterDataset } from "./model-scatter/dataset";
@@ -94,28 +87,25 @@ export function ModelScatter({
   const allRows = useMemo(() => allRowsProp ?? rows, [allRowsProp, rows]);
 
   const [viewState, setViewState] = useState<ScatterViewState>(DEFAULT_SCATTER_VIEW_STATE);
-  const [selectedModels, setSelectedModels] = useState<string[]>([]);
-  const [isSelectionLoaded, setIsSelectionLoaded] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
   const [showLowCoverageRows, setShowLowCoverageRows] = useState(false);
-  const [benchmarkSearchInputValue, setBenchmarkSearchInputValue] = useState("");
-  const [benchmarkSearchQuery, setBenchmarkSearchQuery] = useState("");
   const [hiddenProviders, setHiddenProviders] = useState<string[]>([]);
   const [highlightedModel, setHighlightedModel] = useState<string | null>(null);
-  const [isModelFilterExpanded, setIsModelFilterExpanded] = useState(false);
-  const [expandedLowCoverageProviders, setExpandedLowCoverageProviders] = useState<Record<string, boolean>>({});
   const [exportPreset, setExportPreset] = useState<ExportPresetKey>(DEFAULT_EXPORT_PRESET);
   const [supportsWebpExport, setSupportsWebpExport] = useState(true);
   const [supportsAvifExport, setSupportsAvifExport] = useState(false);
   const [chartHeight, setChartHeight] = useState(SCATTER_CHART_HEIGHT);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isZoomed, setIsZoomed] = useState(false);
+  const [resetZoomSignal, setResetZoomSignal] = useState(0);
   // 与矩阵页共用的「合成行是否计入总评」开关，保证两页 Overall Score 对得上
   const [priceRowsInOverall, setPriceRowsInOverall] = useState(false);
   const [paramsRowsInOverall, setParamsRowsInOverall] = useState(false);
 
   const hydratedRef = useRef(false);
   const searchParamsRef = useRef(searchParams);
-  const selectionBySourceRef = useRef<Record<string, string[]>>({});
   const captureRef = useRef<HTMLDivElement | null>(null);
+  const sectionRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     searchParamsRef.current = searchParams;
@@ -134,15 +124,17 @@ export function ModelScatter({
     setPriceRowsInOverall(readStoredBoolean(PRICE_ROWS_IN_OVERALL_STORAGE_KEY));
     setParamsRowsInOverall(readStoredBoolean(PARAMS_ROWS_IN_OVERALL_STORAGE_KEY));
 
-    const savedSelection = loadModelSelectionBySource();
-    if (savedSelection) {
-      selectionBySourceRef.current = savedSelection;
-    }
-    setIsSelectionLoaded(true);
     // 用 state 而非 ref 放行 URL 同步：ref 会在同一轮 effect 里就被置真，
     // 导致同步逻辑拿着尚未水合的默认状态把链接里的参数冲掉
     setIsHydrated(true);
   }, [searchParams]);
+
+  useEffect(() => {
+    const listener = () => setIsFullscreen(document.fullscreenElement === sectionRef.current);
+
+    document.addEventListener("fullscreenchange", listener);
+    return () => document.removeEventListener("fullscreenchange", listener);
+  }, []);
 
   useEffect(() => {
     const nextSupportsWebpExport = canEncodeCanvasMimeType("image/webp");
@@ -156,6 +148,12 @@ export function ModelScatter({
 
   useEffect(() => {
     const measure = () => {
+      // 全屏时把图表撑到视口高度减去控件与说明行占用的部分
+      if (document.fullscreenElement === sectionRef.current) {
+        setChartHeight(Math.max(SCATTER_CHART_MIN_HEIGHT, window.innerHeight - SCATTER_CHART_FULLSCREEN_CHROME));
+        return;
+      }
+
       setChartHeight(
         window.innerWidth < SCATTER_CHART_COMPACT_BREAKPOINT
           ? SCATTER_CHART_HEIGHT_COMPACT
@@ -165,23 +163,12 @@ export function ModelScatter({
 
     measure();
     window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
+    document.addEventListener("fullscreenchange", measure);
+    return () => {
+      window.removeEventListener("resize", measure);
+      document.removeEventListener("fullscreenchange", measure);
+    };
   }, []);
-
-  useEffect(() => {
-    if (benchmarkSearchInputValue.trim().length === 0) {
-      enqueueStateUpdate(() => setBenchmarkSearchQuery(""));
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      setBenchmarkSearchQuery(benchmarkSearchInputValue);
-      // 搜索时放开低覆盖剪枝，否则用户搜到的指标可能根本不在轴列表里
-      setShowLowCoverageRows(true);
-    }, 300);
-
-    return () => window.clearTimeout(timer);
-  }, [benchmarkSearchInputValue]);
 
   const activeSource = viewState.activeSource;
 
@@ -202,11 +189,6 @@ export function ModelScatter({
   const allRowsIndex = useMemo(
     () => buildAllRowsIndex(indexedSourceRows, SHOW_DUPLICATE_ROWS),
     [indexedSourceRows]
-  );
-
-  const coveredModelsByGroupingKey = useMemo(
-    () => buildCoveredModelsByGroupingKey(allRowsIndex),
-    [allRowsIndex]
   );
 
   const baseSourceRows = useMemo(
@@ -253,68 +235,19 @@ export function ModelScatter({
     [activeSource, defaultAllSourceModels, defaultSelectedModels]
   );
 
-  // 切换来源时按该来源的存档恢复选择；存档里已消失的模型直接剔除
-  useEffect(() => {
-    if (!isSelectionLoaded || allModelNames.length === 0) return;
-
-    const availableModels = new Set(allModelNames);
-    const saved = selectionBySourceRef.current[activeSource];
-    const nextSelection = saved
-      ? saved.filter((modelName) => availableModels.has(modelName))
-      : [...fallbackDefaultModels];
-
-    const normalized = Array.from(new Set(nextSelection.length > 0 ? nextSelection : fallbackDefaultModels))
-      .sort((left, right) => left.localeCompare(right, "zh-Hans-CN"));
-
-    setSelectedModels((prev) =>
-      prev.length === normalized.length && prev.every((item, index) => item === normalized[index])
-        ? prev
-        : normalized
-    );
-  }, [activeSource, allModelNames, fallbackDefaultModels, isSelectionLoaded]);
-
+  /**
+   * 候选模型集合。
+   *
+   * 散点图的可见性由图例（按厂商）控制，不再有模型层叠筛选面板，
+   * 因此这里固定取该来源的默认集合 —— 与矩阵页的默认状态一致，
+   * 也不会去继承矩阵那边用户存下的筛选（在本页没有 UI 可以撤销它）。
+   */
+  const selectedModels = fallbackDefaultModels;
   const selectedModelSet = useMemo(() => new Set(selectedModels), [selectedModels]);
 
-  const persistSelection = useCallback(
-    (nextSelection: string[]) => {
-      const normalized = Array.from(new Set(nextSelection)).sort((left, right) =>
-        left.localeCompare(right, "zh-Hans-CN")
-      );
-      const normalizedDefault = Array.from(new Set(fallbackDefaultModels)).sort((left, right) =>
-        left.localeCompare(right, "zh-Hans-CN")
-      );
-      const isDefault =
-        normalized.length === normalizedDefault.length &&
-        normalized.every((item, index) => item === normalizedDefault[index]);
-
-      const nextBySource = { ...selectionBySourceRef.current };
-      // 与默认一致就删掉键，避免默认集合日后变动时被旧存档钉死
-      if (isDefault) {
-        delete nextBySource[activeSource];
-      } else {
-        nextBySource[activeSource] = normalized;
-      }
-
-      selectionBySourceRef.current = nextBySource;
-      saveModelSelectionBySource(nextBySource);
-    },
-    [activeSource, fallbackDefaultModels]
-  );
-
-  const updateSelectedModels = useCallback(
-    (updater: (prev: string[]) => string[]) => {
-      setSelectedModels((prev) => {
-        const next = updater(prev);
-        persistSelection(next);
-        return next;
-      });
-    },
-    [persistSelection]
-  );
-
   const filteredRows = useMemo(
-    () => buildFilteredRows(allRowsIndex, selectedModelSet, selectedModels, baseBenchmarkKeySet, benchmarkSearchQuery),
-    [allRowsIndex, selectedModelSet, selectedModels, baseBenchmarkKeySet, benchmarkSearchQuery]
+    () => buildFilteredRows(allRowsIndex, selectedModelSet, selectedModels, baseBenchmarkKeySet, ""),
+    [allRowsIndex, selectedModelSet, selectedModels, baseBenchmarkKeySet]
   );
 
   const coveragePrunedRows = useMemo(
@@ -493,24 +426,6 @@ export function ModelScatter({
       .sort((left, right) => right.count - left.count || left.providerName.localeCompare(right.providerName));
   }, [baseModelColumns, providerNameByModel, colorByModel]);
 
-  const displayedCoverageMetaByModel = useMemo(
-    () => buildDisplayedCoverageMetaByModel(allModelNames, coveredModelsByGroupingKey, matrixRows, [
-      ...paramsMatrixRows,
-      ...priceMatrixRows
-    ]),
-    [allModelNames, coveredModelsByGroupingKey, matrixRows, paramsMatrixRows, priceMatrixRows]
-  );
-
-  const modelCoveragePercentMap = useMemo(
-    () => buildModelCoveragePercentMap(displayedCoverageMetaByModel),
-    [displayedCoverageMetaByModel]
-  );
-
-  const providerAverageCoveragePercentMap = useMemo(
-    () => buildProviderAverageCoveragePercentMap(providerGroups, displayedCoverageMetaByModel),
-    [providerGroups, displayedCoverageMetaByModel]
-  );
-
   const availableExportPresetKeys = useMemo<ExportPresetKey[]>(
     () =>
       (Object.keys(EXPORT_PRESET_MAP) as ExportPresetKey[]).filter((key) => {
@@ -571,35 +486,6 @@ export function ModelScatter({
     setViewState((prev) => ({ ...prev, [axis === "x" ? "xScale" : "yScale"]: scale }));
   }, []);
 
-  const toggleProvider = useCallback(
-    (providerName: string, checked: boolean) => {
-      const group = providerGroups.find((item) => item.providerName === providerName);
-      if (!group) return;
-
-      updateSelectedModels((prev) => {
-        const next = new Set(prev);
-        group.models.forEach((modelName) => {
-          if (checked) next.add(modelName);
-          else next.delete(modelName);
-        });
-        return Array.from(next);
-      });
-    },
-    [providerGroups, updateSelectedModels]
-  );
-
-  const toggleModel = useCallback(
-    (modelName: string, checked: boolean) => {
-      updateSelectedModels((prev) => {
-        const next = new Set(prev);
-        if (checked) next.add(modelName);
-        else next.delete(modelName);
-        return Array.from(next);
-      });
-    },
-    [updateSelectedModels]
-  );
-
   const toggleProviderVisibility = useCallback((providerName: string) => {
     setHiddenProviders((prev) =>
       prev.includes(providerName)
@@ -608,12 +494,30 @@ export function ModelScatter({
     );
   }, []);
 
+  const toggleFullscreen = useCallback(async () => {
+    if (!sectionRef.current) return;
+
+    try {
+      if (document.fullscreenElement === sectionRef.current) {
+        await document.exitFullscreen();
+      } else {
+        await sectionRef.current.requestFullscreen();
+      }
+    } catch {
+      // ignore fullscreen API errors gracefully
+    }
+  }, []);
+
   const paretoCount = dataset.points.filter((point) => point.isPareto).length;
   const hasAxes = Boolean(xMetric && yMetric);
   const hasEnoughPoints = dataset.points.length >= 1;
 
   return (
-    <section className="scatter-page" aria-label="模型二维分析">
+    <section
+      className={`scatter-page ${isFullscreen ? "is-fullscreen" : ""}`}
+      aria-label="模型二维分析"
+      ref={sectionRef}
+    >
       <div className="card scatter-card">
         <ScatterControls
           metricGroups={metricGroups}
@@ -645,6 +549,8 @@ export function ModelScatter({
           isDownloading={isDownloading}
           isCopying={isCopying}
           isExportBusy={isBusy}
+          isFullscreen={isFullscreen}
+          onToggleFullscreen={toggleFullscreen}
         />
 
         <div className="scatter-capture" ref={captureRef}>
@@ -668,6 +574,8 @@ export function ModelScatter({
                   onSelectModel={(modelName) =>
                     setHighlightedModel((prev) => (prev === modelName ? null : modelName))
                   }
+                  onZoomChange={setIsZoomed}
+                  resetZoomSignal={resetZoomSignal}
                 />
               )}
             </ScatterChartHost>
@@ -675,7 +583,7 @@ export function ModelScatter({
             <div className="scatter-empty" style={{ height: chartHeight }}>
               <p className="scatter-empty-title">当前条件下没有可绘制的点</p>
               <p className="scatter-empty-hint">
-                换一组坐标轴、放宽模型筛选，或切换数据来源后再试。
+                换一组坐标轴、在图例中放开被隐藏的厂商，或切换数据来源后再试。
               </p>
             </div>
           )}
@@ -729,6 +637,17 @@ export function ModelScatter({
               已钉住 {highlightedModel} · 点击取消
             </button>
           ) : null}
+          {isZoomed ? (
+            <button
+              type="button"
+              className="scatter-btn scatter-note scatter-note-action"
+              onClick={() => setResetZoomSignal((prev) => prev + 1)}
+            >
+              已缩放 · 点击重置（或在图上双击）
+            </button>
+          ) : (
+            <span className="scatter-note scatter-note-hint">滚轮以光标为中心缩放</span>
+          )}
           {activeSource === SOURCE_ALL ? (
             <label className="scatter-note scatter-note-toggle">
               <input
@@ -746,29 +665,6 @@ export function ModelScatter({
             </span>
           ) : null}
         </div>
-
-        <ModelFilterPanel
-          isFullscreen={false}
-          isModelFilterExpanded={isModelFilterExpanded}
-          setIsModelFilterExpanded={setIsModelFilterExpanded}
-          selectedModelCount={selectedModels.length}
-          allModelCount={allModelNames.length}
-          selectAllModels={() => updateSelectedModels(() => [...allModelNames])}
-          clearAllModels={() => updateSelectedModels(() => [])}
-          restoreDefaultModelsForActiveSource={() => updateSelectedModels(() => [...fallbackDefaultModels])}
-          providerGroups={providerGroups}
-          selectedModelSet={selectedModelSet}
-          providerAverageCoveragePercentMap={providerAverageCoveragePercentMap}
-          baseModelNameSet={baseModelNameSet}
-          modelCoveragePercentMap={modelCoveragePercentMap}
-          providerDisplayNameBrandColorMap={allRowsIndex.providerDisplayNameBrandColorMap}
-          expandedLowCoverageProviders={expandedLowCoverageProviders}
-          setExpandedLowCoverageProviders={setExpandedLowCoverageProviders}
-          toggleProvider={toggleProvider}
-          toggleModel={toggleModel}
-          benchmarkSearchInputValue={benchmarkSearchInputValue}
-          setBenchmarkSearchInputValue={setBenchmarkSearchInputValue}
-        />
       </div>
     </section>
   );

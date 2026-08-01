@@ -50,6 +50,11 @@ export const SCATTER_CHART_HEIGHT = 520;
 export const SCATTER_CHART_HEIGHT_COMPACT = 400;
 export const SCATTER_CHART_COMPACT_BREAKPOINT = 768;
 export const SCATTER_CHART_MARGIN = { top: 24, right: 32, bottom: 48, left: 16 } as const;
+/** 全屏时图表之外（控件、说明行、图例）大致占用的高度 */
+export const SCATTER_CHART_FULLSCREEN_CHROME = 210;
+export const SCATTER_CHART_MIN_HEIGHT = 320;
+/** 单次滚轮的缩放步长 */
+export const SCATTER_WHEEL_ZOOM_STEP = 1.18;
 
 export const SCATTER_DOT_RADIUS = 5.5;
 export const SCATTER_DOT_RADIUS_PARETO = 7;

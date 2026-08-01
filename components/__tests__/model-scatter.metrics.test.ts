@@ -23,7 +23,7 @@ import {
   toMetricSlug,
   toScatterMetric
 } from "@/components/model-scatter/metrics";
-import { buildScatterDataset, computeAxisDomain, computeMedian } from "@/components/model-scatter/dataset";
+import { buildScatterDataset, computeAxisDomain, computeMedian, isDomainZoomed, zoomAxisDomain } from "@/components/model-scatter/dataset";
 import { OVERALL_METRIC_SLUG } from "@/components/model-scatter/constants";
 
 function createCell(valueNum: number | null): MatrixCell {
@@ -410,5 +410,95 @@ describe("computeAxisDomain / computeMedian", () => {
     expect(computeMedian([3, 1, 2])).toBe(2);
     expect(computeMedian([4, 1, 2, 3])).toBe(2.5);
     expect(computeMedian([])).toBeNull();
+  });
+});
+
+describe("zoomAxisDomain", () => {
+  const base: [number, number] = [0, 100];
+
+  test("放大后光标底下的数值仍停在同一相对位置", () => {
+    const anchorRatio = 0.25;
+    const zoomed = zoomAxisDomain(base, base, "linear", anchorRatio, 0.5);
+
+    const anchorBefore = base[0] + (base[1] - base[0]) * anchorRatio;
+    const anchorAfter = zoomed[0] + (zoomed[1] - zoomed[0]) * anchorRatio;
+
+    expect(anchorAfter).toBeCloseTo(anchorBefore, 6);
+  });
+
+  test("缩小同样锚定光标位置", () => {
+    const anchorRatio = 0.8;
+    const zoomed = zoomAxisDomain(base, base, "linear", anchorRatio, 2);
+
+    const anchorBefore = base[0] + (base[1] - base[0]) * anchorRatio;
+    const anchorAfter = zoomed[0] + (zoomed[1] - zoomed[0]) * anchorRatio;
+
+    expect(anchorAfter).toBeCloseTo(anchorBefore, 6);
+  });
+
+  test("factor < 1 收窄跨度，factor > 1 放宽跨度", () => {
+    const zoomedIn = zoomAxisDomain(base, base, "linear", 0.5, 0.5);
+    const zoomedOut = zoomAxisDomain(base, base, "linear", 0.5, 2);
+
+    expect(zoomedIn[1] - zoomedIn[0]).toBeCloseTo(50, 6);
+    expect(zoomedOut[1] - zoomedOut[0]).toBeCloseTo(200, 6);
+  });
+
+  test("对数轴在 log 空间等比缩放，结果保持为正", () => {
+    const logBase: [number, number] = [0.1, 100];
+    const zoomed = zoomAxisDomain(logBase, logBase, "log", 0.5, 0.5);
+
+    expect(zoomed[0]).toBeGreaterThan(0);
+    expect(zoomed[0]).toBeGreaterThan(logBase[0]);
+    expect(zoomed[1]).toBeLessThan(logBase[1]);
+    // 中心锚点缩放：log 空间跨度减半
+    expect(Math.log10(zoomed[1]) - Math.log10(zoomed[0])).toBeCloseTo(1.5, 6);
+  });
+
+  test("放大有下限，不会无限缩到一个点", () => {
+    let domain: [number, number] = [...base];
+    for (let step = 0; step < 60; step += 1) {
+      domain = zoomAxisDomain(domain, base, "linear", 0.5, 0.5);
+    }
+
+    expect(domain[1] - domain[0]).toBeGreaterThan(0);
+    expect(domain[1] - domain[0]).toBeCloseTo(100 / 40, 6);
+  });
+
+  test("缩小有上限，不会把数据缩成一团", () => {
+    let domain: [number, number] = [...base];
+    for (let step = 0; step < 60; step += 1) {
+      domain = zoomAxisDomain(domain, base, "linear", 0.5, 2);
+    }
+
+    expect(domain[1] - domain[0]).toBeCloseTo(400, 6);
+  });
+
+  test("退化值域原样返回", () => {
+    expect(zoomAxisDomain([5, 5], [5, 5], "linear", 0.5, 0.5)).toEqual([5, 5]);
+  });
+
+  test("锚点比例超出 [0,1] 时被夹住", () => {
+    expect(zoomAxisDomain(base, base, "linear", -3, 0.5)).toEqual(
+      zoomAxisDomain(base, base, "linear", 0, 0.5)
+    );
+    expect(zoomAxisDomain(base, base, "linear", 9, 0.5)).toEqual(
+      zoomAxisDomain(base, base, "linear", 1, 0.5)
+    );
+  });
+});
+
+describe("isDomainZoomed", () => {
+  test("与基准一致时判为未缩放", () => {
+    expect(isDomainZoomed([0, 100], [0, 100])).toBe(false);
+  });
+
+  test("任一端偏离即判为已缩放", () => {
+    expect(isDomainZoomed([10, 100], [0, 100])).toBe(true);
+    expect(isDomainZoomed([0, 90], [0, 100])).toBe(true);
+  });
+
+  test("浮点误差不算缩放", () => {
+    expect(isDomainZoomed([0, 100 + 1e-9], [0, 100])).toBe(false);
   });
 });

@@ -1,6 +1,15 @@
 "use client";
 
-import { ArrowLeftRight, Copy, Crosshair, ImageDown, Tag, Waypoints } from "lucide-react";
+import {
+  ArrowLeftRight,
+  Copy,
+  Crosshair,
+  Expand,
+  ImageDown,
+  Minimize2,
+  Tag,
+  Waypoints
+} from "lucide-react";
 import type { ExportPresetKey } from "@/components/benchmark-matrix/types";
 import type { SourceOption } from "@/components/benchmark-matrix/selectors";
 import { EXPORT_PRESET_MAP, SOURCE_ALL } from "@/components/benchmark-matrix/constants";
@@ -49,6 +58,9 @@ type ScatterControlsProps = {
   isDownloading: boolean;
   isCopying: boolean;
   isExportBusy: boolean;
+
+  isFullscreen: boolean;
+  onToggleFullscreen: () => void;
 };
 
 const LABEL_MODE_OPTIONS: Array<{ value: ScatterLabelMode; label: string; title: string }> = [
@@ -157,7 +169,9 @@ export function ScatterControls(props: ScatterControlsProps) {
     onCopyImage,
     isDownloading,
     isCopying,
-    isExportBusy
+    isExportBusy,
+    isFullscreen,
+    onToggleFullscreen
   } = props;
 
   return (
@@ -322,6 +336,16 @@ export function ScatterControls(props: ScatterControlsProps) {
           >
             <Copy size={14} />
             {isCopying ? "复制中…" : "复制"}
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-xs btn-ghost"
+            onClick={onToggleFullscreen}
+            aria-pressed={isFullscreen}
+          >
+            {isFullscreen ? <Minimize2 size={14} /> : <Expand size={14} />}
+            {isFullscreen ? "退出全屏" : "全屏"}
           </button>
         </div>
       </div>

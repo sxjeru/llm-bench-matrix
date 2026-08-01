@@ -135,3 +135,54 @@ export function computeMedian(values: readonly number[]): number | null {
   if (sorted.length % 2 === 1) return sorted[middle] ?? null;
   return ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2;
 }
+
+/** 相对基准值域的最深放大倍数（跨度缩到 1/40） */
+export const MAX_ZOOM_IN_RATIO = 1 / 40;
+/** 相对基准值域的最大缩小倍数（跨度撑到 4 倍） */
+export const MAX_ZOOM_OUT_RATIO = 4;
+
+/**
+ * 以光标位置为锚点缩放坐标轴值域。
+ *
+ * `anchorRatio` 是光标在该轴上的相对位置（0 = 轴起点，1 = 轴终点）；
+ * 锚点两侧按同一比例伸缩，所以光标底下的那个数据点在缩放前后始终贴着光标。
+ * 对数轴在 log 空间做同样的运算，视觉上才是等比的。
+ */
+export function zoomAxisDomain(
+  domain: readonly [number, number],
+  baseDomain: readonly [number, number],
+  scale: ScatterAxisScale,
+  anchorRatio: number,
+  factor: number
+): [number, number] {
+  const isLog = scale === "log" && domain[0] > 0 && domain[1] > 0 && baseDomain[0] > 0 && baseDomain[1] > 0;
+  const toSpace = (value: number) => (isLog ? Math.log10(value) : value);
+  const fromSpace = (value: number) => (isLog ? 10 ** value : value);
+
+  const low = toSpace(domain[0]);
+  const high = toSpace(domain[1]);
+  const span = high - low;
+  if (!Number.isFinite(span) || span <= 0) return [domain[0], domain[1]];
+
+  const baseSpan = toSpace(baseDomain[1]) - toSpace(baseDomain[0]);
+  const ratio = Math.min(1, Math.max(0, anchorRatio));
+  const anchor = low + span * ratio;
+
+  let nextSpan = span * factor;
+  if (Number.isFinite(baseSpan) && baseSpan > 0) {
+    nextSpan = Math.min(baseSpan * MAX_ZOOM_OUT_RATIO, Math.max(baseSpan * MAX_ZOOM_IN_RATIO, nextSpan));
+  }
+
+  return [fromSpace(anchor - nextSpan * ratio), fromSpace(anchor + nextSpan * (1 - ratio))];
+}
+
+/** 判断当前值域是否已偏离基准（决定要不要显示「重置缩放」）。 */
+export function isDomainZoomed(
+  domain: readonly [number, number],
+  baseDomain: readonly [number, number]
+): boolean {
+  const epsilon = Math.abs(baseDomain[1] - baseDomain[0]) * 1e-6;
+  return (
+    Math.abs(domain[0] - baseDomain[0]) > epsilon || Math.abs(domain[1] - baseDomain[1]) > epsilon
+  );
+}

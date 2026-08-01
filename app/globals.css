@@ -1082,6 +1082,16 @@ input.heatmap-alpha-range::-moz-range-track {
   position: relative;
 }
 
+/* 滚轮缩放的接管区：默认不让浏览器把手势当页面滚动 */
+.scatter-chart-surface {
+  position: relative;
+  touch-action: pan-y;
+}
+
+.scatter-chart-surface .recharts-scatter-symbol {
+  cursor: pointer;
+}
+
 .scatter-chart-placeholder,
 .scatter-empty {
   display: flex;
@@ -1211,6 +1221,32 @@ input.heatmap-alpha-range::-moz-range-track {
 
 .scatter-note-toggle {
   cursor: pointer;
+}
+
+.scatter-note-hint {
+  opacity: 0.6;
+  border-style: dashed;
+}
+
+/* 全屏：整页铺满视口，卡片吃掉外边距 */
+.scatter-page.is-fullscreen {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 8px 14px 10px;
+  background: linear-gradient(180deg, #0b1020 0%, #0a1226 100%);
+  overflow: auto;
+}
+
+.scatter-page.is-fullscreen .scatter-card {
+  flex: 1;
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.scatter-page.is-fullscreen .scatter-capture {
+  flex: 1;
 }
 
 /* ===== 散点悬浮卡 ===== */
