@@ -45,7 +45,9 @@ export async function PATCH(request: Request) {
     }
 
     const result = await updateModelParams(body);
-    await invalidateAllCaches();
+    if (result.updated) {
+      await invalidateAllCaches();
+    }
     return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json(
