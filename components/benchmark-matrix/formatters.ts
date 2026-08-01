@@ -58,3 +58,19 @@ export function formatComparisonDeltaValue(value: number): string {
   if (absValue >= 1) return Number(absValue.toFixed(2)).toString();
   return Number(absValue.toFixed(3)).toString();
 }
+
+/**
+ * 每百万 token 的美元价格。
+ *
+ * 高价位保 2 位小数、低价位保 3 位，再去掉尾随零，
+ * 让 `$12` 与 `$0.075` 都不出现无意义的补零。
+ */
+export function formatPricePerMillion(value: number): string {
+  const fixed = value.toFixed(value >= 10 ? 2 : 3);
+  return `$${fixed.replace(/0+$/, "").replace(/\.$/, "")}`;
+}
+
+/** 参数量（单位 B），最多 3 位小数且不补零。 */
+export function formatParamsBillions(value: number): string {
+  return `${Number(value.toFixed(3)).toString()}B`;
+}

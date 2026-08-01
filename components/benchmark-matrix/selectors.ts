@@ -27,6 +27,7 @@ import {
   isLowerBetterBenchmark
 } from "./scoring";
 import { calculateBoxPlotStats } from "@/lib/boxplot-stats";
+import { formatParamsBillions, formatPricePerMillion } from "./formatters";
 import type {
   IndexedMatrixInputRow,
   BenchmarkRankingData,
@@ -1080,7 +1081,7 @@ export function buildDisplayedCoverageMetaByModel(
 function createPriceCell(value: number | null, benchTime: string | null): MatrixCell {
   const displayValue = value === null || !Number.isFinite(value)
     ? "--"
-    : `$${value.toFixed(value >= 10 ? 2 : 3).replace(/0+$/, "").replace(/\.$/, "")}`;
+    : formatPricePerMillion(value);
   const valueRaw = displayValue;
   const entry: MatrixCellEntry = {
     valueRaw,
@@ -1155,10 +1156,6 @@ export function buildPriceMatrixRows(
       isPriceRow: true
     };
   });
-}
-
-function formatParamsBillions(value: number): string {
-  return `${Number(value.toFixed(3)).toString()}B`;
 }
 
 /**
