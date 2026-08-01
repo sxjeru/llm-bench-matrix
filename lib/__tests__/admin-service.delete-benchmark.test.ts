@@ -1,11 +1,27 @@
-import { beforeAll, afterEach, describe, expect, test, vi } from "vitest";
+import { beforeAll, beforeEach, afterEach, describe, expect, test, vi } from "vitest";
+import type { MockedFunction } from "vitest";
 import { benchmarks } from "@/lib/db/schema";
 
+/**
+ * 只替换 invalidateAllCaches：admin-service 还会在模块顶层调用同一模块导出的
+ * registerCacheInvalidator，整包替换会让它变成 undefined 并在 import 阶段直接抛错。
+ */
+vi.mock("@/lib/db/queries", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/db/queries")>();
+  return {
+    ...actual,
+    invalidateAllCaches: vi.fn().mockResolvedValue(undefined)
+  };
+});
+
 type DeleteBenchmarkAndAllValuesFn = typeof import("@/lib/admin-service").deleteBenchmarkAndAllValues;
+
+type InvalidateAllCachesFn = typeof import("@/lib/db/queries").invalidateAllCaches;
 
 type TransactionCallback = (tx: unknown) => Promise<unknown>;
 
 let deleteBenchmarkAndAllValues: DeleteBenchmarkAndAllValuesFn;
+let invalidateAllCachesMock: MockedFunction<InvalidateAllCachesFn>;
 let dbForTest: {
   transaction: (callback: TransactionCallback) => Promise<unknown>;
   select: (...args: unknown[]) => unknown;
@@ -60,8 +76,16 @@ beforeAll(async () => {
   const adminServiceModule = await import("@/lib/admin-service");
   deleteBenchmarkAndAllValues = adminServiceModule.deleteBenchmarkAndAllValues;
 
+  const dbQueriesModule = await import("@/lib/db/queries");
+  invalidateAllCachesMock = vi.mocked(dbQueriesModule.invalidateAllCaches);
+
   const dbClientModule = await import("@/lib/db/client");
   dbForTest = dbClientModule.db as typeof dbForTest;
+});
+
+beforeEach(() => {
+  // vi.mock 工厂里的 vi.fn 不受 afterEach 的 restoreAllMocks 影响，调用次数需手动清理
+  invalidateAllCachesMock.mockClear();
 });
 
 afterEach(() => {
@@ -82,6 +106,7 @@ describe("deleteBenchmarkAndAllValues", () => {
     expect(mocks.updateMock).toHaveBeenCalledWith(benchmarks);
     expect(mocks.updateSet).toHaveBeenCalledWith({ mergedIntoBenchmarkId: null });
     expect(mocks.deleteMock).toHaveBeenCalledWith(benchmarks);
+    expect(invalidateAllCachesMock).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({
       ok: true,
       benchmarkId: 970,
@@ -97,6 +122,20 @@ describe("deleteBenchmarkAndAllValues", () => {
 
     await expect(deleteBenchmarkAndAllValues(12345)).rejects.toThrow("benchmark not found: 12345");
     expect(transactionSpy).not.toHaveBeenCalled();
+    expect(invalidateAllCachesMock).not.toHaveBeenCalled();
+  });
+
+  test("事务失败时向上抛错，且不失效缓存", async () => {
+    mockSelects([existingBenchmark], 7);
+    const mocks = createTransactionMock();
+    mocks.deleteWhere.mockRejectedValue(new Error("delete benchmark failed"));
+    vi.spyOn(dbForTest, "transaction").mockImplementation(async (callback) =>
+      callback({ update: mocks.updateMock, delete: mocks.deleteMock })
+    );
+
+    await expect(deleteBenchmarkAndAllValues(970)).rejects.toThrow("delete benchmark failed");
+    // 缓存失效必须发生在事务提交之后：回滚时若仍失效缓存，会把未删除的数据当成已删除
+    expect(invalidateAllCachesMock).not.toHaveBeenCalled();
   });
 
   test("没有关联记录时 deletedValueCount 为 0", async () => {

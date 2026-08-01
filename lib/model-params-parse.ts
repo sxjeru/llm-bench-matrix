@@ -5,6 +5,18 @@
  * 任何无法唯一确定总参数量的写法（例如 Mixtral 的 8x22B）都只写 note，不填数值。
  */
 
+/**
+ * 可录入的参数量区间，单位 B（十亿）。两端都由 models.total_params_b 的列类型
+ * numeric(10, 3) 决定：
+ * - 小于 0.001 会被舍入成 0，触发 models_params_range 的 `> 0` 约束；
+ * - 列的物理上限是 9999999.999，这里收紧到 100000B（即 100T），远超现实模型规模，
+ *   实际作用是拦数量级填错（例如把 685B 填成 685000000000）。
+ *
+ * 定义在本模块是因为它不依赖 db，服务端 schema 与后台表单可以共用同一组边界。
+ */
+export const MIN_PARAMS_B = 0.001;
+export const MAX_PARAMS_B = 100_000;
+
 /** 总参数量：`120B`、`E4B`（E 前缀表示估算，沿用 extractModelScaleToken 的约定） */
 const TOTAL_PARAMS_PATTERN = /\b(E?)(\d+(?:\.\d+)?)B\b/gi;
 

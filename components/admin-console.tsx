@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { type ClipboardEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { formatDateTimeLocalInputValue } from "@/components/benchmark-matrix/formatters";
+import { MAX_PARAMS_B, MIN_PARAMS_B } from "@/lib/model-params-parse";
 import { getJson, postFormData, postJson } from "./admin-console/api";
 import { useEntityLookups } from "./admin-console/hooks/use-entity-lookups";
 import { useImportPreviewState } from "./admin-console/hooks/use-import-preview-state";
@@ -2981,6 +2982,10 @@ export function AdminConsole({
     const parsed = Number(trimmed);
     if (!Number.isFinite(parsed) || parsed <= 0) {
       throw new Error("参数量必须是正数");
+    }
+    // 与后端 schema 同源。这里先拦一道是为了给出中文提示：交给后端会得到一串 ZodError JSON
+    if (parsed < MIN_PARAMS_B || parsed > MAX_PARAMS_B) {
+      throw new Error(`参数量需在 ${MIN_PARAMS_B}B ~ ${MAX_PARAMS_B}B 之间`);
     }
     return parsed;
   }

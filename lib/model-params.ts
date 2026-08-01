@@ -2,7 +2,12 @@ import { eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db/client";
 import { models, providers } from "@/lib/db/schema";
-import { hasParamsSuggestionValue, parseModelParamsFromName } from "@/lib/model-params-parse";
+import {
+  MAX_PARAMS_B,
+  MIN_PARAMS_B,
+  hasParamsSuggestionValue,
+  parseModelParamsFromName
+} from "@/lib/model-params-parse";
 
 /**
  * 参数量是模型自身属性，直接存在 models 表上。
@@ -87,7 +92,14 @@ export async function getAdminModelParamsRows(): Promise<ModelParamsAdminRow[]> 
     .sort((a, b) => Date.parse(b.modelCreatedAt) - Date.parse(a.modelCreatedAt));
 }
 
-const nullableParams = z.number().positive().max(100_000).nullable().optional();
+// 上下界的来历见 MIN_PARAMS_B / MAX_PARAMS_B 的注释：都是 DB 列精度换算出来的，
+// 在这里拦下才能返回可读错误，否则会变成 Postgres 的 numeric overflow / CHECK 报错。
+const nullableParams = z
+  .number()
+  .min(MIN_PARAMS_B, `参数量不能小于 ${MIN_PARAMS_B}B`)
+  .max(MAX_PARAMS_B, `参数量不能大于 ${MAX_PARAMS_B}B`)
+  .nullable()
+  .optional();
 
 const updateSchema = z
   .object({
