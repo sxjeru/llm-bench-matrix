@@ -199,6 +199,8 @@ export function ScatterCanvas({
     const yRankByModel = new Map(rankedModels.map((modelName, index) => [modelName, index]));
 
     const candidates: ScatterLabelCandidate[] = [];
+    const providerByModel = new Map<string, string>();
+
     dataset.points.forEach((point) => {
       const projection = projections.get(point.modelName);
       if (!projection) return;
@@ -212,6 +214,7 @@ export function ScatterCanvas({
         return;
       }
 
+      providerByModel.set(point.modelName, point.providerName);
       candidates.push({
         key: point.modelName,
         text: point.modelName,
@@ -226,14 +229,33 @@ export function ScatterCanvas({
       });
     });
 
-    const labels = layoutScatterLabels(candidates, plotArea, {
+    const layoutOptions = {
       fontSize: SCATTER_LABEL_FONT_SIZE,
       dotRadius: SCATTER_DOT_RADIUS,
       gap: SCATTER_LABEL_GAP,
       mode: labelMode
-    });
+    };
 
-    return new Map(labels.map((label) => [label.key, label]));
+    const labelByKey = new Map(
+      layoutScatterLabels(candidates, plotArea, layoutOptions).map((label) => [label.key, label])
+    );
+
+    // 悬浮某个厂商时，它的标签一个都不能少。这批点已经被排到最上层、其余点也压暗了，
+    // 所以这里允许它们压过别人的标签 —— 看清当前关注的那一组比避让更重要。
+    if (hoveredProvider) {
+      const missing = candidates.filter(
+        (candidate) =>
+          providerByModel.get(candidate.key) === hoveredProvider && !labelByKey.has(candidate.key)
+      );
+
+      if (missing.length > 0) {
+        layoutScatterLabels(missing, plotArea, { ...layoutOptions, mode: "all" }).forEach((label) => {
+          labelByKey.set(label.key, label);
+        });
+      }
+    }
+
+    return labelByKey;
   }, [
     dataset.points,
     plotArea,
@@ -243,6 +265,7 @@ export function ScatterCanvas({
     yScale,
     labelMode,
     highlightedModel,
+    hoveredProvider,
     yMetric.higherIsBetter
   ]);
 
@@ -548,7 +571,14 @@ export function ScatterCanvas({
           content={<ScatterTooltip xMetric={xMetric} yMetric={yMetric} showPareto={showPareto} />}
         />
 
-        {showGuides ? <ScatterGuideLayer xMedian={xMedian} yMedian={yMedian} /> : null}
+        {showGuides ? (
+          <ScatterGuideLayer
+            xMedian={xMedian}
+            yMedian={yMedian}
+            xHigherIsBetter={xMetric.higherIsBetter}
+            yHigherIsBetter={yMetric.higherIsBetter}
+          />
+        ) : null}
 
         <Scatter data={orderedPoints} shape={renderDot} isAnimationActive={false} onClick={handleSelect} />
 

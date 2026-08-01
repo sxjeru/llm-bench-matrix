@@ -78,6 +78,8 @@ export const SCATTER_AXIS_STROKE = "#3b4b74";
 export const SCATTER_AXIS_TICK_COLOR = "#a9b3c9";
 export const SCATTER_PARETO_LINE_COLOR = "#facd6a";
 export const SCATTER_GUIDE_LINE_COLOR = "rgba(169, 179, 201, 0.35)";
+/** 最优象限底色：两轴都优于中位数的那一块，取 --success 的极淡版本 */
+export const SCATTER_BEST_QUADRANT_FILL = "rgba(101, 212, 143, 0.08)";
 export const SCATTER_LABEL_COLOR = "#dbe3f5";
 export const SCATTER_DIMMED_OPACITY = 0.28;
 

@@ -465,6 +465,57 @@ describe("ScatterCanvas", () => {
     expect(container.querySelectorAll(".scatter-guide-layer line").length).toBe(2);
   });
 
+  test("最优象限铺浅绿底色，落在两轴更优的一侧", () => {
+    // X = Output Price（越小越好，左侧更优）；Y = Score（越大越好，上方更优）
+    const { container } = renderCanvas({ showGuides: true });
+
+    const quadrant = container.querySelector(".scatter-best-quadrant") as SVGRectElement | null;
+    expect(quadrant).not.toBeNull();
+
+    const verticalLine = container.querySelector(".scatter-guide-layer line") as SVGLineElement;
+    const xMedianPixel = Number(verticalLine.getAttribute("x1"));
+
+    const rectX = Number(quadrant!.getAttribute("x"));
+    const rectWidth = Number(quadrant!.getAttribute("width"));
+    const rectY = Number(quadrant!.getAttribute("y"));
+
+    // 左半边：右边界贴着中位线
+    expect(rectX + rectWidth).toBeCloseTo(xMedianPixel, 1);
+    // 上半边：顶边贴着绘图区顶部
+    expect(rectY).toBeCloseTo(SCATTER_CHART_MARGIN.top, 1);
+    expect(quadrant!.getAttribute("fill")).toContain("101, 212, 143");
+  });
+
+  test("方向翻转时最优象限跟着换边", () => {
+    const flippedX = { ...canvasXMetric, higherIsBetter: true };
+    const { container } = renderCanvas({ showGuides: true, xMetric: flippedX });
+
+    const verticalLine = container.querySelector(".scatter-guide-layer line") as SVGLineElement;
+    const xMedianPixel = Number(verticalLine.getAttribute("x1"));
+    const quadrant = container.querySelector(".scatter-best-quadrant") as SVGRectElement;
+
+    // X 改为越大越好后，最优象限落到右半边
+    expect(Number(quadrant.getAttribute("x"))).toBeCloseTo(xMedianPixel, 1);
+  });
+
+  test("关闭参考线时不画最优象限", () => {
+    const { container } = renderCanvas({ showGuides: false });
+
+    expect(container.querySelector(".scatter-best-quadrant")).toBeNull();
+  });
+
+  test("悬浮厂商时其全部模型都带标签，即便会压到别人", () => {
+    // auto 模式下密集区域本来会省略部分标签
+    const { container } = renderCanvas({ hoveredProvider: "Anthropic", labelMode: "auto" });
+
+    const labels = Array.from(container.querySelectorAll(".recharts-scatter-symbol text")).map(
+      (node) => node.textContent
+    );
+
+    expect(labels).toContain("Gamma");
+    expect(labels).toContain("Delta");
+  });
+
   test("滚轮在绘图区内缩放并阻止页面滚动", () => {
     const onZoomChange = vi.fn();
     const { container } = renderCanvas({ onZoomChange });
@@ -542,7 +593,7 @@ describe("ScatterCanvas", () => {
   test("悬浮图例时淡化其他厂商的点", () => {
     const { container } = renderCanvas({ hoveredProvider: "Anthropic" });
 
-    const groups = Array.from(container.querySelectorAll(".recharts-scatter-symbol > g"));
+    const groups = Array.from(container.querySelectorAll(".recharts-scatter-symbol .recharts-shape > g"));
     const opacities = groups.map((group) => Number(group.getAttribute("opacity") ?? "1"));
 
     // Anthropic 两个（Gamma / Delta）保持全亮，OpenAI 两个（Alpha / Beta）被淡化
@@ -553,7 +604,7 @@ describe("ScatterCanvas", () => {
   test("被钉住的点即使不属于悬浮厂商也不淡化", () => {
     const { container } = renderCanvas({ hoveredProvider: "Anthropic", highlightedModel: "Alpha" });
 
-    const groups = Array.from(container.querySelectorAll(".recharts-scatter-symbol > g"));
+    const groups = Array.from(container.querySelectorAll(".recharts-scatter-symbol .recharts-shape > g"));
     const opacities = groups.map((group) => Number(group.getAttribute("opacity") ?? "1"));
 
     // Gamma / Delta（悬浮厂商）+ Alpha（钉住）三个全亮，只剩 Beta 被淡化
