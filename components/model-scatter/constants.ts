@@ -78,6 +78,15 @@ export const SCATTER_AXIS_STROKE = "#3b4b74";
 export const SCATTER_AXIS_TICK_COLOR = "#a9b3c9";
 export const SCATTER_PARETO_LINE_COLOR = "#facd6a";
 export const SCATTER_GUIDE_LINE_COLOR = "rgba(169, 179, 201, 0.35)";
+/**
+ * 定位十字线。
+ *
+ * 比坐标轴亮一档：它是跟着鼠标走的临时线，深色底上太暗就起不到定位作用；
+ * 同时用更短的虚线节奏与中位参考线区分开。
+ */
+export const SCATTER_CURSOR_STROKE = "rgba(206, 219, 245, 0.6)";
+export const SCATTER_CURSOR_WIDTH = 1.25;
+export const SCATTER_CURSOR_DASH = "4 3";
 /** 最优象限底色：两轴都优于中位数的那一块，取 --success 的极淡版本 */
 export const SCATTER_BEST_QUADRANT_FILL = "rgba(101, 212, 143, 0.08)";
 export const SCATTER_LABEL_COLOR = "#dbe3f5";

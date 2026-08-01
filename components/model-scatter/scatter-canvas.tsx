@@ -6,6 +6,9 @@ import {
   SCATTER_AXIS_STROKE,
   SCATTER_AXIS_TICK_COLOR,
   SCATTER_CHART_MARGIN,
+  SCATTER_CURSOR_DASH,
+  SCATTER_CURSOR_STROKE,
+  SCATTER_CURSOR_WIDTH,
   SCATTER_DIMMED_OPACITY,
   SCATTER_DOT_RADIUS,
   SCATTER_DOT_RADIUS_PARETO,
@@ -565,7 +568,11 @@ export function ScatterCanvas({
         />
 
         <Tooltip
-          cursor={{ strokeDasharray: "3 3", stroke: SCATTER_AXIS_STROKE }}
+          cursor={{
+            strokeDasharray: SCATTER_CURSOR_DASH,
+            stroke: SCATTER_CURSOR_STROKE,
+            strokeWidth: SCATTER_CURSOR_WIDTH
+          }}
           // 关掉 Recharts 默认的位移过渡：否则浮窗每次都从上一个位置（首次是左上角）滑过来
           isAnimationActive={false}
           content={<ScatterTooltip xMetric={xMetric} yMetric={yMetric} showPareto={showPareto} />}
