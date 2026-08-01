@@ -24,6 +24,7 @@ import { formatScatterAxisTick, getMetricAxisLabel } from "./metrics";
 import { ScatterParetoLayer } from "./pareto-layer";
 import { buildPointProjections, computePlotArea, pixelToAxisRatio } from "./projection";
 import { ScatterTooltip } from "./scatter-tooltip";
+import { buildAxisTicks } from "./ticks";
 import type {
   ScatterAxisScale,
   ScatterLabelCandidate,
@@ -225,6 +226,10 @@ export function ScatterCanvas({
   const xMedian = useMemo(() => (showGuides ? computeMedian(xValues) : null), [showGuides, xValues]);
   const yMedian = useMemo(() => (showGuides ? computeMedian(yValues) : null), [showGuides, yValues]);
 
+  // 横向空间更宽，刻度可以多给两档；纵向密了会挤成一片
+  const xTicks = useMemo(() => buildAxisTicks(xDomain, xScale, 8), [xDomain, xScale]);
+  const yTicks = useMemo(() => buildAxisTicks(yDomain, yScale, 6), [yDomain, yScale]);
+
   // 滚轮缩放必须拿到非 passive 的监听才能 preventDefault，React 的 onWheel 做不到
   useEffect(() => {
     const node = containerRef.current;
@@ -352,6 +357,7 @@ export function ScatterCanvas({
           name={xMetric.label}
           scale={xScale}
           domain={xDomain}
+          ticks={xTicks.length > 0 ? xTicks : undefined}
           allowDataOverflow
           height={SCATTER_X_AXIS_HEIGHT}
           stroke={SCATTER_AXIS_STROKE}
@@ -372,6 +378,7 @@ export function ScatterCanvas({
           name={yMetric.label}
           scale={yScale}
           domain={yDomain}
+          ticks={yTicks.length > 0 ? yTicks : undefined}
           allowDataOverflow
           width={SCATTER_Y_AXIS_WIDTH}
           stroke={SCATTER_AXIS_STROKE}
