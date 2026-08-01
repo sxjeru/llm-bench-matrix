@@ -1166,6 +1166,13 @@ input.heatmap-alpha-range::-moz-range-track {
   border-color: #4b6fb9;
 }
 
+/* 悬浮时图例本身也要亮起来，让「图上留下的那批点」与鼠标所指对得上 */
+.scatter-legend-item.is-hovered {
+  color: var(--text);
+  border-color: #5da7ff;
+  background: rgba(93, 167, 255, 0.14);
+}
+
 .scatter-legend-item.is-hidden {
   opacity: 0.4;
   text-decoration: line-through;

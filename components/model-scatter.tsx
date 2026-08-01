@@ -90,6 +90,7 @@ export function ModelScatter({
   const [isHydrated, setIsHydrated] = useState(false);
   const [showLowCoverageRows, setShowLowCoverageRows] = useState(false);
   const [hiddenProviders, setHiddenProviders] = useState<string[]>([]);
+  const [hoveredProvider, setHoveredProvider] = useState<string | null>(null);
   const [highlightedModel, setHighlightedModel] = useState<string | null>(null);
   const [exportPreset, setExportPreset] = useState<ExportPresetKey>(DEFAULT_EXPORT_PRESET);
   const [supportsWebpExport, setSupportsWebpExport] = useState(true);
@@ -487,11 +488,13 @@ export function ModelScatter({
   }, []);
 
   const toggleProviderVisibility = useCallback((providerName: string) => {
-    setHiddenProviders((prev) =>
-      prev.includes(providerName)
-        ? prev.filter((item) => item !== providerName)
-        : [...prev, providerName]
-    );
+    setHiddenProviders((prev) => {
+      const willHide = !prev.includes(providerName);
+      // 刚被隐藏的厂商不该继续作为悬浮目标，否则图上会一片全暗
+      if (willHide) setHoveredProvider((current) => (current === providerName ? null : current));
+
+      return willHide ? [...prev, providerName] : prev.filter((item) => item !== providerName);
+    });
   }, []);
 
   const toggleFullscreen = useCallback(async () => {
@@ -571,6 +574,7 @@ export function ModelScatter({
                   labelMode={viewState.labelMode}
                   showGuides={viewState.showGuides}
                   highlightedModel={highlightedModel}
+                  hoveredProvider={hoveredProvider}
                   onSelectModel={(modelName) =>
                     setHighlightedModel((prev) => (prev === modelName ? null : modelName))
                   }
@@ -596,8 +600,15 @@ export function ModelScatter({
                   <button
                     key={entry.providerName}
                     type="button"
-                    className={`scatter-btn scatter-legend-item ${isHidden ? "is-hidden" : ""}`}
+                    className={`scatter-btn scatter-legend-item ${isHidden ? "is-hidden" : ""} ${
+                      hoveredProvider === entry.providerName ? "is-hovered" : ""
+                    }`}
                     onClick={() => toggleProviderVisibility(entry.providerName)}
+                    // 已隐藏的厂商图上没有点，悬浮它不该把其余厂商全压暗
+                    onMouseEnter={() => setHoveredProvider(isHidden ? null : entry.providerName)}
+                    onMouseLeave={() => setHoveredProvider(null)}
+                    onFocus={() => setHoveredProvider(isHidden ? null : entry.providerName)}
+                    onBlur={() => setHoveredProvider(null)}
                     title={isHidden ? "点击显示该厂商" : "点击隐藏该厂商"}
                   >
                     <span className="scatter-legend-swatch" style={{ backgroundColor: entry.color }} />

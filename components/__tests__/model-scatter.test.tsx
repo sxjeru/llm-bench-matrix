@@ -539,6 +539,62 @@ describe("ScatterCanvas", () => {
     expect(onZoomChange).toHaveBeenLastCalledWith(false);
   });
 
+  test("悬浮图例时淡化其他厂商的点", () => {
+    const { container } = renderCanvas({ hoveredProvider: "Anthropic" });
+
+    const groups = Array.from(container.querySelectorAll(".recharts-scatter-symbol > g"));
+    const opacities = groups.map((group) => Number(group.getAttribute("opacity") ?? "1"));
+
+    // Anthropic 两个（Gamma / Delta）保持全亮，OpenAI 两个（Alpha / Beta）被淡化
+    expect(opacities.filter((value) => value === 1).length).toBe(2);
+    expect(opacities.filter((value) => value < 1).length).toBe(2);
+  });
+
+  test("被钉住的点即使不属于悬浮厂商也不淡化", () => {
+    const { container } = renderCanvas({ hoveredProvider: "Anthropic", highlightedModel: "Alpha" });
+
+    const groups = Array.from(container.querySelectorAll(".recharts-scatter-symbol > g"));
+    const opacities = groups.map((group) => Number(group.getAttribute("opacity") ?? "1"));
+
+    // Gamma / Delta（悬浮厂商）+ Alpha（钉住）三个全亮，只剩 Beta 被淡化
+    expect(opacities.filter((value) => value === 1).length).toBe(3);
+    expect(opacities.filter((value) => value < 1).length).toBe(1);
+  });
+
+  test("被钉住的点画在最上层，不会被其他点覆盖", () => {
+    const { container } = renderCanvas({ highlightedModel: "Beta" });
+
+    const symbols = Array.from(container.querySelectorAll(".recharts-scatter-symbol"));
+    // SVG 没有 z-index，最后画的才在最上面
+    const lastSymbolText = symbols.at(-1)?.querySelector("text")?.textContent;
+
+    expect(lastSymbolText).toBe("Beta");
+  });
+
+  test("悬浮厂商的点排在普通点之后（更靠上层）", () => {
+    const { container } = renderCanvas({ hoveredProvider: "Anthropic", labelMode: "all" });
+
+    const labels = Array.from(container.querySelectorAll(".recharts-scatter-symbol text")).map(
+      (node) => node.textContent
+    );
+
+    const lastOpenAiIndex = Math.max(labels.indexOf("Alpha"), labels.indexOf("Beta"));
+    const firstAnthropicIndex = Math.min(
+      ...["Gamma", "Delta"].map((name) => labels.indexOf(name)).filter((index) => index >= 0)
+    );
+
+    expect(firstAnthropicIndex).toBeGreaterThan(lastOpenAiIndex);
+  });
+
+  test("没有悬浮与钉住时保持原始绘制顺序", () => {
+    const { container } = renderCanvas({ labelMode: "all" });
+    const labels = Array.from(container.querySelectorAll(".recharts-scatter-symbol text")).map(
+      (node) => node.textContent
+    );
+
+    expect(labels).toEqual(dataset.points.map((point) => point.modelName));
+  });
+
   test("图表内除根 svg 外还有 tabindex=-1 的分层容器（焦点框压制必须覆盖后代）", () => {
     const { container } = renderCanvas();
 

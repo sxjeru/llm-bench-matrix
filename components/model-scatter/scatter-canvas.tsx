@@ -57,6 +57,8 @@ export type ScatterCanvasProps = {
   labelMode: ScatterLabelMode;
   showGuides: boolean;
   highlightedModel: string | null;
+  /** 图例上正在悬浮的厂商；其余厂商的点与标签会被淡化 */
+  hoveredProvider?: string | null;
   onSelectModel?: (modelName: string) => void;
   onZoomChange?: (isZoomed: boolean) => void;
   /** 外部触发的重置计数，每次自增都会把缩放归位 */
@@ -132,6 +134,7 @@ export function ScatterCanvas({
   labelMode,
   showGuides,
   highlightedModel,
+  hoveredProvider = null,
   onSelectModel,
   onZoomChange,
   resetZoomSignal = 0
@@ -293,6 +296,26 @@ export function ScatterCanvas({
 
   const shouldDim = showPareto && dimNonPareto;
 
+  /**
+   * 绘制顺序。
+   *
+   * SVG 没有 z-index，谁后画谁在上面。默认顺序下，被钉住的点很容易被后面的
+   * 散点或标签盖住，所以这里按「钉住 > 悬浮厂商 > 前沿 > 其余」重排一遍，
+   * 让当前最该被看清的点始终画在最上层。排序是稳定的，同组内相对次序不变。
+   */
+  const orderedPoints = useMemo(() => {
+    if (!hoveredProvider && !highlightedModel) return dataset.points;
+
+    const rank = (point: ScatterPoint) => {
+      if (point.modelName === highlightedModel) return 3;
+      if (hoveredProvider && point.providerName === hoveredProvider) return 2;
+      if (point.isPareto) return 1;
+      return 0;
+    };
+
+    return [...dataset.points].sort((left, right) => rank(left) - rank(right));
+  }, [dataset.points, hoveredProvider, highlightedModel]);
+
   const isInsidePlot = useCallback(
     (pointerX: number, pointerY: number) =>
       Boolean(
@@ -381,7 +404,12 @@ export function ScatterCanvas({
       const isHighlighted = payload.modelName === highlightedModel;
       const isPareto = showPareto && payload.isPareto;
       const radius = isPareto ? SCATTER_DOT_RADIUS_PARETO : SCATTER_DOT_RADIUS;
-      const opacity = shouldDim && !payload.isPareto && !isHighlighted ? SCATTER_DIMMED_OPACITY : 1;
+
+      // 悬浮图例时只留下该厂商；被钉住的点无论属于谁都保持全亮，免得刚选中就看不见了
+      const isProviderMuted = Boolean(hoveredProvider) && payload.providerName !== hoveredProvider;
+      const isParetoMuted = shouldDim && !payload.isPareto;
+      const opacity = isHighlighted || (!isProviderMuted && !isParetoMuted) ? 1 : SCATTER_DIMMED_OPACITY;
+
       const label = placedLabels.get(payload.modelName);
       const labelBox = label ? getPlacedLabelBox(label, SCATTER_LABEL_FONT_SIZE) : null;
 
@@ -440,7 +468,7 @@ export function ScatterCanvas({
         </g>
       );
     },
-    [highlightedModel, showPareto, shouldDim, placedLabels]
+    [highlightedModel, showPareto, shouldDim, hoveredProvider, placedLabels]
   );
 
   const handleSelect = useCallback(
@@ -522,7 +550,7 @@ export function ScatterCanvas({
 
         {showGuides ? <ScatterGuideLayer xMedian={xMedian} yMedian={yMedian} /> : null}
 
-        <Scatter data={dataset.points} shape={renderDot} isAnimationActive={false} onClick={handleSelect} />
+        <Scatter data={orderedPoints} shape={renderDot} isAnimationActive={false} onClick={handleSelect} />
 
         {showPareto ? (
           <ScatterParetoLayer path={dataset.paretoPath} lineStyle={paretoLineStyle} />
