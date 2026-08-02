@@ -1,8 +1,10 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   buildMetricCatalog,
   buildImportRows,
+  fetchArtificialAnalysisModels,
   formatMetricValue,
+  invalidateArtificialAnalysisSnapshotCache,
   normalizeImportConfig,
   resolveModelMatches,
   type ArtificialAnalysisModel,
@@ -11,24 +13,29 @@ import {
 } from "@/lib/external-providers/artificial-analysis";
 
 /**
- * fixture 结构对齐 https://artificialanalysis.ai/api-reference 的
- * `GET /api/v2/data/llms/models` 响应示例，模型命名沿用 artificialanalysis.ai/models
- * 上的真实写法（`(max)` / `(Adaptive Reasoning, Max Effort)` / `(Non-reasoning)`）。
+ * fixture 对齐两个上游端点的真实形状：
+ *
+ * - 新 API `/api/v2/language/models/free`：只给三个复合指数 + performance + cost
+ * - 旧 API `/api/v2/data/llms/models`：给逐项 benchmark（免费档下只有它有）
+ *
+ * 模型命名沿用 artificialanalysis.ai/models 上的真实写法
+ * （`(max)` / `(Adaptive Reasoning, Max Effort)` / `(Non-reasoning)`）。
  */
 function upstream(
   id: string,
   name: string,
   creator: string,
-  evaluations: Record<string, number | null> = {},
-  extra: Partial<ArtificialAnalysisModel> = {}
+  metrics: Record<string, number> = {},
+  legacyMetricKeys: string[] = []
 ): ArtificialAnalysisModel {
   return {
     id,
     name,
     slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-    model_creator: { id: creator.toLowerCase(), name: creator, slug: creator.toLowerCase() },
-    evaluations,
-    ...extra
+    creatorName: creator,
+    releaseDate: null,
+    metrics,
+    legacyMetricKeys
   };
 }
 
@@ -198,25 +205,29 @@ describe("buildMetricCatalog", () => {
       "o3-mini",
       "OpenAI",
       {
-        artificial_analysis_intelligence_index: 62.9,
-        mmlu_pro: 0.791,
-        gpqa: 0.748,
-        hle: 0.087,
-        some_new_upstream_eval: 41.2,
-        response_latency_seconds: 3.2
+        "evaluations.artificial_analysis_intelligence_index": 62.9,
+        "evaluations.mmlu_pro": 0.791,
+        "evaluations.gpqa": 0.748,
+        "evaluations.hle": 0.087,
+        "evaluations.some_new_upstream_eval": 41.2,
+        "evaluations.response_latency_seconds": 3.2,
+        "performance.median_output_tokens_per_second": 153.831,
+        "performance.median_time_to_first_token_seconds": 14.939,
+        "cost.intelligence_index_cost_per_task": 0.0321
       },
-      {
-        pricing: { price_1m_input_tokens: 1.1, price_1m_output_tokens: 4.4 },
-        median_output_tokens_per_second: 153.831,
-        median_time_to_first_token_seconds: 14.939
-      }
+      // 逐项 benchmark 在免费档下只有旧接口给
+      ["evaluations.mmlu_pro", "evaluations.gpqa", "evaluations.hle"]
     ),
     upstream(
       "m2",
       "GPT-5.6 Sol (max)",
       "OpenAI",
-      { artificial_analysis_intelligence_index: 59, mmlu_pro: 0.88 },
-      { median_output_tokens_per_second: 90.2 }
+      {
+        "evaluations.artificial_analysis_intelligence_index": 59,
+        "evaluations.mmlu_pro": 0.88,
+        "performance.median_output_tokens_per_second": 90.2
+      },
+      ["evaluations.mmlu_pro"]
     )
   ];
 
@@ -224,39 +235,47 @@ describe("buildMetricCatalog", () => {
   const byKey = new Map(catalog.map((entry) => [entry.key, entry]));
 
   test("已知指标带上固定标签与类别", () => {
-    expect(byKey.get("mmlu_pro")?.label).toBe("MMLU-Pro");
-    expect(byKey.get("gpqa")?.benchmarkType).toBe("Reasoning");
-    expect(byKey.get("artificial_analysis_intelligence_index")?.label).toBe("AA Intelligence Index");
+    expect(byKey.get("evaluations.mmlu_pro")?.label).toBe("MMLU-Pro");
+    expect(byKey.get("evaluations.gpqa")?.benchmarkType).toBe("Reasoning");
+    expect(byKey.get("evaluations.artificial_analysis_intelligence_index")?.label).toBe("AA Intelligence Index");
   });
 
   test("未知指标用 humanize 兜底，不会因为上游新增字段而漏掉", () => {
-    expect(byKey.get("some_new_upstream_eval")?.label).toBe("Some New Upstream Eval");
-    expect(byKey.get("some_new_upstream_eval")?.benchmarkType).toBe("General");
+    expect(byKey.get("evaluations.some_new_upstream_eval")?.label).toBe("Some New Upstream Eval");
+    expect(byKey.get("evaluations.some_new_upstream_eval")?.benchmarkType).toBe("General");
   });
 
-  test("全部取值落在 0-1 的指标判为小数量纲，index 类保持绝对量纲", () => {
-    expect(byKey.get("mmlu_pro")?.valueScale).toBe("fraction");
-    expect(byKey.get("hle")?.valueScale).toBe("fraction");
-    expect(byKey.get("artificial_analysis_intelligence_index")?.valueScale).toBe("absolute");
+  test("全部取值落在 0-1 的未知指标判为小数量纲，index 类显式声明为绝对量纲", () => {
+    expect(byKey.get("evaluations.mmlu_pro")?.valueScale).toBe("fraction");
+    expect(byKey.get("evaluations.hle")?.valueScale).toBe("fraction");
+    expect(byKey.get("evaluations.artificial_analysis_intelligence_index")?.valueScale).toBe("absolute");
   });
 
-  test("延迟类指标判为越低越好", () => {
-    expect(byKey.get("response_latency_seconds")?.higherIsBetter).toBe(false);
-    expect(byKey.get("median_time_to_first_token_seconds")?.higherIsBetter).toBe(false);
-    expect(byKey.get("median_output_tokens_per_second")?.higherIsBetter).toBe(true);
+  test("延迟与成本类指标判为越低越好", () => {
+    expect(byKey.get("evaluations.response_latency_seconds")?.higherIsBetter).toBe(false);
+    expect(byKey.get("performance.median_time_to_first_token_seconds")?.higherIsBetter).toBe(false);
+    expect(byKey.get("cost.intelligence_index_cost_per_task")?.higherIsBetter).toBe(false);
+    expect(byKey.get("performance.median_output_tokens_per_second")?.higherIsBetter).toBe(true);
   });
 
-  test("性能指标进目录，价格指标不进（由既有价格管理负责）", () => {
-    expect(byKey.get("median_output_tokens_per_second")?.group).toBe("performance");
-    expect(byKey.has("price_1m_input_tokens")).toBe(false);
-    expect(byKey.has("price_1m_output_tokens")).toBe(false);
+  test("按组前缀归组", () => {
+    expect(byKey.get("performance.median_output_tokens_per_second")?.group).toBe("performance");
+    expect(byKey.get("cost.intelligence_index_cost_per_task")?.group).toBe("cost");
+    expect(byKey.get("evaluations.mmlu_pro")?.group).toBe("evaluation");
+  });
+
+  test("标出哪些指标只能从旧接口拿到", () => {
+    expect(byKey.get("evaluations.mmlu_pro")?.legacyOnly).toBe(true);
+    expect(byKey.get("evaluations.hle")?.legacyOnly).toBe(true);
+    expect(byKey.get("evaluations.artificial_analysis_intelligence_index")?.legacyOnly).toBe(false);
+    expect(byKey.get("performance.median_output_tokens_per_second")?.legacyOnly).toBe(false);
   });
 
   test("统计覆盖模型数与值域", () => {
-    expect(byKey.get("artificial_analysis_intelligence_index")?.modelCount).toBe(2);
-    expect(byKey.get("gpqa")?.modelCount).toBe(1);
-    expect(byKey.get("mmlu_pro")?.minValue).toBeCloseTo(0.791);
-    expect(byKey.get("mmlu_pro")?.maxValue).toBeCloseTo(0.88);
+    expect(byKey.get("evaluations.artificial_analysis_intelligence_index")?.modelCount).toBe(2);
+    expect(byKey.get("evaluations.gpqa")?.modelCount).toBe(1);
+    expect(byKey.get("evaluations.mmlu_pro")?.minValue).toBeCloseTo(0.791);
+    expect(byKey.get("evaluations.mmlu_pro")?.maxValue).toBeCloseTo(0.88);
   });
 });
 
@@ -299,8 +318,8 @@ describe("normalizeImportConfig", () => {
 
 describe("buildImportRows", () => {
   const upstreamModels = [
-    upstream("aa-1", "GPT 5.4 (max)", "OpenAI", { mmlu_pro: 0.791, gpqa: null }),
-    upstream("aa-2", "Claude Opus 5 (max)", "Anthropic", { mmlu_pro: 0.83 })
+    upstream("aa-1", "GPT 5.4 (max)", "OpenAI", { "evaluations.mmlu_pro": 0.791 }),
+    upstream("aa-2", "Claude Opus 5 (max)", "Anthropic", { "evaluations.mmlu_pro": 0.83 })
   ];
   const catalog = buildMetricCatalog(upstreamModels);
   const localModelsById = new Map([
@@ -327,7 +346,7 @@ describe("buildImportRows", () => {
     const rows = buildImportRows({
       upstreamModels,
       catalog,
-      config: { selectedMetrics: ["mmlu_pro"], metricOverrides: {} },
+      config: { selectedMetrics: ["evaluations.mmlu_pro"], metricOverrides: {} },
       matches: [match(1, "aa-1", "matched"), match(2, "aa-2", "manual"), match(3, null, "ignored")],
       localModelsById
     });
@@ -340,16 +359,22 @@ describe("buildImportRows", () => {
       rawValue: "79.1",
       source: "Artificial Analysis",
       sourceModelId: "aa-1",
-      sourceBenchmarkId: "mmlu_pro"
+      sourceBenchmarkId: "evaluations.mmlu_pro"
     });
     expect(rows[1]!.rawValue).toBe("83");
   });
 
-  test("上游为 null 的指标不产出空行", () => {
+  test("上游缺这一项的模型不产出空行", () => {
+    const partial = [
+      upstream("aa-1", "GPT 5.4 (max)", "OpenAI", { "evaluations.mmlu_pro": 0.791 }),
+      // 这个模型上游没给 gpqa
+      upstream("aa-2", "Claude Opus 5 (max)", "Anthropic", { "evaluations.gpqa": 0.9 })
+    ];
+
     const rows = buildImportRows({
-      upstreamModels,
-      catalog,
-      config: { selectedMetrics: ["gpqa"], metricOverrides: {} },
+      upstreamModels: partial,
+      catalog: buildMetricCatalog(partial),
+      config: { selectedMetrics: ["evaluations.gpqa"], metricOverrides: {} },
       matches: [match(1, "aa-1", "matched")],
       localModelsById
     });
@@ -362,9 +387,13 @@ describe("buildImportRows", () => {
       upstreamModels,
       catalog,
       config: {
-        selectedMetrics: ["mmlu_pro"],
+        selectedMetrics: ["evaluations.mmlu_pro"],
         metricOverrides: {
-          mmlu_pro: { benchmarkName: "MMLU Pro (中文库已有名)", benchmarkType: "综合", higherIsBetter: false }
+          "evaluations.mmlu_pro": {
+            benchmarkName: "MMLU Pro (中文库已有名)",
+            benchmarkType: "综合",
+            higherIsBetter: false
+          }
         }
       },
       matches: [match(1, "aa-1", "matched")],
@@ -388,5 +417,197 @@ describe("buildImportRows", () => {
     });
 
     expect(rows).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 抓取：新 API 分页 + 旧 API 补 evaluations
+// ---------------------------------------------------------------------------
+
+function freePage(page: number, hasMore: boolean, data: unknown[]) {
+  return {
+    tier: "free",
+    intelligence_index_version: 4.1,
+    pagination: { page, page_size: 2, total_pages: hasMore ? page + 1 : page, has_more: hasMore },
+    data
+  };
+}
+
+function freeModel(id: string, name: string, creator: string) {
+  return {
+    id,
+    name,
+    slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+    release_date: "2026-01-15",
+    model_creator: { id: creator.toLowerCase(), name: creator },
+    evaluations: {
+      artificial_analysis_intelligence_index: 61,
+      artificial_analysis_coding_index: 55,
+      artificial_analysis_agentic_index: 48
+    },
+    artificial_analysis_intelligence_index_cost: { total_cost: 812.5, cost_per_task: { total_cost: 0.0321 } },
+    pricing: { price_1m_input_tokens: 1.1, price_1m_output_tokens: 4.4 },
+    performance: {
+      median_output_tokens_per_second: 153.831,
+      median_time_to_first_token_seconds: 14.939,
+      median_time_to_first_answer_token_seconds: 20.1,
+      median_end_to_end_response_time_seconds: 24.2
+    }
+  };
+}
+
+/** 按 URL 分派的 fetch mock，记录每次请求以便断言分页行为 */
+function mockUpstream(handlers: { free: unknown[]; legacy?: unknown; legacyStatus?: number }) {
+  const calls: string[] = [];
+  let freeIndex = 0;
+
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      calls.push(url);
+
+      if (url.includes("/language/models/free")) {
+        const body = handlers.free[freeIndex] ?? handlers.free[handlers.free.length - 1];
+        freeIndex += 1;
+        return jsonResponse(body);
+      }
+
+      if (handlers.legacyStatus && handlers.legacyStatus >= 400) {
+        return { ok: false, status: handlers.legacyStatus, headers: { get: () => null } };
+      }
+      return jsonResponse(handlers.legacy ?? { data: [] });
+    })
+  );
+
+  return calls;
+}
+
+function jsonResponse(body: unknown) {
+  const text = JSON.stringify(body);
+  return {
+    ok: true,
+    status: 200,
+    body: null,
+    headers: { get: (name: string) => (name.toLowerCase() === "content-length" ? String(text.length) : null) },
+    text: async () => text
+  };
+}
+
+describe("fetchArtificialAnalysisModels", () => {
+  beforeEach(() => {
+    process.env.ARTIFICIAL_ANALYSIS_API_KEY = "test-key";
+    invalidateArtificialAnalysisSnapshotCache();
+  });
+
+  afterEach(() => {
+    delete process.env.ARTIFICIAL_ANALYSIS_API_KEY;
+    vi.unstubAllGlobals();
+  });
+
+  test("枚举完新 API 的所有分页，直到 has_more 为 false", async () => {
+    const calls = mockUpstream({
+      free: [
+        freePage(1, true, [freeModel("aa-1", "GPT 5.4 (max)", "OpenAI")]),
+        freePage(2, true, [freeModel("aa-2", "Claude Opus 5 (max)", "Anthropic")]),
+        freePage(3, false, [freeModel("aa-3", "Kimi K3 (max)", "Kimi")])
+      ]
+    });
+
+    const result = await fetchArtificialAnalysisModels();
+
+    expect(result.models.map((model) => model.id)).toEqual(["aa-1", "aa-2", "aa-3"]);
+    expect(result.freePageCount).toBe(3);
+    expect(result.intelligenceIndexVersion).toBe(4.1);
+    expect(calls.filter((url) => url.includes("page=1"))).toHaveLength(1);
+    expect(calls.filter((url) => url.includes("page=3"))).toHaveLength(1);
+    expect(calls.some((url) => url.includes("page=4"))).toBe(false);
+  });
+
+  test("新 API 的指标带组前缀，pricing 不进指标表", async () => {
+    mockUpstream({ free: [freePage(1, false, [freeModel("aa-1", "GPT 5.4 (max)", "OpenAI")])] });
+
+    const { models } = await fetchArtificialAnalysisModels();
+    const metrics = models[0]!.metrics;
+
+    expect(metrics["evaluations.artificial_analysis_intelligence_index"]).toBe(61);
+    expect(metrics["performance.median_end_to_end_response_time_seconds"]).toBe(24.2);
+    expect(metrics["cost.intelligence_index_total_cost"]).toBe(812.5);
+    expect(metrics["cost.intelligence_index_cost_per_task"]).toBe(0.0321);
+    // token 单价由既有的「价格管理」负责
+    expect(Object.keys(metrics).some((key) => key.includes("price_1m"))).toBe(false);
+  });
+
+  test("旧 API 补齐新 API 没有的逐项 benchmark，并标注来源", async () => {
+    mockUpstream({
+      free: [freePage(1, false, [freeModel("aa-1", "GPT 5.4 (max)", "OpenAI")])],
+      legacy: {
+        data: [
+          {
+            id: "aa-1",
+            name: "GPT 5.4 (max)",
+            slug: "gpt-5-4-max",
+            evaluations: { mmlu_pro: 0.791, gpqa: 0.748, artificial_analysis_intelligence_index: 55 }
+          }
+        ]
+      }
+    });
+
+    const { models } = await fetchArtificialAnalysisModels();
+    const model = models[0]!;
+
+    expect(model.metrics["evaluations.mmlu_pro"]).toBe(0.791);
+    expect(model.metrics["evaluations.gpqa"]).toBe(0.748);
+    expect(model.legacyMetricKeys).toEqual(
+      expect.arrayContaining(["evaluations.mmlu_pro", "evaluations.gpqa"])
+    );
+    // 同名键不覆盖：复合指数以新 API 为准
+    expect(model.metrics["evaluations.artificial_analysis_intelligence_index"]).toBe(61);
+    expect(model.legacyMetricKeys).not.toContain("evaluations.artificial_analysis_intelligence_index");
+  });
+
+  test("id 对不上时退回 slug 对齐", async () => {
+    mockUpstream({
+      free: [freePage(1, false, [freeModel("new-id", "GPT 5.4 (max)", "OpenAI")])],
+      legacy: {
+        data: [{ id: "old-id", name: "GPT 5.4 (max)", slug: "gpt-5-4-max", evaluations: { mmlu_pro: 0.8 } }]
+      }
+    });
+
+    const { models } = await fetchArtificialAnalysisModels();
+
+    expect(models).toHaveLength(1);
+    expect(models[0]!.metrics["evaluations.mmlu_pro"]).toBe(0.8);
+  });
+
+  test("旧 API 挂掉时降级而不是整体失败", async () => {
+    mockUpstream({
+      free: [freePage(1, false, [freeModel("aa-1", "GPT 5.4 (max)", "OpenAI")])],
+      legacyStatus: 500
+    });
+
+    const result = await fetchArtificialAnalysisModels();
+
+    expect(result.models).toHaveLength(1);
+    expect(result.models[0]!.metrics["evaluations.artificial_analysis_intelligence_index"]).toBe(61);
+    expect(result.legacyWarning).toContain("500");
+  });
+
+  test("旧 API 独有的模型也保留，不静默丢数据", async () => {
+    mockUpstream({
+      free: [freePage(1, false, [freeModel("aa-1", "GPT 5.4 (max)", "OpenAI")])],
+      legacy: {
+        data: [{ id: "retired", name: "已下架模型", slug: "retired-model", evaluations: { mmlu_pro: 0.5 } }]
+      }
+    });
+
+    const { models } = await fetchArtificialAnalysisModels();
+
+    expect(models.map((model) => model.id)).toEqual(["aa-1", "retired"]);
+    expect(models[1]!.legacyMetricKeys).toEqual(["evaluations.mmlu_pro"]);
+  });
+
+  test("未配置 API key 时直接报错", async () => {
+    delete process.env.ARTIFICIAL_ANALYSIS_API_KEY;
+    await expect(fetchArtificialAnalysisModels()).rejects.toThrow("ARTIFICIAL_ANALYSIS_API_KEY");
   });
 });

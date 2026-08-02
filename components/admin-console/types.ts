@@ -115,7 +115,7 @@ export type TabKey =
 
 // --- 外部数据源导入（artificialanalysis.ai） ---
 
-export type ExternalMetricGroup = "evaluation" | "performance";
+export type ExternalMetricGroup = "evaluation" | "performance" | "cost";
 export type ExternalMetricValueScale = "fraction" | "absolute";
 
 export type ExternalMetricCatalogEntry = {
@@ -131,6 +131,8 @@ export type ExternalMetricCatalogEntry = {
   minValue: number | null;
   maxValue: number | null;
   sampleValues: number[];
+  /** 该指标只能从旧 API 拿到（新 API 免费档不含逐项 benchmark） */
+  legacyOnly: boolean;
 };
 
 export type ExternalMetricOverride = {
@@ -181,12 +183,16 @@ export type ExternalImportSnapshot = {
   apiKeyConfigured: boolean;
   fetchedAt: string | null;
   sourceLabel: string;
+  attributionUrl: string;
   catalog: ExternalMetricCatalogEntry[];
   config: ExternalImportConfig;
   mappings: ExternalMappingRow[];
   upstreamOnly: ExternalUpstreamModel[];
   conflicts: ExternalMappingConflict[];
   upstreamOptions: ExternalUpstreamModel[];
+  intelligenceIndexVersion: number | null;
+  freePageCount: number;
+  legacyWarning: string | null;
 };
 
 export type ExternalImportPreviewRow = {

@@ -9,9 +9,10 @@ function makeSnapshot(overrides: Partial<ExternalImportSnapshot> = {}): External
     apiKeyConfigured: true,
     fetchedAt: "2026-08-02T00:00:00.000Z",
     sourceLabel: "Artificial Analysis",
+    attributionUrl: "https://artificialanalysis.ai/",
     catalog: [
       {
-        key: "mmlu_pro",
+        key: "evaluations.mmlu_pro",
         group: "evaluation",
         label: "MMLU-Pro",
         benchmarkType: "Knowledge",
@@ -22,10 +23,11 @@ function makeSnapshot(overrides: Partial<ExternalImportSnapshot> = {}): External
         modelCount: 120,
         minValue: 0.4,
         maxValue: 0.92,
-        sampleValues: [0.791]
+        sampleValues: [0.791],
+        legacyOnly: true
       },
       {
-        key: "median_time_to_first_token_seconds",
+        key: "performance.median_time_to_first_token_seconds",
         group: "performance",
         label: "Time To First Token",
         unit: "s",
@@ -36,10 +38,11 @@ function makeSnapshot(overrides: Partial<ExternalImportSnapshot> = {}): External
         modelCount: 300,
         minValue: 0.38,
         maxValue: 20,
-        sampleValues: [14.939]
+        sampleValues: [14.939],
+        legacyOnly: false
       }
     ],
-    config: { selectedMetrics: ["mmlu_pro"], metricOverrides: {} },
+    config: { selectedMetrics: ["evaluations.mmlu_pro"], metricOverrides: {} },
     mappings: [
       {
         modelId: 1,
@@ -93,6 +96,9 @@ function makeSnapshot(overrides: Partial<ExternalImportSnapshot> = {}): External
         externalCreator: "OpenAI"
       }
     ],
+    intelligenceIndexVersion: 4.1,
+    freePageCount: 3,
+    legacyWarning: null,
     ...overrides
   };
 }
@@ -148,7 +154,7 @@ describe("ExternalImportTab", () => {
   test("渲染指标目录，并标出需要 ×100 的小数量纲", () => {
     renderTab();
 
-    expect(screen.getByText("mmlu_pro")).toBeInTheDocument();
+    expect(screen.getByText("evaluations.mmlu_pro")).toBeInTheDocument();
     expect(screen.getByDisplayValue("MMLU-Pro")).toBeInTheDocument();
     expect(screen.getByText(/上游 0-1，导入时 ×100/)).toBeInTheDocument();
   });
@@ -160,7 +166,7 @@ describe("ExternalImportTab", () => {
 
     await user.click(screen.getByLabelText("选择数据项 Time To First Token"));
 
-    expect(onToggleMetric).toHaveBeenCalledWith("median_time_to_first_token_seconds");
+    expect(onToggleMetric).toHaveBeenCalledWith("performance.median_time_to_first_token_seconds");
   });
 
   test("把「默认取上游最高强度」的匹配来源翻译成中文说明", () => {

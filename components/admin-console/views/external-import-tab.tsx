@@ -226,6 +226,15 @@ export function ExternalImportTab({
         </div>
       ) : null}
 
+      {snapshot?.legacyWarning ? (
+        <div className="alert alert-warning mb-4 text-sm">
+          <span>
+            旧接口拉取失败（{snapshot.legacyWarning}），本次只有复合指数与性能指标可用，
+            逐项 benchmark（MMLU-Pro / GPQA / HLE 等）缺失。复合指数不受影响。
+          </span>
+        </div>
+      ) : null}
+
       {snapshot && snapshot.conflicts.length > 0 ? (
         <div className="alert alert-error mb-4 text-sm">
           <span>
@@ -260,9 +269,26 @@ export function ExternalImportTab({
             <div className="stat-value text-sm">
               {snapshot?.fetchedAt ? new Date(snapshot.fetchedAt).toLocaleString("zh-CN", { hour12: false }) : "--"}
             </div>
+            <div className="stat-desc text-xs">
+              {snapshot?.intelligenceIndexVersion
+                ? `Intelligence Index v${snapshot.intelligenceIndexVersion}`
+                : "缓存 1 小时"}
+            </div>
           </div>
         </div>
       </div>
+
+      {snapshot?.intelligenceIndexVersion ? (
+        <div className="mb-4 text-xs opacity-70">
+          本次数据属于 Artificial Analysis Intelligence Index v{snapshot.intelligenceIndexVersion}
+          {snapshot.freePageCount > 0 ? `，共翻取 ${snapshot.freePageCount} 页` : ""}。
+          AA 说明不同版本的 Index 分数不可直接比较；数据来源需标注{" "}
+          <a className="link" href={snapshot.attributionUrl} target="_blank" rel="noreferrer noopener">
+            Artificial Analysis
+          </a>
+          。
+        </div>
+      ) : null}
 
       {/* --- 数据项选择 --- */}
       <div className="mb-5 rounded-2xl border border-base-300/70 bg-base-200/30 p-4">
@@ -320,9 +346,14 @@ export function ExternalImportTab({
                       </td>
                       <td className="min-w-[200px]">
                         <div className="font-mono text-xs">{entry.key}</div>
-                        <div className="text-xs opacity-60">
-                          {entry.group === "evaluation" ? "评测" : "性能"}
-                          {entry.valueScale === "fraction" ? " · 上游 0-1，导入时 ×100" : ""}
+                        <div className="flex flex-wrap items-center gap-1 text-xs opacity-60">
+                          <span>
+                            {entry.group === "evaluation" ? "评测" : entry.group === "performance" ? "性能" : "成本"}
+                          </span>
+                          {entry.valueScale === "fraction" ? <span>· 上游 0-1，导入时 ×100</span> : null}
+                          {entry.legacyOnly ? (
+                            <span className="badge badge-ghost badge-xs whitespace-nowrap">仅旧接口</span>
+                          ) : null}
                         </div>
                       </td>
                       <td className="min-w-[200px]">

@@ -11,6 +11,7 @@ import {
   type ExternalImportResult
 } from "@/lib/admin-service";
 import {
+  ARTIFICIAL_ANALYSIS_ATTRIBUTION_URL,
   ARTIFICIAL_ANALYSIS_SETTINGS_KEY,
   ARTIFICIAL_ANALYSIS_SOURCE_ID,
   ARTIFICIAL_ANALYSIS_SOURCE_LABEL,
@@ -61,6 +62,7 @@ export type ArtificialAnalysisAdminSnapshot = {
   apiKeyConfigured: boolean;
   fetchedAt: string | null;
   sourceLabel: string;
+  attributionUrl: string;
   catalog: MetricCatalogEntry[];
   config: ArtificialAnalysisImportConfig;
   mappings: ExternalMappingRow[];
@@ -68,6 +70,12 @@ export type ArtificialAnalysisAdminSnapshot = {
   conflicts: ModelMatchConflict[];
   /** 上游可选条目，供后台手动改绑的下拉框使用 */
   upstreamOptions: UpstreamOnlyModel[];
+  /** Intelligence Index 版本；AA 明确说跨版本分数不可直接比较 */
+  intelligenceIndexVersion: number | null;
+  /** 本次拉取翻了几页新 API */
+  freePageCount: number;
+  /** 旧 API（逐项 benchmark 的来源）失败时的原因 */
+  legacyWarning: string | null;
 };
 
 async function getLocalModels(): Promise<Array<LocalModelInput & { providerDisplayName: string | null }>> {
@@ -110,9 +118,9 @@ export async function getArtificialAnalysisConfig(): Promise<ArtificialAnalysisI
 function toUpstreamOption(model: ArtificialAnalysisModel): UpstreamOnlyModel {
   return {
     externalModelId: model.id,
-    externalModelName: model.name ?? model.slug ?? model.id,
-    externalModelSlug: model.slug ?? null,
-    externalCreator: model.model_creator?.name ?? null
+    externalModelName: model.name,
+    externalModelSlug: model.slug,
+    externalCreator: model.creatorName
   };
 }
 
@@ -136,12 +144,16 @@ export async function getArtificialAnalysisAdminSnapshot(options?: {
       apiKeyConfigured: false,
       fetchedAt: null,
       sourceLabel: ARTIFICIAL_ANALYSIS_SOURCE_LABEL,
+      attributionUrl: ARTIFICIAL_ANALYSIS_ATTRIBUTION_URL,
       catalog: [],
       config,
       mappings: [],
       upstreamOnly: [],
       conflicts: [],
-      upstreamOptions: []
+      upstreamOptions: [],
+      intelligenceIndexVersion: null,
+      freePageCount: 0,
+      legacyWarning: null
     };
   }
 
@@ -183,8 +195,8 @@ export async function getArtificialAnalysisAdminSnapshot(options?: {
       providerName: local.providerDisplayName ?? local.providerName,
       externalModelId: match.externalModelId,
       // 上游若已存在，展示名以上游为准，避免库里存着改名前的旧名字
-      externalModelName: upstream ? upstream.name ?? upstream.slug ?? upstream.id : match.externalModelName,
-      externalCreator: upstream?.model_creator?.name ?? match.externalCreator,
+      externalModelName: upstream ? upstream.name : match.externalModelName,
+      externalCreator: upstream?.creatorName ?? match.externalCreator,
       reasoningEffort: match.reasoningEffort,
       matchStatus: match.matchStatus,
       matchConfidence: match.matchConfidence,
@@ -205,12 +217,16 @@ export async function getArtificialAnalysisAdminSnapshot(options?: {
     apiKeyConfigured: true,
     fetchedAt: snapshot.fetchedAt,
     sourceLabel: ARTIFICIAL_ANALYSIS_SOURCE_LABEL,
+    attributionUrl: ARTIFICIAL_ANALYSIS_ATTRIBUTION_URL,
     catalog: snapshot.catalog,
     config,
     mappings,
     upstreamOnly,
     conflicts,
-    upstreamOptions: snapshot.models.map(toUpstreamOption)
+    upstreamOptions: snapshot.models.map(toUpstreamOption),
+    intelligenceIndexVersion: snapshot.intelligenceIndexVersion,
+    freePageCount: snapshot.freePageCount,
+    legacyWarning: snapshot.legacyWarning
   };
 }
 
@@ -320,7 +336,7 @@ export async function saveArtificialAnalysisMappings(inputs: unknown) {
         externalModelId: update.externalModelId,
         externalModelName: upstream?.name ?? upstream?.slug ?? update.externalModelId,
         externalModelSlug: upstream?.slug ?? null,
-        externalCreator: upstream?.model_creator?.name ?? null,
+        externalCreator: upstream?.creatorName ?? null,
         reasoningEffort: update.reasoningEffort ?? null,
         matchStatus,
         matchConfidence: manualOverride ? 100 : 0,
@@ -394,8 +410,8 @@ export async function runArtificialAnalysisImport(options: {
       const upstream = upstreamById.get(externalModelId);
       if (!upstream) continue;
 
-      const modelName = upstream.name ?? upstream.slug ?? upstream.id;
-      const providerName = upstream.model_creator?.name?.trim() || "Unknown";
+      const modelName = upstream.name;
+      const providerName = upstream.creatorName?.trim() || "Unknown";
       const provider = await ensureProvider(providerName);
       const created = await ensureModelByProviderId({
         providerId: provider.id,
@@ -410,8 +426,8 @@ export async function runArtificialAnalysisImport(options: {
           modelId: created.id,
           externalModelId: upstream.id,
           externalModelName: modelName,
-          externalModelSlug: upstream.slug ?? null,
-          externalCreator: upstream.model_creator?.name ?? null,
+          externalModelSlug: upstream.slug,
+          externalCreator: upstream.creatorName,
           matchStatus: "manual",
           matchConfidence: 100,
           matchReason: "created-from-upstream",
