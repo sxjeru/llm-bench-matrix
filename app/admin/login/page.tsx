@@ -7,7 +7,7 @@ import { AdminLoginForm } from "./login-form";
 export default async function AdminLoginPage({
   searchParams
 }: {
-  searchParams: Promise<{ from?: string }>;
+  searchParams: Promise<{ from?: string | string[] }>;
 }) {
   const headerStore = await headers();
   const cookie = headerStore.get("cookie") ?? "";
