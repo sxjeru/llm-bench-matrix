@@ -234,13 +234,17 @@ export function useExternalImport({ notifySuccess, notifyError }: UseExternalImp
   async function runImport() {
     if (previewing || importing) return;
 
-    const createCount = createExternalModelIds.length;
-    const confirmed = window.confirm(
-      createCount > 0
-        ? `即将导入 Artificial Analysis 数据，并新建 ${createCount} 个本地模型。是否继续？`
-        : "即将把 Artificial Analysis 数据写入 benchmark_values。是否继续？"
-    );
-    if (!confirmed) return;
+    // 刚做过 dry-run 预览时，用户已看过影响面，不再二次确认
+    const hasPreviewed = summary?.dryRun === true;
+    if (!hasPreviewed) {
+      const createCount = createExternalModelIds.length;
+      const confirmed = window.confirm(
+        createCount > 0
+          ? `即将导入 Artificial Analysis 数据，并新建 ${createCount} 个本地模型。是否继续？`
+          : "即将把 Artificial Analysis 数据写入 benchmark_values。是否继续？"
+      );
+      if (!confirmed) return;
+    }
 
     setImporting(true);
     try {
