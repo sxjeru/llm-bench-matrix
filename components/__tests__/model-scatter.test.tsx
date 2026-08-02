@@ -3,11 +3,14 @@ import { describe, expect, test, vi, beforeEach } from "vitest";
 
 import { ModelScatter } from "@/components/model-scatter";
 import { ScatterCanvas } from "@/components/model-scatter/scatter-canvas";
+import { isInWorstQuadrant } from "@/components/model-scatter/guide-layer";
 import { toScatterMetric } from "@/components/model-scatter/metrics";
 import { buildScatterDataset, computeAxisDomain } from "@/components/model-scatter/dataset";
 import { buildPointProjections, computePlotArea } from "@/components/model-scatter/projection";
 import {
   SCATTER_CHART_MARGIN,
+  SCATTER_CURSOR_STROKE,
+  SCATTER_DIMMED_OPACITY,
   SCATTER_X_AXIS_HEIGHT,
   SCATTER_Y_AXIS_WIDTH
 } from "@/components/model-scatter/constants";
@@ -653,6 +656,81 @@ describe("ScatterCanvas", () => {
     expect(container.querySelector(".scatter-best-quadrant")).toBeNull();
   });
 
+  test("钉住模型时即使关闭中位参考线也会画出以该点为中心的十字", () => {
+    const { container } = renderCanvas({ showGuides: false, highlightedModel: "Alpha" });
+
+    const guide = container.querySelector(".scatter-guide-layer");
+    expect(guide).not.toBeNull();
+    expect(guide?.getAttribute("data-emphasis")).toBe("pinned");
+    expect(guide?.classList.contains("is-pinned")).toBe(true);
+    expect(container.querySelectorAll(".scatter-guide-layer line").length).toBe(2);
+  });
+
+  test("钉住后十字与最优象限以该点为中心，而不是全体中位", () => {
+    const { container } = renderCanvas({ showGuides: true, highlightedModel: "Alpha", labelMode: "all" });
+
+    const alphaSymbol = Array.from(container.querySelectorAll(".recharts-scatter-symbol")).find(
+      (symbol) => symbol.querySelector("text")?.textContent === "Alpha"
+    );
+    expect(alphaSymbol).not.toBeUndefined();
+
+    // 主圆是钉住环之后的那个实心圆
+    const alphaDot = alphaSymbol!.querySelectorAll("circle")[1] as SVGCircleElement;
+    const alphaCx = Number(alphaDot.getAttribute("cx"));
+    const alphaCy = Number(alphaDot.getAttribute("cy"));
+
+    const verticalLine = container.querySelector(".scatter-guide-line-x") as SVGLineElement;
+    const horizontalLine = container.querySelector(".scatter-guide-line-y") as SVGLineElement;
+    expect(Number(verticalLine.getAttribute("x1"))).toBeCloseTo(alphaCx, 1);
+    expect(Number(horizontalLine.getAttribute("y1"))).toBeCloseTo(alphaCy, 1);
+
+    // 钉住十字用定位十字同档的亮色，区别于中位淡线
+    expect(verticalLine.getAttribute("stroke")).toBe(SCATTER_CURSOR_STROKE);
+
+    const quadrant = container.querySelector(".scatter-best-quadrant") as SVGRectElement;
+    // X 越小越好 → 最优在左侧；Y 越大越好 → 最优在上方；中心贴着 Alpha
+    expect(Number(quadrant.getAttribute("x")) + Number(quadrant.getAttribute("width"))).toBeCloseTo(
+      alphaCx,
+      1
+    );
+    expect(Number(quadrant.getAttribute("y"))).toBeCloseTo(SCATTER_CHART_MARGIN.top, 1);
+    expect(
+      Number(quadrant.getAttribute("y")) + Number(quadrant.getAttribute("height"))
+    ).toBeCloseTo(alphaCy, 1);
+  });
+
+  test("钉住后淡化最差象限内的点", () => {
+    // Alpha (x=10, y=100)：X 越小越好、Y 越大越好 → 最差象限是更贵且更弱
+    // Delta (20, 0) 全面落后；Beta/Gamma 至少有一轴更优，不应被淡化
+    const { container } = renderCanvas({ highlightedModel: "Alpha", labelMode: "all" });
+
+    const opacityByModel = new Map(
+      Array.from(container.querySelectorAll(".recharts-scatter-symbol")).map((symbol) => {
+        const name = symbol.querySelector("text")?.textContent ?? "";
+        // 与厂商淡化测试同一路径：opacity 挂在 shape 内我们返回的 <g> 上
+        const opacity = Number(
+          symbol.querySelector(".recharts-shape > g")?.getAttribute("opacity") ?? "1"
+        );
+        return [name, opacity] as const;
+      })
+    );
+
+    expect(opacityByModel.get("Alpha")).toBe(1);
+    expect(opacityByModel.get("Beta")).toBe(1);
+    expect(opacityByModel.get("Gamma")).toBe(1);
+    expect(opacityByModel.get("Delta")).toBe(SCATTER_DIMMED_OPACITY);
+  });
+
+  test("最差象限判定：两轴都更差才算，贴边不算", () => {
+    const center = { x: 10, y: 100 };
+    // X 越小越好、Y 越大越好
+    expect(isInWorstQuadrant({ x: 20, y: 0 }, center, false, true)).toBe(true);
+    expect(isInWorstQuadrant({ x: 4, y: 67 }, center, false, true)).toBe(false);
+    expect(isInWorstQuadrant({ x: 1, y: 33 }, center, false, true)).toBe(false);
+    expect(isInWorstQuadrant({ x: 10, y: 0 }, center, false, true)).toBe(false);
+    expect(isInWorstQuadrant({ x: 20, y: 100 }, center, false, true)).toBe(false);
+  });
+
   test("悬浮厂商时其全部模型都带标签，即便会压到别人", () => {
     // auto 模式下密集区域本来会省略部分标签
     const { container } = renderCanvas({ hoveredProvider: "Anthropic", labelMode: "auto" });
@@ -756,9 +834,10 @@ describe("ScatterCanvas", () => {
     const groups = Array.from(container.querySelectorAll(".recharts-scatter-symbol .recharts-shape > g"));
     const opacities = groups.map((group) => Number(group.getAttribute("opacity") ?? "1"));
 
-    // Gamma / Delta（悬浮厂商）+ Alpha（钉住）三个全亮，只剩 Beta 被淡化
-    expect(opacities.filter((value) => value === 1).length).toBe(3);
-    expect(opacities.filter((value) => value < 1).length).toBe(1);
+    // Alpha 钉住全亮；Gamma 属悬浮厂商且不在 Alpha 最差象限 → 全亮；
+    // Delta 虽属 Anthropic，但对 Alpha 两轴都更差 → 仍淡化；Beta 非悬浮厂商 → 淡化
+    expect(opacities.filter((value) => value === 1).length).toBe(2);
+    expect(opacities.filter((value) => value < 1).length).toBe(2);
   });
 
   test("被钉住的点画在最上层，不会被其他点覆盖", () => {
@@ -866,11 +945,29 @@ describe("ScatterCanvas 拖拽平移", () => {
     const { surface } = setupSurface();
 
     fireEvent.pointerDown(surface, { pointerId: 1, button: 0, clientX: 300, clientY: 200 });
+    // 未过阈值时还是点击候选，不应进入拖拽态
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: 301, clientY: 200 });
+    expect(surface.classList.contains("is-panning")).toBe(false);
+
     fireEvent.pointerMove(surface, { pointerId: 1, clientX: 340, clientY: 200 });
     expect(surface.classList.contains("is-panning")).toBe(true);
 
     fireEvent.pointerUp(surface, { pointerId: 1 });
     expect(surface.classList.contains("is-panning")).toBe(false);
+  });
+
+  test("按下未拖动时不进入 is-panning，保留散点点击", () => {
+    const onSelectModel = vi.fn();
+    const { container, surface } = setupSurface({ onSelectModel });
+
+    fireEvent.pointerDown(surface, { pointerId: 1, button: 0, clientX: 300, clientY: 200 });
+    expect(surface.classList.contains("is-panning")).toBe(false);
+    fireEvent.pointerUp(surface, { pointerId: 1 });
+    expect(surface.classList.contains("is-panning")).toBe(false);
+
+    const symbol = container.querySelector(".recharts-scatter-symbol") as HTMLElement;
+    fireEvent.click(symbol);
+    expect(onSelectModel).toHaveBeenCalledTimes(1);
   });
 
   test("绘图区之外按下不启动平移", () => {
@@ -921,6 +1018,28 @@ describe("ScatterCanvas 拖拽平移", () => {
     fireEvent.click(symbol);
 
     expect(onSelectModel).toHaveBeenCalledTimes(1);
+  });
+
+  test("空白轻点会取消钉住", () => {
+    const onSelectModel = vi.fn();
+    const { surface } = setupSurface({ onSelectModel, highlightedModel: "Alpha" });
+
+    // 落在绘图区空白处（非散点 symbol）
+    fireEvent.pointerDown(surface, { pointerId: 1, button: 0, clientX: 320, clientY: 210 });
+    fireEvent.pointerUp(surface, { pointerId: 1, target: surface });
+
+    expect(onSelectModel).toHaveBeenCalledWith(null);
+  });
+
+  test("拖拽平移不会取消钉住", () => {
+    const onSelectModel = vi.fn();
+    const { surface } = setupSurface({ onSelectModel, highlightedModel: "Alpha" });
+
+    fireEvent.pointerDown(surface, { pointerId: 1, button: 0, clientX: 300, clientY: 200 });
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: 360, clientY: 230 });
+    fireEvent.pointerUp(surface, { pointerId: 1, target: surface });
+
+    expect(onSelectModel).not.toHaveBeenCalled();
   });
 
   test("拖拽之后紧跟的点击不会误钉模型", () => {

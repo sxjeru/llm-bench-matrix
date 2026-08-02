@@ -30,7 +30,7 @@ import {
   panAxisDomain,
   zoomAxisDomain
 } from "./dataset";
-import { ScatterGuideLayer } from "./guide-layer";
+import { isInWorstQuadrant, ScatterGuideLayer } from "./guide-layer";
 import { getPlacedLabelBox, layoutScatterLabels } from "./label-layout";
 import { formatScatterAxisTick, getMetricAxisLabel } from "./metrics";
 import { ScatterParetoLayer } from "./pareto-layer";
@@ -64,7 +64,11 @@ export type ScatterCanvasProps = {
   highlightedModel: string | null;
   /** 图例上正在悬浮的厂商；其余厂商的点与标签会被淡化 */
   hoveredProvider?: string | null;
-  onSelectModel?: (modelName: string) => void;
+  /**
+   * 点选散点时传入模型名；点选空白区域时传入 null 以取消钉住。
+   * 拖拽平移不会触发。
+   */
+  onSelectModel?: (modelName: string | null) => void;
   onZoomChange?: (isZoomed: boolean) => void;
   /** 外部触发的重置计数，每次自增都会把缩放归位 */
   resetZoomSignal?: number;
@@ -86,10 +90,13 @@ type PanSession = {
   pointerId: number;
   lastX: number;
   lastY: number;
+  /** 自按下起累计位移；未过阈值前只是待定，不 capture、不改光标 */
   travelled: number;
+  /** 是否已进入真正的平移（过阈值后才 true） */
+  active: boolean;
 };
 
-/** 位移超过这个像素数就算拖拽，之后那一次 click 不应再被当成「钉住模型」 */
+/** 位移超过这个像素数才算拖拽；更小的移动仍视为点击钉住 */
 const PAN_CLICK_SUPPRESS_THRESHOLD = 4;
 
 /**
@@ -277,6 +284,21 @@ export function ScatterCanvas({
   const xMedian = useMemo(() => (showGuides ? computeMedian(xValues) : null), [showGuides, xValues]);
   const yMedian = useMemo(() => (showGuides ? computeMedian(yValues) : null), [showGuides, yValues]);
 
+  const highlightedPoint = useMemo(
+    () =>
+      highlightedModel
+        ? (dataset.points.find((point) => point.modelName === highlightedModel) ?? null)
+        : null,
+    [dataset.points, highlightedModel]
+  );
+
+  // 钉住时十字与最优象限以该点为中心；取消钉住后回到全体中位
+  const guideXCenter = highlightedPoint?.x ?? xMedian;
+  const guideYCenter = highlightedPoint?.y ?? yMedian;
+  const guideEmphasis = highlightedPoint ? "pinned" : "median";
+  // 有钉住点就始终画十字；否则仍受「中位参考线」开关控制
+  const shouldRenderGuides = Boolean(highlightedPoint) || (showGuides && (xMedian !== null || yMedian !== null));
+
   // 横向空间更宽，刻度可以多给两档；纵向密了会挤成一片
   const xTicks = useMemo(() => buildAxisTicks(xDomain, xScale, 8), [xDomain, xScale]);
   const yTicks = useMemo(() => buildAxisTicks(yDomain, yScale, 6), [yDomain, yScale]);
@@ -363,15 +385,15 @@ export function ScatterCanvas({
       const rect = containerRef.current.getBoundingClientRect();
       if (!isInsidePlot(event.clientX - rect.left, event.clientY - rect.top)) return;
 
+      // 只记录待定手势：立刻 capture / is-panning 会抢走散点的 click，点选钉住就失效
       panSessionRef.current = {
         pointerId: event.pointerId,
         lastX: event.clientX,
         lastY: event.clientY,
-        travelled: 0
+        travelled: 0,
+        active: false
       };
       suppressClickRef.current = false;
-      setIsPanning(true);
-      containerRef.current.setPointerCapture?.(event.pointerId);
     },
     [plotArea, isInsidePlot]
   );
@@ -388,6 +410,15 @@ export function ScatterCanvas({
       session.lastX = event.clientX;
       session.lastY = event.clientY;
       session.travelled += Math.abs(deltaX) + Math.abs(deltaY);
+
+      // 未过阈值：仍是点击候选，不平移、不改光标
+      if (!session.active) {
+        if (session.travelled <= PAN_CLICK_SUPPRESS_THRESHOLD) return;
+
+        session.active = true;
+        setIsPanning(true);
+        containerRef.current?.setPointerCapture?.(event.pointerId);
+      }
 
       const plotWidth = plotArea.right - plotArea.left;
       const plotHeight = plotArea.bottom - plotArea.top;
@@ -413,16 +444,30 @@ export function ScatterCanvas({
     [plotArea, domainKey, baseXDomain, baseYDomain, xScale, yScale]
   );
 
-  const endPan = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    const session = panSessionRef.current;
-    if (!session || session.pointerId !== event.pointerId) return;
+  const endPan = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const session = panSessionRef.current;
+      if (!session || session.pointerId !== event.pointerId) return;
 
-    // 拖过一段距离后紧跟着的 click 是拖拽的余波，不该被当成点选模型
-    suppressClickRef.current = session.travelled > PAN_CLICK_SUPPRESS_THRESHOLD;
-    panSessionRef.current = null;
-    setIsPanning(false);
-    containerRef.current?.releasePointerCapture?.(event.pointerId);
-  }, []);
+      // 只有真正拖过阈值才吞掉随后的 click；轻点必须留给散点 onClick
+      const wasActive = session.active;
+      suppressClickRef.current = wasActive;
+      panSessionRef.current = null;
+      if (wasActive) {
+        setIsPanning(false);
+        containerRef.current?.releasePointerCapture?.(event.pointerId);
+        return;
+      }
+
+      // 空白轻点取消钉住；点在散点/标签上则交给 Scatter onClick
+      if (!highlightedModel) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest(".recharts-scatter-symbol")) return;
+      onSelectModel?.(null);
+    },
+    [highlightedModel, onSelectModel]
+  );
 
   const renderDot = useCallback(
     (dotProps: ScatterDotRenderProps) => {
@@ -436,7 +481,20 @@ export function ScatterCanvas({
       // 悬浮图例时只留下该厂商；被钉住的点无论属于谁都保持全亮，免得刚选中就看不见了
       const isProviderMuted = Boolean(hoveredProvider) && payload.providerName !== hoveredProvider;
       const isParetoMuted = shouldDim && !payload.isPareto;
-      const opacity = isHighlighted || (!isProviderMuted && !isParetoMuted) ? 1 : SCATTER_DIMMED_OPACITY;
+      // 钉住后以该点为中心，两轴都更差的象限淡化，方便对比「全面落后」的点
+      const isWorstQuadrantMuted =
+        Boolean(highlightedPoint) &&
+        !isHighlighted &&
+        isInWorstQuadrant(
+          payload,
+          highlightedPoint!,
+          xMetric.higherIsBetter,
+          yMetric.higherIsBetter
+        );
+      const opacity =
+        isHighlighted || (!isProviderMuted && !isParetoMuted && !isWorstQuadrantMuted)
+          ? 1
+          : SCATTER_DIMMED_OPACITY;
 
       const label = placedLabels.get(payload.modelName);
       const labelBox = label ? getPlacedLabelBox(label, SCATTER_LABEL_FONT_SIZE) : null;
@@ -498,7 +556,16 @@ export function ScatterCanvas({
         </g>
       );
     },
-    [highlightedModel, showPareto, shouldDim, hoveredProvider, placedLabels]
+    [
+      highlightedModel,
+      highlightedPoint,
+      showPareto,
+      shouldDim,
+      hoveredProvider,
+      placedLabels,
+      xMetric.higherIsBetter,
+      yMetric.higherIsBetter
+    ]
   );
 
   const handleSelect = useCallback(
@@ -582,12 +649,13 @@ export function ScatterCanvas({
           content={<ScatterTooltip xMetric={xMetric} yMetric={yMetric} showPareto={showPareto} />}
         />
 
-        {showGuides ? (
+        {shouldRenderGuides ? (
           <ScatterGuideLayer
-            xMedian={xMedian}
-            yMedian={yMedian}
+            xCenter={guideXCenter}
+            yCenter={guideYCenter}
             xHigherIsBetter={xMetric.higherIsBetter}
             yHigherIsBetter={yMetric.higherIsBetter}
+            emphasis={guideEmphasis}
           />
         ) : null}
 

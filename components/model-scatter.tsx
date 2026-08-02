@@ -588,7 +588,9 @@ export function ModelScatter({
                   highlightedModel={highlightedModel}
                   hoveredProvider={hoveredProvider}
                   onSelectModel={(modelName) =>
-                    setHighlightedModel((prev) => (prev === modelName ? null : modelName))
+                    setHighlightedModel((prev) =>
+                      modelName === null ? null : prev === modelName ? null : modelName
+                    )
                   }
                   onZoomChange={setIsZoomed}
                   resetZoomSignal={resetZoomSignal}
