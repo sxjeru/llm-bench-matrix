@@ -187,7 +187,11 @@ describe("ExternalImportTab", () => {
     const onUpdateMappingDraft = vi.fn();
     renderTab({ onUpdateMappingDraft });
 
-    await user.selectOptions(screen.getByLabelText("GPT 5.4 的上游条目"), "aa-high");
+    const input = screen.getByLabelText("GPT 5.4 的上游条目");
+    await user.click(input);
+    await user.clear(input);
+    await user.type(input, "high");
+    await user.click(await screen.findByRole("option", { name: /GPT 5\.4 \(high\)/ }));
 
     expect(onUpdateMappingDraft).toHaveBeenCalled();
     const [modelId, updater] = onUpdateMappingDraft.mock.calls[0]!;
@@ -200,6 +204,19 @@ describe("ExternalImportTab", () => {
       ignored: false,
       manualOverride: true
     });
+  });
+
+  test("上游条目支持输入筛选", async () => {
+    const user = userEvent.setup();
+    renderTab();
+
+    const input = screen.getByLabelText("GPT 5.4 的上游条目");
+    await user.click(input);
+    await user.clear(input);
+    await user.type(input, "xhigh");
+
+    expect(await screen.findByRole("option", { name: /GPT 5\.4 \(xhigh\)/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /GPT 5\.4 \(high\) — OpenAI$/ })).not.toBeInTheDocument();
   });
 
   test("上游独有模型默认不勾选，勾选后回调 onToggleCreateModel", async () => {

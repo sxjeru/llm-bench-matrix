@@ -490,10 +490,16 @@ body.column-resizing * {
   color: #c8dcff;
 }
 
+/* warning 黄底上用深色字，避免被上面默认浅色盖掉导致对比度不足 */
+.badge.badge-warning {
+  color: #422006;
+  font-weight: 600;
+}
+
 input:not(.input):not(.file-input):not(.checkbox):not(.toggle),
 select:not(.select),
 textarea:not(.textarea),
-button:not(.btn):not(.tab):not(.ranking-popover-button):not(.scatter-btn) {
+button:not(.btn):not(.tab):not(.ranking-popover-button):not(.scatter-btn):not(.admin-upstream-combobox-clear) {
   width: 100%;
   border-radius: 10px;
   border: 1px solid #354261;
@@ -508,7 +514,7 @@ textarea:not(.textarea) {
   resize: vertical;
 }
 
-button:not(.btn):not(.tab):not(.ranking-popover-button):not(.scatter-btn) {
+button:not(.btn):not(.tab):not(.ranking-popover-button):not(.scatter-btn):not(.admin-upstream-combobox-clear) {
   cursor: pointer;
   background: linear-gradient(135deg, #355dff, #4a9aff);
   border-color: transparent;
@@ -1529,4 +1535,152 @@ input.heatmap-alpha-range::-moz-range-track {
     margin-left: 0;
     width: 100%;
   }
+}
+
+/* 后台外部数据源：模型匹配表固定列宽，长上游名不溢出到相邻列 */
+.admin-mapping-table {
+  table-layout: fixed;
+}
+
+.admin-mapping-table th,
+.admin-mapping-table td {
+  overflow: hidden;
+  vertical-align: top;
+}
+
+.admin-mapping-table .select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* 后台外部数据源：可输入筛选的上游条目组合框 */
+.admin-upstream-combobox {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.admin-upstream-combobox.is-disabled {
+  opacity: 0.55;
+}
+
+.admin-upstream-combobox-icon {
+  position: absolute;
+  left: 9px;
+  color: var(--subtext);
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.admin-upstream-combobox-caret {
+  position: absolute;
+  right: 8px;
+  color: var(--subtext);
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.admin-upstream-combobox-clear {
+  position: absolute;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--subtext);
+  cursor: pointer;
+}
+
+.admin-upstream-combobox-clear:hover {
+  color: var(--text);
+  background: rgba(93, 167, 255, 0.12);
+}
+
+.admin-upstream-combobox-input {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 28px 0 28px;
+  border-radius: 8px;
+  border: 1px solid #2f3d63;
+  background: #121b31;
+  color: var(--text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.admin-upstream-combobox-input::placeholder {
+  color: var(--subtext);
+  opacity: 0.75;
+}
+
+.admin-upstream-combobox-input:focus {
+  outline: none;
+  border-color: #4b6fb9;
+  background: #16203a;
+}
+
+.admin-upstream-combobox-input:disabled {
+  cursor: not-allowed;
+}
+
+.admin-upstream-combobox-list {
+  position: fixed;
+  z-index: 9999;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border-radius: 10px;
+  border: 1px solid #33436c;
+  background: rgba(13, 20, 37, 0.98);
+  box-shadow: 0 16px 34px rgba(3, 8, 20, 0.55);
+  backdrop-filter: blur(6px);
+}
+
+.admin-upstream-combobox-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.admin-upstream-combobox-option.is-active {
+  background: rgba(93, 167, 255, 0.16);
+}
+
+.admin-upstream-combobox-option.is-selected {
+  color: #9ec8ff;
+  font-weight: 600;
+}
+
+.admin-upstream-combobox-option-label {
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+.admin-upstream-combobox-option-secondary {
+  font-size: 10.5px;
+  color: var(--subtext);
+  opacity: 0.8;
+}
+
+.admin-upstream-combobox-empty {
+  padding: 10px 9px;
+  font-size: 12px;
+  color: var(--subtext);
+  text-align: center;
 }

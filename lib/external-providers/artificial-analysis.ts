@@ -49,7 +49,7 @@ const API_BASE_URL = "https://artificialanalysis.ai/api/v2";
 const FREE_LANGUAGE_MODELS_ENDPOINT = "/language/models/free";
 /** 旧 API：只用来补 evaluations，单次返回全量 */
 const LEGACY_LLM_MODELS_ENDPOINT = "/data/llms/models";
-const FETCH_TIMEOUT_MS = 20_000;
+const FETCH_TIMEOUT_MS = 60_000;
 const MAX_BYTES = 16 * 1024 * 1024;
 /** 分页失控时的兜底上限，正常终止条件是 pagination.has_more */
 const MAX_PAGES = 100;

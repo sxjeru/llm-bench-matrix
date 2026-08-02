@@ -11,6 +11,7 @@ import type {
   ExternalMetricOverride
 } from "../types";
 import { isMappingDraftDirty } from "../hooks/use-external-import";
+import { UpstreamModelCombobox } from "./shared/upstream-model-combobox";
 
 /** 与 lib/external-providers/reasoning-effort.ts 的档位保持一致 */
 const REASONING_EFFORT_OPTIONS: Array<{ value: string; label: string }> = [
@@ -69,10 +70,10 @@ type ExternalImportTabProps = {
 };
 
 function getStatusBadgeClass(status: ExternalMappingRow["matchStatus"], manualOverride: boolean) {
-  if (manualOverride || status === "manual") return "border-amber-400 text-amber-200";
-  if (status === "matched") return "border-green-500 text-green-300";
-  if (status === "ignored") return "border-base-content/30 text-base-content/60";
-  return "border-red-500 text-red-300";
+  if (manualOverride || status === "manual") return "border-amber-400/70 bg-amber-500/10 text-amber-200";
+  if (status === "matched") return "border-green-500/70 bg-green-500/10 text-green-300";
+  if (status === "ignored") return "border-base-content/20 bg-base-200/70 text-base-content/60";
+  return "border-red-500/70 bg-red-500/10 text-red-300";
 }
 
 function getStatusLabel(status: ExternalMappingRow["matchStatus"], manualOverride: boolean) {
@@ -427,15 +428,15 @@ export function ExternalImportTab({
         </div>
 
         <div className="overflow-x-auto rounded-box border border-base-300">
-          <table className="table table-zebra table-sm min-w-[1040px]">
+          <table className="admin-mapping-table table table-fixed table-zebra table-sm min-w-[1180px]">
             <thead>
               <tr>
-                <th>本地模型</th>
+                <th className="w-[200px]">本地模型</th>
                 <th>上游条目</th>
-                <th>推理强度</th>
-                <th>匹配来源</th>
-                <th>状态</th>
-                <th className="w-16">忽略</th>
+                <th className="w-[128px]">推理强度</th>
+                <th className="w-[180px]">匹配来源</th>
+                <th className="w-[108px]">状态</th>
+                <th className="w-14 text-center">忽略</th>
               </tr>
             </thead>
             <tbody>
@@ -444,48 +445,57 @@ export function ExternalImportTab({
                 if (!draft) return null;
                 const dirty = isMappingDraftDirty(row, draft);
                 const effectiveStatus = draft.ignored ? "ignored" : row.matchStatus;
+                const matchReasonLabel = MATCH_REASON_LABELS[row.matchReason] ?? row.matchReason;
+                const selectedUpstream = (snapshot?.upstreamOptions ?? []).find(
+                  (option) => option.externalModelId === draft.externalModelId
+                );
+                const selectedUpstreamLabel = selectedUpstream
+                  ? `${selectedUpstream.externalModelName}${
+                      selectedUpstream.externalCreator ? ` — ${selectedUpstream.externalCreator}` : ""
+                    }`
+                  : draft.externalModelId
+                    ? row.externalModelName ?? draft.externalModelId
+                    : "";
 
                 return (
                   <tr key={row.modelId} className={conflictModelIds.has(row.modelId) ? "bg-error/10" : undefined}>
-                    <td className="min-w-[200px]">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">{row.modelName}</span>
-                        {dirty ? <span className="badge badge-warning badge-xs whitespace-nowrap">未保存</span> : null}
+                    <td className="align-top overflow-hidden">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate font-semibold" title={row.modelName}>
+                            {row.modelName}
+                          </div>
+                          <div className="truncate text-xs opacity-60" title={row.providerName}>
+                            {row.providerName}
+                          </div>
+                        </div>
+                        {dirty ? <span className="badge badge-warning badge-xs shrink-0 whitespace-nowrap">未保存</span> : null}
                       </div>
-                      <div className="text-xs opacity-60">{row.providerName}</div>
                     </td>
-                    <td className="min-w-[280px]">
-                      <select
-                        className="select select-bordered select-xs w-full"
-                        value={draft.externalModelId ?? ""}
-                        disabled={draft.ignored}
-                        onChange={(event) => {
-                          // 先把值取出来再进 updater：state updater 可能被 React 延后执行，
-                          // 那时 event.target 已经是重渲染后的 DOM，读出来是旧值
-                          const nextExternalModelId = event.target.value || null;
-                          onUpdateMappingDraft(row.modelId, (current) => ({
-                            ...current,
-                            externalModelId: nextExternalModelId,
-                            manualOverride: true
-                          }));
-                        }}
-                        aria-label={`${row.modelName} 的上游条目`}
-                      >
-                        <option value="">（不绑定）</option>
-                        {(snapshot?.upstreamOptions ?? []).map((option) => (
-                          <option key={option.externalModelId} value={option.externalModelId}>
-                            {option.externalModelName}
-                            {option.externalCreator ? ` — ${option.externalCreator}` : ""}
-                          </option>
-                        ))}
-                      </select>
-                      {row.externalMissing ? (
-                        <div className="mt-1 text-xs text-error">已绑定的上游条目在本次拉取中不存在</div>
-                      ) : null}
+                    <td className="align-top overflow-hidden">
+                      <div className="min-w-0 max-w-full">
+                        <UpstreamModelCombobox
+                          modelName={row.modelName}
+                          value={draft.externalModelId}
+                          selectedLabel={selectedUpstreamLabel}
+                          options={snapshot?.upstreamOptions ?? []}
+                          disabled={draft.ignored}
+                          onChange={(nextExternalModelId) => {
+                            onUpdateMappingDraft(row.modelId, (current) => ({
+                              ...current,
+                              externalModelId: nextExternalModelId,
+                              manualOverride: true
+                            }));
+                          }}
+                        />
+                        {row.externalMissing ? (
+                          <div className="mt-1 text-xs text-error">已绑定的上游条目在本次拉取中不存在</div>
+                        ) : null}
+                      </div>
                     </td>
-                    <td className="min-w-[150px]">
+                    <td className="align-top overflow-hidden">
                       <select
-                        className="select select-bordered select-xs w-full"
+                        className="select select-bordered select-xs w-full max-w-full overflow-hidden text-ellipsis whitespace-nowrap"
                         value={draft.reasoningEffort ?? ""}
                         disabled={draft.ignored}
                         onChange={(event) => {
@@ -505,21 +515,25 @@ export function ExternalImportTab({
                         ))}
                       </select>
                     </td>
-                    <td className="min-w-[190px] text-xs opacity-75">
-                      {MATCH_REASON_LABELS[row.matchReason] ?? row.matchReason}
-                    </td>
-                    <td>
-                      <div
-                        className={`inline-flex h-6 items-center rounded-full border-2 bg-transparent px-3 text-xs font-semibold ${getStatusBadgeClass(
-                          effectiveStatus,
-                          draft.manualOverride
-                        )}`}
-                      >
-                        {getStatusLabel(effectiveStatus, draft.manualOverride)}
+                    <td className="align-top overflow-hidden">
+                      <div className="line-clamp-2 text-xs leading-5 opacity-75" title={matchReasonLabel}>
+                        {matchReasonLabel}
                       </div>
-                      <div className="mt-1 text-xs opacity-60">置信 {row.matchConfidence}</div>
                     </td>
-                    <td>
+                    <td className="align-top overflow-hidden">
+                      <div className="flex min-w-0 flex-col items-start gap-1">
+                        <div
+                          className={`inline-flex h-6 items-center rounded-full border px-2.5 text-[11px] font-semibold whitespace-nowrap ${getStatusBadgeClass(
+                            effectiveStatus,
+                            draft.manualOverride
+                          )}`}
+                        >
+                          {getStatusLabel(effectiveStatus, draft.manualOverride)}
+                        </div>
+                        <div className="text-[11px] opacity-60 whitespace-nowrap">置信 {row.matchConfidence}</div>
+                      </div>
+                    </td>
+                    <td className="align-top text-center">
                       <input
                         type="checkbox"
                         className="checkbox checkbox-xs"
