@@ -53,6 +53,26 @@ function matchesUpstreamOption(option: ExternalUpstreamModel, query: string) {
   );
 }
 
+function measureFloatingPosition(root: HTMLElement | null): FloatingPosition | null {
+  const rect = root?.getBoundingClientRect();
+  if (!rect) return null;
+
+  const gap = 4;
+  const preferredMaxHeight = 280;
+  const spaceBelow = window.innerHeight - rect.bottom - gap - 8;
+  const spaceAbove = rect.top - gap - 8;
+  const placement = spaceBelow >= 160 || spaceBelow >= spaceAbove ? "bottom" : "top";
+  const maxHeight = Math.max(120, Math.min(preferredMaxHeight, placement === "bottom" ? spaceBelow : spaceAbove));
+
+  return {
+    left: rect.left,
+    top: placement === "bottom" ? rect.bottom + gap : rect.top - gap,
+    width: Math.max(rect.width, 280),
+    maxHeight,
+    placement
+  };
+}
+
 export function UpstreamModelCombobox({
   modelName,
   value,
@@ -63,7 +83,6 @@ export function UpstreamModelCombobox({
 }: UpstreamModelComboboxProps) {
   const listId = useId();
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -111,33 +130,16 @@ export function UpstreamModelCombobox({
     setIsOpen(false);
     setQuery("");
     setActiveIndex(0);
+    setPosition(null);
   }, []);
 
   const updatePosition = useCallback(() => {
-    const rect = rootRef.current?.getBoundingClientRect();
-    if (!rect) return;
-
-    const gap = 4;
-    const preferredMaxHeight = 280;
-    const spaceBelow = window.innerHeight - rect.bottom - gap - 8;
-    const spaceAbove = rect.top - gap - 8;
-    const placement = spaceBelow >= 160 || spaceBelow >= spaceAbove ? "bottom" : "top";
-    const maxHeight = Math.max(120, Math.min(preferredMaxHeight, placement === "bottom" ? spaceBelow : spaceAbove));
-
-    setPosition({
-      left: rect.left,
-      top: placement === "bottom" ? rect.bottom + gap : rect.top - gap,
-      width: Math.max(rect.width, 280),
-      maxHeight,
-      placement
-    });
+    const next = measureFloatingPosition(rootRef.current);
+    if (next) setPosition(next);
   }, []);
 
   useLayoutEffect(() => {
-    if (!isOpen) {
-      setPosition(null);
-      return;
-    }
+    if (!isOpen) return;
 
     updatePosition();
     window.addEventListener("resize", updatePosition);
@@ -173,7 +175,6 @@ export function UpstreamModelCombobox({
     (externalModelId: string | null) => {
       onChange(externalModelId);
       close();
-      inputRef.current?.blur();
     },
     [onChange, close]
   );
@@ -280,7 +281,6 @@ export function UpstreamModelCombobox({
     <div className={`admin-upstream-combobox ${disabled ? "is-disabled" : ""}`} ref={rootRef}>
       <Search size={13} className="admin-upstream-combobox-icon" aria-hidden="true" />
       <input
-        ref={inputRef}
         type="text"
         role="combobox"
         className="admin-upstream-combobox-input"
