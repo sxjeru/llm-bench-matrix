@@ -161,12 +161,26 @@ export function useExternalImport({ notifySuccess, notifyError }: UseExternalImp
       .filter((row) => isMappingDraftDirty(row, mappingDrafts[row.modelId]))
       .map((row) => {
         const draft = mappingDrafts[row.modelId]!;
+        // 勾了「忽略」、以及没勾忽略但选了「（不绑定）」，都是「这个模型不绑任何上游条目」，
+        // 存成同一种状态。空绑定不能存成 manual + manualOverride：界面会显示成「手动」却什么都没绑，
+        // 而且 buildExternalImportSnapshot 会把它当作 pin，自动匹配从此不再接管这个模型。
+        const externalModelId = draft.ignored ? null : draft.externalModelId;
+        if (!externalModelId) {
+          return {
+            modelId: row.modelId,
+            externalModelId: null,
+            reasoningEffort: draft.reasoningEffort,
+            matchStatus: "ignored" as const,
+            manualOverride: false
+          };
+        }
+
         return {
           modelId: row.modelId,
-          externalModelId: draft.ignored ? null : draft.externalModelId,
+          externalModelId,
           reasoningEffort: draft.reasoningEffort,
-          matchStatus: draft.ignored ? ("ignored" as const) : ("manual" as const),
-          manualOverride: draft.ignored ? false : true
+          matchStatus: "manual" as const,
+          manualOverride: true
         };
       });
 

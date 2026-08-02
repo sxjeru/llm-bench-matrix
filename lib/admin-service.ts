@@ -4274,6 +4274,13 @@ export async function importExternalBenchmarkRows(
         (await tx.select({ id: benchmarks.id }).from(benchmarks)).map((row) => row.id)
       );
 
+      // 这里一次性把同源的全部历史行捞进内存，再在下面按槽位取最新一条。
+      // 之所以不按槽位精确查询：modelId / benchmarkId 要等下面循环里 ensureModel / ensureBenchmark
+      // 之后才确定（可能当场新建），事务开始时拿不到 id 列表。
+      // 代价是捞取量随同步次数增长（价格、速度这类指标几乎每次同步都变，都会 append 一行历史）。
+      // 走 benchmark_values_source_idx，只涉及同源行，当前规模下无感；等真的变慢了，
+      // 改成 selectDistinctOn([modelId, benchmarkId]) + orderBy(..., desc(benchTime), desc(id))，
+      // 并配一条 (source, model_id, benchmark_id, bench_time desc) 复合索引，DB 侧才一起受益。
       const existingValueRows = await tx
         .select({
           id: benchmarkValues.id,
