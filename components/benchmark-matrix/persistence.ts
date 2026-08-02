@@ -187,7 +187,7 @@ function loadExportPreset(): ExportPresetKey | null {
   return null;
 }
 
-function loadHeatmapPaletteStorage(): {
+export function loadHeatmapPaletteStorage(): {
   palette: HeatmapPaletteHex;
   alpha: number;
   presetSelection: HeatmapPresetSelection;

@@ -646,7 +646,16 @@ export function ScatterCanvas({
           }}
           // 关掉 Recharts 默认的位移过渡：否则浮窗每次都从上一个位置（首次是左上角）滑过来
           isAnimationActive={false}
-          content={<ScatterTooltip xMetric={xMetric} yMetric={yMetric} showPareto={showPareto} />}
+          content={
+            <ScatterTooltip
+              xMetric={xMetric}
+              yMetric={yMetric}
+              xScale={xScale}
+              yScale={yScale}
+              showPareto={showPareto}
+              points={dataset.points}
+            />
+          }
         />
 
         {shouldRenderGuides ? (
