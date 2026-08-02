@@ -101,7 +101,126 @@ export type ModelDedupeRule = {
   removeDot: boolean;
 };
 
-export type TabKey = "import" | "entry" | "providers" | "pricing" | "params" | "rename" | "merge" | "maintenance" | "settings";
+export type TabKey =
+  | "import"
+  | "external"
+  | "entry"
+  | "providers"
+  | "pricing"
+  | "params"
+  | "rename"
+  | "merge"
+  | "maintenance"
+  | "settings";
+
+// --- 外部数据源导入（artificialanalysis.ai） ---
+
+export type ExternalMetricGroup = "evaluation" | "performance";
+export type ExternalMetricValueScale = "fraction" | "absolute";
+
+export type ExternalMetricCatalogEntry = {
+  key: string;
+  group: ExternalMetricGroup;
+  label: string;
+  benchmarkType: string;
+  unit: string;
+  higherIsBetter: boolean;
+  modalities: string[];
+  valueScale: ExternalMetricValueScale;
+  modelCount: number;
+  minValue: number | null;
+  maxValue: number | null;
+  sampleValues: number[];
+};
+
+export type ExternalMetricOverride = {
+  benchmarkName?: string;
+  benchmarkType?: string;
+  higherIsBetter?: boolean;
+  modalities?: string[];
+  valueScale?: ExternalMetricValueScale;
+};
+
+export type ExternalImportConfig = {
+  selectedMetrics: string[];
+  metricOverrides: Record<string, ExternalMetricOverride>;
+  lastImportedAt?: string;
+};
+
+export type ExternalMatchStatus = "matched" | "unmatched" | "ignored" | "manual";
+
+export type ExternalMappingRow = {
+  modelId: number;
+  modelName: string;
+  providerName: string;
+  externalModelId: string | null;
+  externalModelName: string | null;
+  externalCreator: string | null;
+  reasoningEffort: string | null;
+  matchStatus: ExternalMatchStatus;
+  matchConfidence: number;
+  matchReason: string;
+  manualOverride: boolean;
+  externalMissing: boolean;
+};
+
+export type ExternalUpstreamModel = {
+  externalModelId: string;
+  externalModelName: string;
+  externalModelSlug: string | null;
+  externalCreator: string | null;
+};
+
+export type ExternalMappingConflict = {
+  externalModelId: string;
+  externalModelName: string;
+  modelIds: number[];
+};
+
+export type ExternalImportSnapshot = {
+  apiKeyConfigured: boolean;
+  fetchedAt: string | null;
+  sourceLabel: string;
+  catalog: ExternalMetricCatalogEntry[];
+  config: ExternalImportConfig;
+  mappings: ExternalMappingRow[];
+  upstreamOnly: ExternalUpstreamModel[];
+  conflicts: ExternalMappingConflict[];
+  upstreamOptions: ExternalUpstreamModel[];
+};
+
+export type ExternalImportPreviewRow = {
+  modelName: string;
+  benchmarkName: string;
+  benchmarkType: string;
+  rawValue: string;
+  previousValue: string | null;
+  outcome: "inserted" | "appended" | "unchanged" | "skipped";
+};
+
+export type ExternalImportSummary = {
+  source: string;
+  total: number;
+  inserted: number;
+  appended: number;
+  unchanged: number;
+  skipped: number;
+  createdBenchmarks: string[];
+  createdModels: string[];
+  matchedModelCount: number;
+  metricCount: number;
+  benchTime: string;
+  dryRun: boolean;
+  preview: ExternalImportPreviewRow[];
+};
+
+/** 单个模型行的未保存改动 */
+export type ExternalMappingDraft = {
+  externalModelId: string | null;
+  reasoningEffort: string | null;
+  ignored: boolean;
+  manualOverride: boolean;
+};
 
 export type ModelParamsRow = {
   modelId: number;

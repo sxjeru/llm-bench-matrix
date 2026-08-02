@@ -178,6 +178,43 @@ export const modelPricing = pgTable(
   })
 );
 
+/**
+ * 外部数据提供商（当前为 artificialanalysis.ai）的模型匹配关系。
+ *
+ * 两端都可空：`model_id` 为空表示「上游有、本地库没有」的条目，`external_model_id`
+ * 为空表示本地模型被人工标记为不从该数据源导入。Postgres 的唯一索引不会对 NULL
+ * 去重，所以两列各自可空的同时仍能保证同一 source 下的 1:1 绑定。
+ */
+export const externalModelMappings = pgTable(
+  "external_model_mappings",
+  {
+    id: serial("id").primaryKey(),
+    source: text("source").notNull().default("artificial-analysis"),
+    modelId: integer("model_id").references(() => models.id, { onDelete: "cascade" }),
+    externalModelId: text("external_model_id"),
+    externalModelName: text("external_model_name"),
+    externalModelSlug: text("external_model_slug"),
+    externalCreator: text("external_creator"),
+    reasoningEffort: text("reasoning_effort"),
+    matchStatus: text("match_status").notNull().default("unmatched"),
+    matchConfidence: integer("match_confidence").notNull().default(0),
+    matchReason: text("match_reason"),
+    manualOverride: boolean("manual_override").notNull().default(false),
+    rawJson: jsonb("raw_json").notNull().default(sql`'{}'::jsonb`),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
+  },
+  (table) => ({
+    sourceModelUnique: uniqueIndex("external_model_mappings_source_model_unique").on(table.source, table.modelId),
+    sourceExternalUnique: uniqueIndex("external_model_mappings_source_external_unique").on(
+      table.source,
+      table.externalModelId
+    ),
+    statusIdx: index("external_model_mappings_status_idx").on(table.source, table.matchStatus)
+  })
+);
+
 export const settings = pgTable("settings", {
   key: text("key").primaryKey(),
   valueJson: jsonb("value_json").notNull().default(sql`'{}'::jsonb`),

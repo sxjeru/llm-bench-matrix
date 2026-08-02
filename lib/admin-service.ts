@@ -4113,6 +4113,422 @@ export async function importStructuredRows(
   };
 }
 
+// ---------------------------------------------------------------------------
+// 外部数据提供商导入（artificialanalysis.ai 等）
+// ---------------------------------------------------------------------------
+
+export type ExternalImportRowInput = {
+  providerName: string;
+  modelName: string;
+  benchmarkName: string;
+  benchmarkType: string;
+  higherIsBetter?: boolean;
+  modalities?: string[];
+  unit?: string;
+  rawValue: string;
+  sourceModelId?: string | null;
+  sourceBenchmarkId?: string | null;
+};
+
+export type ExternalImportOutcome =
+  /** 该 (模型, benchmark) 在这个 source 下还没有值 */
+  | "inserted"
+  /** 同源已有值但数值不同 —— 追加一行，旧行保留成历史 */
+  | "appended"
+  /** 同源已有值且数值相同 —— 原地覆盖，不新增行 */
+  | "unchanged"
+  | "skipped";
+
+export type ExternalImportPreviewRow = {
+  modelName: string;
+  benchmarkName: string;
+  benchmarkType: string;
+  rawValue: string;
+  previousValue: string | null;
+  outcome: ExternalImportOutcome;
+};
+
+export type ExternalImportResult = {
+  source: string;
+  total: number;
+  inserted: number;
+  appended: number;
+  unchanged: number;
+  skipped: number;
+  createdBenchmarks: string[];
+  benchTime: string;
+  dryRun: boolean;
+  preview: ExternalImportPreviewRow[];
+};
+
+const EXTERNAL_IMPORT_PREVIEW_LIMIT = 200;
+/** numeric(14,6) 落库后回读会有末位抖动，用半个最小刻度做容差 */
+const EXTERNAL_IMPORT_VALUE_EPSILON = 5e-7;
+const EXTERNAL_IMPORT_BATCH_SIZE = 500;
+
+/** 事务里用来触发回滚的哨兵，dryRun 靠它把预览写入撤销掉 */
+class ExternalImportDryRunRollback extends Error {
+  constructor(readonly result: ExternalImportResult) {
+    super("external-import-dry-run");
+  }
+}
+
+type ExistingExternalValue = {
+  id: number;
+  benchTime: Date;
+  valueRaw: string;
+  valueNum: number | null;
+  valueNum2: number | null;
+};
+
+function toComparableNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = typeof value === "number" ? value : Number.parseFloat(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isSameExternalValue(
+  left: { valueNum: number | null; valueNum2: number | null },
+  right: { valueNum: number | null; valueNum2: number | null }
+): boolean {
+  const sameField = (a: number | null, b: number | null) => {
+    if (a === null || b === null) return a === b;
+    return Math.abs(a - b) <= EXTERNAL_IMPORT_VALUE_EPSILON;
+  };
+
+  return sameField(left.valueNum, right.valueNum) && sameField(left.valueNum2, right.valueNum2);
+}
+
+/** `deleteBenchmarkValuesBySource` 同款：带 `text:` 前缀与不带的都要算作同一个来源 */
+function buildSourceLookupCandidates(source: string): string[] {
+  const raw = source.trim();
+  const normalized = normalizeTextImportSource(raw);
+  const candidates = new Set<string>();
+
+  if (raw) candidates.add(raw);
+  if (normalized) {
+    candidates.add(normalized);
+    const unprefixed = normalized.slice(5).trim();
+    if (unprefixed) candidates.add(unprefixed);
+  }
+
+  return Array.from(candidates);
+}
+
+/**
+ * 外部数据源导入。
+ *
+ * 与 `importNormalizedRows` 的差别只在写值策略上：那条路径是无条件 append（适合一次性
+ * 粘贴的论文表格），而外部 API 会被反复同步，无条件 append 会让 benchmark_values 迅速膨胀。
+ * 这里按 (model, benchmark, source) 找同源最新值：
+ *
+ * - 没有 → 插入
+ * - 有且数值相同 → 原地刷新 bench_time，不新增行
+ * - 有且数值不同 → 追加一行，旧行留作历史
+ *
+ * `dryRun` 走完全相同的判定逻辑后回滚，保证「预览」和「执行」不会走出两套结果。
+ */
+export async function importExternalBenchmarkRows(
+  rows: ExternalImportRowInput[],
+  options: { source: string; benchTime?: Date; dryRun?: boolean }
+): Promise<ExternalImportResult> {
+  const source = options.source.trim();
+  if (!source) {
+    throw new Error("外部数据源导入必须指定 source");
+  }
+
+  const normalizedSource = normalizeTextImportSource(source);
+  if (!normalizedSource) {
+    throw new Error("外部数据源导入必须指定 source");
+  }
+
+  const benchTime = options.benchTime ?? new Date();
+  const dryRun = options.dryRun === true;
+  const dedupeRule = await getModelDedupeRule();
+  const sourceCandidates = buildSourceLookupCandidates(source);
+
+  const emptyResult: ExternalImportResult = {
+    source: normalizedSource,
+    total: rows.length,
+    inserted: 0,
+    appended: 0,
+    unchanged: 0,
+    skipped: rows.length,
+    createdBenchmarks: [],
+    benchTime: benchTime.toISOString(),
+    dryRun,
+    preview: []
+  };
+
+  if (rows.length === 0) {
+    return { ...emptyResult, skipped: 0 };
+  }
+
+  const runTransaction = async (): Promise<ExternalImportResult> =>
+    db.transaction(async (tx: DbTransactionClient) => {
+      const providerCache = new Map<string, Awaited<ReturnType<typeof ensureProvider>>>();
+      const modelCache = new Map<string, Awaited<ReturnType<typeof ensureModelByProviderId>>>();
+      const benchmarkCache = new Map<string, typeof benchmarks.$inferSelect>();
+
+      const preexistingBenchmarkIds = new Set(
+        (await tx.select({ id: benchmarks.id }).from(benchmarks)).map((row) => row.id)
+      );
+
+      const existingValueRows = await tx
+        .select({
+          id: benchmarkValues.id,
+          modelId: benchmarkValues.modelId,
+          benchmarkId: benchmarkValues.benchmarkId,
+          benchTime: benchmarkValues.benchTime,
+          valueRaw: benchmarkValues.valueRaw,
+          valueNum: benchmarkValues.valueNum,
+          valueNum2: benchmarkValues.valueNum2
+        })
+        .from(benchmarkValues)
+        .where(inArray(benchmarkValues.source, sourceCandidates));
+
+      // 同一 (model, benchmark) 可能有多条历史，只跟最新的那条比
+      const latestBySlot = new Map<string, ExistingExternalValue>();
+      for (const row of existingValueRows) {
+        const slotKey = `${row.modelId}:${row.benchmarkId}`;
+        const current = latestBySlot.get(slotKey);
+        if (current && current.benchTime.getTime() >= row.benchTime.getTime()) continue;
+        latestBySlot.set(slotKey, {
+          id: row.id,
+          benchTime: row.benchTime,
+          valueRaw: row.valueRaw,
+          valueNum: toComparableNumber(row.valueNum),
+          valueNum2: toComparableNumber(row.valueNum2)
+        });
+      }
+
+      const insertRows: Array<typeof benchmarkValues.$inferInsert> = [];
+      const touchOnlyIds: number[] = [];
+      const rewriteRows: Array<{ id: number; valueRaw: string; valueNote: string | null }> = [];
+      const sourceMetaUpsertMap = new Map<
+        string,
+        { benchmarkId: number; source: string; benchmarkType: string; modalities: string[] }
+      >();
+      const createdBenchmarks = new Set<string>();
+      const preview: ExternalImportPreviewRow[] = [];
+
+      let inserted = 0;
+      let appended = 0;
+      let unchanged = 0;
+      let skipped = 0;
+
+      const pushPreview = (row: ExternalImportPreviewRow) => {
+        if (preview.length >= EXTERNAL_IMPORT_PREVIEW_LIMIT) return;
+        preview.push(row);
+      };
+
+      for (const row of rows) {
+        const modelName = normalizeNameParenthesisSpacing(row.modelName || "");
+        const benchmarkName = normalizeNameParenthesisSpacing(row.benchmarkName || "");
+        const benchmarkType = (row.benchmarkType || "general").trim() || "general";
+
+        if (!modelName || !benchmarkName || isEmptyImportValue(row.rawValue)) {
+          skipped += 1;
+          pushPreview({
+            modelName: row.modelName,
+            benchmarkName: row.benchmarkName,
+            benchmarkType,
+            rawValue: row.rawValue,
+            previousValue: null,
+            outcome: "skipped"
+          });
+          continue;
+        }
+
+        const providerName = row.providerName?.trim() || inferProviderNameFromModel(modelName);
+        const providerKey = toProviderSlug(providerName);
+        let provider = providerCache.get(providerKey);
+        if (!provider) {
+          provider = await ensureProvider(providerName, { db: tx });
+          providerCache.set(providerKey, provider);
+        }
+
+        const modelCanonicalKey = buildModelCanonicalKey(modelName, dedupeRule);
+        let model = modelCache.get(modelCanonicalKey);
+        if (!model) {
+          model = await ensureModelByProviderId(
+            { providerId: provider.id, modelName, sourceModelId: row.sourceModelId ?? null },
+            { dedupeRule, db: tx }
+          );
+          modelCache.set(modelCanonicalKey, model);
+        }
+
+        const benchmarkCacheKey = buildBenchmarkCanonicalKey(benchmarkName, benchmarkType, dedupeRule);
+        let benchmark = benchmarkCache.get(benchmarkCacheKey);
+        if (!benchmark) {
+          benchmark = await ensureBenchmark(
+            {
+              benchmarkName,
+              benchmarkType,
+              unit: row.unit,
+              higherIsBetter: row.higherIsBetter,
+              modalities: row.modalities,
+              sourceBenchmarkId: row.sourceBenchmarkId ?? null
+            },
+            { dedupeRule, db: tx }
+          );
+          benchmarkCache.set(benchmarkCacheKey, benchmark);
+          if (!preexistingBenchmarkIds.has(benchmark.id)) {
+            createdBenchmarks.add(benchmark.benchmarkName);
+          }
+        }
+
+        const parsedValue = normalizeStoredBenchmarkValue(
+          benchmark.benchmarkName,
+          parseBenchmarkValue(row.rawValue)
+        );
+
+        sourceMetaUpsertMap.set(`${benchmark.id}::${normalizedSource}`, {
+          benchmarkId: benchmark.id,
+          source: normalizedSource,
+          benchmarkType,
+          modalities: normalizeModalities(row.modalities?.length ? row.modalities : [benchmarkType])
+        });
+
+        const slotKey = `${model.id}:${benchmark.id}`;
+        const existing = latestBySlot.get(slotKey);
+        const nextValue = { valueNum: parsedValue.valueNum, valueNum2: parsedValue.valueNum2 };
+
+        if (existing && isSameExternalValue(existing, nextValue)) {
+          unchanged += 1;
+          if (existing.valueRaw === parsedValue.valueRaw) {
+            touchOnlyIds.push(existing.id);
+          } else {
+            rewriteRows.push({
+              id: existing.id,
+              valueRaw: parsedValue.valueRaw,
+              valueNote: parsedValue.valueNote
+            });
+          }
+          // 同一批里若有第二行落到同一个槽位，让它跟刚写下的值比
+          latestBySlot.set(slotKey, {
+            id: existing.id,
+            benchTime,
+            valueRaw: parsedValue.valueRaw,
+            valueNum: parsedValue.valueNum,
+            valueNum2: parsedValue.valueNum2
+          });
+          pushPreview({
+            modelName,
+            benchmarkName: benchmark.benchmarkName,
+            benchmarkType,
+            rawValue: parsedValue.valueRaw,
+            previousValue: existing.valueRaw,
+            outcome: "unchanged"
+          });
+          continue;
+        }
+
+        insertRows.push({
+          modelId: model.id,
+          benchmarkId: benchmark.id,
+          benchTime,
+          valueRaw: parsedValue.valueRaw,
+          valueNum: parsedValue.valueNum !== null ? String(parsedValue.valueNum) : null,
+          valueNum2: parsedValue.valueNum2 !== null ? String(parsedValue.valueNum2) : null,
+          valueNote: parsedValue.valueNote,
+          source: normalizedSource
+        });
+
+        if (existing) {
+          appended += 1;
+        } else {
+          inserted += 1;
+        }
+
+        pushPreview({
+          modelName,
+          benchmarkName: benchmark.benchmarkName,
+          benchmarkType,
+          rawValue: parsedValue.valueRaw,
+          previousValue: existing?.valueRaw ?? null,
+          outcome: existing ? "appended" : "inserted"
+        });
+
+        latestBySlot.set(slotKey, {
+          id: -1,
+          benchTime,
+          valueRaw: parsedValue.valueRaw,
+          valueNum: parsedValue.valueNum,
+          valueNum2: parsedValue.valueNum2
+        });
+      }
+
+      for (let index = 0; index < insertRows.length; index += EXTERNAL_IMPORT_BATCH_SIZE) {
+        const chunk = insertRows.slice(index, index + EXTERNAL_IMPORT_BATCH_SIZE);
+        if (chunk.length === 0) continue;
+        await tx.insert(benchmarkValues).values(chunk);
+      }
+
+      // 值没变的那批只需要刷新时间戳，合并成一条 UPDATE，避免每次同步几千条单行更新
+      for (let index = 0; index < touchOnlyIds.length; index += EXTERNAL_IMPORT_BATCH_SIZE) {
+        const chunk = touchOnlyIds.slice(index, index + EXTERNAL_IMPORT_BATCH_SIZE);
+        if (chunk.length === 0) continue;
+        await tx.update(benchmarkValues).set({ benchTime }).where(inArray(benchmarkValues.id, chunk));
+      }
+
+      for (const rewrite of rewriteRows) {
+        await tx
+          .update(benchmarkValues)
+          .set({ benchTime, valueRaw: rewrite.valueRaw, valueNote: rewrite.valueNote })
+          .where(eq(benchmarkValues.id, rewrite.id));
+      }
+
+      const sourceMetaRows = Array.from(sourceMetaUpsertMap.values());
+      for (let index = 0; index < sourceMetaRows.length; index += EXTERNAL_IMPORT_BATCH_SIZE) {
+        const chunk = sourceMetaRows.slice(index, index + EXTERNAL_IMPORT_BATCH_SIZE);
+        if (chunk.length === 0) continue;
+
+        await tx
+          .insert(benchmarkSourceMeta)
+          .values(chunk)
+          .onConflictDoUpdate({
+            target: [benchmarkSourceMeta.benchmarkId, benchmarkSourceMeta.source],
+            set: {
+              benchmarkType: sql`excluded.benchmark_type`,
+              modalities: sql`excluded.modalities`,
+              updatedAt: sql`now()`
+            }
+          });
+      }
+
+      const result: ExternalImportResult = {
+        source: normalizedSource,
+        total: rows.length,
+        inserted,
+        appended,
+        unchanged,
+        skipped,
+        createdBenchmarks: Array.from(createdBenchmarks),
+        benchTime: benchTime.toISOString(),
+        dryRun,
+        preview
+      };
+
+      if (dryRun) {
+        throw new ExternalImportDryRunRollback(result);
+      }
+
+      return result;
+    });
+
+  try {
+    const result = await runTransaction();
+    await invalidateAllCaches();
+    return result;
+  } catch (error) {
+    if (error instanceof ExternalImportDryRunRollback) {
+      return error.result;
+    }
+    throw error;
+  }
+}
+
 function parseStructuredCsvRows(inputText: string, defaultSource: string | null): ParsedTextImportResult {
   const parsedRows = parse(inputText, {
     columns: true,
