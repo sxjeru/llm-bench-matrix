@@ -5,14 +5,17 @@
  *   1. **Proxy (this file)** – Fast cookie-format check. Rejects requests
  *      without a valid-format session cookie and redirects to login. This is a
  *      UX convenience layer; it does NOT perform database validation.
- *   2. **Server Component** (`app/admin/page.tsx`) – Calls `isAdminAuthorized`
- *      which validates the session token against the database.
+ *   2. **Server Component** (`app/admin/page.tsx`, `app/admin/login/page.tsx`) –
+ *      Calls `isAdminAuthorized` which validates the session token against the
+ *      database. Login page also redirects already-authenticated users away.
  *   3. **API Routes** – Each admin API handler calls `requireAdmin`, which
  *      performs full database-backed session validation.
  *
  * The middleware intentionally does NOT make database calls to avoid adding
  * latency to every admin page navigation. The actual security enforcement
- * happens at layers 2 and 3.
+ * happens at layers 2 and 3. Login-page "already signed in" redirects must not
+ * rely on cookie format alone, or expired tokens can bounce between /admin and
+ * /admin/login.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -40,7 +43,8 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  if (pathname === ADMIN_LOGIN_PATH) {
+  // Full session validation for "already logged in" lives in the login page RSC.
+  if (pathname === ADMIN_LOGIN_PATH || pathname.startsWith(`${ADMIN_LOGIN_PATH}/`)) {
     return NextResponse.next();
   }
 
