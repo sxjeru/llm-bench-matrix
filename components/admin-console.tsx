@@ -7,6 +7,7 @@ import { getJson, postFormData, postJson } from "./admin-console/api";
 import { useEntityLookups } from "./admin-console/hooks/use-entity-lookups";
 import { useImportPreviewState } from "./admin-console/hooks/use-import-preview-state";
 import { useAdminNotices } from "./admin-console/hooks/use-notices";
+import { useExternalImport } from "./admin-console/hooks/use-external-import";
 import { useProviderConfig } from "./admin-console/hooks/use-provider-config";
 import {
   PAIR_NOTE_HISTORY_STORAGE_KEY,
@@ -86,6 +87,7 @@ import {
   SheetPickerDialog
 } from "./admin-console/views/confirm-dialogs";
 import { EntryTab } from "./admin-console/views/entry-tab";
+import { ExternalImportTab } from "./admin-console/views/external-import-tab";
 import { ImportTab } from "./admin-console/views/import-tab";
 import { MaintenanceTab } from "./admin-console/views/maintenance-tab";
 import { MergeTab } from "./admin-console/views/merge-tab";
@@ -178,6 +180,8 @@ export function AdminConsole({
     onConfirmDeleteProvider,
     onCreateProviderFromSearch
   } = useProviderConfig({ providers, notifySuccess, notifyError });
+
+  const externalImport = useExternalImport({ notifySuccess, notifyError });
 
   const [providerName, setProviderName] = useState("");
   const [providerId, setProviderId] = useState<number | "">(providers[0]?.id ?? "");
@@ -2847,6 +2851,10 @@ export function AdminConsole({
     if (tab === "params" && !hasLoadedParams && !loadingParams) {
       void loadModelParams();
     }
+
+    if (tab === "external") {
+      externalImport.loadSnapshotOnce();
+    }
   }
 
   function updatePricingDraft(modelId: number, updater: (draft: ModelPricingDraft) => ModelPricingDraft) {
@@ -3259,6 +3267,39 @@ export function AdminConsole({
             setTextImportPreviewVisibleCount={setTextImportPreviewVisibleCount}
             textImportPreviewVisibleCount={textImportPreviewVisibleCount}
             benchmarks={benchmarks}
+          />
+        ) : null}
+
+        {activeTab === "external" ? (
+          <ExternalImportTab
+            snapshot={externalImport.snapshot}
+            loading={externalImport.loading}
+            savingMappings={externalImport.savingMappings}
+            savingConfig={externalImport.savingConfig}
+            previewing={externalImport.previewing}
+            importing={externalImport.importing}
+            summary={externalImport.summary}
+            mappingDrafts={externalImport.mappingDrafts}
+            selectedMetrics={externalImport.selectedMetrics}
+            metricOverrides={externalImport.metricOverrides}
+            createExternalModelIds={externalImport.createExternalModelIds}
+            searchQuery={externalImport.searchQuery}
+            setSearchQuery={externalImport.setSearchQuery}
+            statusFilter={externalImport.statusFilter}
+            setStatusFilter={externalImport.setStatusFilter}
+            dirtyMappingCount={externalImport.dirtyMappingCount}
+            configDirty={externalImport.configDirty}
+            onLoadSnapshot={externalImport.loadSnapshot}
+            onUpdateMappingDraft={externalImport.updateMappingDraft}
+            onDiscardMappingDrafts={externalImport.discardMappingDrafts}
+            onToggleMetric={externalImport.toggleMetric}
+            onSetAllMetrics={externalImport.setAllMetrics}
+            onUpdateMetricOverride={externalImport.updateMetricOverride}
+            onToggleCreateModel={externalImport.toggleCreateModel}
+            onSaveMappings={externalImport.saveMappings}
+            onSaveConfig={externalImport.saveConfig}
+            onPreviewImport={externalImport.previewImport}
+            onRunImport={externalImport.runImport}
           />
         ) : null}
 

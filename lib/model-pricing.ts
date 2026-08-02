@@ -7,7 +7,7 @@ import { normalizeProviderConfig } from "@/lib/provider-config";
 import { createVersionedCacheStore, invalidateVersionedCacheStore, withVersionedCache } from "@/lib/server-cache";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
-const MODELS_DEV_FETCH_TIMEOUT_MS = 10_000;
+const MODELS_DEV_FETCH_TIMEOUT_MS = 20_000;
 const MODELS_DEV_MAX_BYTES = 8 * 1024 * 1024;
 const MODELS_DEV_SOURCE = "models.dev";
 const MODEL_PRICING_VERSION_PROBE_TTL_MS = 5_000;

@@ -50,6 +50,13 @@
       "when": 1785456000000,
       "tag": "0006_model_params",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785974400000,
+      "tag": "0007_external_model_mappings",
+      "breakpoints": true
     }
   ]
 }
