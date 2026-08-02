@@ -17,14 +17,24 @@
 export const MIN_PARAMS_B = 0.001;
 export const MAX_PARAMS_B = 100_000;
 
-/** 总参数量：`120B`、`E4B`（E 前缀表示估算，沿用 extractModelScaleToken 的约定） */
-const TOTAL_PARAMS_PATTERN = /\b(E?)(\d+(?:\.\d+)?)B\b/gi;
+/** 1T = 1000B；建议与落库统一用 B，避免前后台单位分裂 */
+const TRILLION_TO_BILLION = 1000;
 
-/** 激活参数量：`A22B`（MoE 命名惯例，如 Qwen3-235B-A22B） */
-const ACTIVATED_PARAMS_PATTERN = /\bA(\d+(?:\.\d+)?)B\b/i;
+/** 总参数量：`120B`、`1T`、`E4B`（E 前缀表示估算，沿用 extractModelScaleToken 的约定） */
+const TOTAL_PARAMS_PATTERN = /\b(E?)(\d+(?:\.\d+)?)([BT])\b/gi;
+
+/** 激活参数量：`A22B` / `A1T`（MoE 命名惯例，如 Qwen3-235B-A22B） */
+const ACTIVATED_PARAMS_PATTERN = /\bA(\d+(?:\.\d+)?)([BT])\b/i;
 
 /** 专家数 x 单专家规模：`8x22B`，总参数量不等于两者相乘，无法直接推断 */
-const EXPERT_LAYOUT_PATTERN = /\b(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)B\b/i;
+const EXPERT_LAYOUT_PATTERN = /\b(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)([BT])\b/i;
+
+/** 把名字里的 B/T 统一换算成 B（十亿） */
+function toParamsInBillions(sizeText: string, unit: string): number | null {
+  const value = toFiniteNumber(sizeText);
+  if (value === null) return null;
+  return unit.toUpperCase() === "T" ? value * TRILLION_TO_BILLION : value;
+}
 
 export type ParsedModelParams = {
   totalParamsB: number | null;
@@ -39,7 +49,7 @@ function toFiniteNumber(input: string): number | null {
 }
 
 /**
- * 取名字里最大的 `NNB` 作为总参数量。
+ * 取名字里最大的 `NNB` / `NNT`（换算为 B 后比较）作为总参数量。
  *
  * `A22B` 天然不会被 TOTAL_PARAMS_PATTERN 命中（`A` 与 `2` 之间没有单词边界），
  * 所以不需要先剔除激活标记。
@@ -48,8 +58,8 @@ function extractTotalParams(modelName: string): { value: number; isEstimated: bo
   let best: { value: number; isEstimated: boolean } | null = null;
 
   for (const match of modelName.matchAll(TOTAL_PARAMS_PATTERN)) {
-    const [, estimatePrefix, sizeText] = match;
-    const value = toFiniteNumber(sizeText);
+    const [, estimatePrefix, sizeText, unit] = match;
+    const value = toParamsInBillions(sizeText, unit);
     if (value === null) continue;
 
     if (!best || value > best.value) {
@@ -79,7 +89,9 @@ export function parseModelParamsFromName(modelName: string): ParsedModelParams |
   if (!total) return null;
 
   const activatedMatch = name.match(ACTIVATED_PARAMS_PATTERN);
-  const activated = activatedMatch ? toFiniteNumber(activatedMatch[1]) : null;
+  const activated = activatedMatch
+    ? toParamsInBillions(activatedMatch[1], activatedMatch[2])
+    : null;
 
   // 激活参数量不可能大于总参数量，出现这种情况说明其中一个标记被误读，丢弃激活值
   const safeActivated = activated !== null && activated <= total.value ? activated : null;

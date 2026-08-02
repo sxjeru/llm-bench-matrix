@@ -67,6 +67,45 @@ describe("parseModelParamsFromName", () => {
     });
   });
 
+  test("T 单位换算为 B（1T = 1000B）", () => {
+    expect(parseModelParamsFromName("Kimi-K2.5-1T")).toEqual({
+      totalParamsB: 1000,
+      activatedParamsB: null,
+      isEstimated: false,
+      note: null
+    });
+
+    expect(parseModelParamsFromName("Giant-1.2T")).toEqual({
+      totalParamsB: 1200,
+      activatedParamsB: null,
+      isEstimated: false,
+      note: null
+    });
+
+    expect(parseModelParamsFromName("MoE-1T-A50B")).toEqual({
+      totalParamsB: 1000,
+      activatedParamsB: 50,
+      isEstimated: false,
+      note: null
+    });
+
+    expect(parseModelParamsFromName("MoE-2T-A0.1T")).toEqual({
+      totalParamsB: 2000,
+      activatedParamsB: 100,
+      isEstimated: false,
+      note: null
+    });
+  });
+
+  test("B 与 T 混写时按换算后的 B 取最大值", () => {
+    expect(parseModelParamsFromName("Hybrid-500B-1T")).toEqual({
+      totalParamsB: 1000,
+      activatedParamsB: null,
+      isEstimated: false,
+      note: null
+    });
+  });
+
   test("多个规模标记时取最大值作为总参数量", () => {
     expect(parseModelParamsFromName("Nemotron-3-Nano-30B-A3B")).toEqual({
       totalParamsB: 30,
