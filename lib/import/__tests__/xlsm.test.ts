@@ -95,6 +95,18 @@ describe("parseWorkbookBuffer", () => {
     expect(parsed.warnings).toHaveLength(0);
   });
 
+  test("两侧都是空占位的双值按无数据跳过", async () => {
+    const buffer = buildWorkbookBuffer([
+      ["Category", "Benchmark", "Model A", "Model B", "Model C", "Model D", "Model E"],
+      ["Business", "Pair Bench", "-/-", "--/--", "null/null", "na/na", "n/a / -"]
+    ]);
+
+    const parsed = await parseWorkbookBuffer(buffer, "Sheet1");
+
+    expect(parsed.records.filter((item) => item.benchmarkName === "Pair Bench")).toHaveLength(0);
+    expect(parsed.warnings).toHaveLength(0);
+  });
+
   test("支持首个双值段带星号格式", async () => {
     const buffer = buildWorkbookBuffer([
       ["Category", "Benchmark", "Model A"],

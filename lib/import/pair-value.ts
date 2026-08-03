@@ -170,6 +170,14 @@ export function composeImportPairValueRaw(pair: Pick<ParsedImportPairValue, "fir
   return `${pair.first} / ${pair.second}`;
 }
 
+/** `-/-`、`na / null` 这类两侧都是空占位的双值，等同于整格无数据。 */
+export function isEmptyImportPairValue(rawInput: string): boolean {
+  const pairValue = parseImportPairValue(rawInput);
+  if (!pairValue) return false;
+
+  return isImportValueEmptySegment(pairValue.first) && isImportValueEmptySegment(pairValue.second);
+}
+
 export function isStarMarkerOnly(input: string): boolean {
   return /^[*∗﹡✱✳✻]+$/.test(input.trim());
 }

@@ -136,6 +136,21 @@ describe("paper-table 文本解析", () => {
     expect(valueByModel.get("M5")).toBe("77.3");
   });
 
+  test("半空双值保留占位，两侧全空按无数据跳过", async () => {
+    const inputText = [
+      "Benchmark M1 M2 M3 M4",
+      "PairBench --/66.1 66.1/-- -/- na/null"
+    ].join("\n");
+
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const byModel = new Map(parsed.rows.map((row) => [row.modelName, row]));
+
+    expect(byModel.get("M1")?.valueRaw).toBe("-- / 66.1");
+    expect(byModel.get("M2")?.valueRaw).toBe("66.1 / --");
+    expect(byModel.has("M3")).toBe(false);
+    expect(byModel.has("M4")).toBe(false);
+  });
+
   test("成对值段内星号不会被解析为注释", async () => {
     const inputText = [
       "Benchmark M1 M2 M3 M4 M5",

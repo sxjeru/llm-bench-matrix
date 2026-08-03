@@ -14,7 +14,7 @@ import {
   IMPORT_VALUE_SINGLE_REGEX,
   isImportValueEmptyMarker
 } from "@/lib/import/value-patterns";
-import { composeImportPairValueRaw, parseImportPairValue } from "@/lib/import/pair-value";
+import { composeImportPairValueRaw, isEmptyImportPairValue, parseImportPairValue } from "@/lib/import/pair-value";
 import type { ParsedImportRecord } from "@/lib/import/xlsm";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 import type { ProviderConfig } from "@/lib/db/schema";
@@ -619,7 +619,9 @@ function parseBenchmarkNameAndDirection(rawBenchmarkName: string): {
 
 function isEmptyImportValue(rawInput: string | undefined): boolean {
   if (!rawInput) return true;
-  return isImportValueEmptyMarker(normalizeImportedValueRaw(rawInput));
+  const normalized = normalizeImportedValueRaw(rawInput);
+  // `-/-` 这类两侧都缺失的双值同样是无数据，与 xlsm 导入口径保持一致
+  return isImportValueEmptyMarker(normalized) || isEmptyImportPairValue(normalized);
 }
 
 function splitCommaSeparatedLine(line: string): string[] | null {

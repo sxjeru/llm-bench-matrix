@@ -1,4 +1,5 @@
 import { parseBenchmarkValue } from "@/lib/db/parse-value";
+import { isEmptyImportPairValue } from "@/lib/import/pair-value";
 import {
   IMPORT_VALUE_PAIR_REGEX,
   IMPORT_VALUE_RANK_PREFIX_REGEX,
@@ -249,7 +250,8 @@ export async function parseWorkbookBuffer(buffer: Buffer, sheetName?: string): P
       if (!modelName) continue;
 
       const rawValue = normalizeCell(row[modelIndex]);
-      if (isEmptyMarker(rawValue)) continue;
+      // `-/-` 这类两侧都缺失的双值与整格空值一样，属于无数据而非格式错误
+      if (isEmptyMarker(rawValue) || isEmptyImportPairValue(rawValue)) continue;
 
       const expandedCells = expandMetricLabeledCellValue(benchmarkName, rawValue) ?? [
         {

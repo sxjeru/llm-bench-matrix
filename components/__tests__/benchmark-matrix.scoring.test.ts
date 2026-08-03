@@ -35,4 +35,26 @@ describe("benchmark matrix value display", () => {
       hasCurrencySymbol: false
     });
   });
+
+  test("含斜杠的空占位不会被切分错位", () => {
+    expect(getMatrixCellDisplayValue(null, 66.1, "n/a / 66.10", null)).toBe("n/a / 66.1");
+    expect(getMatrixCellDisplayValue(66.1, null, "66.10 / n/a", null)).toBe("66.1 / n/a");
+    expect(getMatrixCellDisplayValue(null, 66.1, "NA / 66.1", null)).toBe("NA / 66.1");
+
+    expect(getMatrixCellPairDisplayParts(null, 66.1, "n/a / 66.10", null)).toEqual({
+      first: "n/a",
+      second: "66.1",
+      hasCurrencySymbol: false
+    });
+  });
+
+  test("非空占位的缺失侧不走 pair 展示，退回原始值", () => {
+    expect(getMatrixCellDisplayValue(null, 66.1, "TBD / 66.1", null)).toBe("TBD / 66.1");
+    expect(getMatrixCellPairDisplayParts(null, 66.1, "TBD / 66.1", null)).toBeNull();
+  });
+
+  test("两侧都无数值时不走 pair 展示", () => {
+    expect(getMatrixCellPairDisplayParts(null, null, "- / -", null)).toBeNull();
+    expect(getMatrixCellDisplayValue(null, null, "- / -", null)).toBe("- / -");
+  });
 });

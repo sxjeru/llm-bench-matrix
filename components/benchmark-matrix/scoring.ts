@@ -1,6 +1,7 @@
 import { LOWER_IS_BETTER_ASR_TYPE_REGEX, LOWER_IS_BETTER_RULES } from "./constants";
 import type { MatrixRow, OverallScoreDisplayItem } from "./types";
 import { formatValueNumForDisplay } from "./formatters";
+import { isImportValueEmptySegment } from "@/lib/import/value-patterns";
 
 function isFleursZhTranslationBenchmark(benchmarkName: string): boolean {
   if (!/fleurs/i.test(benchmarkName)) return false;
@@ -171,9 +172,13 @@ export type MatrixCellPairDisplayParts = {
 const DISPLAY_NUMERIC_TOKEN_REGEX =
   /^\s*((?:[#＃]\s*)?(?:[$¥€£]\s*)?)([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/;
 const STAR_MARKER_REGEX = /[*∗﹡✱✳✻]/;
+const CANONICAL_PAIR_SEPARATOR = " / ";
 
 function splitRawPairValue(raw: string): [string, string] | null {
-  const slashIndex = raw.indexOf("/");
+  // 优先按 composeImportPairValueRaw 产出的 " / " 切分，
+  // 否则首个 `/` 会把 `n/a` 这类占位符从中间切开
+  const canonicalIndex = raw.indexOf(CANONICAL_PAIR_SEPARATOR);
+  const slashIndex = canonicalIndex >= 0 ? canonicalIndex + 1 : raw.indexOf("/");
   if (slashIndex < 0) return null;
 
   const first = raw.slice(0, slashIndex).trim();
@@ -252,10 +257,10 @@ function formatPairSegmentOrEmpty(
   const numericSegment = formatPairSegment(rawSegment, valueNum, valueNote, isLastSegment);
   if (numericSegment) return numericSegment;
 
-  // 半空双值：缺失侧保留空占位，有值侧仍走数值归一化
+  // 半空双值：缺失侧原样保留空占位（-- / n/a 等），有值侧仍走数值归一化
   if (valueNum !== null) return null;
   const placeholder = rawSegment?.trim();
-  if (!placeholder) return null;
+  if (!placeholder || !isImportValueEmptySegment(placeholder)) return null;
 
   return {
     text: placeholder,
