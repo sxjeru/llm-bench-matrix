@@ -290,7 +290,7 @@ export function getMatrixGroupingKey(
 export function normalizeModalityName(input: string): string {
   const normalized = input.trim().toLowerCase();
   if (!normalized) return "Text";
-  if (normalized.includes("vision") || normalized.includes("vlm")) return "Vision";
+  if (normalized.includes("vision") || normalized.includes("visual") || normalized.includes("vlm")) return "Vision";
   if (normalized.includes("audio")) return "Audio";
   if (normalized.includes("video")) return "Video";
   if (normalized.includes("multimodal") || normalized.includes("multi-modal") || normalized.includes("多模态")) {

@@ -3,7 +3,7 @@ import { MULTIMODAL_HINT_PATTERN } from "../constants";
 export function normalizeModalityName(input: string): string {
   const normalized = input.trim().toLowerCase();
   if (!normalized) return "Text";
-  if (normalized.includes("vision") || normalized.includes("vlm")) return "Vision";
+  if (normalized.includes("vision") || normalized.includes("visual") || normalized.includes("vlm")) return "Vision";
   if (normalized.includes("audio")) return "Audio";
   if (normalized.includes("video")) return "Video";
   if (MULTIMODAL_HINT_PATTERN.test(normalized)) return "Multimodal";

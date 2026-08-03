@@ -337,6 +337,21 @@ describe("paper-table 文本解析", () => {
     expect(sceneRows.every((row) => row.modalities.includes("Vision"))).toBe(true);
   });
 
+  test("visual 关键词可识别为 Vision 模态", async () => {
+    const inputText = [
+      "Benchmark M1 M2",
+      "Visual Reasoning",
+      "ChartQA 80 81"
+    ].join("\n");
+
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    const chartRows = parsed.rows.filter((row) => row.benchmarkName === "ChartQA");
+
+    expect(chartRows.length).toBeGreaterThan(0);
+    expect(new Set(chartRows.map((row) => row.benchmarkType))).toEqual(new Set(["Visual Reasoning"]));
+    expect(chartRows.every((row) => row.modalities.includes("Vision"))).toBe(true);
+  });
+
   test("Fleurs 只要含双向标记就不再默认 low-is-better", async () => {
     const inputText = [
       "Benchmark\tM1",

@@ -148,6 +148,7 @@ const PAPER_HEADER_CONTINUATION_TOKENS = new Set([
 const PAPER_MODALITY_HINT_TOKENS = new Set([
   "text",
   "vision",
+  "visual",
   "vlm",
   "audio",
   "video",
@@ -1945,7 +1946,7 @@ function inferModalitiesFromCategory(category: string | null): string[] {
   if (!category) return ["Text"];
   const normalized = category.toLowerCase();
 
-  if (normalized.includes("vision") || normalized.includes("vlm")) return ["Vision"];
+  if (normalized.includes("vision") || normalized.includes("visual") || normalized.includes("vlm")) return ["Vision"];
   if (normalized.includes("audio")) return ["Audio"];
   if (normalized.includes("video")) return ["Video"];
   if (isMultimodalHint(normalized)) return ["Multimodal"];
@@ -4626,7 +4627,7 @@ function parseStructuredCsvRows(inputText: string, defaultSource: string | null)
 function inferTypeFromPreambleLine(line: string): string | null {
   const normalized = line.trim().toLowerCase();
   if (!normalized) return null;
-  if (normalized.includes("vision") || normalized.includes("vlm")) return "Vision";
+  if (normalized.includes("vision") || normalized.includes("visual") || normalized.includes("vlm")) return "Vision";
   if (normalized.includes("audio")) return "Audio";
   if (normalized.includes("video")) return "Video";
   if (isMultimodalHint(normalized)) return "Multimodal";
