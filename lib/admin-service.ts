@@ -22,6 +22,12 @@ import { invalidateAllCaches, registerCacheInvalidator } from "@/lib/db/queries"
 import { createVersionedCacheStore, withVersionedCache, invalidateVersionedCacheStore } from "@/lib/server-cache";
 import { getCacheVersion } from "@/lib/cache-versions";
 import { isValidHexColor, normalizeProviderConfig, normalizeProviderConfigPrefix } from "@/lib/provider-config";
+import {
+  inferModalitiesFromCategory,
+  inferTypeFromPreambleLine,
+  normalizeModalityList,
+  PAPER_MODALITY_HINT_TOKENS
+} from "@/lib/modality";
 
 type EnsureBenchmarkInput = {
   benchmarkName: string;
@@ -122,7 +128,6 @@ const HTML_TABLE_TAG_REGEX = /<table[\s>]/i;
 const LOWER_IS_BETTER_BENCHMARK_RULES = [/omnidocbench\s*1\.5/i, /\b(?:r?mse)\b/i];
 const LOWER_IS_BETTER_ASR_TYPE_REGEX = /\basr\b/i;
 const OMNIDOCBENCH_15_MATCHER = /omnidocbench\s*1\.5/i;
-const MULTIMODAL_HINT_PATTERN = /(\bmultimodal(?:ity)?\b|\bmulti[\s-_]?modal(?:ity)?\b|多模态)/i;
 const PAPER_TABLE_VALUE_TOKEN_REGEX = /^(?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[%％])?(?:[*^][0-9A-Za-z]*)?$/;
 const PAPER_HEADER_CONTINUATION_TOKENS = new Set([
   "high",
@@ -144,24 +149,6 @@ const PAPER_HEADER_CONTINUATION_TOKENS = new Set([
   "exp",
   "experimental",
   "default"
-]);
-const PAPER_MODALITY_HINT_TOKENS = new Set([
-  "text",
-  "vision",
-  "visual",
-  "vlm",
-  "audio",
-  "video",
-  "multimodal",
-  "multimodality",
-  "multi",
-  "modal",
-  "视觉",
-  "语音",
-  "音频",
-  "视频",
-  "多模态",
-  "文本"
 ]);
 const PAPER_HEADER_NOISE_TOKENS = new Set([
   "evaluation",
@@ -388,10 +375,6 @@ function normalizeStoredBenchmarkValue(benchmarkName: string, parsed: ParsedBenc
     valueNum2: normalizedNum2,
     valueNote: normalizedNote
   };
-}
-
-function isMultimodalHint(input: string): boolean {
-  return MULTIMODAL_HINT_PATTERN.test(input);
 }
 
 function normalizeImportedValueRaw(rawInput: string): string {
@@ -1451,27 +1434,7 @@ function looksLikeStructuredCsv(firstLine: string): boolean {
 }
 
 function normalizeModalities(modalities?: string[]): string[] {
-  if (!modalities || modalities.length === 0) return ["Text"];
-
-  const normalized = modalities
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .map((item) => item[0].toUpperCase() + item.slice(1).toLowerCase());
-
-  const unique = normalized.length > 0 ? Array.from(new Set(normalized)) : ["Text"];
-  const withoutText = unique.some((item) => item !== "Text")
-    ? unique.filter((item) => item !== "Text")
-    : unique;
-
-  const withoutVision = withoutText.includes("Video")
-    ? withoutText.filter((item) => item !== "Vision")
-    : withoutText;
-
-  if (withoutVision.length === 0) {
-    return ["Text"];
-  }
-
-  return withoutVision;
+  return normalizeModalityList(modalities);
 }
 
 function parseBoolean(input: string | undefined, fallback = true): boolean {
@@ -1940,18 +1903,6 @@ export async function deleteProviderAndTransferModels(
     transferTargetProviderId: deletedResult.transferTargetProviderId,
     transferredModelCount: deletedResult.transferredModelCount
   };
-}
-
-function inferModalitiesFromCategory(category: string | null): string[] {
-  if (!category) return ["Text"];
-  const normalized = category.toLowerCase();
-
-  if (normalized.includes("vision") || normalized.includes("visual") || normalized.includes("vlm")) return ["Vision"];
-  if (normalized.includes("audio")) return ["Audio"];
-  if (normalized.includes("video")) return ["Video"];
-  if (isMultimodalHint(normalized)) return ["Multimodal"];
-
-  return ["Text"];
 }
 
 function isMatrixTypeMarker(label: string): boolean {
@@ -4622,16 +4573,6 @@ function parseStructuredCsvRows(inputText: string, defaultSource: string | null)
     rows,
     skipped
   };
-}
-
-function inferTypeFromPreambleLine(line: string): string | null {
-  const normalized = line.trim().toLowerCase();
-  if (!normalized) return null;
-  if (normalized.includes("vision") || normalized.includes("visual") || normalized.includes("vlm")) return "Vision";
-  if (normalized.includes("audio")) return "Audio";
-  if (normalized.includes("video")) return "Video";
-  if (isMultimodalHint(normalized)) return "Multimodal";
-  return null;
 }
 
 function looksLikeModelHeaderRow(cells: string[]): boolean {

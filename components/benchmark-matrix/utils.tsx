@@ -5,10 +5,16 @@ import {
   Video
 } from "lucide-react";
 import { isImportValueEmptyMarker } from "@/lib/import/value-patterns";
+import {
+  normalizeModalityList as normalizeModalityListShared,
+  normalizeModalityName
+} from "@/lib/modality";
 import type { CompareDirection, MatrixCellEntry, MatrixInputRow } from "./types";
 import { SOURCE_ALL, SOURCE_EMPTY } from "./constants";
 import { blendColor } from "./colors";
 import { getMatrixCellDisplayValue } from "./scoring";
+
+export { normalizeModalityName };
 
 type SourceValueDisplayItem = {
   displayValue: string;
@@ -287,35 +293,8 @@ export function getMatrixGroupingKey(
   return `merged::${duplicateKey}`;
 }
 
-export function normalizeModalityName(input: string): string {
-  const normalized = input.trim().toLowerCase();
-  if (!normalized) return "Text";
-  if (normalized.includes("vision") || normalized.includes("visual") || normalized.includes("vlm")) return "Vision";
-  if (normalized.includes("audio")) return "Audio";
-  if (normalized.includes("video")) return "Video";
-  if (normalized.includes("multimodal") || normalized.includes("multi-modal") || normalized.includes("多模态")) {
-    return "Multimodal";
-  }
-  return "Text";
-}
-
 export function normalizeModalityList(input: string[] | undefined, benchmarkType: string): string[] {
-  const source = input && input.length > 0 ? input : [benchmarkType];
-
-  const normalized = source
-    .map((item) => normalizeModalityName(item))
-    .filter(Boolean);
-
-  const unique = normalized.length > 0 ? Array.from(new Set(normalized)) : ["Text"];
-  const withoutText = unique.some((item) => item !== "Text")
-    ? unique.filter((item) => item !== "Text")
-    : unique;
-
-  const withoutVision = withoutText.includes("Video")
-    ? withoutText.filter((item) => item !== "Vision")
-    : withoutText;
-
-  return withoutVision.length > 0 ? withoutVision : ["Text"];
+  return normalizeModalityListShared(input, benchmarkType);
 }
 
 export function renderModalityBadge(modalityInput: string, key: string) {
