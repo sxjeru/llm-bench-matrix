@@ -55,4 +55,18 @@ describe("admin console import value helpers", () => {
       note: null
     });
   });
+
+  test("成对值支持半空占位段", () => {
+    expect(parsePairRawValue("-- / 66.1")).toEqual({
+      first: "--",
+      second: "66.1",
+      note: null
+    });
+    expect(parsePairRawValue("66.1 / --")).toEqual({
+      first: "66.1",
+      second: "--",
+      note: null
+    });
+    expect(composePairRawValue("--", "66.1")).toBe("-- / 66.1");
+  });
 });

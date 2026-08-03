@@ -9,7 +9,11 @@ import {
   toProviderSlug
 } from "@/lib/db/normalize";
 import { parseBenchmarkValue, type ParsedBenchmarkValue } from "@/lib/db/parse-value";
-import { IMPORT_VALUE_RANK_PREFIX_REGEX, IMPORT_VALUE_SINGLE_REGEX } from "@/lib/import/value-patterns";
+import {
+  IMPORT_VALUE_RANK_PREFIX_REGEX,
+  IMPORT_VALUE_SINGLE_REGEX,
+  isImportValueEmptyMarker
+} from "@/lib/import/value-patterns";
 import { composeImportPairValueRaw, parseImportPairValue } from "@/lib/import/pair-value";
 import type { ParsedImportRecord } from "@/lib/import/xlsm";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
@@ -114,7 +118,6 @@ type ProviderDeleteTransactionExecutor = {
 };
 type DbTransactionClient = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-const EMPTY_VALUE_MARKERS = new Set(["", "-", "--", "—", "na", "n/a", "null", "none"]);
 const HTML_TABLE_TAG_REGEX = /<table[\s>]/i;
 const LOWER_IS_BETTER_BENCHMARK_RULES = [/omnidocbench\s*1\.5/i, /\b(?:r?mse)\b/i];
 const LOWER_IS_BETTER_ASR_TYPE_REGEX = /\basr\b/i;
@@ -616,8 +619,7 @@ function parseBenchmarkNameAndDirection(rawBenchmarkName: string): {
 
 function isEmptyImportValue(rawInput: string | undefined): boolean {
   if (!rawInput) return true;
-  const normalized = normalizeImportedValueRaw(rawInput).toLowerCase();
-  return EMPTY_VALUE_MARKERS.has(normalized);
+  return isImportValueEmptyMarker(normalizeImportedValueRaw(rawInput));
 }
 
 function splitCommaSeparatedLine(line: string): string[] | null {
@@ -850,13 +852,17 @@ function isPaperTableValueToken(token: string): boolean {
       .map((item) => item.trim())
       .filter(Boolean);
 
-    if (pairParts.length === 2 && pairParts.every((part) => isPaperTableNumericToken(part))) {
+    if (
+      pairParts.length === 2
+      && pairParts.every((part) => isPaperTableNumericToken(part) || isImportValueEmptyMarker(part))
+      && pairParts.some((part) => isPaperTableNumericToken(part))
+    ) {
       return true;
     }
   }
 
-  const lower = normalizeImportedValueRaw(withoutUnsupportedSymbols).toLowerCase();
-  return EMPTY_VALUE_MARKERS.has(lower);
+  const lower = normalizeImportedValueRaw(withoutUnsupportedSymbols);
+  return isImportValueEmptyMarker(lower);
 }
 
 function splitPaperTableTokens(line: string): string[] {

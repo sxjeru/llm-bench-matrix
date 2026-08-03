@@ -30,6 +30,31 @@ describe("parseBenchmarkValue currency", () => {
     expect(parsed.valueNote).toBeNull();
   });
 
+  test("支持 -- / 66.1 这类半空双值格式", () => {
+    const leftEmpty = parseBenchmarkValue("-- / 66.1");
+    const rightEmpty = parseBenchmarkValue("66.1 / --");
+    const dashEmpty = parseBenchmarkValue("- / 66.1");
+    const noneEmpty = parseBenchmarkValue("none / 66.1");
+
+    expect(leftEmpty.valueRaw).toBe("-- / 66.1");
+    expect(leftEmpty.valueNum).toBeNull();
+    expect(leftEmpty.valueNum2).toBeCloseTo(66.1);
+    expect(leftEmpty.valueNote).toBeNull();
+
+    expect(rightEmpty.valueRaw).toBe("66.1 / --");
+    expect(rightEmpty.valueNum).toBeCloseTo(66.1);
+    expect(rightEmpty.valueNum2).toBeNull();
+    expect(rightEmpty.valueNote).toBeNull();
+
+    expect(dashEmpty.valueRaw).toBe("- / 66.1");
+    expect(dashEmpty.valueNum).toBeNull();
+    expect(dashEmpty.valueNum2).toBeCloseTo(66.1);
+
+    expect(noneEmpty.valueRaw).toBe("none / 66.1");
+    expect(noneEmpty.valueNum).toBeNull();
+    expect(noneEmpty.valueNum2).toBeCloseTo(66.1);
+  });
+
   test("支持首个双值段带星号格式", () => {
     const parsed = parseBenchmarkValue("91*/83");
 

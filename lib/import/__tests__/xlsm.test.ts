@@ -67,6 +67,34 @@ describe("parseWorkbookBuffer", () => {
     expect(parsed.warnings).toHaveLength(0);
   });
 
+  test("支持 -- / 66.1 这类半空双值格式", async () => {
+    const buffer = buildWorkbookBuffer([
+      ["Category", "Benchmark", "Model A", "Model B"],
+      ["Business", "Pair Bench", "-- / 66.1", "66.1 / --"]
+    ]);
+
+    const parsed = await parseWorkbookBuffer(buffer, "Sheet1");
+    const modelA = parsed.records.find(
+      (item) => item.benchmarkName === "Pair Bench" && item.modelName === "Model A"
+    );
+    const modelB = parsed.records.find(
+      (item) => item.benchmarkName === "Pair Bench" && item.modelName === "Model B"
+    );
+
+    expect(modelA).toBeDefined();
+    expect(modelA?.valid).toBe(true);
+    expect(modelA?.rawValue).toBe("-- / 66.1");
+    expect(modelA?.valueNum).toBeNull();
+    expect(modelA?.valueNum2).toBeCloseTo(66.1);
+
+    expect(modelB).toBeDefined();
+    expect(modelB?.valid).toBe(true);
+    expect(modelB?.rawValue).toBe("66.1 / --");
+    expect(modelB?.valueNum).toBeCloseTo(66.1);
+    expect(modelB?.valueNum2).toBeNull();
+    expect(parsed.warnings).toHaveLength(0);
+  });
+
   test("支持首个双值段带星号格式", async () => {
     const buffer = buildWorkbookBuffer([
       ["Category", "Benchmark", "Model A"],

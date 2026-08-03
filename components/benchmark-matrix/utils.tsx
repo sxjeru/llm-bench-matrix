@@ -4,6 +4,7 @@ import {
   Layers,
   Video
 } from "lucide-react";
+import { isImportValueEmptyMarker } from "@/lib/import/value-patterns";
 import type { CompareDirection, MatrixCellEntry, MatrixInputRow } from "./types";
 import { SOURCE_ALL, SOURCE_EMPTY } from "./constants";
 import { blendColor } from "./colors";
@@ -368,10 +369,10 @@ export function normalizeMatchToken(input: string): string {
 }
 
 export function hasMeaningfulMatrixRawValue(rawValue: string): boolean {
-  const normalized = rawValue.trim().toLowerCase();
+  const normalized = rawValue.trim();
   if (!normalized) return false;
 
-  return !new Set(["-", "--", "—", "na", "n/a", "null", "none"]).has(normalized);
+  return !isImportValueEmptyMarker(normalized);
 }
 
 export function getMatrixCellValueIdentity(entry: MatrixCellEntry): string {

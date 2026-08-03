@@ -243,6 +243,26 @@ function formatPairSegment(
   };
 }
 
+function formatPairSegmentOrEmpty(
+  rawSegment: string | null,
+  valueNum: number | null,
+  valueNote: string | null,
+  isLastSegment: boolean
+): { text: string; hasCurrencySymbol: boolean } | null {
+  const numericSegment = formatPairSegment(rawSegment, valueNum, valueNote, isLastSegment);
+  if (numericSegment) return numericSegment;
+
+  // 半空双值：缺失侧保留空占位，有值侧仍走数值归一化
+  if (valueNum !== null) return null;
+  const placeholder = rawSegment?.trim();
+  if (!placeholder) return null;
+
+  return {
+    text: placeholder,
+    hasCurrencySymbol: false
+  };
+}
+
 export function getMatrixCellPairDisplayParts(
   valueNum: number | null,
   valueNum2: number | null,
@@ -251,11 +271,14 @@ export function getMatrixCellPairDisplayParts(
 ): MatrixCellPairDisplayParts | null {
   const firstNumeric = formatValueNumForDisplay(valueNum);
   const secondNumeric = formatValueNumForDisplay(valueNum2);
-  if (firstNumeric === null || secondNumeric === null) return null;
+  // 双值全有或半空都可展示；两侧都无数值时不走 pair 路径
+  if (firstNumeric === null && secondNumeric === null) return null;
 
   const rawPair = splitRawPairValue(rawValue.trim());
-  const firstSegment = formatPairSegment(rawPair?.[0] ?? null, valueNum, valueNote, false);
-  const secondSegment = formatPairSegment(rawPair?.[1] ?? null, valueNum2, valueNote, true);
+  if (!rawPair) return null;
+
+  const firstSegment = formatPairSegmentOrEmpty(rawPair[0], valueNum, valueNote, false);
+  const secondSegment = formatPairSegmentOrEmpty(rawPair[1], valueNum2, valueNote, true);
   if (!firstSegment || !secondSegment) return null;
 
   return {

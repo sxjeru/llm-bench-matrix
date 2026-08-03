@@ -1,4 +1,8 @@
-import { IMPORT_VALUE_PAIR_REGEX, IMPORT_VALUE_SINGLE_REGEX } from "@/lib/import/value-patterns";
+import {
+  IMPORT_VALUE_PAIR_REGEX,
+  IMPORT_VALUE_SINGLE_REGEX,
+  isImportValueEmptySegment
+} from "@/lib/import/value-patterns";
 
 export type ParsedImportPairValue = {
   first: string;
@@ -73,7 +77,15 @@ function normalizeMarkerSuffix(markerRaw: string, suffixRaw: string): {
 }
 
 function normalizePairSegment(rawSegment: string): NormalizedPairSegment | null {
-  const singleMatch = rawSegment.trim().match(IMPORT_VALUE_SINGLE_REGEX);
+  const trimmed = rawSegment.trim();
+  if (isImportValueEmptySegment(trimmed)) {
+    return {
+      value: trimmed,
+      note: null
+    };
+  }
+
+  const singleMatch = trimmed.match(IMPORT_VALUE_SINGLE_REGEX);
   if (!singleMatch) return null;
 
   const [, numericPart, tailRaw] = singleMatch;

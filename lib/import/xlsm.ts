@@ -1,7 +1,11 @@
 import { parseBenchmarkValue } from "@/lib/db/parse-value";
-import { IMPORT_VALUE_PAIR_REGEX, IMPORT_VALUE_RANK_PREFIX_REGEX, IMPORT_VALUE_SINGLE_REGEX } from "@/lib/import/value-patterns";
+import {
+  IMPORT_VALUE_PAIR_REGEX,
+  IMPORT_VALUE_RANK_PREFIX_REGEX,
+  IMPORT_VALUE_SINGLE_REGEX,
+  isImportValueEmptyMarker
+} from "@/lib/import/value-patterns";
 
-const EMPTY_MARKERS = new Set(["", "-", "--", "—", "–", "n/a", "na", "null"]);
 const CATEGORY_HEADERS = new Set(["category", "类别", "分类", "type", "group"]);
 const HYPHEN_VARIANT_REGEX = /[\-\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g;
 
@@ -138,8 +142,7 @@ function expandMetricLabeledCellValue(benchmarkName: string, rawValue: string): 
 }
 
 function isEmptyMarker(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  return EMPTY_MARKERS.has(normalized);
+  return isImportValueEmptyMarker(value);
 }
 
 function isValidRawValue(raw: string): boolean {

@@ -24,4 +24,15 @@ describe("benchmark matrix value display", () => {
   test("带空格的单位后缀仍由数值列控制简洁展示", () => {
     expect(getMatrixCellDisplayValue(95, null, "95 ms", null)).toBe("95");
   });
+
+  test("半空双值两侧都走数值归一化", () => {
+    expect(getMatrixCellDisplayValue(null, 66.1, "-- / 66.10", null)).toBe("-- / 66.1");
+    expect(getMatrixCellDisplayValue(66.1, null, "66.10 / --", null)).toBe("66.1 / --");
+
+    expect(getMatrixCellPairDisplayParts(null, 66.1, "-- / 66.10", null)).toEqual({
+      first: "--",
+      second: "66.1",
+      hasCurrencySymbol: false
+    });
+  });
 });
