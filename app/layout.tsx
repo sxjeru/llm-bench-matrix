@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Analytics } from "@vercel/analytics/next";
 import { TopbarActions } from "@/components/topbar-actions";
 import { UmamiAnalytics } from "@/components/umami-analytics";
+import { VercountPageview } from "@/components/vercount-pageview";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -73,7 +74,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </footer>
 
         {process.env.NEXT_PUBLIC_VERCOUNT_SCRIPT_URL && (
-          <script defer src={process.env.NEXT_PUBLIC_VERCOUNT_SCRIPT_URL} />
+          <>
+            <script defer src={process.env.NEXT_PUBLIC_VERCOUNT_SCRIPT_URL} />
+            <VercountPageview />
+          </>
         )}
         <Analytics />
         <UmamiAnalytics />

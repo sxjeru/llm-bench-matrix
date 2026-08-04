@@ -667,7 +667,7 @@ export function ModelScatter({
               已钉住 {highlightedModel} · 点击取消
             </button>
           ) : null}
-          {isZoomed ? (
+          {/* {isZoomed ? (
             <button
               type="button"
               className="scatter-btn scatter-note scatter-note-action"
@@ -677,7 +677,7 @@ export function ModelScatter({
             </button>
           ) : (
             <span className="scatter-note scatter-note-hint">拖拽平移 · 滚轮以光标为中心放大</span>
-          )}
+          )} */}
           {activeSource === SOURCE_ALL ? (
             <label className="scatter-note scatter-note-toggle">
               <input
