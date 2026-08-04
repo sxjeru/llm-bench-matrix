@@ -36,6 +36,7 @@ import { normalizeMatchToken, sourceTabDisplayLabel, enqueueStateUpdate } from "
 import { resolveProviderBrandColorForDarkTheme } from "@/lib/provider-config";
 import { ScatterChartHost } from "./model-scatter/chart-host";
 import {
+  SCATTER_ALWAYS_VISIBLE_BENCHMARK_TYPES,
   SCATTER_CHART_COMPACT_BREAKPOINT,
   SCATTER_CHART_FULLSCREEN_CHROME,
   SCATTER_CHART_HEIGHT,
@@ -252,7 +253,11 @@ export function ModelScatter({
   );
 
   const coveragePrunedRows = useMemo(
-    () => buildCoveragePrunedRows(activeSource, filteredRows, SHOW_DUPLICATE_ROWS, showLowCoverageRows),
+    () =>
+      buildCoveragePrunedRows(activeSource, filteredRows, SHOW_DUPLICATE_ROWS, showLowCoverageRows, {
+        // Cost / Performance 作为散点常用轴，始终保留在下拉里
+        alwaysKeepBenchmarkTypes: SCATTER_ALWAYS_VISIBLE_BENCHMARK_TYPES
+      }),
     [activeSource, filteredRows, showLowCoverageRows]
   );
 

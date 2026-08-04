@@ -36,12 +36,17 @@ export const SYNTHETIC_METRIC_SLUGS: Readonly<Record<string, string>> = {
   [PARAMS_ACTIVE_RATIO_ROW_KEY]: "params-activated"
 };
 
-/** 轴选择器与图例的分类排序：总评 → 模型属性 → 价格 → 其余按字母 */
+/** 轴选择器与图例的分类排序：总评 → 模型属性 → 价格 → Cost/Performance → 其余按字母 */
 export const METRIC_CATEGORY_PRIORITY: Readonly<Record<string, number>> = {
   Summary: 0,
   "Model Info": 1,
-  Pricing: 2
+  Pricing: 2,
+  Cost: 3,
+  Performance: 4
 };
+
+/** 散点轴下拉里始终保留的 benchmark 分类（全匹配），不受「含低覆盖指标」裁剪 */
+export const SCATTER_ALWAYS_VISIBLE_BENCHMARK_TYPES = new Set(["Cost", "Performance"]);
 
 /**
  * 默认 X 轴偏好：先按 label 精确匹配 AA 任务成本，再回落到合成价格/参数量 key。

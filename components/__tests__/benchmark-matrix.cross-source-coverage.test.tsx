@@ -8,6 +8,8 @@ import {
   __resolveCaptureDimensionsForTest,
   BenchmarkMatrix
 } from "@/components/benchmark-matrix";
+import { SOURCE_ALL } from "@/components/benchmark-matrix/constants";
+import { buildCoveragePrunedRows } from "@/components/benchmark-matrix/selectors";
 
 const mockSearchParams = new URLSearchParams();
 
@@ -916,6 +918,78 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
 
     expect(screen.getByText("Latency")).toBeInTheDocument();
     expect(screen.getByText("Throughput")).toBeInTheDocument();
+  });
+
+  test("buildCoveragePrunedRows 可按 alwaysKeepBenchmarkTypes 始终保留 Cost / Performance", () => {
+    const highCoverage = ["Model A", "Model B", "Model C"].flatMap((modelName, index) =>
+      ["Bench-1", "Bench-2"].map((benchmarkName, benchIndex) => ({
+        providerName: "OpenAI",
+        modelName,
+        benchmarkName,
+        benchmarkType: "General",
+        benchmarkCanonicalKey: `${benchmarkName.toLowerCase()}:general`,
+        valueRaw: String(70 + index + benchIndex),
+        valueNum: 70 + index + benchIndex,
+        source: "text:S1"
+      }))
+    );
+
+    const alwaysKeepRows = [
+      {
+        providerName: "OpenAI",
+        modelName: "Model A",
+        benchmarkName: "Output Speed",
+        benchmarkType: "Performance",
+        benchmarkCanonicalKey: "output-speed:performance",
+        valueRaw: "120",
+        valueNum: 120,
+        source: "text:S1"
+      },
+      {
+        providerName: "OpenAI",
+        modelName: "Model A",
+        benchmarkName: "AA Intelligence Index Cost per Task",
+        benchmarkType: "Cost",
+        benchmarkCanonicalKey: "cost-per-task:cost",
+        valueRaw: "0.4",
+        valueNum: 0.4,
+        source: "text:S1"
+      },
+      // 仅 1/3 模型有值，覆盖率低于 40%，默认应被裁掉
+      {
+        providerName: "OpenAI",
+        modelName: "Model A",
+        benchmarkName: "Sparse Bench",
+        benchmarkType: "Reasoning",
+        benchmarkCanonicalKey: "sparse:reasoning",
+        valueRaw: "10",
+        valueNum: 10,
+        source: "text:S1"
+      }
+    ];
+
+    const filteredRows = [...highCoverage, ...alwaysKeepRows].map((row) => ({
+      ...row,
+      higherIsBetter: true,
+      modalities: ["Text"],
+      sourceBenchmarkType: null,
+      sourceModalities: null,
+      valueNum2: null,
+      valueNote: null,
+      benchTime: "2026-04-06T00:00:00.000Z",
+      updatedAt: "2026-04-06T00:00:00.000Z"
+    }));
+
+    const defaultPruned = buildCoveragePrunedRows(SOURCE_ALL, filteredRows, false, false);
+    expect(defaultPruned.some((row) => row.benchmarkType === "Performance")).toBe(false);
+    expect(defaultPruned.some((row) => row.benchmarkName === "Sparse Bench")).toBe(false);
+
+    const scatterPruned = buildCoveragePrunedRows(SOURCE_ALL, filteredRows, false, false, {
+      alwaysKeepBenchmarkTypes: new Set(["Cost", "Performance"])
+    });
+    expect(scatterPruned.some((row) => row.benchmarkType === "Performance")).toBe(true);
+    expect(scatterPruned.some((row) => row.benchmarkType === "Cost")).toBe(true);
+    expect(scatterPruned.some((row) => row.benchmarkName === "Sparse Bench")).toBe(false);
   });
 
   test("刷新到非全部 source 页签时，默认进入 source 导入顺序模式", async () => {

@@ -282,13 +282,43 @@ describe("buildScatterMetrics", () => {
     expect(build().some((metric) => metric.label === "Cache Input Price")).toBe(true);
   });
 
-  test("排序为 总评 → 模型属性 → 价格 → 其余分类", () => {
-    const categories = build().map((metric) => metric.category);
+  test("排序为 总评 → 模型属性 → 价格 → Cost/Performance → 其余分类", () => {
+    const metrics = buildScatterMetrics({
+      benchmarkRows: [
+        ...benchmarkRows,
+        createBenchmarkRow(
+          {
+            rowKey: "merged::cost-per-task",
+            benchmark: "AA Intelligence Index Cost per Task",
+            category: "Cost"
+          },
+          { Alpha: 0.4 }
+        ),
+        createBenchmarkRow(
+          {
+            rowKey: "merged::output-speed",
+            benchmark: "Output Speed",
+            category: "Performance"
+          },
+          { Alpha: 120 }
+        )
+      ],
+      priceRows: buildPriceMatrixRows(modelColumns, modelPrices),
+      paramsRows: buildParamsMatrixRows(modelColumns, modelParams),
+      overallScoreByModel: new Map([
+        ["Alpha", 82],
+        ["Beta", 60],
+        ["Gamma", 41]
+      ])
+    });
+    const categories = metrics.map((metric) => metric.category);
     const firstIndexOf = (category: string) => categories.indexOf(category);
 
     expect(firstIndexOf("Summary")).toBe(0);
     expect(firstIndexOf(MODEL_INFO_CATEGORY_LABEL)).toBeLessThan(firstIndexOf(PRICE_CATEGORY_LABEL));
-    expect(firstIndexOf(PRICE_CATEGORY_LABEL)).toBeLessThan(firstIndexOf("Math"));
+    expect(firstIndexOf(PRICE_CATEGORY_LABEL)).toBeLessThan(firstIndexOf("Cost"));
+    expect(firstIndexOf("Cost")).toBeLessThan(firstIndexOf("Performance"));
+    expect(firstIndexOf("Performance")).toBeLessThan(firstIndexOf("Math"));
   });
 
   test("指标 key 唯一", () => {

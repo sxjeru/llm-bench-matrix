@@ -214,6 +214,78 @@ describe("ModelScatter", () => {
     expect(groups).toContain("Model Info");
   });
 
+  test("Cost / Performance 分类排在价格之后、普通评测之前", () => {
+    const extraRows = [
+      {
+        recordId: 1001,
+        providerName: "OpenAI",
+        providerDisplayName: "OpenAI",
+        providerBrandColor: null,
+        modelName: "Alpha",
+        benchmarkName: "AA Intelligence Index Cost per Task",
+        benchmarkType: "Cost",
+        sourceBenchmarkType: null,
+        higherIsBetter: false,
+        benchmarkCanonicalKey: "cost-per-task",
+        modalities: ["Text"],
+        sourceModalities: null,
+        benchTime: "2026-04-06T00:00:00.000Z",
+        valueRaw: "0.4",
+        valueNum: 0.4,
+        valueNum2: null,
+        valueNote: null,
+        source: "text:demo",
+        updatedAt: "2026-04-06T00:00:00.000Z"
+      },
+      {
+        recordId: 1002,
+        providerName: "OpenAI",
+        providerDisplayName: "OpenAI",
+        providerBrandColor: null,
+        modelName: "Alpha",
+        benchmarkName: "Output Speed",
+        benchmarkType: "Performance",
+        sourceBenchmarkType: null,
+        higherIsBetter: true,
+        benchmarkCanonicalKey: "output-speed",
+        modalities: ["Text"],
+        sourceModalities: null,
+        benchTime: "2026-04-06T00:00:00.000Z",
+        valueRaw: "120",
+        valueNum: 120,
+        valueNum2: null,
+        valueNote: null,
+        source: "text:demo",
+        updatedAt: "2026-04-06T00:00:00.000Z"
+      }
+    ];
+
+    const { container } = render(
+      <ModelScatter
+        rows={[...rows, ...extraRows]}
+        allRows={[...rows, ...extraRows]}
+        sourceOptions={["text:demo"]}
+        modelPrices={modelPrices}
+        modelParams={modelParams}
+      />
+    );
+
+    fireEvent.focus(axisInput(container, "x"));
+    const groups = Array.from(container.querySelectorAll(".scatter-combobox-group")).map(
+      (node) => node.textContent ?? ""
+    );
+
+    const pricingIndex = groups.indexOf("Pricing");
+    const costIndex = groups.indexOf("Cost");
+    const performanceIndex = groups.indexOf("Performance");
+    const codingIndex = groups.indexOf("Coding");
+
+    expect(pricingIndex).toBeGreaterThanOrEqual(0);
+    expect(costIndex).toBeGreaterThan(pricingIndex);
+    expect(performanceIndex).toBeGreaterThan(costIndex);
+    expect(codingIndex).toBeGreaterThan(performanceIndex);
+  });
+
   test("方向提示随指标切换", () => {
     const { container } = renderScatter();
 

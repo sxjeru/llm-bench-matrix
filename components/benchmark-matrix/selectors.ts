@@ -472,26 +472,75 @@ export function buildFilteredRows(
   return result;
 }
 
+export type BuildCoveragePrunedRowsOptions = {
+  /**
+   * 始终保留的 benchmarkType（全匹配）。
+   * 这些行不参与「默认隐藏 Performance」规则，裁剪后也会补回，
+   * 供散点轴下拉等场景在关闭「含低覆盖」时仍能选到 Cost / Performance。
+   */
+  alwaysKeepBenchmarkTypes?: ReadonlySet<string>;
+};
+
+function rowIdentityKey(row: MatrixInputRow, showDuplicateRows: boolean): string {
+  return `${getMatrixGroupingKey(row, showDuplicateRows)}::${row.modelName}`;
+}
+
+function mergeAlwaysKeepBenchmarkRows(
+  prunedRows: MatrixInputRow[],
+  filteredRows: MatrixInputRow[],
+  showDuplicateRows: boolean,
+  alwaysKeepBenchmarkTypes: ReadonlySet<string> | undefined
+): MatrixInputRow[] {
+  if (!alwaysKeepBenchmarkTypes || alwaysKeepBenchmarkTypes.size === 0) {
+    return prunedRows;
+  }
+
+  const present = new Set(prunedRows.map((row) => rowIdentityKey(row, showDuplicateRows)));
+  const extras = filteredRows.filter((row) => {
+    if (!alwaysKeepBenchmarkTypes.has(row.benchmarkType)) return false;
+    return !present.has(rowIdentityKey(row, showDuplicateRows));
+  });
+
+  return extras.length > 0 ? [...prunedRows, ...extras] : prunedRows;
+}
+
 export function buildCoveragePrunedRows(
   activeSource: string,
   filteredRows: MatrixInputRow[],
   showDuplicateRows: boolean,
-  showLowCoverageRows: boolean
+  showLowCoverageRows: boolean,
+  options?: BuildCoveragePrunedRowsOptions
 ): MatrixInputRow[] {
+  const alwaysKeepBenchmarkTypes = options?.alwaysKeepBenchmarkTypes;
+
   if (activeSource !== SOURCE_ALL || showLowCoverageRows) {
     return filteredRows;
   }
 
-  // All 默认隐藏低覆盖时，同步隐藏分类精确为 Performance 的行
-  const eligibleRows = filteredRows.filter((row) => row.benchmarkType !== "Performance");
+  // All 默认隐藏低覆盖时，同步隐藏分类精确为 Performance 的行；
+  // alwaysKeep 的类型不参与覆盖率裁剪，最后再并回结果。
+  const eligibleRows = filteredRows.filter((row) => {
+    if (alwaysKeepBenchmarkTypes?.has(row.benchmarkType)) return false;
+    return row.benchmarkType !== "Performance";
+  });
 
   if (eligibleRows.length === 0) {
-    return eligibleRows;
+    return mergeAlwaysKeepBenchmarkRows(
+      eligibleRows,
+      filteredRows,
+      showDuplicateRows,
+      alwaysKeepBenchmarkTypes
+    );
   }
 
   const candidateModels = Array.from(new Set(eligibleRows.map((row) => row.modelName)));
   if (candidateModels.length === 0) {
-    return eligibleRows;
+    return mergeAlwaysKeepBenchmarkRows(
+      eligibleRows,
+      filteredRows,
+      showDuplicateRows,
+      alwaysKeepBenchmarkTypes
+    );
   }
 
   const rowModelsWithValue = new Map<string, Set<string>>();
@@ -506,7 +555,12 @@ export function buildCoveragePrunedRows(
   });
 
   if (rowModelsWithValue.size === 0) {
-    return eligibleRows;
+    return mergeAlwaysKeepBenchmarkRows(
+      eligibleRows,
+      filteredRows,
+      showDuplicateRows,
+      alwaysKeepBenchmarkTypes
+    );
   }
 
   const firstPassRowKeys = new Set<string>();
@@ -518,7 +572,12 @@ export function buildCoveragePrunedRows(
   });
 
   if (firstPassRowKeys.size === 0) {
-    return eligibleRows;
+    return mergeAlwaysKeepBenchmarkRows(
+      eligibleRows,
+      filteredRows,
+      showDuplicateRows,
+      alwaysKeepBenchmarkTypes
+    );
   }
 
   const modelCoveredRowCount = new Map<string, number>();
@@ -540,7 +599,12 @@ export function buildCoveragePrunedRows(
   });
 
   if (keptModels.size === 0) {
-    return eligibleRows;
+    return mergeAlwaysKeepBenchmarkRows(
+      eligibleRows,
+      filteredRows,
+      showDuplicateRows,
+      alwaysKeepBenchmarkTypes
+    );
   }
 
   const secondPassRowKeys = new Set<string>();
@@ -559,7 +623,12 @@ export function buildCoveragePrunedRows(
   });
 
   if (secondPassRowKeys.size === 0) {
-    return eligibleRows;
+    return mergeAlwaysKeepBenchmarkRows(
+      eligibleRows,
+      filteredRows,
+      showDuplicateRows,
+      alwaysKeepBenchmarkTypes
+    );
   }
 
   const prunedRows = eligibleRows.filter((row) => {
@@ -568,7 +637,13 @@ export function buildCoveragePrunedRows(
     return secondPassRowKeys.has(matrixKey);
   });
 
-  return prunedRows.length > 0 ? prunedRows : eligibleRows;
+  const basePruned = prunedRows.length > 0 ? prunedRows : eligibleRows;
+  return mergeAlwaysKeepBenchmarkRows(
+    basePruned,
+    filteredRows,
+    showDuplicateRows,
+    alwaysKeepBenchmarkTypes
+  );
 }
 
 export function buildModelColumns(
