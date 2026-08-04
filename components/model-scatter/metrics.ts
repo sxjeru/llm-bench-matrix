@@ -9,6 +9,7 @@ import {
 import { getMatrixRowComparableScore } from "@/components/benchmark-matrix/scoring";
 import type { MatrixRow } from "@/components/benchmark-matrix/types";
 import {
+  AA_SUMMARY_INDEX_LABEL_REGEX,
   DEFAULT_X_METRIC_PREFERENCE,
   DEFAULT_Y_METRIC_PREFERENCE,
   LOG_SCALE_CATEGORIES,
@@ -97,14 +98,23 @@ function buildValueByModel(row: MatrixRow): Map<string, number> {
   return valueByModel;
 }
 
+function resolveScatterMetricCategory(row: Pick<MatrixRow, "benchmark" | "category">): string {
+  // AA 复合指数在下拉里并入 Summary，与 Overall Score 放一起
+  if (AA_SUMMARY_INDEX_LABEL_REGEX.test(row.benchmark.trim())) {
+    return SUMMARY_CATEGORY_LABEL;
+  }
+  return row.category;
+}
+
 export function toScatterMetric(row: MatrixRow): ScatterMetric {
   const unit = resolveMetricUnit(row);
+  const category = resolveScatterMetricCategory(row);
 
   return {
     key: toMetricSlug(row.rowKey),
     rowKey: row.rowKey,
     label: row.benchmark,
-    category: row.category,
+    category,
     kind: resolveMetricKind(row),
     higherIsBetter: isMetricHigherBetter(row),
     unit,

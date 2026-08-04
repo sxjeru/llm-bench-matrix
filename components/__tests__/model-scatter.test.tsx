@@ -214,14 +214,14 @@ describe("ModelScatter", () => {
     expect(groups).toContain("Model Info");
   });
 
-  test("Cost / Performance 分类排在价格之后、普通评测之前", () => {
-    const extraRows = [
+  test("Cost 排第二，Performance 在价格之后；AA Index 归入 Summary", () => {
+    const extraRows = MODEL_SPECS.flatMap((spec, index) => [
       {
-        recordId: 1001,
-        providerName: "OpenAI",
-        providerDisplayName: "OpenAI",
+        recordId: 1000 + index * 3,
+        providerName: spec.provider,
+        providerDisplayName: spec.provider,
         providerBrandColor: null,
-        modelName: "Alpha",
+        modelName: spec.modelName,
         benchmarkName: "AA Intelligence Index Cost per Task",
         benchmarkType: "Cost",
         sourceBenchmarkType: null,
@@ -230,19 +230,19 @@ describe("ModelScatter", () => {
         modalities: ["Text"],
         sourceModalities: null,
         benchTime: "2026-04-06T00:00:00.000Z",
-        valueRaw: "0.4",
-        valueNum: 0.4,
+        valueRaw: String(0.2 * (index + 1)),
+        valueNum: 0.2 * (index + 1),
         valueNum2: null,
         valueNote: null,
         source: "text:demo",
         updatedAt: "2026-04-06T00:00:00.000Z"
       },
       {
-        recordId: 1002,
-        providerName: "OpenAI",
-        providerDisplayName: "OpenAI",
+        recordId: 1001 + index * 3,
+        providerName: spec.provider,
+        providerDisplayName: spec.provider,
         providerBrandColor: null,
-        modelName: "Alpha",
+        modelName: spec.modelName,
         benchmarkName: "Output Speed",
         benchmarkType: "Performance",
         sourceBenchmarkType: null,
@@ -251,14 +251,35 @@ describe("ModelScatter", () => {
         modalities: ["Text"],
         sourceModalities: null,
         benchTime: "2026-04-06T00:00:00.000Z",
-        valueRaw: "120",
-        valueNum: 120,
+        valueRaw: String(100 + index * 10),
+        valueNum: 100 + index * 10,
+        valueNum2: null,
+        valueNote: null,
+        source: "text:demo",
+        updatedAt: "2026-04-06T00:00:00.000Z"
+      },
+      {
+        recordId: 1002 + index * 3,
+        providerName: spec.provider,
+        providerDisplayName: spec.provider,
+        providerBrandColor: null,
+        modelName: spec.modelName,
+        benchmarkName: "AA Intelligence Index",
+        benchmarkType: "Overall",
+        sourceBenchmarkType: null,
+        higherIsBetter: true,
+        benchmarkCanonicalKey: "aa-intelligence-index",
+        modalities: ["Text"],
+        sourceModalities: null,
+        benchTime: "2026-04-06T00:00:00.000Z",
+        valueRaw: String(60 + index),
+        valueNum: 60 + index,
         valueNum2: null,
         valueNote: null,
         source: "text:demo",
         updatedAt: "2026-04-06T00:00:00.000Z"
       }
-    ];
+    ]);
 
     const { container } = render(
       <ModelScatter
@@ -274,16 +295,25 @@ describe("ModelScatter", () => {
     const groups = Array.from(container.querySelectorAll(".scatter-combobox-group")).map(
       (node) => node.textContent ?? ""
     );
+    const optionLabels = Array.from(container.querySelectorAll(".scatter-combobox-option-label")).map(
+      (node) => node.textContent ?? ""
+    );
 
-    const pricingIndex = groups.indexOf("Pricing");
+    const summaryIndex = groups.indexOf("Summary");
     const costIndex = groups.indexOf("Cost");
+    const modelInfoIndex = groups.indexOf("Model Info");
+    const pricingIndex = groups.indexOf("Pricing");
     const performanceIndex = groups.indexOf("Performance");
     const codingIndex = groups.indexOf("Coding");
 
-    expect(pricingIndex).toBeGreaterThanOrEqual(0);
-    expect(costIndex).toBeGreaterThan(pricingIndex);
-    expect(performanceIndex).toBeGreaterThan(costIndex);
+    expect(summaryIndex).toBe(0);
+    expect(costIndex).toBe(1);
+    expect(modelInfoIndex).toBeGreaterThan(costIndex);
+    expect(pricingIndex).toBeGreaterThan(modelInfoIndex);
+    expect(performanceIndex).toBeGreaterThan(pricingIndex);
     expect(codingIndex).toBeGreaterThan(performanceIndex);
+    expect(optionLabels).toContain("AA Intelligence Index");
+    expect(optionLabels).toContain("Overall Score");
   });
 
   test("方向提示随指标切换", () => {

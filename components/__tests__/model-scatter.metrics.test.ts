@@ -239,6 +239,38 @@ describe("toScatterMetric", () => {
       ).preferLogScale
     ).toBe(false);
   });
+
+  test("AA * Index 在下拉里归入 Summary，Cost 后缀项保持原分类", () => {
+    expect(
+      toScatterMetric(
+        createBenchmarkRow({
+          rowKey: "merged::aa-intelligence",
+          benchmark: "AA Intelligence Index",
+          category: "Overall"
+        })
+      ).category
+    ).toBe("Summary");
+
+    expect(
+      toScatterMetric(
+        createBenchmarkRow({
+          rowKey: "merged::aa-coding",
+          benchmark: "AA Coding Index",
+          category: "Coding"
+        })
+      ).category
+    ).toBe("Summary");
+
+    expect(
+      toScatterMetric(
+        createBenchmarkRow({
+          rowKey: "merged::aa-cost-per-task",
+          benchmark: "AA Intelligence Index Cost per Task",
+          category: "Cost"
+        })
+      ).category
+    ).toBe("Cost");
+  });
 });
 
 describe("buildScatterMetrics", () => {
@@ -282,10 +314,18 @@ describe("buildScatterMetrics", () => {
     expect(build().some((metric) => metric.label === "Cache Input Price")).toBe(true);
   });
 
-  test("排序为 总评 → 模型属性 → 价格 → Cost/Performance → 其余分类", () => {
+  test("排序为 总评 → Cost → 模型属性 → 价格 → Performance → 其余分类", () => {
     const metrics = buildScatterMetrics({
       benchmarkRows: [
         ...benchmarkRows,
+        createBenchmarkRow(
+          {
+            rowKey: "merged::aa-intelligence",
+            benchmark: "AA Intelligence Index",
+            category: "Overall"
+          },
+          { Alpha: 66 }
+        ),
         createBenchmarkRow(
           {
             rowKey: "merged::cost-per-task",
@@ -315,10 +355,11 @@ describe("buildScatterMetrics", () => {
     const firstIndexOf = (category: string) => categories.indexOf(category);
 
     expect(firstIndexOf("Summary")).toBe(0);
+    expect(firstIndexOf("Cost")).toBeLessThan(firstIndexOf(MODEL_INFO_CATEGORY_LABEL));
     expect(firstIndexOf(MODEL_INFO_CATEGORY_LABEL)).toBeLessThan(firstIndexOf(PRICE_CATEGORY_LABEL));
-    expect(firstIndexOf(PRICE_CATEGORY_LABEL)).toBeLessThan(firstIndexOf("Cost"));
-    expect(firstIndexOf("Cost")).toBeLessThan(firstIndexOf("Performance"));
+    expect(firstIndexOf(PRICE_CATEGORY_LABEL)).toBeLessThan(firstIndexOf("Performance"));
     expect(firstIndexOf("Performance")).toBeLessThan(firstIndexOf("Math"));
+    expect(metrics.find((metric) => metric.label === "AA Intelligence Index")?.category).toBe("Summary");
   });
 
   test("指标 key 唯一", () => {
