@@ -206,6 +206,39 @@ describe("toScatterMetric", () => {
 
     expect(metric.valueByModel.get("Alpha")).toBe(397);
   });
+
+  test("分类精确为 Cost / Performance 的指标默认建议对数轴", () => {
+    expect(
+      toScatterMetric(
+        createBenchmarkRow({
+          rowKey: "merged::cost-per-task",
+          benchmark: "AA Intelligence Index Cost per Task",
+          category: "Cost"
+        })
+      ).preferLogScale
+    ).toBe(true);
+
+    expect(
+      toScatterMetric(
+        createBenchmarkRow({
+          rowKey: "merged::output-speed",
+          benchmark: "Output Speed",
+          category: "Performance"
+        })
+      ).preferLogScale
+    ).toBe(true);
+
+    // 仅全匹配，不把含词的分类也当成对数轴
+    expect(
+      toScatterMetric(
+        createBenchmarkRow({
+          rowKey: "merged::cost-ish",
+          benchmark: "Something",
+          category: "Cost Analysis"
+        })
+      ).preferLogScale
+    ).toBe(false);
+  });
 });
 
 describe("buildScatterMetrics", () => {
@@ -274,6 +307,36 @@ describe("buildScatterMetrics", () => {
   test("默认双轴取 总评 × 输出价格", () => {
     const metrics = build();
     expect(resolveDefaultAxisKeys(metrics)).toEqual({ xKey: "price-output", yKey: OVERALL_METRIC_SLUG });
+  });
+
+  test("有 AA Intelligence Index Cost per Task 时默认 X 轴优先取它", () => {
+    const costRow = createBenchmarkRow(
+      {
+        rowKey: "merged::aa-cost-per-task",
+        benchmark: "AA Intelligence Index Cost per Task",
+        category: "Cost",
+        higherIsBetter: false
+      },
+      { Alpha: 0.4, Beta: 1.2, Gamma: 0.05 }
+    );
+    const metrics = buildScatterMetrics({
+      benchmarkRows: [...benchmarkRows, costRow],
+      priceRows: buildPriceMatrixRows(modelColumns, modelPrices),
+      paramsRows: buildParamsMatrixRows(modelColumns, modelParams),
+      overallScoreByModel: new Map([
+        ["Alpha", 82],
+        ["Beta", 60],
+        ["Gamma", 41]
+      ])
+    });
+    const costMetric = metrics.find((metric) => metric.label === "AA Intelligence Index Cost per Task");
+
+    expect(costMetric).not.toBeNull();
+    expect(costMetric?.preferLogScale).toBe(true);
+    expect(resolveDefaultAxisKeys(metrics)).toEqual({
+      xKey: costMetric!.key,
+      yKey: OVERALL_METRIC_SLUG
+    });
   });
 
   test("没有总评与价格时退化为覆盖最广的指标，且两轴不重复", () => {

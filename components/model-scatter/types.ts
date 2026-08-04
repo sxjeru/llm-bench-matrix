@@ -27,7 +27,7 @@ export type ScatterMetric = {
   /** true 表示数值越大越好；由 getMatrixRowComparableScore 反推，不另立规则 */
   higherIsBetter: boolean;
   unit: ScatterMetricUnit;
-  /** 量纲跨数量级的指标（价格、参数量）默认建议对数轴 */
+  /** 量纲跨数量级的指标（价格、参数量、Cost/Performance 分类）默认建议对数轴 */
   preferLogScale: boolean;
   valueByModel: Map<string, number>;
 };

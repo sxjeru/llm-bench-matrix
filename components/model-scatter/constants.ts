@@ -43,8 +43,20 @@ export const METRIC_CATEGORY_PRIORITY: Readonly<Record<string, number>> = {
   Pricing: 2
 };
 
-export const DEFAULT_X_METRIC_PREFERENCE = ["price-output", "price-input", "params"] as const;
+/**
+ * 默认 X 轴偏好：先按 label 精确匹配 AA 任务成本，再回落到合成价格/参数量 key。
+ * `pickByPreference` 同时匹配 metric.key 与 metric.label。
+ */
+export const DEFAULT_X_METRIC_PREFERENCE = [
+  "AA Intelligence Index Cost per Task",
+  "price-output",
+  "price-input",
+  "params"
+] as const;
 export const DEFAULT_Y_METRIC_PREFERENCE = [OVERALL_METRIC_SLUG] as const;
+
+/** 分类全匹配时默认对数轴（跨数量级的成本/性能指标） */
+export const LOG_SCALE_CATEGORIES = new Set(["Cost", "Performance"]);
 
 export const SCATTER_CHART_HEIGHT = 520;
 export const SCATTER_CHART_HEIGHT_COMPACT = 400;

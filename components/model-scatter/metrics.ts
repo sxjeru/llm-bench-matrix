@@ -11,6 +11,7 @@ import type { MatrixRow } from "@/components/benchmark-matrix/types";
 import {
   DEFAULT_X_METRIC_PREFERENCE,
   DEFAULT_Y_METRIC_PREFERENCE,
+  LOG_SCALE_CATEGORIES,
   METRIC_CATEGORY_PRIORITY,
   OVERALL_METRIC_LABEL,
   OVERALL_METRIC_SLUG,
@@ -107,8 +108,9 @@ export function toScatterMetric(row: MatrixRow): ScatterMetric {
     kind: resolveMetricKind(row),
     higherIsBetter: isMetricHigherBetter(row),
     unit,
-    // 价格与参数量跨数量级，线性轴会把低价模型全挤在左边
-    preferLogScale: unit === "usd" || unit === "billions",
+    // 价格/参数量，以及分类精确为 Cost、Performance 的指标跨数量级，线性轴会把点挤成一团
+    preferLogScale:
+      unit === "usd" || unit === "billions" || LOG_SCALE_CATEGORIES.has(row.category),
     valueByModel: buildValueByModel(row)
   };
 }
@@ -213,8 +215,12 @@ function pickByPreference(
   preference: readonly string[],
   excludeKey: string | null
 ): ScatterMetric | null {
-  for (const key of preference) {
-    const match = metrics.find((metric) => metric.key === key && metric.key !== excludeKey);
+  for (const preferred of preference) {
+    const match = metrics.find(
+      (metric) =>
+        metric.key !== excludeKey &&
+        (metric.key === preferred || metric.label === preferred)
+    );
     if (match) return match;
   }
   return null;
@@ -237,8 +243,8 @@ function pickWidestCoverage(
 }
 
 /**
- * 默认双轴：Y 取总评分、X 取输出价格，对齐 artificialanalysis.ai 的主视图。
- * 缺任一项时退化为覆盖模型数最多的指标。
+ * 默认双轴：Y 取总评分、X 优先取 AA Intelligence Index Cost per Task，
+ * 没有该项时回落到输出价格；再缺则取覆盖模型数最多的指标。
  */
 export function resolveDefaultAxisKeys(metrics: readonly ScatterMetric[]): {
   xKey: string | null;
