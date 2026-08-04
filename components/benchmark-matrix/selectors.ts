@@ -57,8 +57,22 @@ import {
   normalizeMatchToken,
   normalizeModalityList,
   parseTimestampMs,
-  pickPreferredBenchmarkDisplayName
+  pickPreferredBenchmarkDisplayName,
+  sourceTabDisplayLabel
 } from "./utils";
+
+/** AA 默认排序里沉底的分类：能力评测优先，性能与成本放后 */
+const AA_SECONDARY_CATEGORY_SET = new Set(["cost", "performance"]);
+
+function isArtificialAnalysisSource(activeSource: string): boolean {
+  const sourceKey = activeSource.trim().toLowerCase();
+  if (sourceKey === "artificial analysis") return true;
+  return sourceTabDisplayLabel(activeSource).trim().toLowerCase() === "artificial analysis";
+}
+
+function isAaSecondaryCategory(category: string): boolean {
+  return category.split(" / ").some((part) => AA_SECONDARY_CATEGORY_SET.has(part.trim().toLowerCase()));
+}
 
 export type SourceOption = { key: string; label: string };
 
@@ -1573,7 +1587,18 @@ export function sortMatrixRows(
     : rowSortState.mode;
 
   if (effectiveMode === "source") {
+    const preferAaCapabilityFirst = isArtificialAnalysisSource(activeSource);
+
     rowsCopy.sort((a, b) => {
+      // 仅 AA 页签：Cost / Performance 沉底，其余评测指标保持 source 序
+      if (preferAaCapabilityFirst) {
+        const leftSecondary = isAaSecondaryCategory(a.category) ? 1 : 0;
+        const rightSecondary = isAaSecondaryCategory(b.category) ? 1 : 0;
+        if (leftSecondary !== rightSecondary) {
+          return leftSecondary - rightSecondary;
+        }
+      }
+
       const leftSourceOrder = a.sourceOrderKey;
       const rightSourceOrder = b.sourceOrderKey;
 

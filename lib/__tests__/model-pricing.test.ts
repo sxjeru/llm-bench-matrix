@@ -25,6 +25,13 @@ type ActiveModelRow = {
 type ExistingPricingRow = {
   modelId: number;
   manualOverride: boolean;
+  inputCost?: string | number | null;
+  outputCost?: string | number | null;
+  reasoningCost?: string | number | null;
+  cacheReadCost?: string | number | null;
+  cacheWriteCost?: string | number | null;
+  inputAudioCost?: string | number | null;
+  outputAudioCost?: string | number | null;
 };
 
 type PricingSelectRow = {
@@ -660,6 +667,90 @@ describe("model pricing module", () => {
     expect(result.matchedCount).toBe(1);
     expect(result.unmatchedCount).toBe(1);
     expect(result.skippedManualCount).toBe(0);
+    // 首次匹配到价格算作变动；首次 unmatched 且无旧价格不算变动
+    expect(result.changedCount).toBe(1);
+    expect(result.changedModels).toEqual(["GPT-4"]);
+  });
+
+  test("syncModelsDevPricing 应统计相对旧价格真正发生变化的模型", async () => {
+    const { db } = createDbMock(
+      [
+        {
+          id: 101,
+          modelName: "Changed Model",
+          sourceModelId: "changed-model",
+          providerName: "OpenAI",
+          providerSlug: "openai",
+          providerConfig: {}
+        },
+        {
+          id: 102,
+          modelName: "Unchanged Model",
+          sourceModelId: "unchanged-model",
+          providerName: "OpenAI",
+          providerSlug: "openai",
+          providerConfig: {}
+        },
+        {
+          id: 103,
+          modelName: "Cleared Model",
+          sourceModelId: null,
+          providerName: "OpenAI",
+          providerSlug: "openai",
+          providerConfig: {}
+        }
+      ],
+      [
+        {
+          modelId: 101,
+          manualOverride: false,
+          inputCost: "1",
+          outputCost: "2",
+          cacheReadCost: null
+        },
+        {
+          modelId: 102,
+          manualOverride: false,
+          inputCost: "3",
+          outputCost: "4",
+          cacheReadCost: "0.5"
+        },
+        {
+          modelId: 103,
+          manualOverride: false,
+          inputCost: "9",
+          outputCost: "8",
+          cacheReadCost: "1"
+        }
+      ]
+    );
+
+    mockModelsDevResponse({
+      openai: {
+        id: "openai",
+        name: "OpenAI",
+        models: {
+          "changed-model": {
+            id: "changed-model",
+            name: "Changed Model",
+            cost: { input: 1.5, output: 2, cache_read: 0.1 }
+          },
+          "unchanged-model": {
+            id: "unchanged-model",
+            name: "Unchanged Model",
+            cost: { input: 3, output: 4, cache_read: 0.5 }
+          }
+        }
+      }
+    });
+
+    const pricingModule = await importPricingModule(db);
+    const result = await pricingModule.syncModelsDevPricing();
+
+    expect(result.matchedCount).toBe(2);
+    expect(result.unmatchedCount).toBe(1);
+    expect(result.changedCount).toBe(2);
+    expect(result.changedModels).toEqual(["Changed Model", "Cleared Model"]);
   });
 
   test("syncModelsDevPricing 支持分块读取 models.dev 响应", async () => {
