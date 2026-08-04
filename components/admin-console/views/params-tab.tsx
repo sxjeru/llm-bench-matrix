@@ -61,6 +61,20 @@ function getParamsSortTime(row: ModelParamsRow) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+/** 闭源主流系列（gpt/claude/gemini）沉底；名称含 oss 的开源变体保持正常排序 */
+function isClosedSourceFrontierModel(modelName: string) {
+  const normalized = modelName.toLowerCase();
+  if (normalized.includes("oss")) return false;
+  return /gpt|claude|gemini/.test(normalized);
+}
+
+function compareParamsRows(a: ModelParamsRow, b: ModelParamsRow) {
+  const aClosed = isClosedSourceFrontierModel(a.modelName);
+  const bClosed = isClosedSourceFrontierModel(b.modelName);
+  if (aClosed !== bClosed) return aClosed ? 1 : -1;
+  return getParamsSortTime(b) - getParamsSortTime(a);
+}
+
 export function ParamsTab({
   params,
   loadingParams,
@@ -94,7 +108,7 @@ export function ParamsTab({
       if (paramsStatusFilter === "missing") return !isParamsFilled(row);
       return hasApplicableSuggestion(row);
     })
-    .sort((a, b) => getParamsSortTime(b) - getParamsSortTime(a));
+    .sort(compareParamsRows);
 
   const filledCount = params.filter(isParamsFilled).length;
   const missingCount = params.length - filledCount;
