@@ -843,9 +843,79 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
 
     expect(screen.getByRole("button", { name: "显示低覆盖行" })).toHaveAttribute(
       "title",
-      "隐藏时会过滤行覆盖率低于 40% 的 benchmark 行，并基于保留行过滤列覆盖率低于 20% 的模型列"
+      "隐藏时会过滤行覆盖率低于 40% 的 benchmark 行、分类为 Performance 的行，并基于保留行过滤列覆盖率低于 20% 的模型列"
     );
 
+  });
+
+  test("All 默认隐藏低覆盖时不显示分类为 Performance 的行，开启后恢复", () => {
+    const performanceRows = [
+      {
+        providerName: "OpenAI",
+        modelName: "Model A",
+        benchmarkName: "Latency",
+        benchmarkType: "Performance",
+        benchmarkCanonicalKey: "latency:performance",
+        benchTime: "2026-04-06T00:00:00.000Z",
+        valueRaw: "12",
+        valueNum: 12,
+        valueNote: null,
+        source: "text:S1"
+      },
+      {
+        providerName: "OpenAI",
+        modelName: "Model B",
+        benchmarkName: "Latency",
+        benchmarkType: "Performance",
+        benchmarkCanonicalKey: "latency:performance",
+        benchTime: "2026-04-06T00:00:00.000Z",
+        valueRaw: "11",
+        valueNum: 11,
+        valueNote: null,
+        source: "text:S1"
+      },
+      {
+        providerName: "OpenAI",
+        modelName: "Model A",
+        benchmarkName: "Throughput",
+        benchmarkType: "Performance2",
+        benchmarkCanonicalKey: "throughput:performance2",
+        benchTime: "2026-04-06T00:00:00.000Z",
+        valueRaw: "100",
+        valueNum: 100,
+        valueNote: null,
+        source: "text:S1"
+      },
+      {
+        providerName: "OpenAI",
+        modelName: "Model B",
+        benchmarkName: "Throughput",
+        benchmarkType: "Performance2",
+        benchmarkCanonicalKey: "throughput:performance2",
+        benchTime: "2026-04-06T00:00:00.000Z",
+        valueRaw: "98",
+        valueNum: 98,
+        valueNote: null,
+        source: "text:S1"
+      }
+    ] as const;
+
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:S1"]}
+        rows={[...baseRows, ...performanceRows]}
+        allRows={[...baseRows, ...performanceRows]}
+      />
+    );
+
+    expect(screen.queryByText("Latency")).not.toBeInTheDocument();
+    expect(screen.getByText("Throughput")).toBeInTheDocument();
+    expect(screen.getByText("Bench-1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "显示低覆盖行" }));
+
+    expect(screen.getByText("Latency")).toBeInTheDocument();
+    expect(screen.getByText("Throughput")).toBeInTheDocument();
   });
 
   test("刷新到非全部 source 页签时，默认进入 source 导入顺序模式", async () => {

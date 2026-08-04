@@ -482,17 +482,20 @@ export function buildCoveragePrunedRows(
     return filteredRows;
   }
 
-  if (filteredRows.length === 0) {
-    return filteredRows;
+  // All 默认隐藏低覆盖时，同步隐藏分类精确为 Performance 的行
+  const eligibleRows = filteredRows.filter((row) => row.benchmarkType !== "Performance");
+
+  if (eligibleRows.length === 0) {
+    return eligibleRows;
   }
 
-  const candidateModels = Array.from(new Set(filteredRows.map((row) => row.modelName)));
+  const candidateModels = Array.from(new Set(eligibleRows.map((row) => row.modelName)));
   if (candidateModels.length === 0) {
-    return filteredRows;
+    return eligibleRows;
   }
 
   const rowModelsWithValue = new Map<string, Set<string>>();
-  filteredRows.forEach((row) => {
+  eligibleRows.forEach((row) => {
     if (!hasMeaningfulMatrixRawValue(row.valueRaw)) return;
 
     const matrixKey = getMatrixGroupingKey(row, showDuplicateRows);
@@ -503,7 +506,7 @@ export function buildCoveragePrunedRows(
   });
 
   if (rowModelsWithValue.size === 0) {
-    return filteredRows;
+    return eligibleRows;
   }
 
   const firstPassRowKeys = new Set<string>();
@@ -515,7 +518,7 @@ export function buildCoveragePrunedRows(
   });
 
   if (firstPassRowKeys.size === 0) {
-    return filteredRows;
+    return eligibleRows;
   }
 
   const modelCoveredRowCount = new Map<string, number>();
@@ -537,7 +540,7 @@ export function buildCoveragePrunedRows(
   });
 
   if (keptModels.size === 0) {
-    return filteredRows;
+    return eligibleRows;
   }
 
   const secondPassRowKeys = new Set<string>();
@@ -556,16 +559,16 @@ export function buildCoveragePrunedRows(
   });
 
   if (secondPassRowKeys.size === 0) {
-    return filteredRows;
+    return eligibleRows;
   }
 
-  const prunedRows = filteredRows.filter((row) => {
+  const prunedRows = eligibleRows.filter((row) => {
     if (!keptModels.has(row.modelName)) return false;
     const matrixKey = getMatrixGroupingKey(row, showDuplicateRows);
     return secondPassRowKeys.has(matrixKey);
   });
 
-  return prunedRows.length > 0 ? prunedRows : filteredRows;
+  return prunedRows.length > 0 ? prunedRows : eligibleRows;
 }
 
 export function buildModelColumns(
