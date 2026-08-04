@@ -264,7 +264,7 @@ export function AdminConsole({
   const importProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const textImportProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const [mergeType, setMergeType] = useState<"model" | "benchmark">("model");
+  const [mergeType, setMergeType] = useState<"model" | "benchmark">("benchmark");
   const [mergeSourceInput, setMergeSourceInput] = useState("");
   const [mergeTargetInput, setMergeTargetInput] = useState("");
   const [mergeTargetBenchmarkNameInput, setMergeTargetBenchmarkNameInput] = useState("");
@@ -292,7 +292,7 @@ export function AdminConsole({
   );
   const [isDetectingDuplicates, setIsDetectingDuplicates] = useState(false);
   const [duplicateDetectionResult, setDuplicateDetectionResult] = useState<DuplicateDetectionResult | null>(null);
-  const [duplicateDetectionEntityType, setDuplicateDetectionEntityType] = useState<"model" | "benchmark">("model");
+  const [duplicateDetectionEntityType, setDuplicateDetectionEntityType] = useState<"model" | "benchmark">("benchmark");
   const [duplicateConfidenceFilter, setDuplicateConfidenceFilter] = useState<"high-medium" | "all">("high-medium");
   const [selectedDuplicateCandidateKeys, setSelectedDuplicateCandidateKeys] = useState<Record<string, boolean>>({});
   const [isBatchMergingDuplicates, setIsBatchMergingDuplicates] = useState(false);
@@ -303,7 +303,7 @@ export function AdminConsole({
   const [splittingScaleBenchmarkId, setSplittingScaleBenchmarkId] = useState<number | null>(null);
   const [scaleSplitNameDrafts, setScaleSplitNameDrafts] = useState<Record<number, { baseName: string; eloName: string }>>({});
 
-  const [renameEntityType, setRenameEntityType] = useState<RenameEntityType>("model");
+  const [renameEntityType, setRenameEntityType] = useState<RenameEntityType>("benchmark");
   const [renameSearchKeyword, setRenameSearchKeyword] = useState("");
   const [renameSelectedEntityId, setRenameSelectedEntityId] = useState<number | null>(null);
   const [renameNextName, setRenameNextName] = useState("");
@@ -2113,10 +2113,10 @@ export function AdminConsole({
       setDuplicateDetectionResult(typedResult);
       setSelectedDuplicateCandidateKeys({});
 
-      if ((typedResult.modelCandidates?.length ?? 0) > 0) {
-        setDuplicateDetectionEntityType("model");
-      } else {
+      if ((typedResult.benchmarkCandidates?.length ?? 0) > 0) {
         setDuplicateDetectionEntityType("benchmark");
+      } else if ((typedResult.modelCandidates?.length ?? 0) > 0) {
+        setDuplicateDetectionEntityType("model");
       }
 
       notifySuccess(

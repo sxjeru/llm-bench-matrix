@@ -2782,7 +2782,6 @@ describe("AdminConsole merge interactions", () => {
     expect(await screen.findByRole("button", { name: "Model 候选（1）" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Benchmark 候选（1）" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Benchmark 候选（1）" }));
     expect(await screen.findByText(/source text:old-source → text:new-source/i)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Model 候选（1）" }));
 
@@ -2826,6 +2825,7 @@ describe("AdminConsole merge interactions", () => {
     await openMergeTab(user);
     await user.click(screen.getByRole("button", { name: "检测重复候选" }));
     await screen.findByRole("button", { name: "Model 候选（1）" });
+    await user.click(screen.getByRole("button", { name: "Model 候选（1）" }));
 
     await user.click(screen.getByRole("button", { name: "填充到合并表单" }));
 
@@ -2876,7 +2876,7 @@ describe("AdminConsole merge interactions", () => {
 
     await openMergeTab(user);
     await user.click(screen.getByRole("button", { name: "检测重复候选" }));
-    await screen.findByRole("button", { name: "Model 候选（2）" });
+    await user.click(await screen.findByRole("button", { name: "Model 候选（2）" }));
 
     await user.click(screen.getByRole("checkbox", { name: "选择当前列表全部候选" }));
     expect(screen.getByText("已选 2 / 2")).toBeInTheDocument();
@@ -2986,6 +2986,8 @@ describe("AdminConsole rename tab", () => {
     render(<AdminConsole {...buildProps()} />);
 
     await user.click(screen.getByRole("tab", { name: "名称维护" }));
+
+    await user.selectOptions(screen.getByDisplayValue("benchmark"), "model");
 
     const searchInput = screen.getByPlaceholderText("输入名称或 ID 关键字搜索实体");
     await user.clear(searchInput);
