@@ -23,7 +23,7 @@
     "csv-parse": "^7.0.1",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.1",
-    "html2canvas-pro": "^2.0.4",
+    "html2canvas-pro": "^2.3.3",
     "lucide-react": "^1.25.0",
     "next": "16.2.11",
     "pg": "^8.22.0",
