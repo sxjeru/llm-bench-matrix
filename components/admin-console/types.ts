@@ -302,6 +302,8 @@ export type ModelPricingSyncResult = {
   matchedCount: number;
   unmatchedCount: number;
   skippedManualCount: number;
+  changedCount: number;
+  changedModels: string[];
   syncedAt: string;
 };
 

@@ -196,7 +196,7 @@ export function PricingTab({
       {syncResult ? (
         <div className="alert alert-info mb-4 text-sm">
           <span>
-            同步完成：provider {syncResult.providerCount} 个，source model {syncResult.sourceModelCount} 个，匹配 {syncResult.matchedCount} 个，未匹配 {syncResult.unmatchedCount} 个，跳过手动覆盖 {syncResult.skippedManualCount} 个。
+            同步完成：provider {syncResult.providerCount} 个，source model {syncResult.sourceModelCount} 个，匹配 {syncResult.matchedCount} 个，未匹配 {syncResult.unmatchedCount} 个，跳过手动覆盖 {syncResult.skippedManualCount} 个，价格变动 {syncResult.changedCount ?? 0} 个。
           </span>
         </div>
       ) : null}

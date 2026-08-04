@@ -85,6 +85,35 @@ const COST_KEYS = [
   "output_audio"
 ] as const;
 
+const PRICING_COST_DB_FIELDS = [
+  "inputCost",
+  "outputCost",
+  "reasoningCost",
+  "cacheReadCost",
+  "cacheWriteCost",
+  "inputAudioCost",
+  "outputAudioCost"
+] as const;
+
+const MAX_CHANGED_MODELS_IN_SYNC_RESULT = 20;
+
+function normalizePricingCostForCompare(value: unknown): string | null {
+  const numeric = toNullableNumber(value);
+  if (numeric === null) return null;
+  return String(numeric);
+}
+
+function hasPricingCostChanged(
+  existing: Partial<Record<(typeof PRICING_COST_DB_FIELDS)[number], unknown>> | undefined,
+  next: ModelPricingUpsertRow
+) {
+  return PRICING_COST_DB_FIELDS.some((field) => {
+    const previous = normalizePricingCostForCompare(existing?.[field]);
+    const upcoming = normalizePricingCostForCompare(next[field]);
+    return previous !== upcoming;
+  });
+}
+
 export type ModelPricingRow = {
   modelId: number;
   modelName: string;
@@ -119,6 +148,10 @@ export type ModelPricingSyncResult = {
   matchedCount: number;
   unmatchedCount: number;
   skippedManualCount: number;
+  /** 同步后费用字段相对库内旧值发生变化的模型数（含新增价格、清空价格） */
+  changedCount: number;
+  /** 发生价格变动的模型名，最多返回若干条供 toast 展示 */
+  changedModels: string[];
   syncedAt: string;
 };
 
@@ -770,6 +803,7 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
   let unmatchedCount = 0;
   let skippedManualCount = 0;
   const pricingUpserts: ModelPricingUpsertRow[] = [];
+  const changedModels: string[] = [];
 
   function createClearedPricingUpsert(
     modelId: number,
@@ -803,6 +837,17 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
     };
   }
 
+  function trackPricingUpsert(
+    model: DbModel,
+    existing: (typeof existingRows)[number] | undefined,
+    upsert: ModelPricingUpsertRow
+  ) {
+    pricingUpserts.push(upsert);
+    if (hasPricingCostChanged(existing, upsert)) {
+      changedModels.push(model.modelName);
+    }
+  }
+
   for (const model of activeModels) {
     const existing = existingByModelId.get(model.id);
     if (existing?.manualOverride) {
@@ -811,21 +856,33 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
     }
 
     if (model.pricingDisabled) {
-      pricingUpserts.push(createClearedPricingUpsert(model.id, "ignored", 0, "provider-pricing-disabled"));
+      trackPricingUpsert(
+        model,
+        existing,
+        createClearedPricingUpsert(model.id, "ignored", 0, "provider-pricing-disabled")
+      );
       continue;
     }
 
     const { provider: sourceProvider, confidenceBoost } = resolveProviderMatch(model, sourceProviders);
     const match = resolveModelMatch(model, sourceProvider, sourceProviders);
     if (!match) {
-      pricingUpserts.push(createClearedPricingUpsert(model.id, "unmatched", 0, "no-match"));
+      trackPricingUpsert(
+        model,
+        existing,
+        createClearedPricingUpsert(model.id, "unmatched", 0, "no-match")
+      );
       unmatchedCount += 1;
       continue;
     }
 
     const confidence = Math.min(100, match.confidence + confidenceBoost);
     if (confidence < 70) {
-      pricingUpserts.push(createClearedPricingUpsert(model.id, "unmatched", confidence, "low-confidence"));
+      trackPricingUpsert(
+        model,
+        existing,
+        createClearedPricingUpsert(model.id, "unmatched", confidence, "low-confidence")
+      );
       unmatchedCount += 1;
       continue;
     }
@@ -833,7 +890,7 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
     const cost = match.model.cost ?? {};
     const sourceModelName = match.model.name ?? match.model.id ?? match.modelKey;
 
-    pricingUpserts.push({
+    trackPricingUpsert(model, existing, {
       modelId: model.id,
       source: MODELS_DEV_SOURCE,
       sourceProviderId: match.provider.id,
@@ -905,6 +962,8 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
     matchedCount,
     unmatchedCount,
     skippedManualCount,
+    changedCount: changedModels.length,
+    changedModels: changedModels.slice(0, MAX_CHANGED_MODELS_IN_SYNC_RESULT),
     syncedAt: syncedAt.toISOString()
   };
 }

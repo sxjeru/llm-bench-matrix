@@ -2889,9 +2889,25 @@ export function AdminConsole({
 
     setSyncingPrices(true);
     try {
-      const result = await postJson("/api/admin/model-prices/sync", {});
-      setPricingSyncResult(result as ModelPricingSyncResult);
-      notifySuccess(`价格同步完成：匹配 ${result.matchedCount ?? 0} 个，未匹配 ${result.unmatchedCount ?? 0} 个`);
+      const result = await postJson("/api/admin/model-prices/sync", {}) as ModelPricingSyncResult;
+      setPricingSyncResult(result);
+
+      const changedCount = Number(result.changedCount ?? 0);
+      const changedModels = Array.isArray(result.changedModels)
+        ? result.changedModels.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        : [];
+      const remainingChangedCount = Math.max(0, changedCount - changedModels.length);
+      const changeDetails = [
+        ...changedModels.map((modelName) => `价格变动：${modelName}`),
+        ...(remainingChangedCount > 0 ? [`以及其他 ${remainingChangedCount} 个模型`] : [])
+      ];
+
+      notifySuccess(
+        changedCount > 0
+          ? `价格同步完成：${changedCount} 个模型价格有变动（匹配 ${result.matchedCount ?? 0}，未匹配 ${result.unmatchedCount ?? 0}）`
+          : `价格同步完成：无价格变动（匹配 ${result.matchedCount ?? 0}，未匹配 ${result.unmatchedCount ?? 0}）`,
+        changeDetails.length > 0 ? changeDetails : undefined
+      );
       await loadModelPrices();
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "同步模型价格失败");
