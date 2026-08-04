@@ -479,11 +479,11 @@ export function ExternalImportTab({
                           value={draft.externalModelId}
                           selectedLabel={selectedUpstreamLabel}
                           options={snapshot?.upstreamOptions ?? []}
-                          disabled={draft.ignored}
                           onChange={(nextExternalModelId) => {
                             onUpdateMappingDraft(row.modelId, (current) => ({
                               ...current,
                               externalModelId: nextExternalModelId,
+                              ignored: false,
                               manualOverride: true
                             }));
                           }}
@@ -497,12 +497,12 @@ export function ExternalImportTab({
                       <select
                         className="select select-bordered select-xs w-full max-w-full overflow-hidden text-ellipsis whitespace-nowrap"
                         value={draft.reasoningEffort ?? ""}
-                        disabled={draft.ignored}
                         onChange={(event) => {
                           const nextEffort = event.target.value || null;
                           onUpdateMappingDraft(row.modelId, (current) => ({
                             ...current,
                             reasoningEffort: nextEffort,
+                            ignored: false,
                             manualOverride: true
                           }));
                         }}

@@ -206,6 +206,51 @@ describe("ExternalImportTab", () => {
     });
   });
 
+  test("已忽略的模型仍可编辑上游条目，编辑后自动取消忽略", async () => {
+    const user = userEvent.setup();
+    const onUpdateMappingDraft = vi.fn();
+    renderTab({
+      onUpdateMappingDraft,
+      snapshot: makeSnapshot({
+        mappings: [
+          {
+            modelId: 1,
+            modelName: "GPT 5.4",
+            providerName: "OpenAI",
+            externalModelId: null,
+            externalModelName: null,
+            externalCreator: null,
+            reasoningEffort: null,
+            matchStatus: "ignored",
+            matchConfidence: 0,
+            matchReason: "manual-ignore",
+            manualOverride: false,
+            externalMissing: false
+          }
+        ]
+      })
+    });
+
+    const input = screen.getByLabelText("GPT 5.4 的上游条目");
+    expect(input).toBeEnabled();
+
+    await user.click(input);
+    await user.type(input, "xhigh");
+    await user.click(await screen.findByRole("option", { name: /GPT 5\.4 \(xhigh\)/ }));
+
+    expect(onUpdateMappingDraft).toHaveBeenCalled();
+    const [modelId, updater] = onUpdateMappingDraft.mock.calls.at(-1)!;
+    expect(modelId).toBe(1);
+    expect(
+      updater({ externalModelId: null, reasoningEffort: null, ignored: true, manualOverride: false })
+    ).toEqual({
+      externalModelId: "aa-xhigh",
+      reasoningEffort: null,
+      ignored: false,
+      manualOverride: true
+    });
+  });
+
   test("上游条目支持输入筛选", async () => {
     const user = userEvent.setup();
     renderTab();
