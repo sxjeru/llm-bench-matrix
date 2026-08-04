@@ -843,7 +843,7 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
 
     expect(screen.getByRole("button", { name: "显示低覆盖行" })).toHaveAttribute(
       "title",
-      "隐藏时会过滤行覆盖率低于 40% 的 benchmark 行、分类为 Performance 的行，并基于保留行过滤列覆盖率低于 20% 的模型列"
+      "隐藏时会过滤行覆盖率低于 40% 的 benchmark 行，并基于保留行过滤列覆盖率低于 20% 的模型列"
     );
 
   });
