@@ -22,7 +22,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 describe("TopbarActions hydration safety", () => {
-  test("后台入口链接启用 suppressHydrationWarning", () => {
+  test("后台入口链接启用 suppressHydrationWarning 并在新标签页打开", () => {
     render(<TopbarActions />);
 
     const adminLinkCall = linkPropsSpy.mock.calls.find(
@@ -33,5 +33,7 @@ describe("TopbarActions hydration safety", () => {
     expect(
       (adminLinkCall?.[0] as { suppressHydrationWarning?: boolean }).suppressHydrationWarning
     ).toBe(true);
+    expect((adminLinkCall?.[0] as { target?: string }).target).toBe("_blank");
+    expect((adminLinkCall?.[0] as { rel?: string }).rel).toBe("noopener noreferrer");
   });
 });
