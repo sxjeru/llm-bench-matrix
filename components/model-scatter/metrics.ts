@@ -1,6 +1,7 @@
 import {
   OVERALL_ROW_KEY,
-  PARAMS_ACTIVE_RATIO_ROW_KEY
+  PARAMS_ACTIVE_RATIO_ROW_KEY,
+  SOURCE_ALL
 } from "@/components/benchmark-matrix/constants";
 import {
   formatParamsBillions,
@@ -143,6 +144,24 @@ function compareMetricsForSelector(left: ScatterMetric, right: ScatterMetric): n
   }
 
   return left.label.localeCompare(right.label, "en", { numeric: true, sensitivity: "base" });
+}
+
+/**
+ * 散点 Overall 用的 benchmark 行。
+ *
+ * All 且未勾选「含低覆盖指标」时，Cost 仍会因 alwaysKeep 留在轴下拉里，
+ * 但不计入 Overall（与矩阵默认不把成本类指标混进能力总评一致）。
+ */
+export function filterMatrixRowsForScatterOverall(
+  matrixRows: readonly MatrixRow[],
+  showLowCoverageRows: boolean,
+  activeSource: string
+): MatrixRow[] {
+  if (showLowCoverageRows || activeSource !== SOURCE_ALL) {
+    return matrixRows as MatrixRow[];
+  }
+
+  return matrixRows.filter((row) => row.category !== "Cost");
 }
 
 /**

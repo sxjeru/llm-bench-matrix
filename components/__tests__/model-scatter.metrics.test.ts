@@ -7,13 +7,15 @@ import {
   PARAMS_ROW_KEY,
   PRICE_CATEGORY_LABEL,
   PRICE_INPUT_ROW_KEY,
-  PRICE_OUTPUT_ROW_KEY
+  PRICE_OUTPUT_ROW_KEY,
+  SOURCE_ALL
 } from "@/components/benchmark-matrix/constants";
 import { buildParamsMatrixRows, buildPriceMatrixRows } from "@/components/benchmark-matrix/selectors";
 import { getMatrixRowComparableScore } from "@/components/benchmark-matrix/scoring";
 import type { MatrixCell, MatrixRow } from "@/components/benchmark-matrix/types";
 import {
   buildScatterMetrics,
+  filterMatrixRowsForScatterOverall,
   findScatterMetric,
   formatScatterAxisTick,
   formatScatterValue,
@@ -270,6 +272,37 @@ describe("toScatterMetric", () => {
         })
       ).category
     ).toBe("Cost");
+  });
+});
+
+describe("filterMatrixRowsForScatterOverall", () => {
+  const codingRow = createBenchmarkRow(
+    { rowKey: "merged::coding", benchmark: "Bench-One", category: "Coding" },
+    { Alpha: 90 }
+  );
+  const costRow = createBenchmarkRow(
+    {
+      rowKey: "merged::cost-per-task",
+      benchmark: "AA Intelligence Index Cost per Task",
+      category: "Cost",
+      higherIsBetter: false
+    },
+    { Alpha: 0.4 }
+  );
+
+  test("All 且未勾选低覆盖时剔除 Cost 分类", () => {
+    const filtered = filterMatrixRowsForScatterOverall([codingRow, costRow], false, SOURCE_ALL);
+    expect(filtered.map((row) => row.category)).toEqual(["Coding"]);
+  });
+
+  test("勾选含低覆盖指标后保留 Cost", () => {
+    const filtered = filterMatrixRowsForScatterOverall([codingRow, costRow], true, SOURCE_ALL);
+    expect(filtered.some((row) => row.category === "Cost")).toBe(true);
+  });
+
+  test("非 All 来源时不剔除 Cost", () => {
+    const filtered = filterMatrixRowsForScatterOverall([codingRow, costRow], false, "text:demo");
+    expect(filtered.some((row) => row.category === "Cost")).toBe(true);
   });
 });
 

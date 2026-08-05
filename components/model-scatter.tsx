@@ -48,6 +48,7 @@ import { buildScatterDataset } from "./model-scatter/dataset";
 import { useScatterImageActions } from "./model-scatter/image-actions";
 import {
   buildScatterMetrics,
+  filterMatrixRowsForScatterOverall,
   findScatterMetric,
   groupScatterMetrics,
   resolveDefaultAxisKeys
@@ -281,14 +282,22 @@ export function ModelScatter({
     [baseModelColumns, modelParams]
   );
 
-  // 与 benchmark-matrix.tsx 的 summaryMatrixRows 保持同一条组装规则
+  // 轴下拉可保留 alwaysKeep 的 Cost；Overall 在未勾选低覆盖时剔除 Cost
   const summaryMatrixRows = useMemo(
     () => [
       ...(paramsRowsInOverall ? paramsMatrixRows : []),
       ...(priceRowsInOverall ? priceMatrixRows : []),
-      ...matrixRows
+      ...filterMatrixRowsForScatterOverall(matrixRows, showLowCoverageRows, activeSource)
     ],
-    [paramsRowsInOverall, paramsMatrixRows, priceRowsInOverall, priceMatrixRows, matrixRows]
+    [
+      paramsRowsInOverall,
+      paramsMatrixRows,
+      priceRowsInOverall,
+      priceMatrixRows,
+      matrixRows,
+      showLowCoverageRows,
+      activeSource
+    ]
   );
 
   const overallSummaryByModel = useMemo(
