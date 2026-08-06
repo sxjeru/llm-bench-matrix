@@ -156,6 +156,7 @@ export function ScatterCanvas({
   const suppressClickRef = useRef(false);
   const [zoom, setZoom] = useState<ZoomState | null>(null);
   const [isPanning, setIsPanning] = useState(false);
+  const [isTooltipDismissed, setIsTooltipDismissed] = useState(false);
 
   const xValues = useMemo(() => dataset.points.map((point) => point.x), [dataset.points]);
   const yValues = useMemo(() => dataset.points.map((point) => point.y), [dataset.points]);
@@ -581,6 +582,18 @@ export function ScatterCanvas({
     [onSelectModel]
   );
 
+  const handleContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (!(target instanceof Element) || !target.closest(".recharts-scatter-symbol")) return;
+
+    event.preventDefault();
+    setIsTooltipDismissed(true);
+  }, []);
+
+  const handleMouseMove = useCallback(() => {
+    setIsTooltipDismissed(false);
+  }, []);
+
   return (
     <div
       ref={containerRef}
@@ -589,6 +602,8 @@ export function ScatterCanvas({
       onPointerMove={handlePointerMove}
       onPointerUp={endPan}
       onPointerCancel={endPan}
+      onContextMenu={handleContextMenu}
+      onMouseMove={handleMouseMove}
       onDoubleClick={() => setZoom(null)}
       title={isZoomed ? "拖拽平移 · 滚轮缩放 · 双击重置" : "拖拽平移 · 滚轮缩放"}
     >
@@ -639,6 +654,7 @@ export function ScatterCanvas({
         />
 
         <Tooltip
+          active={isTooltipDismissed ? false : undefined}
           cursor={{
             strokeDasharray: SCATTER_CURSOR_DASH,
             stroke: SCATTER_CURSOR_STROKE,

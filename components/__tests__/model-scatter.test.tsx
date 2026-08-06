@@ -713,6 +713,22 @@ describe("ScatterCanvas", () => {
     });
   });
 
+  test("散点浮窗显示时右键可隐藏，继续移动后恢复悬浮", () => {
+    const { container } = renderCanvas();
+    const surface = container.querySelector(".scatter-chart-surface") as HTMLElement;
+    const symbol = container.querySelector(".recharts-scatter-symbol") as HTMLElement;
+
+    fireEvent.mouseEnter(symbol);
+    expect(container.querySelector(".scatter-tooltip")).not.toBeNull();
+
+    const contextMenuEvent = fireEvent.contextMenu(symbol);
+    expect(contextMenuEvent).toBe(false);
+    expect(container.querySelector(".scatter-tooltip")).toBeNull();
+
+    fireEvent.mouseMove(surface);
+    expect(container.querySelector(".scatter-tooltip")).not.toBeNull();
+  });
+
   test("开启中位参考线时画出参考层", () => {
     const { container } = renderCanvas({ showGuides: true });
 
