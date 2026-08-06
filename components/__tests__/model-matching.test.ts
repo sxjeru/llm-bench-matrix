@@ -149,6 +149,13 @@ describe("model-matching variant sorting", () => {
     expect(compareModelNameByColumnOrder("Muse Spark 1.1", "Muse Spark Thinking", collator)).toBeLessThan(0);
     expect(compareModelNameByColumnOrder("Muse Spark 1.1", "Muse Spark", collator)).toBeLessThan(0);
     expect(compareModelNameByColumnOrder("Muse Spark Thinking", "Muse Spark", collator)).toBeLessThan(0);
+
+    // Source tabs should also put versioned Muse Spark ahead of the unversioned base name.
+    expect(compareSourceTabKeysByVersion("text:Muse Spark 1.1", "text:Muse Spark")).toBeLessThan(0);
+    expect(compareSourceTabKeysByVersion("text:Muse Spark", "text:Muse Spark 1.1")).toBeGreaterThan(0);
+    expect(
+      ["text:Muse Spark", "text:Muse Spark Thinking", "text:Muse Spark 1.1"].sort(compareSourceTabKeysByVersion)
+    ).toEqual(["text:Muse Spark 1.1", "text:Muse Spark", "text:Muse Spark Thinking"]);
   });
 });
 

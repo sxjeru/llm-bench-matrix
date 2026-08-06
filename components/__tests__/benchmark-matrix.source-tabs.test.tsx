@@ -65,6 +65,38 @@ describe("BenchmarkMatrix source tabs", () => {
     expect(claudeTabs).toEqual(["Claude Sonnet 5", "Claude Opus 4.8", "Claude Opus 4.7"]);
   });
 
+  test("同系列 source 页签中带版本的 Muse Spark 1.1 排在无版本 Muse Spark 前面", () => {
+    render(
+      <BenchmarkMatrix
+        sourceOptions={[
+          "text:Muse Spark",
+          "text:Muse Spark Thinking",
+          "text:Muse Spark 1.1"
+        ]}
+        rows={[
+          {
+            providerName: "Muse",
+            modelName: "Muse Spark",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Muse Spark"
+          }
+        ]}
+      />
+    );
+
+    const museTabs = screen
+      .getAllByRole("tab")
+      .map((tab) => tab.textContent?.trim() ?? "")
+      .filter((label) => label.startsWith("Muse Spark"));
+
+    expect(museTabs).toEqual(["Muse Spark 1.1", "Muse Spark", "Muse Spark Thinking"]);
+  });
+
   test("Nemotron 组内页签按 ultra > super > nano 顺序排序", () => {
     render(
       <BenchmarkMatrix

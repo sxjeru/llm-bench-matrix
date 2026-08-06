@@ -112,6 +112,17 @@ export function compareSourceTabKeysByVersion(leftKey: string, rightKey: string)
     }
   }
 
+  const leftFamily = getModelFamilyMatchKey(leftLabel);
+  const rightFamily = getModelFamilyMatchKey(rightLabel);
+  if (leftFamily && rightFamily && leftFamily === rightFamily) {
+    if (leftVersionToken && !rightVersionToken) {
+      return -1;
+    }
+    if (!leftVersionToken && rightVersionToken) {
+      return 1;
+    }
+  }
+
   const labelCompare = leftLabel.localeCompare(rightLabel, "zh-Hans-CN", { numeric: true, sensitivity: "base" });
   if (labelCompare !== 0) return labelCompare;
 
