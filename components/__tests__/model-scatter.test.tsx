@@ -161,6 +161,16 @@ describe("ModelScatter", () => {
     expect(axisInput(container, "x").getAttribute("role")).toBe("combobox");
   });
 
+  test("导出默认不含底部图例，并可切换为包含图例", () => {
+    renderScatter();
+
+    const legendSelect = screen.getByRole("combobox", { name: "导出图例" });
+    expect(legendSelect).toHaveValue("exclude");
+
+    fireEvent.change(legendSelect, { target: { value: "include" } });
+    expect(legendSelect).toHaveValue("include");
+  });
+
   test("统计出可比模型数与帕累托前沿数", () => {
     renderScatter();
 

@@ -1211,9 +1211,12 @@ input.heatmap-alpha-range::-moz-range-track {
 }
 
 .scatter-capture {
-  padding: 6px 2px 2px;
   border-radius: 12px;
   background: linear-gradient(180deg, rgba(13, 20, 37, 0.5), rgba(11, 16, 32, 0.3));
+}
+
+.scatter-chart-capture {
+  padding: 6px 2px 2px;
 }
 
 .scatter-chart-host {

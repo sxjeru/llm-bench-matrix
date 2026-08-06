@@ -95,6 +95,7 @@ export function ModelScatter({
   const [hoveredProvider, setHoveredProvider] = useState<string | null>(null);
   const [highlightedModel, setHighlightedModel] = useState<string | null>(null);
   const [exportPreset, setExportPreset] = useState<ExportPresetKey>(DEFAULT_EXPORT_PRESET);
+  const [includeLegendInExport, setIncludeLegendInExport] = useState(false);
   const [supportsWebpExport, setSupportsWebpExport] = useState(true);
   const [supportsAvifExport, setSupportsAvifExport] = useState(false);
   const [chartHeight, setChartHeight] = useState(SCATTER_CHART_HEIGHT);
@@ -108,6 +109,7 @@ export function ModelScatter({
   const hydratedRef = useRef(false);
   const searchParamsRef = useRef(searchParams);
   const captureRef = useRef<HTMLDivElement | null>(null);
+  const chartCaptureRef = useRef<HTMLDivElement | null>(null);
   const sectionRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -473,7 +475,7 @@ export function ModelScatter({
   }, [availableExportPresetKeys, exportPreset]);
 
   const { downloadImage, copyImage, isDownloading, isCopying, isBusy, notice, setNotice } =
-    useScatterImageActions(captureRef, exportPreset);
+    useScatterImageActions(includeLegendInExport ? captureRef : chartCaptureRef, exportPreset);
 
   useEffect(() => {
     if (!notice) return;
@@ -589,6 +591,8 @@ export function ModelScatter({
           exportPreset={exportPreset}
           onChangeExportPreset={setExportPreset}
           availableExportPresetKeys={availableExportPresetKeys}
+          includeLegendInExport={includeLegendInExport}
+          onChangeIncludeLegendInExport={setIncludeLegendInExport}
           onDownloadImage={downloadImage}
           onCopyImage={copyImage}
           isDownloading={isDownloading}
@@ -599,43 +603,45 @@ export function ModelScatter({
         />
 
         <div className="scatter-capture" ref={captureRef}>
-          {hasAxes && hasEnoughPoints ? (
-            <ScatterChartHost height={chartHeight}>
-              {({ width, height }) => (
-                <ScatterCanvas
-                  width={width}
-                  height={height}
-                  xMetric={xMetric!}
-                  yMetric={yMetric!}
-                  dataset={dataset}
-                  xScale={viewState.xScale}
-                  yScale={viewState.yScale}
-                  showPareto={viewState.showPareto}
-                  overlayMode={overlayMode}
-                  dimNonPareto={viewState.dimNonPareto}
-                  paretoLineStyle={viewState.paretoLineStyle}
-                  labelMode={viewState.labelMode}
-                  showGuides={viewState.showGuides}
-                  highlightedModel={highlightedModel}
-                  hoveredProvider={hoveredProvider}
-                  onSelectModel={(modelName) =>
-                    setHighlightedModel((prev) =>
-                      modelName === null ? null : prev === modelName ? null : modelName
-                    )
-                  }
-                  onZoomChange={setIsZoomed}
-                  resetZoomSignal={resetZoomSignal}
-                />
-              )}
-            </ScatterChartHost>
-          ) : (
-            <div className="scatter-empty" style={{ height: chartHeight }}>
-              <p className="scatter-empty-title">当前条件下没有可绘制的点</p>
-              <p className="scatter-empty-hint">
-                换一组坐标轴、在图例中放开被隐藏的厂商，或切换数据来源后再试。
-              </p>
-            </div>
-          )}
+          <div className="scatter-chart-capture" ref={chartCaptureRef}>
+            {hasAxes && hasEnoughPoints ? (
+              <ScatterChartHost height={chartHeight}>
+                {({ width, height }) => (
+                  <ScatterCanvas
+                    width={width}
+                    height={height}
+                    xMetric={xMetric!}
+                    yMetric={yMetric!}
+                    dataset={dataset}
+                    xScale={viewState.xScale}
+                    yScale={viewState.yScale}
+                    showPareto={viewState.showPareto}
+                    overlayMode={overlayMode}
+                    dimNonPareto={viewState.dimNonPareto}
+                    paretoLineStyle={viewState.paretoLineStyle}
+                    labelMode={viewState.labelMode}
+                    showGuides={viewState.showGuides}
+                    highlightedModel={highlightedModel}
+                    hoveredProvider={hoveredProvider}
+                    onSelectModel={(modelName) =>
+                      setHighlightedModel((prev) =>
+                        modelName === null ? null : prev === modelName ? null : modelName
+                      )
+                    }
+                    onZoomChange={setIsZoomed}
+                    resetZoomSignal={resetZoomSignal}
+                  />
+                )}
+              </ScatterChartHost>
+            ) : (
+              <div className="scatter-empty" style={{ height: chartHeight }}>
+                <p className="scatter-empty-title">当前条件下没有可绘制的点</p>
+                <p className="scatter-empty-hint">
+                  换一组坐标轴、在图例中放开被隐藏的厂商，或切换数据来源后再试。
+                </p>
+              </div>
+            )}
+          </div>
 
           {legendEntries.length > 0 ? (
             <div className="scatter-legend" role="group" aria-label="按厂商筛选">

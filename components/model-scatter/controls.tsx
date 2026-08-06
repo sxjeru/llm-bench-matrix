@@ -59,6 +59,8 @@ type ScatterControlsProps = {
   exportPreset: ExportPresetKey;
   onChangeExportPreset: (value: ExportPresetKey) => void;
   availableExportPresetKeys: ExportPresetKey[];
+  includeLegendInExport: boolean;
+  onChangeIncludeLegendInExport: (value: boolean) => void;
   onDownloadImage: () => void;
   onCopyImage: () => void;
   isDownloading: boolean;
@@ -166,6 +168,8 @@ export function ScatterControls(props: ScatterControlsProps) {
     exportPreset,
     onChangeExportPreset,
     availableExportPresetKeys,
+    includeLegendInExport,
+    onChangeIncludeLegendInExport,
     onDownloadImage,
     onCopyImage,
     isDownloading,
@@ -315,6 +319,16 @@ export function ScatterControls(props: ScatterControlsProps) {
         </div>
 
         <div className="scatter-toggle-group scatter-export-group">
+          <select
+            className="select select-xs scatter-export-select"
+            value={includeLegendInExport ? "include" : "exclude"}
+            onChange={(event) => onChangeIncludeLegendInExport(event.target.value === "include")}
+            aria-label="导出图例"
+          >
+            <option value="exclude">不含图例</option>
+            <option value="include">包含图例</option>
+          </select>
+
           <select
             className="select select-xs scatter-export-select"
             value={exportPreset}
