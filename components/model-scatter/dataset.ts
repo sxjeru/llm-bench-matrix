@@ -3,6 +3,7 @@ import {
   SCATTER_LOG_DOMAIN_PADDING
 } from "./constants";
 import { computeParetoFrontier, orderParetoPath } from "./pareto";
+import { computeScatterTrendLine } from "./trend-line";
 import type {
   ScatterAxisScale,
   ScatterMetric,
@@ -24,6 +25,7 @@ const EMPTY_DATASET: ScatterPlotDataset = {
   points: [],
   paretoKeys: new Set<string>(),
   paretoPath: [],
+  trendLine: null,
   missingCount: 0,
   nonPositiveCount: 0
 };
@@ -85,7 +87,9 @@ export function buildScatterDataset(input: BuildScatterDatasetInput): ScatterPlo
     yMetric.higherIsBetter
   );
 
-  return { points, paretoKeys, paretoPath, missingCount, nonPositiveCount };
+  const trendLine = computeScatterTrendLine(points);
+
+  return { points, paretoKeys, paretoPath, trendLine, missingCount, nonPositiveCount };
 }
 
 /**

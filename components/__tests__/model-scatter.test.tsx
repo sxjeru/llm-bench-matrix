@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, test, vi, beforeEach } from "vitest";
 
 import { ModelScatter } from "@/components/model-scatter";
@@ -180,6 +180,30 @@ describe("ModelScatter", () => {
 
     fireEvent.click(toggle);
     expect(paretoCount()).toBe("3");
+  });
+
+  test("双线性且两轴方向一致时切换为散点趋势线", () => {
+    const { container } = renderScatter();
+
+    pickAxisOption(container, "y", "Bench-Two");
+    pickAxisOption(container, "x", "Bench-One");
+
+    expect(screen.getByRole("checkbox", { name: /散点趋势线/ })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /淡化非前沿/ })).toBeNull();
+    expect(paretoCount()).toBe("--");
+  });
+
+  test("任一坐标轴切为对数后恢复帕累托前沿", () => {
+    const { container } = renderScatter();
+
+    pickAxisOption(container, "y", "Bench-Two");
+    pickAxisOption(container, "x", "Bench-One");
+    const yAxisField = axisInput(container, "y").closest<HTMLElement>(".scatter-axis-field");
+    if (!yAxisField) throw new Error("未找到 Y 轴控件");
+    fireEvent.click(within(yAxisField).getByRole("button", { name: "对数" }));
+
+    expect(screen.getByRole("checkbox", { name: /帕累托前沿/ })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /淡化非前沿/ })).toBeInTheDocument();
   });
 
   test("交换按钮互换双轴", () => {
@@ -630,6 +654,7 @@ const canvasProps: React.ComponentProps<typeof ScatterCanvas> = {
   xScale: "linear",
   yScale: "linear",
   showPareto: true,
+  overlayMode: "pareto",
   dimNonPareto: false,
   paretoLineStyle: "linear",
   labelMode: "auto",
@@ -674,6 +699,13 @@ describe("ScatterCanvas", () => {
   test("关闭帕累托时不画前沿层", () => {
     const { container } = renderCanvas({ showPareto: false });
 
+    expect(container.querySelector(".scatter-pareto-layer")).toBeNull();
+  });
+
+  test("趋势线模式绘制回归线而不绘制帕累托层", () => {
+    const { container } = renderCanvas({ overlayMode: "trend" });
+
+    expect(container.querySelector(".scatter-trend-line-layer line")).not.toBeNull();
     expect(container.querySelector(".scatter-pareto-layer")).toBeNull();
   });
 
@@ -1072,6 +1104,24 @@ describe("ScatterCanvas 拖拽平移", () => {
 
     fireEvent.pointerUp(surface, { pointerId: 1 });
     expect(surface.classList.contains("is-panning")).toBe(false);
+  });
+
+  test("拖拽期间及结束后不显示 Tooltip，下一次移动才恢复悬浮", () => {
+    const { container, surface } = setupSurface();
+    const symbol = container.querySelector(".recharts-scatter-symbol") as HTMLElement;
+
+    fireEvent.mouseEnter(symbol);
+    expect(container.querySelector(".scatter-tooltip")).not.toBeNull();
+
+    fireEvent.pointerDown(surface, { pointerId: 1, button: 0, clientX: 300, clientY: 200 });
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: 340, clientY: 200 });
+    expect(container.querySelector(".scatter-tooltip")).toBeNull();
+
+    fireEvent.pointerUp(surface, { pointerId: 1 });
+    expect(container.querySelector(".scatter-tooltip")).toBeNull();
+
+    fireEvent.mouseMove(surface);
+    expect(container.querySelector(".scatter-tooltip")).not.toBeNull();
   });
 
   test("按下未拖动时不进入 is-panning，保留散点点击", () => {

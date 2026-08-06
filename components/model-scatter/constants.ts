@@ -100,6 +100,7 @@ export const SCATTER_GRID_STROKE = "#24314f";
 export const SCATTER_AXIS_STROKE = "#3b4b74";
 export const SCATTER_AXIS_TICK_COLOR = "#a9b3c9";
 export const SCATTER_PARETO_LINE_COLOR = "#facd6a";
+export const SCATTER_TREND_LINE_COLOR = "#8fc7ff";
 export const SCATTER_GUIDE_LINE_COLOR = "rgba(169, 179, 201, 0.35)";
 /**
  * 定位十字线。

@@ -62,7 +62,7 @@ import {
   type ScatterViewState
 } from "./model-scatter/persistence";
 import { ScatterCanvas } from "./model-scatter/scatter-canvas";
-import type { ModelScatterProps, ScatterAxisScale } from "./model-scatter/types";
+import type { ModelScatterProps, ScatterAxisScale, ScatterOverlayMode } from "./model-scatter/types";
 
 /** 散点图不做重复行拆分：合并同名 benchmark 才能得到干净的轴列表。 */
 const SHOW_DUPLICATE_ROWS = false;
@@ -403,7 +403,14 @@ export function ModelScatter({
 
   const dataset = useMemo(() => {
     if (!xMetric || !yMetric) {
-      return { points: [], paretoKeys: new Set<string>(), paretoPath: [], missingCount: 0, nonPositiveCount: 0 };
+      return {
+        points: [],
+        paretoKeys: new Set<string>(),
+        paretoPath: [],
+        trendLine: null,
+        missingCount: 0,
+        nonPositiveCount: 0
+      };
     }
 
     return buildScatterDataset({
@@ -539,6 +546,14 @@ export function ModelScatter({
   const paretoCount = dataset.points.filter((point) => point.isPareto).length;
   const hasAxes = Boolean(xMetric && yMetric);
   const hasEnoughPoints = dataset.points.length >= 1;
+  const overlayMode: ScatterOverlayMode =
+    xMetric &&
+    yMetric &&
+    viewState.xScale === "linear" &&
+    viewState.yScale === "linear" &&
+    xMetric.higherIsBetter === yMetric.higherIsBetter
+      ? "trend"
+      : "pareto";
 
   return (
     <section
@@ -559,6 +574,7 @@ export function ModelScatter({
           onChangeScale={handleChangeScale}
           showPareto={viewState.showPareto}
           onChangeShowPareto={(value) => setViewState((prev) => ({ ...prev, showPareto: value }))}
+          overlayMode={overlayMode}
           dimNonPareto={viewState.dimNonPareto}
           onChangeDimNonPareto={(value) => setViewState((prev) => ({ ...prev, dimNonPareto: value }))}
           paretoLineStyle={viewState.paretoLineStyle}
@@ -595,6 +611,7 @@ export function ModelScatter({
                   xScale={viewState.xScale}
                   yScale={viewState.yScale}
                   showPareto={viewState.showPareto}
+                  overlayMode={overlayMode}
                   dimNonPareto={viewState.dimNonPareto}
                   paretoLineStyle={viewState.paretoLineStyle}
                   labelMode={viewState.labelMode}
@@ -654,7 +671,7 @@ export function ModelScatter({
             可比模型 <b>{dataset.points.length}</b>
             <span className="scatter-note-dim">/ {baseModelColumns.length}</span>
           </span>
-          {viewState.showPareto ? (
+          {overlayMode === "pareto" && viewState.showPareto ? (
             <span className="scatter-note scatter-note-pareto">
               帕累托前沿 <b>{paretoCount}</b>
             </span>

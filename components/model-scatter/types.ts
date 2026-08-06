@@ -9,6 +9,7 @@ export type ScatterMetricUnit = "score" | "usd" | "billions" | "percent";
 export type ScatterAxisScale = "linear" | "log";
 export type ScatterLabelMode = "auto" | "all" | "none";
 export type ScatterParetoLineStyle = "linear" | "step";
+export type ScatterOverlayMode = "pareto" | "trend";
 
 /**
  * 可作为坐标轴的指标。
@@ -52,10 +53,19 @@ export type ScatterPlotDataset = {
   paretoKeys: Set<string>;
   /** 帕累托前沿点，按真实 x 升序，用于连线 */
   paretoPath: ScatterPoint[];
+  /** 当前可绘制点的线性回归趋势线；不适用于少于两点或 X 值无差异的情况。 */
+  trendLine: ScatterTrendLine | null;
   /** 因数值缺失被排除的模型数 */
   missingCount: number;
   /** 因对数轴要求正数被排除的模型数 */
   nonPositiveCount: number;
+};
+
+export type ScatterTrendLine = {
+  slope: number;
+  intercept: number;
+  start: { x: number; y: number };
+  end: { x: number; y: number };
 };
 
 export type ScatterAxisBounds = {
