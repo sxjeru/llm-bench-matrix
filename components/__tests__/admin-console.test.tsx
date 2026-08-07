@@ -1349,6 +1349,51 @@ describe("AdminConsole text import", () => {
     expect(secondPayload.csvText).toContain("qwen3.6-3b-1b");
   });
 
+  test("矩阵 Model 输入可匹配去掉括号后缀后的库内候选", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "Qwen",
+          modelName: "Qwen3.5-4B (Thinking)",
+          benchmarkName: "Bench-1",
+          benchmarkType: "Type-A",
+          rawValue: "70.1",
+          valueNum: 70.1,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    const props = buildProps();
+    props.models = [
+      ...props.models,
+      { id: 3, providerId: 1, modelName: "Qwen3.5-4B", canonicalKey: "qwen3.5-4b" }
+    ];
+
+    mockFetchSequence(previewResponse);
+    render(<AdminConsole {...props} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const matrixTable = await findMatrixPreviewTable();
+    const modelInput = within(matrixTable).getByDisplayValue("Qwen3.5-4B (Thinking)");
+
+    await user.click(modelInput);
+
+    expect(await screen.findByRole("option", { name: /Qwen3\.5-4B \[3\]/ })).toBeInTheDocument();
+  });
+
   test("矩阵 Benchmark 输入编辑时保持焦点，失焦后才提交重命名", async () => {
     const user = userEvent.setup();
 

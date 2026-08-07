@@ -40,10 +40,17 @@ export function getModelSearchCandidateIds(
   models: Array<{ id: number; modelName: string }>,
   limit = 30
 ): number[] {
-  const normalizedInput = input.trim().toLowerCase();
-  const compareInput = buildModelCompareKey(input);
+  const inputVariants = Array.from(new Set([
+    input.trim(),
+    input.replace(/[（(][^()（）]*[)）]/g, " ").replace(/\s+/g, " ").trim()
+  ]))
+    .map((value) => ({
+      normalized: value.toLowerCase(),
+      compare: buildModelCompareKey(value)
+    }))
+    .filter((value) => value.normalized || value.compare);
 
-  if (!normalizedInput && !compareInput) {
+  if (inputVariants.length === 0) {
     return [];
   }
 
@@ -52,18 +59,22 @@ export function getModelSearchCandidateIds(
       const normalizedName = model.modelName.trim().toLowerCase();
       const compareName = buildModelCompareKey(model.modelName);
 
-      let score = Number.POSITIVE_INFINITY;
-      if (normalizedName === normalizedInput || compareName === compareInput) {
-        score = 0;
-      } else if (normalizedName.startsWith(normalizedInput)) {
-        score = 1;
-      } else if (compareInput && compareName.startsWith(compareInput)) {
-        score = 2;
-      } else if (normalizedName.includes(normalizedInput)) {
-        score = 3;
-      } else if (compareInput && compareName.includes(compareInput)) {
-        score = 4;
-      }
+      const score = inputVariants.reduce((bestScore, variant, variantIndex) => {
+        let matchScore = Number.POSITIVE_INFINITY;
+        if (normalizedName === variant.normalized || compareName === variant.compare) {
+          matchScore = 0;
+        } else if (normalizedName.startsWith(variant.normalized)) {
+          matchScore = 1;
+        } else if (variant.compare && compareName.startsWith(variant.compare)) {
+          matchScore = 2;
+        } else if (normalizedName.includes(variant.normalized)) {
+          matchScore = 3;
+        } else if (variant.compare && compareName.includes(variant.compare)) {
+          matchScore = 4;
+        }
+
+        return Math.min(bestScore, matchScore * inputVariants.length + variantIndex);
+      }, Number.POSITIVE_INFINITY);
 
       return { model, score };
     })
