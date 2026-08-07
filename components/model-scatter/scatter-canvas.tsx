@@ -573,11 +573,11 @@ export function ScatterCanvas({
           xMetric.higherIsBetter,
           yMetric.higherIsBetter
         );
-      const opacity = isTemporarilyHidden
-        ? 0
-        : isHighlighted || (!isProviderMuted && !isParetoMuted && !isWorstQuadrantMuted)
-          ? 1
-          : SCATTER_DIMMED_OPACITY;
+      const opacity =
+        isTemporarilyHidden ||
+        (!isHighlighted && (isProviderMuted || isParetoMuted || isWorstQuadrantMuted))
+          ? SCATTER_DIMMED_OPACITY
+          : 1;
 
       const label = placedLabels.get(payload.modelName);
       const labelBox = label ? getPlacedLabelBox(label, SCATTER_LABEL_FONT_SIZE) : null;

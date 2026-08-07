@@ -817,7 +817,9 @@ describe("ScatterCanvas", () => {
 
     const hiddenAlpha = findAlphaSymbol();
     expect(hiddenAlpha).not.toBeUndefined();
-    expect(hiddenAlpha!.querySelector("[data-model-name='Alpha']")?.getAttribute("opacity")).toBe("0");
+    expect(hiddenAlpha!.querySelector("[data-model-name='Alpha']")?.getAttribute("opacity")).toBe(
+      String(SCATTER_DIMMED_OPACITY)
+    );
     expect(hiddenAlpha!.querySelector("text")).toBeNull();
     const lineAfter = container.querySelector(".scatter-pareto-layer polyline");
     expect(lineAfter?.getAttribute("points")).toBeTruthy();
