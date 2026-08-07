@@ -415,6 +415,7 @@ export function AdminConsole({
     modelParenthesesCustomNames,
     modelMergeTargets,
     benchmarkMergeTargets,
+    matrixModelNameDrafts,
     matrixBenchmarkNameDrafts,
     matrixBenchmarkTypeDrafts,
     modelById,

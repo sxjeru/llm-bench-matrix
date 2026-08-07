@@ -210,7 +210,7 @@ describe("useImportPreviewState Hook - benchmarkPreviewValueOverlapPayload", () 
     ]);
   });
 
-  test("模型名变化时会更新重复率重算触发 key", () => {
+  test("模型名编辑草稿会立即用于重复率检查并更新重算触发 key", () => {
     const draftRow: TextImportPreviewRow = {
       rowNumber: 1,
       providerName: "OpenAI",
@@ -233,13 +233,17 @@ describe("useImportPreviewState Hook - benchmarkPreviewValueOverlapPayload", () 
     };
 
     const { result, rerender } = renderHook(
-      ({ rows }) => useImportPreviewState(createMockOptions({ benchmarks: [benchmark], textImportDraftRows: rows })),
-      { initialProps: { rows: [draftRow] } }
+      ({ modelNameDrafts }) => useImportPreviewState(createMockOptions({
+        benchmarks: [benchmark],
+        textImportDraftRows: [draftRow],
+        matrixModelNameDrafts: modelNameDrafts
+      })),
+      { initialProps: { modelNameDrafts: {} as Record<string, string> } }
     );
 
     const initialTriggerKey = result.current.benchmarkPreviewValueOverlapTriggerKey;
 
-    rerender({ rows: [{ ...draftRow, modelName: "GPT-4o" }] });
+    rerender({ modelNameDrafts: { "GPT-4": "GPT-4o" } });
 
     expect(result.current.benchmarkPreviewValueOverlapPayload.items[0].cells).toEqual([
       { modelName: "GPT-4o", rawValue: "0.85" }

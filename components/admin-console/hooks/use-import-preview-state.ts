@@ -45,6 +45,7 @@ type UseImportPreviewStateOptions = {
   modelParenthesesCustomNames: Record<string, string>;
   modelMergeTargets: Record<string, string>;
   benchmarkMergeTargets: Record<string, string>;
+  matrixModelNameDrafts?: Record<string, string>;
   /** 预览矩阵中尚未 blur 提交的 name 编辑，导入时需一并生效 */
   matrixBenchmarkNameDrafts?: Record<string, string>;
   /** 预览矩阵中尚未 blur 提交的 type 编辑，导入时需一并生效 */
@@ -146,6 +147,7 @@ export function useImportPreviewState({
   modelParenthesesCustomNames,
   modelMergeTargets,
   benchmarkMergeTargets,
+  matrixModelNameDrafts = {},
   matrixBenchmarkNameDrafts = {},
   matrixBenchmarkTypeDrafts = {},
   modelById,
@@ -576,7 +578,7 @@ export function useImportPreviewState({
           .map((rowIndex) => textImportDraftRows[rowIndex])
           .filter((row): row is TextImportPreviewRow => Boolean(row) && row.rawValue.trim().length > 0)
           .map((row) => ({
-            modelName: row.modelName,
+            modelName: matrixModelNameDrafts[row.modelName]?.trim() || row.modelName,
             rawValue: row.rawValue
           }));
 
@@ -598,7 +600,7 @@ export function useImportPreviewState({
       key: items.length > 0 ? JSON.stringify(items) : "",
       items
     };
-  }, [benchmarks, benchmarkWarnings, benchmarkMergeCandidateMap, matrixPreview.rows, textImportDraftRows]);
+  }, [benchmarks, benchmarkWarnings, benchmarkMergeCandidateMap, matrixPreview.rows, matrixModelNameDrafts, textImportDraftRows]);
 
   const benchmarkPreviewValueOverlapTriggerKey = useMemo(() => {
     if (textImportDraftRows.length === 0) {
@@ -606,9 +608,12 @@ export function useImportPreviewState({
     }
 
     return textImportDraftRows
-      .map((row, rowIndex) => `${rowIndex}:${row.modelName}\u001e${row.rawValue}`)
+      .map((row, rowIndex) => {
+        const modelName = matrixModelNameDrafts[row.modelName]?.trim() || row.modelName;
+        return `${rowIndex}:${modelName}\u001e${row.rawValue}`;
+      })
       .join("\u001f");
-  }, [textImportDraftRows]);
+  }, [matrixModelNameDrafts, textImportDraftRows]);
 
   const pairValueRows = useMemo(() => {
     return textImportDraftRows
