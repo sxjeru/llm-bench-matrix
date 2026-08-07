@@ -269,7 +269,7 @@ export function ScatterCanvas({
     if (labelMode === "none" || !plotArea) return new Map();
 
     const projections = buildPointProjections({
-      points: activeDataset.points.filter((point) => !activeHiddenModelNames.has(point.modelName)),
+      points: activeDataset.points,
       xDomain,
       yDomain,
       xScale,
@@ -277,8 +277,7 @@ export function ScatterCanvas({
       plotArea
     });
 
-    const rankedModels = activeDataset.points
-      .filter((point) => !activeHiddenModelNames.has(point.modelName))
+    const rankedModels = [...activeDataset.points]
       .sort((left, right) => (yMetric.higherIsBetter ? right.y - left.y : left.y - right.y))
       .map((point) => point.modelName);
     const yRankByModel = new Map(rankedModels.map((modelName, index) => [modelName, index]));
@@ -287,7 +286,6 @@ export function ScatterCanvas({
     const providerByModel = new Map<string, string>();
 
     activeDataset.points.forEach((point) => {
-      if (activeHiddenModelNames.has(point.modelName)) return;
       const projection = projections.get(point.modelName);
       if (!projection) return;
       // 缩放后落在绘图区外的点不参与排版，免得标签飘到坐标轴上
@@ -345,7 +343,6 @@ export function ScatterCanvas({
     return labelByKey;
   }, [
     activeDataset.points,
-    activeHiddenModelNames,
     plotArea,
     xDomain,
     yDomain,
