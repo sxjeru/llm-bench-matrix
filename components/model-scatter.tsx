@@ -101,6 +101,7 @@ export function ModelScatter({
   const [chartHeight, setChartHeight] = useState(SCATTER_CHART_HEIGHT);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isZoomed, setIsZoomed] = useState(false);
+  const [visibleScatterPoints, setVisibleScatterPoints] = useState<readonly { modelName: string; providerName: string }[]>([]);
   const [resetZoomSignal, setResetZoomSignal] = useState(0);
   // 与矩阵页共用的「合成行是否计入总评」开关，保证两页 Overall Score 对得上
   const [priceRowsInOverall, setPriceRowsInOverall] = useState(false);
@@ -426,8 +427,12 @@ export function ModelScatter({
     });
   }, [xMetric, yMetric, plottableModelNames, providerNameByModel, colorByModel, viewState.xScale, viewState.yScale]);
 
+  useEffect(() => {
+    setVisibleScatterPoints(dataset.points);
+  }, [dataset.points]);
+
   const legendEntries = useMemo(() => {
-    const countByProvider = new Map<string, { color: string; count: number }>();
+    const countByProvider = new Map<string, { color: string; candidateCount: number }>();
 
     baseModelColumns.forEach((modelName) => {
       const providerName = providerNameByModel.get(modelName);
@@ -435,20 +440,36 @@ export function ModelScatter({
 
       const existing = countByProvider.get(providerName);
       if (existing) {
-        existing.count += 1;
+        existing.candidateCount += 1;
         return;
       }
 
       countByProvider.set(providerName, {
         color: colorByModel.get(modelName) ?? "#5da7ff",
-        count: 1
+        candidateCount: 1
       });
     });
 
+    const visibleCountByProvider = new Map<string, number>();
+    visibleScatterPoints.forEach((point) => {
+      visibleCountByProvider.set(
+        point.providerName,
+        (visibleCountByProvider.get(point.providerName) ?? 0) + 1
+      );
+    });
+
     return Array.from(countByProvider.entries())
-      .map(([providerName, meta]) => ({ providerName, ...meta }))
-      .sort((left, right) => right.count - left.count || left.providerName.localeCompare(right.providerName));
-  }, [baseModelColumns, providerNameByModel, colorByModel]);
+      .map(([providerName, meta]) => ({
+        providerName,
+        color: meta.color,
+        count: visibleCountByProvider.get(providerName) ?? 0,
+        candidateCount: meta.candidateCount
+      }))
+      .sort(
+        (left, right) =>
+          right.candidateCount - left.candidateCount || left.providerName.localeCompare(right.providerName)
+      );
+  }, [baseModelColumns, providerNameByModel, colorByModel, visibleScatterPoints]);
 
   const availableExportPresetKeys = useMemo<ExportPresetKey[]>(
     () =>
@@ -629,6 +650,7 @@ export function ModelScatter({
                       )
                     }
                     onZoomChange={setIsZoomed}
+                    onVisiblePointsChange={setVisibleScatterPoints}
                     resetZoomSignal={resetZoomSignal}
                   />
                 )}

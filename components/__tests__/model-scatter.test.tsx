@@ -111,6 +111,11 @@ function paretoCount(): string {
   return note ? note.replace(/^帕累托前沿\s*/, "").trim() : "--";
 }
 
+function legendCount(providerName: string): string {
+  const button = screen.getByRole("button", { name: new RegExp(providerName) });
+  return button.querySelector(".scatter-legend-count")?.textContent ?? "";
+}
+
 function axisInput(container: HTMLElement, axis: "x" | "y"): HTMLInputElement {
   const input = container.querySelector<HTMLInputElement>(`#scatter-axis-${axis}`);
   if (!input) throw new Error(`未找到 ${axis} 轴选择器`);
@@ -364,11 +369,30 @@ describe("ModelScatter", () => {
     renderScatter();
 
     expect(comparableModelCount()).toBe("4");
+    expect(legendCount("OpenAI")).toBe("2");
 
     fireEvent.click(screen.getByRole("button", { name: /OpenAI/ }));
 
     // Alpha 与 Beta 属于 OpenAI，隐藏后只剩 Anthropic 的两个模型
     expect(comparableModelCount()).toBe("2");
+    expect(legendCount("OpenAI")).toBe("0");
+    expect(legendCount("Anthropic")).toBe("2");
+  });
+
+  test("图例只统计当前双轴下实际绘制的模型", () => {
+    render(
+      <ModelScatter
+        rows={rows}
+        allRows={rows}
+        sourceOptions={["text:demo"]}
+        modelPrices={modelPrices.filter((price) => price.modelName !== "Delta")}
+        modelParams={modelParams}
+      />
+    );
+
+    expect(comparableModelCount()).toBe("3");
+    expect(legendCount("OpenAI")).toBe("2");
+    expect(legendCount("Anthropic")).toBe("1");
   });
 
   test("图例全部隐藏时给出空态引导", () => {
@@ -935,6 +959,33 @@ describe("ScatterCanvas", () => {
     expect(onZoomChange).toHaveBeenLastCalledWith(true);
     // 缩放必须真的挪动落点，而不只是改了内部状态
     expect(dotPositions()).not.toBe(before);
+  });
+
+  test("缩放时回报当前视窗内的点，重置后恢复全部", () => {
+    const onVisiblePointsChange = vi.fn();
+    const { container } = renderCanvas({ onVisiblePointsChange });
+    const surface = container.querySelector(".scatter-chart-surface") as HTMLElement;
+
+    expect(onVisiblePointsChange).toHaveBeenLastCalledWith(dataset.points);
+    stubSurfaceRect(surface);
+
+    act(() => {
+      surface.dispatchEvent(
+        new WheelEvent("wheel", {
+          deltaY: -120,
+          clientX: 320,
+          clientY: 210,
+          bubbles: true,
+          cancelable: true
+        })
+      );
+    });
+
+    const zoomedPoints = onVisiblePointsChange.mock.calls.at(-1)?.[0] as typeof dataset.points;
+    expect(zoomedPoints.length).toBeLessThan(dataset.points.length);
+
+    fireEvent.doubleClick(surface);
+    expect(onVisiblePointsChange).toHaveBeenLastCalledWith(dataset.points);
   });
 
   test("绘图区之外的滚轮不拦截页面滚动", () => {

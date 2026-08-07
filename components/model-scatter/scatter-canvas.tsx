@@ -73,6 +73,7 @@ export type ScatterCanvasProps = {
    */
   onSelectModel?: (modelName: string | null) => void;
   onZoomChange?: (isZoomed: boolean) => void;
+  onVisiblePointsChange?: (points: readonly ScatterPoint[]) => void;
   /** 外部触发的重置计数，每次自增都会把缩放归位 */
   resetZoomSignal?: number;
 };
@@ -154,6 +155,7 @@ export function ScatterCanvas({
   hoveredProvider = null,
   onSelectModel,
   onZoomChange,
+  onVisiblePointsChange,
   resetZoomSignal = 0
 }: ScatterCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -187,6 +189,22 @@ export function ScatterCanvas({
   useEffect(() => {
     onZoomChange?.(isZoomed);
   }, [isZoomed, onZoomChange]);
+
+  const visiblePoints = useMemo(
+    () =>
+      dataset.points.filter(
+        (point) =>
+          point.x >= xDomain[0] &&
+          point.x <= xDomain[1] &&
+          point.y >= yDomain[0] &&
+          point.y <= yDomain[1]
+      ),
+    [dataset.points, xDomain, yDomain]
+  );
+
+  useEffect(() => {
+    onVisiblePointsChange?.(visiblePoints);
+  }, [onVisiblePointsChange, visiblePoints]);
 
   const plotArea = useMemo(
     () =>
