@@ -779,20 +779,52 @@ describe("ScatterCanvas", () => {
     });
   });
 
-  test("散点浮窗显示时右键可隐藏，继续移动后恢复悬浮", () => {
+  test("散点浮窗显示时右键只隐藏浮窗并保留十字线，继续移动后恢复悬浮", () => {
     const { container } = renderCanvas();
     const surface = container.querySelector(".scatter-chart-surface") as HTMLElement;
     const symbol = container.querySelector(".recharts-scatter-symbol") as HTMLElement;
 
     fireEvent.mouseEnter(symbol);
     expect(container.querySelector(".scatter-tooltip")).not.toBeNull();
+    expect(container.querySelector(".recharts-tooltip-cursor")).not.toBeNull();
 
     const contextMenuEvent = fireEvent.contextMenu(symbol);
     expect(contextMenuEvent).toBe(false);
     expect(container.querySelector(".scatter-tooltip")).toBeNull();
+    expect(container.querySelector(".recharts-tooltip-cursor")).not.toBeNull();
 
     fireEvent.mouseMove(surface);
     expect(container.querySelector(".scatter-tooltip")).not.toBeNull();
+  });
+
+  test("Shift 点击前沿点会临时隐藏该点并刷新帕累托前沿", () => {
+    const { container } = renderCanvas({ labelMode: "all" });
+    const findAlphaSymbol = () =>
+      Array.from(container.querySelectorAll(".recharts-scatter-symbol")).find(
+        (symbol) =>
+          symbol.querySelector("text")?.textContent === "Alpha" ||
+          symbol.querySelector("[data-model-name='Alpha']") !== null
+      ) as HTMLElement | undefined;
+
+    const alphaSymbol = findAlphaSymbol();
+    expect(alphaSymbol).not.toBeUndefined();
+
+    const lineBefore = container.querySelector(".scatter-pareto-layer polyline");
+    const pointsBefore = lineBefore?.getAttribute("points");
+    expect(pointsBefore).toBeTruthy();
+
+    fireEvent.click(alphaSymbol!, { shiftKey: true });
+
+    const hiddenAlpha = findAlphaSymbol();
+    expect(hiddenAlpha).not.toBeUndefined();
+    expect(hiddenAlpha!.querySelector("[data-model-name='Alpha']")?.getAttribute("opacity")).toBe("0");
+    expect(hiddenAlpha!.querySelector("text")).toBeNull();
+    const lineAfter = container.querySelector(".scatter-pareto-layer polyline");
+    expect(lineAfter?.getAttribute("points")).toBeTruthy();
+    expect(lineAfter?.getAttribute("points")).not.toBe(pointsBefore);
+    expect(container.querySelectorAll(".scatter-pareto-layer circle").length).toBe(
+      dataset.paretoPath.length - 1
+    );
   });
 
   test("开启中位参考线时画出参考层", () => {

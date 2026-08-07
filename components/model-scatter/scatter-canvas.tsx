@@ -33,6 +33,7 @@ import {
 import { isInWorstQuadrant, ScatterGuideLayer } from "./guide-layer";
 import { getPlacedLabelBox, layoutScatterLabels } from "./label-layout";
 import { formatScatterAxisTick, getMetricAxisLabel } from "./metrics";
+import { computeParetoFrontier, orderParetoPath } from "./pareto";
 import { ScatterParetoLayer } from "./pareto-layer";
 import { ScatterTrendLineLayer } from "./trend-line-layer";
 import { buildPointProjections, computePlotArea, pixelToAxisRatio } from "./projection";
@@ -82,6 +83,17 @@ type ScatterDotRenderProps = {
   cx?: number;
   cy?: number;
   payload?: ScatterPoint;
+};
+
+type ScatterClickEvent = {
+  shiftKey?: boolean;
+};
+
+type ScatterClickPoint = {
+  modelName?: string;
+  payload?: {
+    modelName?: string;
+  };
 };
 
 type ZoomState = {
@@ -165,9 +177,43 @@ export function ScatterCanvas({
   const [zoom, setZoom] = useState<ZoomState | null>(null);
   const [isPanning, setIsPanning] = useState(false);
   const [isTooltipDismissed, setIsTooltipDismissed] = useState(false);
+  const [hiddenModelNames, setHiddenModelNames] = useState<Set<string>>(() => new Set());
 
-  const xValues = useMemo(() => dataset.points.map((point) => point.x), [dataset.points]);
-  const yValues = useMemo(() => dataset.points.map((point) => point.y), [dataset.points]);
+  const activeHiddenModelNames = useMemo(() => {
+    const datasetModelNames = new Set(dataset.points.map((point) => point.modelName));
+    return new Set([...hiddenModelNames].filter((modelName) => datasetModelNames.has(modelName)));
+  }, [dataset.points, hiddenModelNames]);
+
+  const activeDataset = useMemo<ScatterPlotDataset>(() => {
+    if (activeHiddenModelNames.size === 0) return dataset;
+
+    const activePoints = dataset.points.filter(
+      (point) => !activeHiddenModelNames.has(point.modelName)
+    );
+    const paretoKeys = computeParetoFrontier(
+      activePoints.map((point) => ({ key: point.modelName, x: point.x, y: point.y })),
+      xMetric.higherIsBetter,
+      yMetric.higherIsBetter
+    );
+    const points = dataset.points.map((point) => ({
+      ...point,
+      isPareto: paretoKeys.has(point.modelName)
+    }));
+
+    return {
+      ...dataset,
+      points,
+      paretoKeys,
+      paretoPath: orderParetoPath(
+        points.filter((point) => point.isPareto),
+        xMetric.higherIsBetter,
+        yMetric.higherIsBetter
+      )
+    };
+  }, [activeHiddenModelNames, dataset, xMetric.higherIsBetter, yMetric.higherIsBetter]);
+
+  const xValues = useMemo(() => activeDataset.points.map((point) => point.x), [activeDataset.points]);
+  const yValues = useMemo(() => activeDataset.points.map((point) => point.y), [activeDataset.points]);
 
   const baseXDomain = useMemo(() => computeAxisDomain(xValues, xScale), [xValues, xScale]);
   const baseYDomain = useMemo(() => computeAxisDomain(yValues, yScale), [yValues, yScale]);
@@ -192,14 +238,15 @@ export function ScatterCanvas({
 
   const visiblePoints = useMemo(
     () =>
-      dataset.points.filter(
+      activeDataset.points.filter(
         (point) =>
+          !activeHiddenModelNames.has(point.modelName) &&
           point.x >= xDomain[0] &&
           point.x <= xDomain[1] &&
           point.y >= yDomain[0] &&
           point.y <= yDomain[1]
       ),
-    [dataset.points, xDomain, yDomain]
+    [activeDataset.points, activeHiddenModelNames, xDomain, yDomain]
   );
 
   useEffect(() => {
@@ -222,7 +269,7 @@ export function ScatterCanvas({
     if (labelMode === "none" || !plotArea) return new Map();
 
     const projections = buildPointProjections({
-      points: dataset.points,
+      points: activeDataset.points.filter((point) => !activeHiddenModelNames.has(point.modelName)),
       xDomain,
       yDomain,
       xScale,
@@ -230,7 +277,8 @@ export function ScatterCanvas({
       plotArea
     });
 
-    const rankedModels = [...dataset.points]
+    const rankedModels = activeDataset.points
+      .filter((point) => !activeHiddenModelNames.has(point.modelName))
       .sort((left, right) => (yMetric.higherIsBetter ? right.y - left.y : left.y - right.y))
       .map((point) => point.modelName);
     const yRankByModel = new Map(rankedModels.map((modelName, index) => [modelName, index]));
@@ -238,7 +286,8 @@ export function ScatterCanvas({
     const candidates: ScatterLabelCandidate[] = [];
     const providerByModel = new Map<string, string>();
 
-    dataset.points.forEach((point) => {
+    activeDataset.points.forEach((point) => {
+      if (activeHiddenModelNames.has(point.modelName)) return;
       const projection = projections.get(point.modelName);
       if (!projection) return;
       // 缩放后落在绘图区外的点不参与排版，免得标签飘到坐标轴上
@@ -259,8 +308,8 @@ export function ScatterCanvas({
         cy: projection.cy,
         priority: computeLabelPriority(
           point,
-          yRankByModel.get(point.modelName) ?? dataset.points.length,
-          dataset.points.length,
+          yRankByModel.get(point.modelName) ?? activeDataset.points.length,
+          activeDataset.points.length,
           highlightedModel,
           overlayMode === "pareto" && showPareto
         )
@@ -295,7 +344,8 @@ export function ScatterCanvas({
 
     return labelByKey;
   }, [
-    dataset.points,
+    activeDataset.points,
+    activeHiddenModelNames,
     plotArea,
     xDomain,
     yDomain,
@@ -315,9 +365,9 @@ export function ScatterCanvas({
   const highlightedPoint = useMemo(
     () =>
       highlightedModel
-        ? (dataset.points.find((point) => point.modelName === highlightedModel) ?? null)
+        ? (activeDataset.points.find((point) => point.modelName === highlightedModel) ?? null)
         : null,
-    [dataset.points, highlightedModel]
+      [activeDataset.points, highlightedModel]
   );
 
   // 钉住时十字与最优象限以该点为中心；取消钉住后回到全体中位
@@ -382,7 +432,7 @@ export function ScatterCanvas({
    * 让当前最该被看清的点始终画在最上层。排序是稳定的，同组内相对次序不变。
    */
   const orderedPoints = useMemo(() => {
-    if (!hoveredProvider && !highlightedModel) return dataset.points;
+    if (!hoveredProvider && !highlightedModel) return activeDataset.points;
 
     const rank = (point: ScatterPoint) => {
       if (point.modelName === highlightedModel) return 3;
@@ -391,8 +441,8 @@ export function ScatterCanvas({
       return 0;
     };
 
-    return [...dataset.points].sort((left, right) => rank(left) - rank(right));
-  }, [dataset.points, hoveredProvider, highlightedModel, overlayMode, showPareto]);
+    return [...activeDataset.points].sort((left, right) => rank(left) - rank(right));
+  }, [activeDataset.points, hoveredProvider, highlightedModel, overlayMode, showPareto]);
 
   const isInsidePlot = useCallback(
     (pointerX: number, pointerY: number) =>
@@ -505,6 +555,7 @@ export function ScatterCanvas({
       const { cx, cy, payload } = dotProps;
       if (typeof cx !== "number" || typeof cy !== "number" || !payload) return <g />;
 
+      const isTemporarilyHidden = activeHiddenModelNames.has(payload.modelName);
       const isHighlighted = payload.modelName === highlightedModel;
       const isPareto = overlayMode === "pareto" && showPareto && payload.isPareto;
       const radius = isPareto ? SCATTER_DOT_RADIUS_PARETO : SCATTER_DOT_RADIUS;
@@ -522,8 +573,9 @@ export function ScatterCanvas({
           xMetric.higherIsBetter,
           yMetric.higherIsBetter
         );
-      const opacity =
-        isHighlighted || (!isProviderMuted && !isParetoMuted && !isWorstQuadrantMuted)
+      const opacity = isTemporarilyHidden
+        ? 0
+        : isHighlighted || (!isProviderMuted && !isParetoMuted && !isWorstQuadrantMuted)
           ? 1
           : SCATTER_DIMMED_OPACITY;
 
@@ -531,7 +583,7 @@ export function ScatterCanvas({
       const labelBox = label ? getPlacedLabelBox(label, SCATTER_LABEL_FONT_SIZE) : null;
 
       return (
-        <g opacity={opacity}>
+        <g opacity={opacity} data-model-name={payload.modelName}>
           {isHighlighted ? (
             // 钉住标记用该模型自己的品牌色描一圈淡环。早先用的是纯白硬边，
             // 看起来跟浏览器的焦点框一模一样，会被误读成点击留下的脏东西。
@@ -590,6 +642,7 @@ export function ScatterCanvas({
     [
       highlightedModel,
       highlightedPoint,
+      activeHiddenModelNames,
       overlayMode,
       showPareto,
       shouldDim,
@@ -601,14 +654,27 @@ export function ScatterCanvas({
   );
 
   const handleSelect = useCallback(
-    (point: unknown) => {
+    (point: unknown, _index: unknown, event?: ScatterClickEvent) => {
       if (suppressClickRef.current) {
         suppressClickRef.current = false;
         return;
       }
 
-      const modelName = (point as { modelName?: string } | undefined)?.modelName;
-      if (modelName) onSelectModel?.(modelName);
+      const clickPoint = point as ScatterClickPoint | undefined;
+      const modelName = clickPoint?.payload?.modelName ?? clickPoint?.modelName;
+      if (!modelName) return;
+
+      if (event?.shiftKey) {
+        setHiddenModelNames((previous) => {
+          const next = new Set(previous);
+          if (next.has(modelName)) next.delete(modelName);
+          else next.add(modelName);
+          return next;
+        });
+        return;
+      }
+
+      onSelectModel?.(modelName);
     },
     [onSelectModel]
   );
@@ -695,7 +761,6 @@ export function ScatterCanvas({
         />
 
         <Tooltip
-          active={isTooltipDismissed ? false : undefined}
           cursor={{
             strokeDasharray: SCATTER_CURSOR_DASH,
             stroke: SCATTER_CURSOR_STROKE,
@@ -703,15 +768,18 @@ export function ScatterCanvas({
           }}
           // 关掉 Recharts 默认的位移过渡：否则浮窗每次都从上一个位置（首次是左上角）滑过来
           isAnimationActive={false}
-          content={
-            <ScatterTooltip
-              xMetric={xMetric}
-              yMetric={yMetric}
-              xScale={xScale}
-              yScale={yScale}
-              showPareto={overlayMode === "pareto" && showPareto}
-              points={dataset.points}
-            />
+          content={(tooltipProps) =>
+            isTooltipDismissed ? null : (
+              <ScatterTooltip
+                {...tooltipProps}
+                xMetric={xMetric}
+                yMetric={yMetric}
+                xScale={xScale}
+                yScale={yScale}
+                showPareto={overlayMode === "pareto" && showPareto}
+                points={activeDataset.points}
+              />
+            )
           }
         />
 
@@ -728,7 +796,7 @@ export function ScatterCanvas({
         <Scatter data={orderedPoints} shape={renderDot} isAnimationActive={false} onClick={handleSelect} />
 
         {overlayMode === "pareto" && showPareto ? (
-          <ScatterParetoLayer path={dataset.paretoPath} lineStyle={paretoLineStyle} />
+          <ScatterParetoLayer path={activeDataset.paretoPath} lineStyle={paretoLineStyle} />
         ) : null}
         {overlayMode === "trend" && showPareto ? (
           <ScatterTrendLineLayer line={dataset.trendLine} xDomain={xDomain} />
