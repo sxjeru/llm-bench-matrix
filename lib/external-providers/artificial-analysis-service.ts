@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db/client";
 import { getSettings, invalidateAllCaches, saveSetting } from "@/lib/db/queries";
@@ -91,7 +91,8 @@ async function getLocalModels(): Promise<Array<LocalModelInput & { providerDispl
     .from(models)
     .innerJoin(providers, eq(models.providerId, providers.id))
     .where(isNull(models.mergedIntoModelId))
-    .orderBy(providers.name, models.modelName);
+    // 模型匹配列表按添加顺序展示：新添加的模型优先
+    .orderBy(desc(models.createdAt), desc(models.id));
 
   return rows.map((row) => ({
     id: row.id,

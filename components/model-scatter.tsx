@@ -100,9 +100,13 @@ export function ModelScatter({
   const [supportsAvifExport, setSupportsAvifExport] = useState(false);
   const [chartHeight, setChartHeight] = useState(SCATTER_CHART_HEIGHT);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isZoomed, setIsZoomed] = useState(false);
-  const [visibleScatterPoints, setVisibleScatterPoints] = useState<readonly { modelName: string; providerName: string }[]>([]);
-  const [resetZoomSignal, setResetZoomSignal] = useState(0);
+  // 视口内可见点（缩放/平移后由画布回传）；dataset 变化时在渲染期重置
+  const [visibleScatterPoints, setVisibleScatterPoints] = useState<
+    readonly { modelName: string; providerName: string }[]
+  >([]);
+  const [syncedDatasetPoints, setSyncedDatasetPoints] = useState<
+    readonly { modelName: string; providerName: string }[]
+  >([]);
   // 与矩阵页共用的「合成行是否计入总评」开关，保证两页 Overall Score 对得上
   const [priceRowsInOverall, setPriceRowsInOverall] = useState(false);
   const [paramsRowsInOverall, setParamsRowsInOverall] = useState(false);
@@ -427,9 +431,11 @@ export function ModelScatter({
     });
   }, [xMetric, yMetric, plottableModelNames, providerNameByModel, colorByModel, viewState.xScale, viewState.yScale]);
 
-  useEffect(() => {
+  // 数据集一变就清空视口覆盖，避免沿用上一组轴/筛选下的可见点
+  if (dataset.points !== syncedDatasetPoints) {
+    setSyncedDatasetPoints(dataset.points);
     setVisibleScatterPoints(dataset.points);
-  }, [dataset.points]);
+  }
 
   const legendEntries = useMemo(() => {
     const countByProvider = new Map<string, { color: string; candidateCount: number }>();
@@ -649,9 +655,7 @@ export function ModelScatter({
                         modelName === null ? null : prev === modelName ? null : modelName
                       )
                     }
-                    onZoomChange={setIsZoomed}
                     onVisiblePointsChange={setVisibleScatterPoints}
-                    resetZoomSignal={resetZoomSignal}
                   />
                 )}
               </ScatterChartHost>
@@ -721,17 +725,7 @@ export function ModelScatter({
               已钉住 {highlightedModel} · 点击取消
             </button>
           ) : null}
-          {/* {isZoomed ? (
-            <button
-              type="button"
-              className="scatter-btn scatter-note scatter-note-action"
-              onClick={() => setResetZoomSignal((prev) => prev + 1)}
-            >
-              已缩放 · 点击重置（或在图上双击）
-            </button>
-          ) : (
-            <span className="scatter-note scatter-note-hint">拖拽平移 · 滚轮以光标为中心放大</span>
-          )} */}
+          {/* <span className="scatter-note scatter-note-hint">拖拽平移 · 滚轮以光标为中心放大 · 双击重置</span> */}
           {activeSource === SOURCE_ALL ? (
             <label className="scatter-note scatter-note-toggle">
               <input
