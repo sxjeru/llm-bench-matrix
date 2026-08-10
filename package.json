@@ -42,7 +42,7 @@
     "@types/node": "^26.1.2",
     "@types/pg": "^8.20.1",
     "@types/react": "19.2.18",
-    "@types/react-dom": "19.2.3",
+    "@types/react-dom": "19.2.4",
     "@types/ws": "^8.18.1",
     "daisyui": "^5.7.9",
     "drizzle-kit": "^0.31.10",
