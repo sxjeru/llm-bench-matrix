@@ -36,7 +36,6 @@ export default async function ScatterPage() {
       <Suspense fallback={null}>
         <ModelScatter
           rows={mappedRows}
-          allRows={mappedRows}
           sourceOptions={sourceOptions}
           modelPrices={modelPrices}
           modelParams={modelParams}

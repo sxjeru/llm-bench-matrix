@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import { NextResponse } from "next/server";
+import { toMatrixInputRow } from "@/components/benchmark-matrix/map-row";
 import { getDashboardRows } from "@/lib/db/queries";
 import { createRateLimiter, getRateLimitKey } from "@/lib/rate-limit";
 import { getCacheVersion } from "@/lib/cache-versions";
@@ -7,8 +8,9 @@ import { getCacheVersion } from "@/lib/cache-versions";
 // 60 requests per IP per 60-second window
 const limiter = createRateLimiter(60, 60_000);
 const CACHE_CONTROL_BROWSER = "public, max-age=0, must-revalidate";
-const CACHE_CONTROL_CDN = "public, s-maxage=10, stale-while-revalidate=60";
-const CACHE_CONTROL_VERCEL = "public, s-maxage=30, stale-while-revalidate=120";
+// 数据仅在后台写入后变化；长 CDN TTL + 版本 ETag，减少 origin 回源流量
+const CACHE_CONTROL_CDN = "public, s-maxage=300, stale-while-revalidate=3600";
+const CACHE_CONTROL_VERCEL = "public, s-maxage=900, stale-while-revalidate=86400";
 
 function normalizeRequestedLimit(value: string | null) {
   const limitRaw = Number.parseInt(value || "300", 10);
@@ -96,7 +98,7 @@ export async function GET(request: Request) {
   }
 
   const cachedRows = await getDashboardRows(cachedLimit, null, dashboardVersion);
-  const rows = cachedRows.slice(0, limit);
+  const rows = cachedRows.slice(0, limit).map(toMatrixInputRow);
 
   return NextResponse.json(
     { rows },

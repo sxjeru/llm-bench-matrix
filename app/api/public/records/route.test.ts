@@ -28,8 +28,8 @@ describe("GET /api/public/records", () => {
     expect(getCacheVersion).toHaveBeenCalledWith("pricing");
     expect(getDashboardRows).toHaveBeenCalledWith(300, null, "dashboard-version");
     expect(response.headers.get("Cache-Control")).toBe("public, max-age=0, must-revalidate");
-    expect(response.headers.get("CDN-Cache-Control")).toBe("public, s-maxage=10, stale-while-revalidate=60");
-    expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe("public, s-maxage=30, stale-while-revalidate=120");
+    expect(response.headers.get("CDN-Cache-Control")).toBe("public, s-maxage=300, stale-while-revalidate=3600");
+    expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe("public, s-maxage=900, stale-while-revalidate=86400");
     expect(response.headers.get("X-Dashboard-Version")).toBe("dashboard-version");
     expect(response.headers.get("X-Pricing-Version")).toBe("pricing-version");
     expect(response.headers.get("ETag")).toBe('"records:dashboard-version:pricing-version:limit:300:f23a4e48f80ed64c"');
@@ -45,9 +45,72 @@ describe("GET /api/public/records", () => {
 
   test("limit 会收敛到固定缓存档位并按请求值裁剪", async () => {
     vi.mocked(getDashboardRows).mockResolvedValue([
-      { id: 1, updatedAt: "2026-05-01T00:00:00.000Z" },
-      { id: 2, updatedAt: "2026-05-02T00:00:00.000Z" },
-      { id: 3, updatedAt: "2026-05-03T00:00:00.000Z" }
+      {
+        id: 1,
+        providerName: "OpenAI",
+        providerDisplayName: "OpenAI",
+        providerBrandColor: null,
+        providerEntityId: 1,
+        modelName: "GPT-5",
+        benchmarkName: "MMLU-Pro",
+        benchmarkType: "Knowledge",
+        sourceBenchmarkType: null,
+        higherIsBetter: true,
+        benchmarkCanonicalKey: "mmlu-pro:knowledge",
+        modalities: ["Text"],
+        sourceModalities: null,
+        benchTime: "2026-05-01T00:00:00.000Z",
+        valueRaw: "70.1",
+        valueNum: 70.1,
+        valueNum2: null,
+        valueNote: null,
+        source: "text:only",
+        updatedAt: "2026-05-01T00:00:00.000Z"
+      },
+      {
+        id: 2,
+        providerName: "OpenAI",
+        providerDisplayName: "OpenAI",
+        providerBrandColor: null,
+        providerEntityId: 1,
+        modelName: "GPT-5",
+        benchmarkName: "GPQA",
+        benchmarkType: "Knowledge",
+        sourceBenchmarkType: null,
+        higherIsBetter: true,
+        benchmarkCanonicalKey: "gpqa:knowledge",
+        modalities: ["Text"],
+        sourceModalities: null,
+        benchTime: "2026-05-02T00:00:00.000Z",
+        valueRaw: "60.2",
+        valueNum: 60.2,
+        valueNum2: null,
+        valueNote: null,
+        source: "text:only",
+        updatedAt: "2026-05-02T00:00:00.000Z"
+      },
+      {
+        id: 3,
+        providerName: "OpenAI",
+        providerDisplayName: "OpenAI",
+        providerBrandColor: null,
+        providerEntityId: 1,
+        modelName: "GPT-5",
+        benchmarkName: "AIME",
+        benchmarkType: "Math",
+        sourceBenchmarkType: null,
+        higherIsBetter: true,
+        benchmarkCanonicalKey: "aime:math",
+        modalities: ["Text"],
+        sourceModalities: null,
+        benchTime: "2026-05-03T00:00:00.000Z",
+        valueRaw: "80.3",
+        valueNum: 80.3,
+        valueNum2: null,
+        valueNote: null,
+        source: "text:only",
+        updatedAt: "2026-05-03T00:00:00.000Z"
+      }
     ] as Awaited<ReturnType<typeof getDashboardRows>>);
 
     const response = await GET(new Request("https://example.com/api/public/records?limit=2"));
@@ -55,6 +118,18 @@ describe("GET /api/public/records", () => {
 
     expect(getDashboardRows).toHaveBeenCalledWith(100, null, "dashboard-version");
     expect(payload.rows).toHaveLength(2);
+    expect(payload.rows[0]).toMatchObject({
+      recordId: 1,
+      providerName: "OpenAI",
+      modelName: "GPT-5",
+      benchmarkName: "MMLU-Pro",
+      valueNum: 70.1,
+      source: "text:only"
+    });
+    expect(payload.rows[0]).not.toHaveProperty("providerEntityId");
+    expect(payload.rows[0]).not.toHaveProperty("valueNote");
+    expect(payload.rows[0]).not.toHaveProperty("higherIsBetter");
+    expect(payload.rows[0]).not.toHaveProperty("providerDisplayName");
     expect(response.headers.get("ETag")).toBe('"records:dashboard-version:pricing-version:limit:2:730ad87362fcc123"');
   });
 

@@ -15,8 +15,10 @@ export type MatrixInputRow = {
   valueRaw: string;
   valueNum: number | null;
   valueNum2?: number | null;
-  valueNote: string | null;
-  source: string | null;
+  /** 紧凑 DTO 可省略；消费端按空串处理 */
+  valueNote?: string | null;
+  /** 紧凑 DTO 可省略；getSourceKey 将空值归到「未标注」 */
+  source?: string | null;
   updatedAt?: string | null;
 };
 

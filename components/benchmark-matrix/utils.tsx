@@ -194,7 +194,7 @@ export function parseTimestampMs(value?: string | null): number | null {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
-export function getSourceKey(source: string | null): string {
+export function getSourceKey(source: string | null | undefined): string {
   const cleaned = source?.trim();
   return cleaned ? cleaned : SOURCE_EMPTY;
 }

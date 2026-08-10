@@ -188,7 +188,7 @@ function splitRawPairValue(raw: string): [string, string] | null {
   return [first, second];
 }
 
-function normalizeInlineSuffix(tailRaw: string, valueNote: string | null, isLastSegment: boolean): string {
+function normalizeInlineSuffix(tailRaw: string, valueNote: string | null | undefined, isLastSegment: boolean): string {
   const tailText = tailRaw.trim();
   const noteText = valueNote?.trim() ?? "";
   const isXNote = noteText.toLowerCase() === "x";
@@ -214,7 +214,7 @@ function normalizeInlineSuffix(tailRaw: string, valueNote: string | null, isLast
 function formatPairSegment(
   rawSegment: string | null,
   valueNum: number | null,
-  valueNote: string | null,
+  valueNote: string | null | undefined,
   isLastSegment: boolean
 ): { text: string; hasCurrencySymbol: boolean } | null {
   const numericDisplay = formatValueNumForDisplay(valueNum);
@@ -251,7 +251,7 @@ function formatPairSegment(
 function formatPairSegmentOrEmpty(
   rawSegment: string | null,
   valueNum: number | null,
-  valueNote: string | null,
+  valueNote: string | null | undefined,
   isLastSegment: boolean
 ): { text: string; hasCurrencySymbol: boolean } | null {
   const numericSegment = formatPairSegment(rawSegment, valueNum, valueNote, isLastSegment);
@@ -272,7 +272,7 @@ export function getMatrixCellPairDisplayParts(
   valueNum: number | null,
   valueNum2: number | null,
   rawValue: string,
-  valueNote: string | null
+  valueNote?: string | null
 ): MatrixCellPairDisplayParts | null {
   const firstNumeric = formatValueNumForDisplay(valueNum);
   const secondNumeric = formatValueNumForDisplay(valueNum2);
@@ -297,7 +297,7 @@ export function getMatrixCellDisplayValue(
   valueNum: number | null,
   valueNum2: number | null,
   rawValue: string,
-  valueNote: string | null
+  valueNote?: string | null
 ): string {
   const raw = rawValue.trim();
   if (!raw) return "--";

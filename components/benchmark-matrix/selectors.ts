@@ -964,8 +964,8 @@ export function buildMatrixRows(
         valueRaw: row.valueRaw,
         valueNum: row.valueNum,
         valueNum2: row.valueNum2 ?? null,
-        valueNote: row.valueNote,
-        source: row.source,
+        valueNote: row.valueNote ?? null,
+        source: row.source ?? null,
         benchTime: row.benchTime
       };
       const noteText = (row.valueNote ?? "").trim();
@@ -974,14 +974,14 @@ export function buildMatrixRows(
         valueRaw: row.valueRaw,
         valueNum: row.valueNum,
         valueNum2: row.valueNum2 ?? null,
-        valueNote: row.valueNote,
-        source: row.source,
+        valueNote: row.valueNote ?? null,
+        source: row.source ?? null,
         benchTime: row.benchTime,
         allEntries: [initialEntry],
         hasMultipleValues: false,
         uniqueEntries: [initialEntry],
         noteText,
-        displayValue: getMatrixCellDisplayValue(row.valueNum, row.valueNum2 ?? null, row.valueRaw, row.valueNote),
+        displayValue: getMatrixCellDisplayValue(row.valueNum, row.valueNum2 ?? null, row.valueRaw, row.valueNote ?? null),
         hasMeaningfulMultipleValues: false,
         hasMultipleActiveSourceValues: false,
         shouldShowQuestionMark: noteText.length > 0 && noteText.toLowerCase() !== "x"
@@ -993,8 +993,8 @@ export function buildMatrixRows(
         valueRaw: row.valueRaw,
         valueNum: row.valueNum,
         valueNum2: row.valueNum2 ?? null,
-        valueNote: row.valueNote,
-        source: row.source,
+        valueNote: row.valueNote ?? null,
+        source: row.source ?? null,
         benchTime: row.benchTime
       });
       existingCell.hasMultipleValues = existingCell.allEntries.length > 1;
@@ -1010,8 +1010,8 @@ export function buildMatrixRows(
         existingCell.valueNum = row.valueNum;
         existingCell.valueNum2 = row.valueNum2 ?? null;
         existingCell.valueRaw = row.valueRaw;
-        existingCell.valueNote = row.valueNote;
-        existingCell.source = row.source;
+        existingCell.valueNote = row.valueNote ?? null;
+        existingCell.source = row.source ?? null;
         existingCell.benchTime = row.benchTime;
       }
     }
@@ -1556,13 +1556,13 @@ export function buildBenchmarkRankingData(
 
     const rowValueNum = row.valueNum;
     const rowValueNum2 = row.valueNum2 ?? null;
-    const rowValueNote = row.valueNote;
+    const rowValueNote = row.valueNote ?? null;
     const entry = {
       valueRaw: row.valueRaw,
       valueNum: rowValueNum,
       valueNum2: rowValueNum2,
       valueNote: rowValueNote,
-      source: row.source,
+      source: row.source ?? null,
       benchTime: row.benchTime
     };
 
@@ -1574,7 +1574,7 @@ export function buildBenchmarkRankingData(
         valueNum: rowValueNum,
         valueNum2: rowValueNum2,
         valueNote: rowValueNote,
-        source: row.source,
+        source: row.source ?? null,
         benchTime: row.benchTime,
         allEntries: [entry],
         hasMultipleValues: false,
@@ -1596,7 +1596,7 @@ export function buildBenchmarkRankingData(
           previous.valueNum = rowValueNum;
           previous.valueNum2 = rowValueNum2;
           previous.valueNote = rowValueNote;
-          previous.source = row.source;
+          previous.source = row.source ?? null;
           previous.benchTime = row.benchTime;
           previous.displayValue = getMatrixCellDisplayValue(rowValueNum, rowValueNum2, row.valueRaw, rowValueNote);
         } else {
@@ -1607,7 +1607,7 @@ export function buildBenchmarkRankingData(
             previous.valueNum = rowValueNum;
             previous.valueNum2 = rowValueNum2;
             previous.valueNote = rowValueNote;
-            previous.source = row.source;
+            previous.source = row.source ?? null;
             previous.benchTime = row.benchTime;
             previous.displayValue = getMatrixCellDisplayValue(rowValueNum, rowValueNum2, row.valueRaw, rowValueNote);
           }

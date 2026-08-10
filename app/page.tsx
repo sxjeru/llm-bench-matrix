@@ -70,7 +70,6 @@ export default async function HomePage() {
         <BenchmarkMatrix
           sourceOptions={sourceOptions}
           rows={mappedRows}
-          allRows={mappedRows}
           modelPrices={modelPrices}
           modelParams={modelParams}
           exportFootnoteText={exportFootnoteText}

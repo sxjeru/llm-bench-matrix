@@ -166,8 +166,8 @@ export function buildAutoModelWidthMap({
       valueRaw: row.valueRaw,
       valueNum: row.valueNum,
       valueNum2: row.valueNum2 ?? null,
-      valueNote: row.valueNote,
-      source: row.source,
+      valueNote: row.valueNote ?? null,
+      source: row.source ?? null,
       benchTime: row.benchTime
     };
 
