@@ -828,6 +828,76 @@ describe("ScatterCanvas", () => {
     );
   });
 
+  function findSymbolByModel(container: HTMLElement, modelName: string): HTMLElement | undefined {
+    return Array.from(container.querySelectorAll(".recharts-scatter-symbol")).find(
+      (symbol) =>
+        symbol.querySelector("text")?.textContent === modelName ||
+        symbol.querySelector(`[data-model-name='${modelName}']`) !== null
+    ) as HTMLElement | undefined;
+  }
+
+  test("Ctrl 依次点击两个点会添加弧形箭头标注", () => {
+    const onSelectModel = vi.fn();
+    const { container } = renderCanvas({ labelMode: "all", onSelectModel });
+
+    const alpha = findSymbolByModel(container, "Alpha");
+    expect(alpha).not.toBeUndefined();
+
+    fireEvent.click(alpha!, { ctrlKey: true });
+    expect(container.querySelector(".scatter-arrow-start-ring")).not.toBeNull();
+    expect(container.querySelector(".scatter-chart-surface")?.classList.contains("is-annotating")).toBe(
+      true
+    );
+    expect(onSelectModel).not.toHaveBeenCalled();
+
+    // 起点高亮会重绘 symbol，必须重新取终点节点
+    const beta = findSymbolByModel(container, "Beta");
+    expect(beta).not.toBeUndefined();
+    fireEvent.click(beta!, { ctrlKey: true });
+
+    const arrow = container.querySelector(".scatter-arrow-annotation") as SVGElement | null;
+    expect(arrow).not.toBeNull();
+    expect(arrow?.getAttribute("data-from-model")).toBe("Alpha");
+    expect(arrow?.getAttribute("data-to-model")).toBe("Beta");
+    expect(container.querySelector(".scatter-arrow-path")?.getAttribute("d")).toContain("Q");
+    expect(container.querySelector(".scatter-arrow-start-ring")).toBeNull();
+    expect(onSelectModel).not.toHaveBeenCalled();
+  });
+
+  test("可连续添加多条箭头，普通点击不会钉住起点", () => {
+    const onSelectModel = vi.fn();
+    const { container } = renderCanvas({ labelMode: "all", onSelectModel });
+
+    fireEvent.click(findSymbolByModel(container, "Alpha")!, { ctrlKey: true });
+    fireEvent.click(findSymbolByModel(container, "Beta")!, { ctrlKey: true });
+    fireEvent.click(findSymbolByModel(container, "Beta")!, { ctrlKey: true });
+    fireEvent.click(findSymbolByModel(container, "Gamma")!, { metaKey: true });
+
+    const arrows = Array.from(container.querySelectorAll(".scatter-arrow-annotation"));
+    expect(arrows).toHaveLength(2);
+    expect(arrows[0]?.getAttribute("data-from-model")).toBe("Alpha");
+    expect(arrows[0]?.getAttribute("data-to-model")).toBe("Beta");
+    expect(arrows[1]?.getAttribute("data-from-model")).toBe("Beta");
+    expect(arrows[1]?.getAttribute("data-to-model")).toBe("Gamma");
+    expect(onSelectModel).not.toHaveBeenCalled();
+  });
+
+  test("空白处点击会取消待选的箭头起点", () => {
+    const { container } = renderCanvas({ labelMode: "all" });
+    const surface = container.querySelector(".scatter-chart-surface") as HTMLElement;
+
+    fireEvent.click(findSymbolByModel(container, "Alpha")!, { ctrlKey: true });
+    expect(container.querySelector(".scatter-arrow-start-ring")).not.toBeNull();
+
+    fireEvent.pointerDown(surface, { pointerId: 1, button: 0, clientX: 300, clientY: 200 });
+    fireEvent.pointerUp(surface, { pointerId: 1, button: 0, clientX: 300, clientY: 200 });
+
+    expect(container.querySelector(".scatter-arrow-start-ring")).toBeNull();
+    expect(container.querySelector(".scatter-chart-surface")?.classList.contains("is-annotating")).toBe(
+      false
+    );
+  });
+
   test("开启中位参考线时画出参考层", () => {
     const { container } = renderCanvas({ showGuides: true });
 

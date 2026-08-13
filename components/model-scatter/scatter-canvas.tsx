@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from "recharts";
+import { ScatterArrowLayer } from "./arrow-layer";
 import {
   SCATTER_AXIS_STROKE,
   SCATTER_AXIS_TICK_COLOR,
@@ -86,6 +87,8 @@ type ScatterDotRenderProps = {
 };
 
 type ScatterClickEvent = {
+  ctrlKey?: boolean;
+  metaKey?: boolean;
   shiftKey?: boolean;
 };
 
@@ -94,6 +97,12 @@ type ScatterClickPoint = {
   payload?: {
     modelName?: string;
   };
+};
+
+type ScatterArrowAnnotation = {
+  id: number;
+  fromModelName: string;
+  toModelName: string;
 };
 
 type ZoomState = {
@@ -174,10 +183,15 @@ export function ScatterCanvas({
   const panSessionRef = useRef<PanSession | null>(null);
   const isPanningRef = useRef(false);
   const suppressClickRef = useRef(false);
+  const nextArrowIdRef = useRef(1);
+  // Recharts 会缓存旧的 onClick；用 ref 读起点，避免第二次 Ctrl 点击拿到过期闭包
+  const arrowStartModelNameRef = useRef<string | null>(null);
   const [zoom, setZoom] = useState<ZoomState | null>(null);
   const [isPanning, setIsPanning] = useState(false);
   const [isTooltipDismissed, setIsTooltipDismissed] = useState(false);
   const [hiddenModelNames, setHiddenModelNames] = useState<Set<string>>(() => new Set());
+  const [arrowStartModelName, setArrowStartModelName] = useState<string | null>(null);
+  const [arrowAnnotations, setArrowAnnotations] = useState<ScatterArrowAnnotation[]>([]);
 
   const activeHiddenModelNames = useMemo(() => {
     const datasetModelNames = new Set(dataset.points.map((point) => point.modelName));
@@ -538,11 +552,12 @@ export function ScatterCanvas({
       }
 
       // 空白轻点取消钉住；点在散点/标签上则交给 Scatter onClick
-      if (!highlightedModel) return;
       const target = event.target;
       if (!(target instanceof Element)) return;
       if (target.closest(".recharts-scatter-symbol")) return;
-      onSelectModel?.(null);
+      arrowStartModelNameRef.current = null;
+      setArrowStartModelName(null);
+      if (highlightedModel) onSelectModel?.(null);
     },
     [highlightedModel, onSelectModel]
   );
@@ -554,6 +569,7 @@ export function ScatterCanvas({
 
       const isTemporarilyHidden = activeHiddenModelNames.has(payload.modelName);
       const isHighlighted = payload.modelName === highlightedModel;
+      const isArrowStart = payload.modelName === arrowStartModelName;
       const isPareto = overlayMode === "pareto" && showPareto && payload.isPareto;
       const radius = isPareto ? SCATTER_DOT_RADIUS_PARETO : SCATTER_DOT_RADIUS;
 
@@ -581,6 +597,18 @@ export function ScatterCanvas({
 
       return (
         <g opacity={opacity} data-model-name={payload.modelName}>
+          {isArrowStart ? (
+            <circle
+              className="scatter-arrow-start-ring"
+              cx={cx}
+              cy={cy}
+              r={radius + 7}
+              fill="none"
+              stroke={payload.color}
+              strokeWidth={2}
+              strokeDasharray="3 3"
+            />
+          ) : null}
           {isHighlighted ? (
             // 钉住标记用该模型自己的品牌色描一圈淡环。早先用的是纯白硬边，
             // 看起来跟浏览器的焦点框一模一样，会被误读成点击留下的脏东西。
@@ -639,6 +667,7 @@ export function ScatterCanvas({
     [
       highlightedModel,
       highlightedPoint,
+      arrowStartModelName,
       activeHiddenModelNames,
       overlayMode,
       showPareto,
@@ -660,6 +689,31 @@ export function ScatterCanvas({
       const clickPoint = point as ScatterClickPoint | undefined;
       const modelName = clickPoint?.payload?.modelName ?? clickPoint?.modelName;
       if (!modelName) return;
+
+      // Ctrl/Cmd：首点为起点，次点为终点；普通点击会取消待选起点
+      if (event?.ctrlKey || event?.metaKey) {
+        const startModelName = arrowStartModelNameRef.current;
+        if (!startModelName || startModelName === modelName) {
+          arrowStartModelNameRef.current = modelName;
+          setArrowStartModelName(modelName);
+          return;
+        }
+
+        setArrowAnnotations((previous) => [
+          ...previous,
+          {
+            id: nextArrowIdRef.current++,
+            fromModelName: startModelName,
+            toModelName: modelName
+          }
+        ]);
+        arrowStartModelNameRef.current = null;
+        setArrowStartModelName(null);
+        return;
+      }
+
+      arrowStartModelNameRef.current = null;
+      setArrowStartModelName(null);
 
       if (event?.shiftKey) {
         setHiddenModelNames((previous) => {
@@ -700,7 +754,7 @@ export function ScatterCanvas({
   return (
     <div
       ref={containerRef}
-      className={`scatter-chart-surface ${isPanning ? "is-panning" : ""}`}
+      className={`scatter-chart-surface${isPanning ? " is-panning" : ""}${arrowStartModelName ? " is-annotating" : ""}`}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={endPan}
@@ -709,7 +763,13 @@ export function ScatterCanvas({
       onMouseMove={handleMouseMove}
       onClickCapture={handleClickCapture}
       onDoubleClick={() => setZoom(null)}
-      title={isZoomed ? "拖拽平移 · 滚轮缩放 · 双击重置" : "拖拽平移 · 滚轮缩放"}
+      title={
+        arrowStartModelName
+          ? `已选择 ${arrowStartModelName}，按住 Ctrl 点击另一个点作为终点`
+          : isZoomed
+            ? "拖拽平移 · 滚轮缩放 · 双击重置 · Ctrl 点击两点添加箭头"
+            : "拖拽平移 · 滚轮缩放 · Ctrl 点击两点添加箭头"
+      }
     >
       <ScatterChart width={width} height={height} margin={{ ...SCATTER_CHART_MARGIN }}>
         <CartesianGrid strokeDasharray="3 3" stroke={SCATTER_GRID_STROKE} />
@@ -798,6 +858,15 @@ export function ScatterCanvas({
         {overlayMode === "trend" && showPareto ? (
           <ScatterTrendLineLayer line={dataset.trendLine} xDomain={xDomain} />
         ) : null}
+        <ScatterArrowLayer
+          annotations={arrowAnnotations}
+          points={activeDataset.points}
+          xDomain={xDomain}
+          yDomain={yDomain}
+          xScale={xScale}
+          yScale={yScale}
+          plotArea={plotArea}
+        />
       </ScatterChart>
     </div>
   );

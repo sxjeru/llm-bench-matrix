@@ -1236,6 +1236,42 @@ input.heatmap-alpha-range::-moz-range-track {
   cursor: grabbing;
 }
 
+.scatter-chart-surface.is-annotating .recharts-scatter-symbol {
+  cursor: crosshair;
+}
+
+.scatter-arrow-start-ring {
+  filter: drop-shadow(0 0 5px currentColor);
+  animation: scatter-arrow-start-pulse 1.2s ease-in-out infinite;
+}
+
+.scatter-arrow-path {
+  filter: drop-shadow(0 1px 3px rgba(143, 199, 255, 0.65));
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: scatter-arrow-draw 0.38s ease-out forwards;
+}
+
+@keyframes scatter-arrow-start-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes scatter-arrow-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scatter-arrow-start-ring,
+  .scatter-arrow-path {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}
+
 .scatter-chart-surface .recharts-scatter-symbol {
   cursor: pointer;
 }
