@@ -233,6 +233,7 @@ export function AdminConsole({
   const [modelParenthesesModes, setModelParenthesesModes] = useState<Record<string, "keep" | "remove" | "custom">>({});
   const [modelParenthesesCustomNames, setModelParenthesesCustomNames] = useState<Record<string, string>>({});
   const [pairNoteAutoFillAppliedByBenchmark, setPairNoteAutoFillAppliedByBenchmark] = useState<Record<string, boolean>>({});
+  const [modalityEditedByBenchmark, setModalityEditedByBenchmark] = useState<Record<string, boolean>>({});
   const [textImportPreviewMeta, setTextImportPreviewMeta] = useState<{
     format: string;
     total: number;
@@ -991,6 +992,7 @@ export function AdminConsole({
     setModelParenthesesModes({});
     setModelParenthesesCustomNames({});
     setPairNoteAutoFillAppliedByBenchmark({});
+    setModalityEditedByBenchmark({});
     setMatrixBenchmarkNameDrafts({});
     setMatrixBenchmarkTypeDrafts({});
     setMatrixModelNameDrafts({});
@@ -1367,43 +1369,104 @@ export function AdminConsole({
   }
 
   function onToggleMatrixBenchmarkModality(benchmarkKey: string, modality: string, checked: boolean) {
-    setTextImportDraftRows((prev) => {
-      const matchedRows = prev.filter(
-        (row) => getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType) === benchmarkKey
-      );
+    const matchedRows = textImportDraftRows.filter(
+      (row) => getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType) === benchmarkKey
+    );
 
-      if (matchedRows.length === 0) {
-        return prev;
-      }
+    if (matchedRows.length === 0) {
+      return;
+    }
 
-      const currentModalities = normalizeModalityList(
-        matchedRows[0].modalities?.length ? matchedRows[0].modalities : [matchedRows[0].benchmarkType]
-      );
+    const seedRow = matchedRows[0];
+    const currentModalities = normalizeModalityList(
+      seedRow.modalities?.length ? seedRow.modalities : [seedRow.benchmarkType]
+    );
 
-      let nextRawModalities = checked
-        ? [...currentModalities, modality]
-        : currentModalities.filter((item) => item !== modality);
+    let nextRawModalities = checked
+      ? [...currentModalities, modality]
+      : currentModalities.filter((item) => item !== modality);
 
-      if (checked && modality === "Vision") {
-        nextRawModalities = nextRawModalities.filter((item) => item !== "Video");
-      }
+    if (checked && modality === "Vision") {
+      nextRawModalities = nextRawModalities.filter((item) => item !== "Video");
+    }
 
-      if (checked && modality === "Video") {
-        nextRawModalities = nextRawModalities.filter((item) => item !== "Vision");
-      }
+    if (checked && modality === "Video") {
+      nextRawModalities = nextRawModalities.filter((item) => item !== "Vision");
+    }
 
-      const nextModalities = normalizeModalityList(
-        nextRawModalities.length > 0 ? nextRawModalities : ["Text"]
-      );
+    const nextModalities = normalizeModalityList(
+      nextRawModalities.length > 0 ? nextRawModalities : ["Text"]
+    );
 
-      return prev.map((row) =>
-        getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType) === benchmarkKey
-          ? {
-              ...row,
-              modalities: nextModalities
-            }
-          : row
-      );
+    const isFirstEdit = !modalityEditedByBenchmark[benchmarkKey];
+    const normalizedType = seedRow.benchmarkType.trim().toLowerCase();
+    // 首次修改且 type 非 General 时，同步同 type 下尚未手动改过的 benchmark
+    const shouldPropagateByType =
+      isFirstEdit
+      && normalizedType.length > 0
+      && normalizedType !== "general";
+
+    const affectedBenchmarkKeys = new Set<string>([benchmarkKey]);
+    if (shouldPropagateByType) {
+      textImportDraftRows.forEach((row) => {
+        const rowKey = getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType);
+        if (
+          row.benchmarkType.trim().toLowerCase() === normalizedType
+          && !modalityEditedByBenchmark[rowKey]
+        ) {
+          affectedBenchmarkKeys.add(rowKey);
+        }
+      });
+    }
+
+    setTextImportDraftRows((prev) =>
+      prev.map((row) => {
+        const rowKey = getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType);
+        if (!affectedBenchmarkKeys.has(rowKey)) {
+          return row;
+        }
+
+        return {
+          ...row,
+          modalities: nextModalities
+        };
+      })
+    );
+
+    setModalityEditedByBenchmark((prevEdited) => {
+      const nextEdited = { ...prevEdited };
+      affectedBenchmarkKeys.forEach((key) => {
+        nextEdited[key] = true;
+      });
+      return nextEdited;
+    });
+  }
+
+  function onApplyMatrixModalitiesToAll(modalities: string[]) {
+    const nextModalities = normalizeModalityList(
+      modalities.length > 0 ? modalities : ["Text"]
+    );
+    const affectedBenchmarkKeys = Array.from(
+      new Set(
+        textImportDraftRows.map((row) =>
+          getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType)
+        )
+      )
+    );
+
+    setTextImportDraftRows((prev) =>
+      prev.map((row) => ({
+        ...row,
+        modalities: nextModalities
+      }))
+    );
+
+    setModalityEditedByBenchmark((prevEdited) => {
+      const nextEdited = { ...prevEdited };
+      affectedBenchmarkKeys.forEach((key) => {
+        nextEdited[key] = true;
+      });
+      return nextEdited;
     });
   }
 
@@ -1461,6 +1524,7 @@ export function AdminConsole({
     setParenthesesModes(migrateRecord);
     setParenthesesCustomNames(migrateRecord);
     setPairNoteAutoFillAppliedByBenchmark(migrateRecord);
+    setModalityEditedByBenchmark(migrateRecord);
   }
 
   function clearMatrixDrafts(oldKey: string, newKey: string) {
@@ -1720,6 +1784,7 @@ export function AdminConsole({
       setModelParenthesesModes({});
       setModelParenthesesCustomNames({});
       setPairNoteAutoFillAppliedByBenchmark({});
+      setModalityEditedByBenchmark({});
       setMatrixBenchmarkNameDrafts({});
       setMatrixBenchmarkTypeDrafts({});
       setMatrixModelNameDrafts({});
@@ -3258,6 +3323,7 @@ export function AdminConsole({
             onMatrixBenchmarkTypeInputBlur={onMatrixBenchmarkTypeInputBlur}
             onToggleMatrixBenchmarkLowerIsBetter={onToggleMatrixBenchmarkLowerIsBetter}
             onToggleMatrixBenchmarkModality={onToggleMatrixBenchmarkModality}
+            onApplyMatrixModalitiesToAll={onApplyMatrixModalitiesToAll}
             onUpdateTextImportDraftValue={onUpdateTextImportDraftValue}
             benchmarkWarnings={benchmarkWarnings}
             benchmarkMergeFilters={benchmarkMergeFilters}

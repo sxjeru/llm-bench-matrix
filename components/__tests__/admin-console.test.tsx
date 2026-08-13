@@ -495,6 +495,286 @@ describe("AdminConsole text import", () => {
     expect(typeHeader).not.toHaveTextContent("Type 2");
   });
 
+  test("矩阵预览表头可统一修改全部模态", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 2,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "Bench-A",
+          benchmarkType: "Type-A",
+          modalities: ["Text"],
+          rawValue: "70.1",
+          valueNum: 70.1,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        },
+        {
+          rowNumber: 2,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "Bench-B",
+          benchmarkType: "Type-B",
+          modalities: ["Text"],
+          rawValue: "80.2",
+          valueNum: 80.2,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    const importResponse = {
+      format: "structured-csv",
+      total: 2,
+      skipped: 0,
+      inserted: 2,
+      warningCount: 0,
+      warnings: []
+    };
+
+    const fetchMock = mockFetchSequence(previewResponse, importResponse);
+    render(<AdminConsole {...buildProps()} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const matrixTable = await findMatrixPreviewTable();
+    const headerDropdown = matrixTable.querySelector(
+      'thead details[data-modality-dropdown="true"]'
+    ) as HTMLDetailsElement | null;
+    if (!headerDropdown) {
+      throw new Error("Header modality dropdown not found");
+    }
+
+    headerDropdown.setAttribute("open", "");
+    const visionCheckbox = within(headerDropdown).getByRole("checkbox", { name: "Vision" });
+    await user.click(visionCheckbox);
+
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some((call) => call[0] === "/api/admin/import-csv")).toBe(true);
+    });
+
+    const importCalls = fetchMock.mock.calls.filter((call) => call[0] === "/api/admin/import-csv");
+    expect(importCalls).toHaveLength(1);
+    const importPayload = JSON.parse(((importCalls[0][1] as RequestInit).body ?? "{}") as string) as {
+      csvText?: string;
+    };
+
+    expect(importPayload.csvText).toContain("Bench-A,Type-A,");
+    expect(importPayload.csvText).toContain("Bench-B,Type-B,");
+    expect(importPayload.csvText).toMatch(/Bench-A,Type-A,[^\n]*Vision/);
+    expect(importPayload.csvText).toMatch(/Bench-B,Type-B,[^\n]*Vision/);
+  });
+
+  test("首次修改非 General type 的模态会同步同 type 的其他 benchmark", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 3,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "SameType-A",
+          benchmarkType: "Vision",
+          modalities: ["Text"],
+          rawValue: "70.1",
+          valueNum: 70.1,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        },
+        {
+          rowNumber: 2,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "SameType-B",
+          benchmarkType: "Vision",
+          modalities: ["Text"],
+          rawValue: "71.2",
+          valueNum: 71.2,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        },
+        {
+          rowNumber: 3,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "OtherType",
+          benchmarkType: "Audio",
+          modalities: ["Text"],
+          rawValue: "80.3",
+          valueNum: 80.3,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    const importResponse = {
+      format: "structured-csv",
+      total: 3,
+      skipped: 0,
+      inserted: 3,
+      warningCount: 0,
+      warnings: []
+    };
+
+    const fetchMock = mockFetchSequence(previewResponse, importResponse);
+    render(<AdminConsole {...buildProps()} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const matrixTable = await findMatrixPreviewTable();
+    const sameTypeInput = within(matrixTable).getByDisplayValue("SameType-A") as HTMLInputElement;
+    const sameTypeRow = sameTypeInput.closest("tr");
+    if (!sameTypeRow) {
+      throw new Error("SameType-A row not found");
+    }
+
+    const rowDropdown = sameTypeRow.querySelector(
+      'details[data-modality-dropdown="true"]'
+    ) as HTMLDetailsElement | null;
+    if (!rowDropdown) {
+      throw new Error("Row modality dropdown not found");
+    }
+
+    rowDropdown.setAttribute("open", "");
+    const visionCheckbox = within(rowDropdown).getByRole("checkbox", { name: "Vision" });
+    await user.click(visionCheckbox);
+
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some((call) => call[0] === "/api/admin/import-csv")).toBe(true);
+    });
+
+    const importCalls = fetchMock.mock.calls.filter((call) => call[0] === "/api/admin/import-csv");
+    expect(importCalls).toHaveLength(1);
+    const importPayload = JSON.parse(((importCalls[0][1] as RequestInit).body ?? "{}") as string) as {
+      csvText?: string;
+    };
+
+    expect(importPayload.csvText).toMatch(/SameType-A,Vision,[^\n]*Vision/);
+    expect(importPayload.csvText).toMatch(/SameType-B,Vision,[^\n]*Vision/);
+    expect(importPayload.csvText).toMatch(/OtherType,Audio,[^\n]*Text/);
+    expect(importPayload.csvText).not.toMatch(/OtherType,Audio,[^\n]*Vision/);
+  });
+
+  test("首次修改 General type 的模态不会同步其他 General benchmark", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 2,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "General-A",
+          benchmarkType: "General",
+          modalities: ["Text"],
+          rawValue: "70.1",
+          valueNum: 70.1,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        },
+        {
+          rowNumber: 2,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "General-B",
+          benchmarkType: "General",
+          modalities: ["Text"],
+          rawValue: "71.2",
+          valueNum: 71.2,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    const importResponse = {
+      format: "structured-csv",
+      total: 2,
+      skipped: 0,
+      inserted: 2,
+      warningCount: 0,
+      warnings: []
+    };
+
+    const fetchMock = mockFetchSequence(previewResponse, importResponse);
+    render(<AdminConsole {...buildProps()} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const matrixTable = await findMatrixPreviewTable();
+    const generalInput = within(matrixTable).getByDisplayValue("General-A") as HTMLInputElement;
+    const generalRow = generalInput.closest("tr");
+    if (!generalRow) {
+      throw new Error("General-A row not found");
+    }
+
+    const rowDropdown = generalRow.querySelector(
+      'details[data-modality-dropdown="true"]'
+    ) as HTMLDetailsElement | null;
+    if (!rowDropdown) {
+      throw new Error("Row modality dropdown not found");
+    }
+
+    rowDropdown.setAttribute("open", "");
+    const visionCheckbox = within(rowDropdown).getByRole("checkbox", { name: "Vision" });
+    await user.click(visionCheckbox);
+
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some((call) => call[0] === "/api/admin/import-csv")).toBe(true);
+    });
+
+    const importCalls = fetchMock.mock.calls.filter((call) => call[0] === "/api/admin/import-csv");
+    expect(importCalls).toHaveLength(1);
+    const importPayload = JSON.parse(((importCalls[0][1] as RequestInit).body ?? "{}") as string) as {
+      csvText?: string;
+    };
+
+    expect(importPayload.csvText).toMatch(/General-A,General,[^\n]*Vision/);
+    expect(importPayload.csvText).toMatch(/General-B,General,[^\n]*Text/);
+    expect(importPayload.csvText).not.toMatch(/General-B,General,[^\n]*Vision/);
+  });
+
   test("导入 >100 数值且缺少同名 Elo benchmark 时高亮告警", async () => {
     const user = userEvent.setup();
 

@@ -488,6 +488,7 @@ type ImportTabProps = {
   onMatrixBenchmarkTypeInputBlur: (benchmarkKey: string, currentBenchmarkType: string, inputValue: string) => void;
   onToggleMatrixBenchmarkLowerIsBetter: (benchmarkKey: string, checkedLowerIsBetter: boolean) => void;
   onToggleMatrixBenchmarkModality: (benchmarkKey: string, modality: string, checked: boolean) => void;
+  onApplyMatrixModalitiesToAll: (modalities: string[]) => void;
   onUpdateTextImportDraftValue: (rowIndex: number, rawValue: string) => void;
   benchmarkWarnings: BenchmarkWarningItem[];
   benchmarkMergeFilters: Record<string, string>;
@@ -596,6 +597,7 @@ export function ImportTab({
   onMatrixBenchmarkTypeInputBlur,
   onToggleMatrixBenchmarkLowerIsBetter,
   onToggleMatrixBenchmarkModality,
+  onApplyMatrixModalitiesToAll,
   onUpdateTextImportDraftValue,
   benchmarkWarnings,
   benchmarkMergeFilters,
@@ -636,6 +638,40 @@ export function ImportTab({
     return normalizedInput.length > 0 && benchmarks.some((item) => (
       item.benchmarkName.trim().toLowerCase() === normalizedInput
     ));
+  }
+
+  const sharedMatrixModalities = useMemo(() => {
+    if (matrixPreview.rows.length === 0) return ["Text"] as string[];
+
+    const first = normalizeModalityList(matrixPreview.rows[0].modalities);
+    const allSame = matrixPreview.rows.every((row) => {
+      const modalities = normalizeModalityList(row.modalities);
+      return modalities.length === first.length && modalities.every((item, index) => item === first[index]);
+    });
+
+    return allSame ? first : [];
+  }, [matrixPreview.rows]);
+
+  function onToggleHeaderMatrixModality(modality: string, checked: boolean) {
+    const currentModalities = sharedMatrixModalities.length > 0
+      ? sharedMatrixModalities
+      : ["Text"];
+
+    let nextRawModalities = checked
+      ? [...currentModalities, modality]
+      : currentModalities.filter((item) => item !== modality);
+
+    if (checked && modality === "Vision") {
+      nextRawModalities = nextRawModalities.filter((item) => item !== "Video");
+    }
+
+    if (checked && modality === "Video") {
+      nextRawModalities = nextRawModalities.filter((item) => item !== "Vision");
+    }
+
+    onApplyMatrixModalitiesToAll(
+      nextRawModalities.length > 0 ? nextRawModalities : ["Text"]
+    );
   }
 
   const modelCandidateSearchOptions = modelEntityOptions.map((item) => ({ id: item.id, modelName: item.label }));
@@ -992,7 +1028,33 @@ export function ImportTab({
               <table className="table table-zebra table-sm">
                 <thead>
                   <tr>
-                    <th className="w-[56px]">模态</th>
+                    <th className="w-[72px]">
+                      <details className="dropdown dropdown-bottom" data-modality-dropdown="true">
+                        <summary className="btn btn-ghost btn-xs h-7 min-h-0 gap-1 px-1 font-semibold">
+                          模态
+                          <span className="text-[10px] font-normal opacity-60">全部</span>
+                        </summary>
+                        <div className="dropdown-content z-[90] mt-1 w-44 rounded-box border border-base-300 bg-base-100 p-2 shadow-xl">
+                          <div className="mb-1 text-[11px] opacity-75">统一设置全部模态</div>
+                          <div className="space-y-1">
+                            {MODALITY_OPTIONS.map((modality) => (
+                              <label
+                                key={`matrix-header-modality-option-${modality}`}
+                                className="label cursor-pointer justify-start gap-2 py-0.5"
+                              >
+                                <input
+                                  type="checkbox"
+                                  className="checkbox checkbox-xs"
+                                  checked={sharedMatrixModalities.includes(modality)}
+                                  onChange={(e) => onToggleHeaderMatrixModality(modality, e.target.checked)}
+                                />
+                                <span className="label-text text-xs">{modality}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      </details>
+                    </th>
                     <th className="min-w-[240px]">
                       Benchmark
                       <span className="ml-1 text-[11px] opacity-70">
