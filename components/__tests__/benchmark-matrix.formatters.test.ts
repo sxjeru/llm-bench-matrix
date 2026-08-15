@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   formatDateTimeLocalInputValue,
   formatLocalDateLabel,
+  formatParamsBillions,
   formatTooltipTime
 } from "@/components/benchmark-matrix/formatters";
 
@@ -35,5 +36,21 @@ describe("benchmark matrix 时间格式化", () => {
     expect(formatDateTimeLocalInputValue(date)).toBe(
       `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
     );
+  });
+});
+
+describe("formatParamsBillions", () => {
+  test("小于 1000B 保持 B，去掉尾随零", () => {
+    expect(formatParamsBillions(120)).toBe("120B");
+    expect(formatParamsBillions(17)).toBe("17B");
+    expect(formatParamsBillions(4.5)).toBe("4.5B");
+    expect(formatParamsBillions(999.999)).toBe("999.999B");
+  });
+
+  test("满 1000B 升为 T，保留最多 3 位小数", () => {
+    expect(formatParamsBillions(1000)).toBe("1T");
+    expect(formatParamsBillions(1100)).toBe("1.1T");
+    expect(formatParamsBillions(1123)).toBe("1.123T");
+    expect(formatParamsBillions(12345)).toBe("12.345T");
   });
 });

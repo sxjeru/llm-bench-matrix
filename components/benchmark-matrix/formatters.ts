@@ -70,7 +70,10 @@ export function formatPricePerMillion(value: number): string {
   return `$${fixed.replace(/0+$/, "").replace(/\.$/, "")}`;
 }
 
-/** 参数量（单位 B），最多 3 位小数且不补零。 */
+/** 参数量（单位 B），满 1000B 升为 T；最多 3 位小数且不补零。 */
 export function formatParamsBillions(value: number): string {
+  if (Math.abs(value) >= 1000) {
+    return `${Number((value / 1000).toFixed(3)).toString()}T`;
+  }
   return `${Number(value.toFixed(3)).toString()}B`;
 }
