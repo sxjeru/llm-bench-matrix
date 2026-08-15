@@ -111,4 +111,71 @@ describe("BenchmarkMatrix ranking panel", () => {
     expect(modelC).toHaveTextContent("#2");
     expect(modelA).toHaveTextContent("#3");
   });
+
+  test("箱线图 tooltip 相对条带中心偏左", async () => {
+    const { container } = render(
+      <BenchmarkMatrix
+        rows={[
+          ...rows,
+          {
+            providerName: "OpenAI",
+            modelName: "Model A",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General Extra",
+            benchmarkCanonicalKey: "bench-1:general-extra",
+            benchTime: "2026-04-06T01:00:00.000Z",
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:S2"
+          }
+        ]}
+        allRows={[
+          ...rows,
+          {
+            providerName: "OpenAI",
+            modelName: "Model A",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General Extra",
+            benchmarkCanonicalKey: "bench-1:general-extra",
+            benchTime: "2026-04-06T01:00:00.000Z",
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:S2"
+          }
+        ]}
+      />
+    );
+
+    const benchRow = screen.getByText("Bench-1").closest("tr");
+    expect(benchRow).not.toBeNull();
+    fireEvent.click(benchRow!, { ctrlKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "箱线图" }));
+
+    const modelA = container.querySelector('[data-ranking-model="Model A"]');
+    expect(modelA).not.toBeNull();
+    const boxPlotBar = modelA!.querySelector(".cursor-help") as HTMLElement | null;
+    expect(boxPlotBar).not.toBeNull();
+
+    const originalGetBoundingClientRect = boxPlotBar!.getBoundingClientRect.bind(boxPlotBar);
+    boxPlotBar!.getBoundingClientRect = () => ({
+      ...originalGetBoundingClientRect(),
+      left: 400,
+      right: 640,
+      width: 240,
+      top: 180,
+      bottom: 198,
+      height: 18,
+      x: 400,
+      y: 180,
+      toJSON: () => ({})
+    });
+
+    fireEvent.mouseEnter(boxPlotBar!);
+    const tooltip = await screen.findByText("存在多条记录");
+    const tooltipBox = tooltip.closest("[data-cell-tooltip]") as HTMLElement | null;
+    expect(tooltipBox).not.toBeNull();
+    expect(Number.parseFloat(tooltipBox!.style.left)).toBe(472);
+  });
 });

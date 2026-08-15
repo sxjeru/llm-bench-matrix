@@ -22,49 +22,82 @@ type OverallTooltip = {
 
 type MatrixCellTooltipProps = {
   tooltip: CellTooltip | null;
+  onHoverChange?: (hovered: boolean) => void;
+  onScrollableChange?: (scrollable: boolean) => void;
 };
 
 type OverallScoreTooltipProps = {
   tooltip: OverallTooltip | null;
 };
 
-export function MatrixCellTooltip({ tooltip }: MatrixCellTooltipProps) {
+const TOOLTIP_VIEWPORT_MARGIN = 8;
+
+function clampTooltipTop(preferredTop: number, height: number, viewportHeight: number): number {
+  const maxTop = Math.max(TOOLTIP_VIEWPORT_MARGIN, viewportHeight - height - TOOLTIP_VIEWPORT_MARGIN);
+  return Math.min(Math.max(preferredTop, TOOLTIP_VIEWPORT_MARGIN), maxTop);
+}
+
+function getTooltipListMaxHeight(viewportHeight: number): number {
+  return Math.max(96, viewportHeight - TOOLTIP_VIEWPORT_MARGIN * 2 - 48);
+}
+
+export function MatrixCellTooltip({ tooltip, onHoverChange, onScrollableChange }: MatrixCellTooltipProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLSpanElement>(null);
   const [adjustedTop, setAdjustedTop] = useState<number | null>(null);
-  const [adjustedTransform, setAdjustedTransform] = useState<string>("translate(-50%, -100%)");
+  const [listMaxHeight, setListMaxHeight] = useState<number | null>(null);
+  const [isListScrollable, setIsListScrollable] = useState(false);
 
   useLayoutEffect(() => {
     if (!tooltip) {
       setAdjustedTop(null);
-      setAdjustedTransform("translate(-50%, -100%)");
+      setListMaxHeight(null);
+      setIsListScrollable(false);
+      onScrollableChange?.(false);
       return;
     }
 
-    if (ref.current) {
-      const height = ref.current.offsetHeight;
-      const topOffset = tooltip.y - height;
-      
-      if (topOffset < 8) {
-        const targetH = tooltip.targetHeight ?? 24;
-        setAdjustedTop(tooltip.y + 12 + targetH);
-        setAdjustedTransform("translate(-50%, 0)");
-      } else {
-        setAdjustedTop(tooltip.y);
-        setAdjustedTransform("translate(-50%, -100%)");
-      }
+    const viewportHeight = window.innerHeight;
+    const nextListMaxHeight = getTooltipListMaxHeight(viewportHeight);
+    setListMaxHeight(nextListMaxHeight);
+
+    if (listRef.current) {
+      listRef.current.style.maxHeight = `${nextListMaxHeight}px`;
     }
-  }, [tooltip]);
+
+    if (ref.current) {
+      const height = Math.min(ref.current.offsetHeight, viewportHeight - TOOLTIP_VIEWPORT_MARGIN * 2);
+      const spaceAbove = tooltip.y - TOOLTIP_VIEWPORT_MARGIN;
+      const preferredTop = spaceAbove >= height
+        ? tooltip.y - height
+        : tooltip.y + 12 + (tooltip.targetHeight ?? 24);
+      setAdjustedTop(clampTooltipTop(preferredTop, height, viewportHeight));
+    }
+
+    const list = listRef.current;
+    const scrollable = Boolean(list && list.scrollHeight > list.clientHeight + 1);
+    setIsListScrollable(scrollable);
+    onScrollableChange?.(scrollable);
+  }, [onScrollableChange, tooltip]);
 
   if (!tooltip) return null;
 
   return (
     <div
       ref={ref}
-      className="pointer-events-none fixed z-[2600] w-[320px] max-w-[320px] rounded-xl border border-white/20 bg-slate-900/80 p-2 text-left text-[11px] font-medium text-slate-100 shadow-2xl backdrop-blur-lg"
+      data-cell-tooltip="1"
+      data-cell-tooltip-scrollable={isListScrollable ? "1" : "0"}
+      className={`${isListScrollable ? "pointer-events-auto" : "pointer-events-none"} fixed z-[2600] w-[320px] max-w-[320px] rounded-xl border border-white/20 bg-slate-900/80 p-2 text-left text-[11px] font-medium text-slate-100 shadow-2xl backdrop-blur-lg`}
       style={{
         left: tooltip.x,
         top: adjustedTop !== null ? adjustedTop : tooltip.y,
-        transform: adjustedTransform
+        maxHeight: `calc(100vh - ${TOOLTIP_VIEWPORT_MARGIN * 2}px)`
+      }}
+      onMouseEnter={() => {
+        if (isListScrollable) onHoverChange?.(true);
+      }}
+      onMouseLeave={() => {
+        if (isListScrollable) onHoverChange?.(false);
       }}
     >
       {tooltip.entries.length > 1 ? (
@@ -77,7 +110,11 @@ export function MatrixCellTooltip({ tooltip }: MatrixCellTooltipProps) {
         </span>
       ) : null}
 
-      <span className="block max-h-[65vh] space-y-1 overflow-auto">
+      <span
+        ref={listRef}
+        className="block space-y-1 overflow-auto"
+        style={listMaxHeight !== null ? { maxHeight: listMaxHeight } : { maxHeight: "65vh" }}
+      >
         {tooltip.entries.map((entry) => {
           const formattedTime = entry.benchTime ? formatTooltipTime(entry.benchTime) : null;
 
@@ -103,27 +140,21 @@ export function MatrixCellTooltip({ tooltip }: MatrixCellTooltipProps) {
 export function OverallScoreTooltip({ tooltip }: OverallScoreTooltipProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [adjustedTop, setAdjustedTop] = useState<number | null>(null);
-  const [adjustedTransform, setAdjustedTransform] = useState<string>("translate(-50%, -100%)");
 
   useLayoutEffect(() => {
     if (!tooltip) {
       setAdjustedTop(null);
-      setAdjustedTransform("translate(-50%, -100%)");
       return;
     }
 
     if (ref.current) {
       const height = ref.current.offsetHeight;
-      const topOffset = tooltip.y - height;
-      
-      if (topOffset < 8) {
-        const targetH = tooltip.targetHeight ?? 24;
-        setAdjustedTop(tooltip.y + 12 + targetH);
-        setAdjustedTransform("translate(-50%, 0)");
-      } else {
-        setAdjustedTop(tooltip.y);
-        setAdjustedTransform("translate(-50%, -100%)");
-      }
+      const viewportHeight = window.innerHeight;
+      const spaceAbove = tooltip.y - TOOLTIP_VIEWPORT_MARGIN;
+      const preferredTop = spaceAbove >= height
+        ? tooltip.y - height
+        : tooltip.y + 12 + (tooltip.targetHeight ?? 24);
+      setAdjustedTop(clampTooltipTop(preferredTop, height, viewportHeight));
     }
   }, [tooltip]);
 
@@ -136,7 +167,7 @@ export function OverallScoreTooltip({ tooltip }: OverallScoreTooltipProps) {
       style={{
         left: tooltip.x,
         top: adjustedTop !== null ? adjustedTop : tooltip.y,
-        transform: adjustedTransform
+        maxHeight: `calc(100vh - ${TOOLTIP_VIEWPORT_MARGIN * 2}px)`
       }}
     >
       <span className="mb-1 block text-[10px] text-slate-300">{tooltip.modelName} · 总评细节</span>

@@ -145,6 +145,8 @@ const PARAMS_ROW_KEY_SET = new Set([
 const RANKING_POPOVER_GAP = 8;
 const RANKING_POPOVER_MARGIN = 16;
 const RANKING_POPOVER_MAX_WIDTH = 860;
+const CELL_TOOLTIP_HIDE_DELAY_MS = 140;
+const BOX_PLOT_TOOLTIP_LEFT_OFFSET = 88;
 const FRONTEND_TABLE_PAIR_VALUE_REGEX =
   /^\s*((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?[^\s/]*)\s*\/\s*((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?.*)\s*$/;
 const PAIR_VALUE_SLASH_CLASS_NAME = "mx-[2px] opacity-85";
@@ -187,6 +189,7 @@ export function BenchmarkMatrix({
   const sourceTabsMenuRef = useRef<HTMLDivElement | null>(null);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const rankingPopoverRef = useRef<HTMLDivElement | null>(null);
+  const cellTooltipHideTimerRef = useRef<number | null>(null);
   const showCategoryLoadedRef = useRef(false);
   const showDuplicateLoadedRef = useRef(false);
   const showSourceValuesLoadedRef = useRef(false);
@@ -296,6 +299,53 @@ export function BenchmarkMatrix({
     summary: OverallModelSummary;
     targetHeight?: number;
   } | null>(null);
+  const cellTooltipScrollableRef = useRef(false);
+
+  const cancelCellTooltipHide = useCallback(() => {
+    if (cellTooltipHideTimerRef.current === null) return;
+    window.clearTimeout(cellTooltipHideTimerRef.current);
+    cellTooltipHideTimerRef.current = null;
+  }, []);
+
+  const handleCellTooltipScrollableChange = useCallback((scrollable: boolean) => {
+    cellTooltipScrollableRef.current = scrollable;
+  }, []);
+
+  const showCellTooltip = useCallback((
+    tooltip: {
+      x: number;
+      y: number;
+      entries: MatrixCellEntry[];
+      note: string | null;
+      targetHeight?: number;
+    }
+  ) => {
+    cancelCellTooltipHide();
+    cellTooltipScrollableRef.current = false;
+    setActiveCellTooltip(tooltip);
+  }, [cancelCellTooltipHide]);
+
+  const hideCellTooltip = useCallback((immediate = false) => {
+    cancelCellTooltipHide();
+    if (immediate || !cellTooltipScrollableRef.current) {
+      cellTooltipScrollableRef.current = false;
+      setActiveCellTooltip(null);
+      return;
+    }
+
+    cellTooltipHideTimerRef.current = window.setTimeout(() => {
+      cellTooltipHideTimerRef.current = null;
+      cellTooltipScrollableRef.current = false;
+      setActiveCellTooltip(null);
+    }, CELL_TOOLTIP_HIDE_DELAY_MS);
+  }, [cancelCellTooltipHide]);
+
+  useEffect(() => {
+    return () => {
+      if (cellTooltipHideTimerRef.current === null) return;
+      window.clearTimeout(cellTooltipHideTimerRef.current);
+    };
+  }, []);
 
   const {
     sourceOptions,
@@ -1244,7 +1294,7 @@ export function BenchmarkMatrix({
     setColumnSortBenchmarkKey((prev) => (prev === rowKey ? null : prev));
     setExpandedRankingRowKey((prev) => (prev === rowKey ? null : prev));
     setRankingPopoverPosition(null);
-    setActiveCellTooltip(null);
+    hideCellTooltip(true);
     setActiveOverallTooltip(null);
     window.getSelection()?.removeAllRanges();
   }
@@ -2027,7 +2077,7 @@ export function BenchmarkMatrix({
                         setRankingPopoverPosition(shouldClose ? null : nextPosition);
                         return shouldClose ? null : rowKey;
                       });
-                      setActiveCellTooltip(null);
+                      hideCellTooltip(true);
                       setActiveOverallTooltip(null);
                       return;
                     }
@@ -2394,7 +2444,7 @@ export function BenchmarkMatrix({
                             className="absolute right-1 top-1/2 inline-flex h-4 w-4 -translate-y-1/2 cursor-help items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
                             onMouseEnter={(event) => {
                               const rect = event.currentTarget.getBoundingClientRect();
-                              setActiveCellTooltip({
+                              showCellTooltip({
                                 x: rect.left + rect.width / 2,
                                 y: rect.top - 6,
                                 entries: tooltipEntries,
@@ -2402,7 +2452,7 @@ export function BenchmarkMatrix({
                                 targetHeight: rect.height
                               });
                             }}
-                            onMouseLeave={() => setActiveCellTooltip(null)}
+                            onMouseLeave={() => hideCellTooltip()}
                           >
                             ?
                           </span>
@@ -2642,11 +2692,11 @@ export function BenchmarkMatrix({
               }}
               onHoverItem={(rect, item) => {
                 if (!rankingShowBoxPlot || !rect || !item || !item.allEntries || item.allEntries.length === 0) {
-                  setActiveCellTooltip(null);
+                  hideCellTooltip();
                   return;
                 }
-                setActiveCellTooltip({
-                  x: rect.left + rect.width / 2,
+                showCellTooltip({
+                  x: rect.left + Math.min(rect.width / 2, BOX_PLOT_TOOLTIP_LEFT_OFFSET),
                   y: rect.top - 6,
                   entries: item.allEntries,
                   note: item.noteText && item.noteText.length > 0 ? item.noteText : null,
@@ -2672,7 +2722,17 @@ export function BenchmarkMatrix({
         />
       )}
 
-      <MatrixCellTooltip tooltip={activeCellTooltip} />
+      <MatrixCellTooltip
+        tooltip={activeCellTooltip}
+        onScrollableChange={handleCellTooltipScrollableChange}
+        onHoverChange={(hovered) => {
+          if (hovered) {
+            cancelCellTooltipHide();
+            return;
+          }
+          hideCellTooltip();
+        }}
+      />
 
       <OverallScoreTooltip tooltip={activeOverallTooltip} />
 

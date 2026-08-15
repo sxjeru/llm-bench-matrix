@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
@@ -164,6 +164,151 @@ describe("BenchmarkMatrix 星号值显示", () => {
 
     expect(seedEntries).toHaveLength(1);
     expect(qwenEntries).toHaveLength(1);
+    expect(tooltip).toHaveAttribute("data-cell-tooltip-scrollable", "0");
+    expect(tooltip).toHaveClass("pointer-events-none");
+  });
+
+  test("记录列表溢出时，鼠标可移入 tooltip 滚动且移出后关闭", async () => {
+    const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
+    const clientHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        return (this as HTMLElement).classList.contains("overflow-auto") ? 2000 : 120;
+      }
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get() {
+        return (this as HTMLElement).classList.contains("overflow-auto") ? 240 : 120;
+      }
+    });
+
+    try {
+      const { container } = render(
+        <BenchmarkMatrix
+          rows={Array.from({ length: 24 }, (_, index) => ({
+            providerName: "OpenAI",
+            modelName: "GPT-5-mini",
+            benchmarkName: "LiveCodeBench",
+            benchmarkType: `Coding Agent ${index}`,
+            benchTime: `2026-04-06T${String(index).padStart(2, "0")}:00:00.000Z`,
+            valueRaw: String(50 + index),
+            valueNum: 50 + index,
+            valueNote: null,
+            source: `text:S${index}`
+          }))}
+        />
+      );
+
+      const questionMark = Array.from(container.querySelectorAll("span")).find(
+        (node) => node.textContent === "?" && !node.hasAttribute("data-overall-tooltip-trigger")
+      );
+      expect(questionMark).toBeTruthy();
+      fireEvent.mouseEnter(questionMark as HTMLElement);
+
+      const tooltip = (await screen.findByText("存在多条记录")).closest("div");
+      expect(tooltip).not.toBeNull();
+      expect(tooltip).toHaveAttribute("data-cell-tooltip-scrollable", "1");
+      expect(tooltip).toHaveClass("pointer-events-auto");
+
+      fireEvent.mouseLeave(questionMark as HTMLElement);
+      fireEvent.mouseEnter(tooltip as HTMLElement);
+      expect(screen.getByText("存在多条记录")).toBeInTheDocument();
+
+      fireEvent.mouseLeave(tooltip as HTMLElement);
+      await waitFor(() => {
+        expect(screen.queryByText("存在多条记录")).not.toBeInTheDocument();
+      });
+    } finally {
+      if (scrollHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
+      } else {
+        delete (HTMLElement.prototype as Partial<HTMLElement>).scrollHeight;
+      }
+      if (clientHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeightDescriptor);
+      } else {
+        delete (HTMLElement.prototype as Partial<HTMLElement>).clientHeight;
+      }
+    }
+  });
+
+  test("溢出记录 tooltip 的上下边界保持在可视范围内", async () => {
+    const originalInnerHeight = window.innerHeight;
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 360 });
+
+    const offsetHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
+    const clientHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get() {
+        return (this as HTMLElement).hasAttribute("data-cell-tooltip") ? 400 : 16;
+      }
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        return (this as HTMLElement).classList.contains("overflow-auto") ? 2000 : 120;
+      }
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get() {
+        return (this as HTMLElement).classList.contains("overflow-auto") ? 240 : 120;
+      }
+    });
+
+    try {
+      const { container } = render(
+        <BenchmarkMatrix
+          rows={Array.from({ length: 24 }, (_, index) => ({
+            providerName: "OpenAI",
+            modelName: "GPT-5-mini",
+            benchmarkName: "LiveCodeBench",
+            benchmarkType: `Coding Agent ${index}`,
+            benchTime: `2026-04-06T${String(index).padStart(2, "0")}:00:00.000Z`,
+            valueRaw: String(50 + index),
+            valueNum: 50 + index,
+            valueNote: null,
+            source: `text:S${index}`
+          }))}
+        />
+      );
+
+      const questionMark = Array.from(container.querySelectorAll("span")).find(
+        (node) => node.textContent === "?" && !node.hasAttribute("data-overall-tooltip-trigger")
+      );
+      expect(questionMark).toBeTruthy();
+      fireEvent.mouseEnter(questionMark as HTMLElement);
+
+      const tooltip = (await screen.findByText("存在多条记录")).closest("div") as HTMLElement;
+      expect(tooltip).not.toBeNull();
+
+      const top = Number.parseFloat(tooltip.style.top);
+      const maxHeight = tooltip.style.maxHeight;
+      expect(top).toBeGreaterThanOrEqual(8);
+      expect(top).toBeLessThanOrEqual(8);
+      expect(maxHeight).toBe("calc(100vh - 16px)");
+    } finally {
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
+      if (offsetHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeightDescriptor);
+      } else {
+        delete (HTMLElement.prototype as Partial<HTMLElement>).offsetHeight;
+      }
+      if (scrollHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
+      } else {
+        delete (HTMLElement.prototype as Partial<HTMLElement>).scrollHeight;
+      }
+      if (clientHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeightDescriptor);
+      } else {
+        delete (HTMLElement.prototype as Partial<HTMLElement>).clientHeight;
+      }
+    }
   });
 
   test("遇到注释为 x 的，在表格数值后直接显示 x 且不展示问号标记", () => {
