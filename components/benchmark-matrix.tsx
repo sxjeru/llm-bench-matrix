@@ -1951,7 +1951,7 @@ export function BenchmarkMatrix({
                         return null;
                       }
 
-                      const deltaRaw = getSourceValueDeltaRaw(cell.uniqueEntries, activeSource, matrixRow.higherIsBetter);
+                      const deltaRaw = getSourceValueDeltaRaw(cell.allEntries, activeSource, matrixRow.higherIsBetter);
                       return deltaRaw === null ? null : Math.abs(deltaRaw);
                     })
                     .filter((value): value is number => value !== null && Number.isFinite(value))
@@ -2145,7 +2145,7 @@ export function BenchmarkMatrix({
                       ? getSourceValueDisplayItem(uniqueEntries, activeSource, matrixRow.higherIsBetter)
                       : null;
                     const sourceValueDeltaRaw = displaySourceValueDeltasInCells && cell?.hasMeaningfulMultipleValues
-                      ? getSourceValueDeltaRaw(uniqueEntries, activeSource, matrixRow.higherIsBetter)
+                      ? getSourceValueDeltaRaw(cell.allEntries, activeSource, matrixRow.higherIsBetter)
                       : null;
                     const shouldRenderSourceValues = Boolean(sourceValueItem);
                     // 展示 source 原值时，tooltip 收敛到当前 source 的记录，与单元格里的取值范围一致

@@ -9,6 +9,7 @@ import {
   normalizeModalityList as normalizeModalityListShared,
   normalizeModalityName
 } from "@/lib/modality";
+import { calculateBoxPlotStats } from "@/lib/boxplot-stats";
 import type { CompareDirection, MatrixCellEntry, MatrixInputRow } from "./types";
 import { SOURCE_ALL, SOURCE_EMPTY } from "./constants";
 import { blendColor } from "./colors";
@@ -103,8 +104,8 @@ export function getPreferredMatrixCellEntry(entries: MatrixCellEntry[], higherIs
   if (entries.length === 0) return null;
 
   return entries.reduce((preferred, entry) => {
-    if (entry.valueNum === null) return preferred;
-    if (preferred.valueNum === null) return entry;
+    if (entry.valueNum === null || !Number.isFinite(entry.valueNum)) return preferred;
+    if (preferred.valueNum === null || !Number.isFinite(preferred.valueNum)) return entry;
 
     const isBetter = higherIsBetter
       ? entry.valueNum > preferred.valueNum
@@ -112,6 +113,48 @@ export function getPreferredMatrixCellEntry(entries: MatrixCellEntry[], higherIs
 
     return isBetter ? entry : preferred;
   });
+}
+
+export type MatrixCellAggregateValues = {
+  valueNum: number | null;
+  valueNum2: number | null;
+};
+
+function isPairMatrixCellEntry(entry: MatrixCellEntry): boolean {
+  return entry.valueNum2 !== null || entry.valueRaw.includes("/");
+}
+
+/**
+ * 普通单值记录使用上中位数；双值记录保留原有整条记录择优策略，避免拼出不存在的数值对。
+ */
+export function aggregateMatrixCellEntries(
+  entries: MatrixCellEntry[],
+  higherIsBetter = true
+): MatrixCellAggregateValues {
+  if (entries.length === 0) {
+    return { valueNum: null, valueNum2: null };
+  }
+
+  if (entries.some(isPairMatrixCellEntry)) {
+    const preferred = getPreferredMatrixCellEntry(entries, higherIsBetter);
+    return {
+      valueNum: preferred?.valueNum !== null && preferred?.valueNum !== undefined && Number.isFinite(preferred.valueNum)
+        ? preferred.valueNum
+        : null,
+      valueNum2: preferred?.valueNum2 !== null && preferred?.valueNum2 !== undefined && Number.isFinite(preferred.valueNum2)
+        ? preferred.valueNum2
+        : null
+    };
+  }
+
+  const values = entries
+    .map((entry) => entry.valueNum)
+    .filter((value): value is number => value !== null && Number.isFinite(value));
+
+  return {
+    valueNum: values.length > 0 ? calculateBoxPlotStats(values, { medianMode: "upper" }).median : null,
+    valueNum2: null
+  };
 }
 
 export function compareMatrixCellEntryRecency(left: MatrixCellEntry, right: MatrixCellEntry): number {
@@ -159,13 +202,13 @@ export function getSourceValueEntry(entries: MatrixCellEntry[], activeSource: st
 
 export function getSourceValueDeltaRaw(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): number | null {
   const sourceEntry = getSourceValueEntry(entries, activeSource, higherIsBetter);
-  const preferredEntry = getPreferredMatrixCellEntry(entries, higherIsBetter);
+  const aggregate = aggregateMatrixCellEntries(entries, higherIsBetter);
 
-  if (!sourceEntry || !preferredEntry || sourceEntry.valueNum === null || preferredEntry.valueNum === null) {
+  if (!sourceEntry || sourceEntry.valueNum === null || aggregate.valueNum === null) {
     return null;
   }
 
-  const delta = sourceEntry.valueNum - preferredEntry.valueNum;
+  const delta = sourceEntry.valueNum - aggregate.valueNum;
   if (!Number.isFinite(delta) || Math.abs(delta) < Number.EPSILON) {
     return null;
   }

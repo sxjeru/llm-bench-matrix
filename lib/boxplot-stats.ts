@@ -31,14 +31,21 @@ export interface BoxPlotStats {
   count: number;
 }
 
-export function calculateBoxPlotStats(values: number[]): Omit<BoxPlotStats, 'benchmark'> {
+export type BoxPlotMedianMode = "interpolated" | "upper";
+
+export function calculateBoxPlotStats(
+  values: number[],
+  options: { medianMode?: BoxPlotMedianMode } = {}
+): Omit<BoxPlotStats, 'benchmark'> {
   if (values.length === 0) {
     return { min: 0, q1: 0, median: 0, q3: 0, max: 0, outliers: [], count: 0 };
   }
 
   const sorted = [...values].sort((a, b) => a - b);
   const q1 = quantile(sorted, 0.25);
-  const median = quantile(sorted, 0.5);
+  const median = options.medianMode === "upper"
+    ? sorted[Math.floor(sorted.length / 2)] ?? sorted[sorted.length - 1]
+    : quantile(sorted, 0.5);
   const q3 = quantile(sorted, 0.75);
   const iqr = q3 - q1;
 

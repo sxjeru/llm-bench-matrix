@@ -178,6 +178,61 @@ const repeatedSourceImportRows = [
   }
 ] as const;
 
+const medianDeltaRows = [
+  {
+    recordId: 4,
+    providerName: "OpenAI",
+    modelName: "Model A",
+    benchmarkName: "MMLU-Pro",
+    benchmarkType: "Knowledge",
+    benchmarkCanonicalKey: "mmlu-pro:knowledge",
+    benchTime: "2026-06-01T00:00:00.000Z",
+    valueRaw: "60",
+    valueNum: 60,
+    valueNote: null,
+    source: "text:S2"
+  },
+  {
+    recordId: 3,
+    providerName: "OpenAI",
+    modelName: "Model A",
+    benchmarkName: "MMLU-Pro",
+    benchmarkType: "Knowledge",
+    benchmarkCanonicalKey: "mmlu-pro:knowledge",
+    benchTime: "2026-05-01T00:00:00.000Z",
+    valueRaw: "75",
+    valueNum: 75,
+    valueNote: null,
+    source: "text:S1"
+  },
+  {
+    recordId: 2,
+    providerName: "OpenAI",
+    modelName: "Model A",
+    benchmarkName: "MMLU-Pro",
+    benchmarkType: "Knowledge",
+    benchmarkCanonicalKey: "mmlu-pro:knowledge",
+    benchTime: "2026-04-01T00:00:00.000Z",
+    valueRaw: "80",
+    valueNum: 80,
+    valueNote: null,
+    source: "text:S2"
+  },
+  {
+    recordId: 1,
+    providerName: "OpenAI",
+    modelName: "Model A",
+    benchmarkName: "MMLU-Pro",
+    benchmarkType: "Knowledge",
+    benchmarkCanonicalKey: "mmlu-pro:knowledge",
+    benchTime: "2026-03-01T00:00:00.000Z",
+    valueRaw: "85",
+    valueNum: 85,
+    valueNote: null,
+    source: "text:S1"
+  }
+] as const;
+
 describe("BenchmarkMatrix 重名 benchmark 合并", () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -194,6 +249,29 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(screen.getByText("Knowledge / Knowledge123")).toBeInTheDocument();
     expect(screen.getByText("82")).toBeInTheDocument();
     expect(screen.queryByText("80")).not.toBeInTheDocument();
+  });
+
+  test("偶数条单值记录默认展示较大的中间值", () => {
+    render(
+      <BenchmarkMatrix
+        rows={[70, 80, 82, 100].map((value, index) => ({
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "MMLU-Pro",
+          benchmarkType: `Knowledge${index}`,
+          benchmarkCanonicalKey: `mmlu-pro:knowledge${index}`,
+          benchTime: `2026-04-06T0${index}:00:00.000Z`,
+          valueRaw: String(value),
+          valueNum: value,
+          valueNote: null,
+          source: `text:S${index}`
+        }))}
+      />
+    );
+
+    expect(screen.getByText("82")).toBeInTheDocument();
+    expect(screen.queryByText("81")).not.toBeInTheDocument();
+    expect(screen.queryByText("100")).not.toBeInTheDocument();
   });
 
   test("开启显示重名列后，重名 benchmark 恢复为多行展示", () => {
@@ -335,8 +413,8 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
       expect(screen.getByRole("button", { name: "显示原始值" })).toBeInTheDocument();
     });
 
-    // 表格默认取值仍是跨 source 的最优值
-    expect(screen.getByText("85")).toBeInTheDocument();
+    // 三条记录 70、80、85 的默认聚合值是中间值 80
+    expect(screen.getByText("80")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "显示原始值" }));
 
@@ -348,15 +426,13 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     fireEvent.click(screen.getByRole("button", { name: "显示原始值" }), { ctrlKey: true });
 
     const deltaBadge = mergedCell.querySelector('[data-source-delta-badge="1"]') as HTMLElement | null;
-    expect(deltaBadge).not.toBeNull();
-    expect(deltaBadge).toHaveAttribute("data-compare-direction", "down");
-    expect(deltaBadge).toHaveTextContent("▼5");
+    expect(deltaBadge).toBeNull();
   });
 
   test("开启原始值后，同 source 多条记录仍保留问号与 tooltip", async () => {
     const user = userEvent.setup();
 
-    render(<BenchmarkMatrix rows={[...repeatedSourceImportRows]} sourceOptions={["text:S1", "text:S2"]} />);
+    render(<BenchmarkMatrix rows={[...medianDeltaRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
     await user.click(screen.getByRole("tab", { name: "S1" }));
     await waitFor(() => {
@@ -365,7 +441,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
 
     await user.click(screen.getByRole("button", { name: "显示原始值" }));
 
-    const mergedCell = screen.getByText("80").closest("td")!;
+    const mergedCell = screen.getByText("75").closest("td")!;
     const questionMark = within(mergedCell).getByText("?");
 
     fireEvent.mouseEnter(questionMark);
@@ -375,7 +451,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(tooltipBox).toHaveTextContent("text:S1");
     // 开启原始值后 tooltip 收敛到当前 source，不再列出 S2 的记录
     expect(tooltipBox).not.toHaveTextContent("text:S2");
-    expect(tooltipBox).not.toHaveTextContent("70");
+    expect(tooltipBox).not.toHaveTextContent("60");
 
     // 差值徽标与问号共用单元格右侧同一位置，徽标出现时问号让位
     fireEvent.mouseLeave(questionMark);
@@ -512,7 +588,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(modelBCell.querySelector('[data-source-delta-badge="1"]')).toBeNull();
   });
 
-  test("关闭 Source 原值后恢复最大值展示", async () => {
+  test("关闭 Source 原值后恢复默认聚合值展示", async () => {
     const user = userEvent.setup();
 
     render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
@@ -600,7 +676,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
 
     render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
-    // 初始渲染（"全部" 页签）时应该仍显示默认的最大值
+    // 两条记录的上中位数为较大的 82
     expect(screen.getByText("82")).toBeInTheDocument();
 
     // 切换到 S1 页签
@@ -642,7 +718,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     });
   });
 
-  test("higherIsBetter=false 时，重复 source 记录应优先显示更低值并计算正确 delta", async () => {
+  test("higherIsBetter=false 时默认值仍取中位数，并按该基线计算 source delta", async () => {
     const user = userEvent.setup();
 
     const lowerIsBetterRows = [
@@ -687,15 +763,17 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
       }
     ] as const;
 
-    render(
+    const { container } = render(
       <BenchmarkMatrix
         rows={[...lowerIsBetterRows]}
         sourceOptions={["text:S1", "text:S2"]}
       />
     );
 
-    // 在 "全部" 页签，默认应显示所有 entries 中的最佳值（由于 lowerIsBetter: false，最理想是 95 ms）
-    expect(screen.getByText("95")).toBeInTheDocument();
+    // 聚合值不受指标方向影响：95、120、150 的中位数为 120
+    const defaultCell = container.querySelector('td[data-model-name="Model A"]');
+    expect(defaultCell).not.toBeNull();
+    expect(defaultCell).toHaveTextContent("120");
 
     // 切换到 S1 页签
     await user.click(screen.getByRole("tab", { name: "S1" }));
@@ -706,15 +784,18 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     // 开启 Source 原值
     await user.click(screen.getByRole("button", { name: "显示原始值" }));
 
-    // S1 有两个 entry：120 ms 和 95 ms。因为 lowerIsBetter=false，95 是更好的值，应该优先显示 95
+    // Source 原值仍保持现有策略：S1 最新一条为 95
     const mergedCell = screen.getByText("95").closest("td")!;
     expect(mergedCell).toHaveTextContent("95");
 
     // 用 Ctrl+点击开启差值视图
     fireEvent.click(screen.getByRole("button", { name: "显示原始值" }), { ctrlKey: true });
 
-    // preferredEntry (整体最佳值) 为 95 ms，S1 最佳值也是 95 ms，差值为 0，不应有 delta 徽标
-    expect(mergedCell.querySelector('[data-source-delta-badge="1"]')).toBeNull();
+    // 默认聚合值为 120，S1 原值 95 的差值为 -25
+    const s1DeltaBadge = mergedCell.querySelector('[data-source-delta-badge="1"]');
+    expect(s1DeltaBadge).not.toBeNull();
+    expect(s1DeltaBadge).toHaveAttribute("data-compare-direction", "down");
+    expect(s1DeltaBadge).toHaveTextContent("▼25");
 
     // 切换到 S2 页签 (S2 只有一个 entry: 150 ms)
     await user.click(screen.getByRole("tab", { name: "S2" }));
@@ -723,10 +804,10 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(screen.getByText("150")).toBeInTheDocument();
     const mergedCellS2 = screen.getByText("150").closest("td")!;
 
-    // S2 值为 150 ms，整体最佳值为 95 ms，差值是 55；Source 差值徽标方向跟随底层数值变化，值增加显示 ▲55
+    // S2 值为 150 ms，默认聚合值为 120，差值是 30
     const sourceDeltaBadge = mergedCellS2.querySelector('[data-source-delta-badge="1"]') as HTMLElement | null;
     expect(sourceDeltaBadge).not.toBeNull();
     expect(sourceDeltaBadge).toHaveAttribute("data-compare-direction", "up");
-    expect(sourceDeltaBadge).toHaveTextContent("▲55");
+    expect(sourceDeltaBadge).toHaveTextContent("▲30");
   });
 });

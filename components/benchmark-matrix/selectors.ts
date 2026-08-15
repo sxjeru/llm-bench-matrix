@@ -46,6 +46,7 @@ import type {
 } from "./types";
 import {
   applySourceMeta,
+  aggregateMatrixCellEntries,
   compareMatrixCellEntryRecency,
   getMatrixCellSourceValueDedupKey,
   getMatrixCellValueIdentity,
@@ -835,23 +836,68 @@ export function buildModelColumns(
   }
 
   const benchmarkScoreMap = new Map<string, number>();
+  const benchmarkRowsByModel = new Map<string, MatrixInputRow[]>();
   coveragePrunedRows.forEach((row) => {
     if (getMatrixGroupingKey(row, showDuplicateRows) !== columnSortBenchmarkKey) {
       return;
     }
 
+    const modelRows = benchmarkRowsByModel.get(row.modelName) ?? [];
+    modelRows.push(row);
+    benchmarkRowsByModel.set(row.modelName, modelRows);
+  });
+
+  benchmarkRowsByModel.forEach((matchingRows, modelName) => {
+    const representativeRow = matchingRows[0];
+    if (!representativeRow) return;
+
+    const hasPairValues = matchingRows.some((row) => (row.valueNum2 ?? null) !== null || row.valueRaw.includes("/"));
+    if (hasPairValues) {
+      matchingRows.forEach((row) => {
+        const comparableScore = getBenchmarkBestComparableScore(
+          row.benchmarkName,
+          row.valueNum,
+          row.valueNum2 ?? null,
+          row.benchmarkType,
+          row.higherIsBetter
+        );
+        if (comparableScore === null) return;
+
+        const previous = benchmarkScoreMap.get(modelName);
+        if (previous === undefined || comparableScore > previous) {
+          benchmarkScoreMap.set(modelName, comparableScore);
+        }
+      });
+      return;
+    }
+
+    const entries = matchingRows.map((candidate) => ({
+      recordId: candidate.recordId ?? null,
+      valueRaw: candidate.valueRaw,
+      valueNum: candidate.valueNum,
+      valueNum2: candidate.valueNum2 ?? null,
+      valueNote: candidate.valueNote ?? null,
+      source: candidate.source ?? null,
+      benchTime: candidate.benchTime
+    }));
+    const higherIsBetter = matchingRows.some((candidate) => candidate.higherIsBetter === false)
+      ? false
+      : matchingRows.some((candidate) => candidate.higherIsBetter === true)
+        ? true
+        : !isLowerBetterBenchmark(representativeRow.benchmarkName, representativeRow.benchmarkType);
+    const aggregate = aggregateMatrixCellEntries(entries, higherIsBetter);
     const comparableScore = getBenchmarkBestComparableScore(
-      row.benchmarkName,
-      row.valueNum,
-      row.valueNum2 ?? null,
-      row.benchmarkType,
-      row.higherIsBetter
+      representativeRow.benchmarkName,
+      aggregate.valueNum,
+      aggregate.valueNum2,
+      representativeRow.benchmarkType,
+      higherIsBetter
     );
     if (comparableScore === null) return;
 
-    const previous = benchmarkScoreMap.get(row.modelName);
+    const previous = benchmarkScoreMap.get(modelName);
     if (previous === undefined || comparableScore > previous) {
-      benchmarkScoreMap.set(row.modelName, comparableScore);
+      benchmarkScoreMap.set(modelName, comparableScore);
     }
   });
 
@@ -1042,9 +1088,10 @@ export function buildMatrixRows(
         const sourceEntry = displaySourceValuesInCells && hasMeaningfulMultipleValues
           ? getSourceValueEntry(uniqueEntries, activeSource, matrixRow.higherIsBetter)
           : null;
+        const aggregateValues = aggregateMatrixCellEntries(cell.allEntries, matrixRow.higherIsBetter);
         const effectiveValueRaw = sourceEntry ? sourceEntry.valueRaw : cell.valueRaw;
-        const effectiveValueNum = sourceEntry ? sourceEntry.valueNum : cell.valueNum;
-        const effectiveValueNum2 = sourceEntry ? sourceEntry.valueNum2 : cell.valueNum2;
+        const effectiveValueNum = sourceEntry ? sourceEntry.valueNum : aggregateValues.valueNum;
+        const effectiveValueNum2 = sourceEntry ? sourceEntry.valueNum2 : aggregateValues.valueNum2;
         const effectiveValueNote = sourceEntry ? sourceEntry.valueNote : cell.valueNote;
         const effectiveSource = sourceEntry ? sourceEntry.source : cell.source;
         const effectiveBenchTime = sourceEntry ? sourceEntry.benchTime : cell.benchTime;
@@ -1476,8 +1523,8 @@ function buildRankingDataFromMatrixRow(
         const percents = validEntries.map((e) => toPercent(e.scoreVal, e.rawVal));
         const rawVals = validEntries.map((e) => e.rawVal);
 
-        const stats = calculateBoxPlotStats(percents);
-        const rawStats = calculateBoxPlotStats(rawVals);
+        const stats = calculateBoxPlotStats(percents, { medianMode: "upper" });
+        const rawStats = calculateBoxPlotStats(rawVals, { medianMode: "upper" });
 
         boxplot = {
           min: stats.min,
@@ -1614,6 +1661,13 @@ export function buildBenchmarkRankingData(
         }
       }
     }
+  });
+
+  cellsByModel.forEach((cell) => {
+    const aggregateValues = aggregateMatrixCellEntries(cell.allEntries, matrixRow.higherIsBetter);
+    cell.valueNum = aggregateValues.valueNum;
+    cell.valueNum2 = aggregateValues.valueNum2;
+    cell.displayValue = getMatrixCellDisplayValue(cell.valueNum, cell.valueNum2, cell.valueRaw, cell.valueNote);
   });
 
   const rankingMatrixRow: MatrixRow = {
