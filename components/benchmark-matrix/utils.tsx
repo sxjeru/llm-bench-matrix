@@ -9,11 +9,10 @@ import {
   normalizeModalityList as normalizeModalityListShared,
   normalizeModalityName
 } from "@/lib/modality";
-import { calculateBoxPlotStats } from "@/lib/boxplot-stats";
 import type { CompareDirection, MatrixCellEntry, MatrixInputRow } from "./types";
 import { SOURCE_ALL, SOURCE_EMPTY } from "./constants";
 import { blendColor } from "./colors";
-import { getMatrixCellDisplayValue } from "./scoring";
+import { getMatrixCellDisplayValue, hasMatrixCellPairRawValue } from "./scoring";
 
 export { normalizeModalityName };
 
@@ -116,43 +115,66 @@ export function getPreferredMatrixCellEntry(entries: MatrixCellEntry[], higherIs
 }
 
 export type MatrixCellAggregateValues = {
+  /** 中位数对应的那条真实记录，raw / note / source / benchTime 都应跟着它走，避免数值与展示串到不同记录上 */
+  entry: MatrixCellEntry | null;
   valueNum: number | null;
   valueNum2: number | null;
 };
 
 function isPairMatrixCellEntry(entry: MatrixCellEntry): boolean {
-  return entry.valueNum2 !== null || entry.valueRaw.includes("/");
+  return entry.valueNum2 !== null || hasMatrixCellPairRawValue(entry.valueRaw);
 }
 
 /**
- * 普通单值记录使用上中位数；双值记录保留原有整条记录择优策略，避免拼出不存在的数值对。
+ * 普通单值记录取中位数；偶数条时取指标方向上「更优」的那个中间值（越大越优取较大者，
+ * 越小越优取较小者），因此结果始终是真实存在的记录，不会插值出不存在的数值。
+ * 双值记录保留原有整条记录择优策略，避免拼出不存在的数值对。
  */
 export function aggregateMatrixCellEntries(
   entries: MatrixCellEntry[],
   higherIsBetter = true
 ): MatrixCellAggregateValues {
   if (entries.length === 0) {
-    return { valueNum: null, valueNum2: null };
+    return { entry: null, valueNum: null, valueNum2: null };
   }
 
   if (entries.some(isPairMatrixCellEntry)) {
     const preferred = getPreferredMatrixCellEntry(entries, higherIsBetter);
+    const preferredValueNum = preferred?.valueNum ?? null;
+    const preferredValueNum2 = preferred?.valueNum2 ?? null;
+
     return {
-      valueNum: preferred?.valueNum !== null && preferred?.valueNum !== undefined && Number.isFinite(preferred.valueNum)
-        ? preferred.valueNum
-        : null,
-      valueNum2: preferred?.valueNum2 !== null && preferred?.valueNum2 !== undefined && Number.isFinite(preferred.valueNum2)
-        ? preferred.valueNum2
-        : null
+      entry: preferred,
+      valueNum: preferredValueNum !== null && Number.isFinite(preferredValueNum) ? preferredValueNum : null,
+      valueNum2: preferredValueNum2 !== null && Number.isFinite(preferredValueNum2) ? preferredValueNum2 : null
     };
   }
 
-  const values = entries
-    .map((entry) => entry.valueNum)
-    .filter((value): value is number => value !== null && Number.isFinite(value));
+  const numericEntries = entries.filter(
+    (entry) => entry.valueNum !== null && Number.isFinite(entry.valueNum)
+  );
+
+  if (numericEntries.length === 0) {
+    return { entry: null, valueNum: null, valueNum2: null };
+  }
+
+  const sorted = [...numericEntries].sort((left, right) => {
+    if (left.valueNum !== right.valueNum) {
+      return (left.valueNum as number) - (right.valueNum as number);
+    }
+    // 数值相同时取更新的一条，让 source / benchTime 归属落在最新记录上
+    return compareMatrixCellEntryRecency(right, left);
+  });
+
+  // 奇数条时两个下标重合；偶数条时按指标方向偏向更优的一侧
+  const medianIndex = higherIsBetter
+    ? Math.floor(sorted.length / 2)
+    : Math.ceil(sorted.length / 2) - 1;
+  const medianEntry = sorted[medianIndex];
 
   return {
-    valueNum: values.length > 0 ? calculateBoxPlotStats(values, { medianMode: "upper" }).median : null,
+    entry: medianEntry,
+    valueNum: medianEntry.valueNum,
     valueNum2: null
   };
 }

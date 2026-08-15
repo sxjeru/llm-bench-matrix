@@ -31,7 +31,19 @@ export interface BoxPlotStats {
   count: number;
 }
 
-export type BoxPlotMedianMode = "interpolated" | "upper";
+/**
+ * 中位数口径：
+ * - `interpolated` 偶数条时取两个中间值的插值，可能得到数据中不存在的数值；
+ * - `upper` / `lower` 偶数条时分别取较大 / 较小的那个中间值，结果一定是真实存在的数据点。
+ *   指标方向已知时（越大越优 / 越小越优），由调用方选出「更优」的一侧。
+ */
+export type BoxPlotMedianMode = "interpolated" | "upper" | "lower";
+
+function pickMedian(sorted: number[], mode: BoxPlotMedianMode | undefined): number {
+  if (mode === "upper") return sorted[Math.floor(sorted.length / 2)];
+  if (mode === "lower") return sorted[Math.ceil(sorted.length / 2) - 1];
+  return quantile(sorted, 0.5);
+}
 
 export function calculateBoxPlotStats(
   values: number[],
@@ -43,9 +55,7 @@ export function calculateBoxPlotStats(
 
   const sorted = [...values].sort((a, b) => a - b);
   const q1 = quantile(sorted, 0.25);
-  const median = options.medianMode === "upper"
-    ? sorted[Math.floor(sorted.length / 2)] ?? sorted[sorted.length - 1]
-    : quantile(sorted, 0.5);
+  const median = pickMedian(sorted, options.medianMode);
   const q3 = quantile(sorted, 0.75);
   const iqr = q3 - q1;
 

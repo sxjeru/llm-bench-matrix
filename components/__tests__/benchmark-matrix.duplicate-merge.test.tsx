@@ -251,7 +251,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(screen.queryByText("80")).not.toBeInTheDocument();
   });
 
-  test("偶数条单值记录默认展示较大的中间值", () => {
+  test("偶数条单值记录默认展示更优的中间值", () => {
     render(
       <BenchmarkMatrix
         rows={[70, 80, 82, 100].map((value, index) => ({
@@ -676,7 +676,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
 
     render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
-    // 两条记录的上中位数为较大的 82
+    // 两条记录取更优侧的中间值，越大越优所以是 82
     expect(screen.getByText("82")).toBeInTheDocument();
 
     // 切换到 S1 页签
@@ -718,16 +718,18 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     });
   });
 
-  test("higherIsBetter=false 时默认值仍取中位数，并按该基线计算 source delta", async () => {
+  test("higherIsBetter=false 时取更优侧的中位数，并按该基线计算 source delta", async () => {
     const user = userEvent.setup();
 
+    // 注意：benchmarkType 不能用 "Performance"，「全部」页签下该分类会被覆盖率裁剪整行剔除，
+    // 三条记录就凑不齐了
     const lowerIsBetterRows = [
       {
         providerName: "OpenAI",
         modelName: "Model A",
         benchmarkName: "Latency",
-        benchmarkType: "Performance",
-        benchmarkCanonicalKey: "latency:performance",
+        benchmarkType: "Performance1",
+        benchmarkCanonicalKey: "latency:performance1",
         benchTime: "2026-04-06T00:00:00.000Z",
         valueRaw: "120 ms",
         valueNum: 120,
@@ -770,7 +772,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
       />
     );
 
-    // 聚合值不受指标方向影响：95、120、150 的中位数为 120
+    // 奇数条时方向不影响取值：95、120、150 的中位数为 120
     const defaultCell = container.querySelector('td[data-model-name="Model A"]');
     expect(defaultCell).not.toBeNull();
     expect(defaultCell).toHaveTextContent("120");

@@ -24,6 +24,7 @@ import {
   getMatrixCellDisplayValue,
   getMatrixRowComparableScore,
   getSortedQuantile,
+  hasMatrixCellPairRawValue,
   isLowerBetterBenchmark
 } from "./scoring";
 import { calculateBoxPlotStats } from "@/lib/boxplot-stats";
@@ -851,7 +852,9 @@ export function buildModelColumns(
     const representativeRow = matchingRows[0];
     if (!representativeRow) return;
 
-    const hasPairValues = matchingRows.some((row) => (row.valueNum2 ?? null) !== null || row.valueRaw.includes("/"));
+    const hasPairValues = matchingRows.some(
+      (row) => (row.valueNum2 ?? null) !== null || hasMatrixCellPairRawValue(row.valueRaw)
+    );
     if (hasPairValues) {
       matchingRows.forEach((row) => {
         const comparableScore = getBenchmarkBestComparableScore(
@@ -871,26 +874,33 @@ export function buildModelColumns(
       return;
     }
 
-    const entries = matchingRows.map((candidate) => ({
-      recordId: candidate.recordId ?? null,
-      valueRaw: candidate.valueRaw,
-      valueNum: candidate.valueNum,
-      valueNum2: candidate.valueNum2 ?? null,
-      valueNote: candidate.valueNote ?? null,
-      source: candidate.source ?? null,
-      benchTime: candidate.benchTime
-    }));
+    const entryRowMap = new Map<MatrixCellEntry, MatrixInputRow>();
+    const entries = matchingRows.map((candidate) => {
+      const entry: MatrixCellEntry = {
+        recordId: candidate.recordId ?? null,
+        valueRaw: candidate.valueRaw,
+        valueNum: candidate.valueNum,
+        valueNum2: candidate.valueNum2 ?? null,
+        valueNote: candidate.valueNote ?? null,
+        source: candidate.source ?? null,
+        benchTime: candidate.benchTime
+      };
+      entryRowMap.set(entry, candidate);
+      return entry;
+    });
     const higherIsBetter = matchingRows.some((candidate) => candidate.higherIsBetter === false)
       ? false
       : matchingRows.some((candidate) => candidate.higherIsBetter === true)
         ? true
         : !isLowerBetterBenchmark(representativeRow.benchmarkName, representativeRow.benchmarkType);
     const aggregate = aggregateMatrixCellEntries(entries, higherIsBetter);
+    // 重名 benchmark 合并后各行的 name / type 可能不同，可比分要用聚合命中的那一行来算
+    const scoringRow = (aggregate.entry ? entryRowMap.get(aggregate.entry) : null) ?? representativeRow;
     const comparableScore = getBenchmarkBestComparableScore(
-      representativeRow.benchmarkName,
+      scoringRow.benchmarkName,
       aggregate.valueNum,
       aggregate.valueNum2,
-      representativeRow.benchmarkType,
+      scoringRow.benchmarkType,
       higherIsBetter
     );
     if (comparableScore === null) return;
@@ -1088,13 +1098,16 @@ export function buildMatrixRows(
         const sourceEntry = displaySourceValuesInCells && hasMeaningfulMultipleValues
           ? getSourceValueEntry(uniqueEntries, activeSource, matrixRow.higherIsBetter)
           : null;
-        const aggregateValues = aggregateMatrixCellEntries(cell.allEntries, matrixRow.higherIsBetter);
-        const effectiveValueRaw = sourceEntry ? sourceEntry.valueRaw : cell.valueRaw;
-        const effectiveValueNum = sourceEntry ? sourceEntry.valueNum : aggregateValues.valueNum;
-        const effectiveValueNum2 = sourceEntry ? sourceEntry.valueNum2 : aggregateValues.valueNum2;
-        const effectiveValueNote = sourceEntry ? sourceEntry.valueNote : cell.valueNote;
-        const effectiveSource = sourceEntry ? sourceEntry.source : cell.source;
-        const effectiveBenchTime = sourceEntry ? sourceEntry.benchTime : cell.benchTime;
+        const aggregate = aggregateMatrixCellEntries(cell.allEntries, matrixRow.higherIsBetter);
+        // 没有 sourceEntry 时整格都以聚合出的那条记录为准：数值、原始文本、货币符号、星标、
+        // source 与 benchTime 必须同源，否则会出现「显示 $9.00、排序按 5」这类错位
+        const fallbackEntry = aggregate.entry;
+        const effectiveValueRaw = sourceEntry ? sourceEntry.valueRaw : fallbackEntry?.valueRaw ?? cell.valueRaw;
+        const effectiveValueNum = sourceEntry ? sourceEntry.valueNum : aggregate.valueNum;
+        const effectiveValueNum2 = sourceEntry ? sourceEntry.valueNum2 : aggregate.valueNum2;
+        const effectiveValueNote = sourceEntry ? sourceEntry.valueNote : fallbackEntry?.valueNote ?? cell.valueNote;
+        const effectiveSource = sourceEntry ? sourceEntry.source : fallbackEntry?.source ?? cell.source;
+        const effectiveBenchTime = sourceEntry ? sourceEntry.benchTime : fallbackEntry?.benchTime ?? cell.benchTime;
         const noteText = (effectiveValueNote ?? "").trim();
 
         finalizedCells.set(modelName, {
@@ -1523,8 +1536,10 @@ function buildRankingDataFromMatrixRow(
         const percents = validEntries.map((e) => toPercent(e.scoreVal, e.rawVal));
         const rawVals = validEntries.map((e) => e.rawVal);
 
+        // percents 已按指标方向归一（越大越优），raw 值则要按 lowerIsBetter 选更优的一侧，
+        // 两者才会落在同一条记录上
         const stats = calculateBoxPlotStats(percents, { medianMode: "upper" });
-        const rawStats = calculateBoxPlotStats(rawVals, { medianMode: "upper" });
+        const rawStats = calculateBoxPlotStats(rawVals, { medianMode: lowerIsBetter ? "lower" : "upper" });
 
         boxplot = {
           min: stats.min,
@@ -1664,9 +1679,15 @@ export function buildBenchmarkRankingData(
   });
 
   cellsByModel.forEach((cell) => {
-    const aggregateValues = aggregateMatrixCellEntries(cell.allEntries, matrixRow.higherIsBetter);
-    cell.valueNum = aggregateValues.valueNum;
-    cell.valueNum2 = aggregateValues.valueNum2;
+    const aggregate = aggregateMatrixCellEntries(cell.allEntries, matrixRow.higherIsBetter);
+    if (aggregate.entry) {
+      cell.valueRaw = aggregate.entry.valueRaw;
+      cell.valueNote = aggregate.entry.valueNote;
+      cell.source = aggregate.entry.source;
+      cell.benchTime = aggregate.entry.benchTime;
+    }
+    cell.valueNum = aggregate.valueNum;
+    cell.valueNum2 = aggregate.valueNum2;
     cell.displayValue = getMatrixCellDisplayValue(cell.valueNum, cell.valueNum2, cell.valueRaw, cell.valueNote);
   });
 

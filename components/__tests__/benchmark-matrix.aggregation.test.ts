@@ -13,6 +13,7 @@ import {
   getSourceValueDeltaRaw
 } from "@/components/benchmark-matrix/utils";
 import { calculateBoxPlotStats } from "@/lib/boxplot-stats";
+import { hasMatrixCellPairRawValue } from "@/components/benchmark-matrix/scoring";
 
 function makeEntry(valueNum: number | null, overrides: Partial<MatrixCellEntry> = {}): MatrixCellEntry {
   return {
@@ -46,13 +47,29 @@ function makeRow(modelName: string, valueNum: number, index: number): MatrixInpu
 }
 
 describe("benchmark matrix repeated-value aggregation", () => {
-  test("单值奇数取中间值，偶数取较大的中间值，且不受指标方向影响", () => {
+  test("单值奇数取中间值，偶数取指标方向上更优的中间值", () => {
     const oddEntries = [70, 80, 100].map((value) => makeEntry(value));
     const evenEntries = [70, 80, 82, 100].map((value) => makeEntry(value));
 
     expect(aggregateMatrixCellEntries(oddEntries, true).valueNum).toBe(80);
+    expect(aggregateMatrixCellEntries(oddEntries, false).valueNum).toBe(80);
+    // 越大越优取较大的中间值 82，越小越优取较小的中间值 80
     expect(aggregateMatrixCellEntries(evenEntries, true).valueNum).toBe(82);
-    expect(aggregateMatrixCellEntries(evenEntries, false).valueNum).toBe(82);
+    expect(aggregateMatrixCellEntries(evenEntries, false).valueNum).toBe(80);
+  });
+
+  test("聚合结果始终落在真实记录上，raw / source / benchTime 与数值同源", () => {
+    const entries = [
+      makeEntry(1, { valueRaw: "$1.00", source: "text:S1", benchTime: "2026-03-01T00:00:00.000Z" }),
+      makeEntry(5, { valueRaw: "$5.00", source: "text:S2", benchTime: "2026-04-01T00:00:00.000Z" }),
+      makeEntry(9, { valueRaw: "$9.00", source: "text:S3", benchTime: "2026-05-01T00:00:00.000Z" })
+    ];
+
+    const aggregate = aggregateMatrixCellEntries(entries, true);
+    expect(aggregate.valueNum).toBe(5);
+    expect(aggregate.entry?.valueRaw).toBe("$5.00");
+    expect(aggregate.entry?.source).toBe("text:S2");
+    expect(aggregate.entry?.benchTime).toBe("2026-04-01T00:00:00.000Z");
   });
 
   test("忽略无效数值，无有效数值时保持 null", () => {
@@ -65,7 +82,7 @@ describe("benchmark matrix repeated-value aggregation", () => {
     expect(aggregateMatrixCellEntries([
       makeEntry(null),
       makeEntry(Number.NaN)
-    ])).toEqual({ valueNum: null, valueNum2: null });
+    ])).toMatchObject({ entry: null, valueNum: null, valueNum2: null });
   });
 
   test("双值记录继续整条记录按指标方向择优", () => {
@@ -74,15 +91,27 @@ describe("benchmark matrix repeated-value aggregation", () => {
       makeEntry(44, { valueRaw: "44 / 55", valueNum2: 55 })
     ];
 
-    expect(aggregateMatrixCellEntries(entries, true)).toEqual({ valueNum: 44, valueNum2: 55 });
-    expect(aggregateMatrixCellEntries(entries, false)).toEqual({ valueNum: 22, valueNum2: 33 });
+    expect(aggregateMatrixCellEntries(entries, true)).toMatchObject({ valueNum: 44, valueNum2: 55 });
+    expect(aggregateMatrixCellEntries(entries, false)).toMatchObject({ valueNum: 22, valueNum2: 33 });
   });
 
-  test("upper median 仅用于矩阵箱线图口径，默认插值口径保持不变", () => {
+  test("N/A 等含斜杠的占位符不会被当成双值记录，仍走中位数", () => {
+    const entries = [makeEntry(70), makeEntry(80), makeEntry(null), makeEntry(100)];
+
+    // 若把 "N/A" 误判为双值，这里会退回整条择优拿到 100
+    expect(aggregateMatrixCellEntries(entries, true).valueNum).toBe(80);
+    expect(hasMatrixCellPairRawValue("N/A")).toBe(false);
+    expect(hasMatrixCellPairRawValue("22 / 33")).toBe(true);
+    expect(hasMatrixCellPairRawValue("$1.50/$3.00")).toBe(true);
+  });
+
+  test("upper / lower median 仅用于矩阵箱线图口径，默认插值口径保持不变", () => {
     const values = [70, 80, 82, 100];
 
     expect(calculateBoxPlotStats(values).median).toBe(81);
     expect(calculateBoxPlotStats(values, { medianMode: "upper" }).median).toBe(82);
+    expect(calculateBoxPlotStats(values, { medianMode: "lower" }).median).toBe(80);
+    expect(calculateBoxPlotStats([70], { medianMode: "lower" }).median).toBe(70);
   });
 
   test("矩阵值、列排序、排名箱线图与 Overall 使用同一聚合值", () => {
@@ -119,7 +148,7 @@ describe("benchmark matrix repeated-value aggregation", () => {
     expect(overall.get("Model A")?.rawScore).toBe(0);
   });
 
-  test("Source 差值使用 allEntries 的默认上中位数作为基线", () => {
+  test("Source 差值使用 allEntries 的聚合中位数作为基线", () => {
     const entries = [
       makeEntry(60, { source: "text:S2", benchTime: "2026-06-01T00:00:00.000Z", recordId: 4 }),
       makeEntry(75, { source: "text:S1", benchTime: "2026-05-01T00:00:00.000Z", recordId: 3 }),

@@ -293,6 +293,17 @@ export function getMatrixCellPairDisplayParts(
   };
 }
 
+const MATRIX_CELL_PAIR_RAW_PATTERN =
+  /^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/;
+
+/**
+ * 判断原始值是不是「数值 / 数值」形式。斜杠两侧都必须是数字，
+ * 因此 "N/A" 这类占位符不会被误判成双值记录。
+ */
+export function hasMatrixCellPairRawValue(rawValue: string): boolean {
+  return MATRIX_CELL_PAIR_RAW_PATTERN.test(rawValue.trim());
+}
+
 export function getMatrixCellDisplayValue(
   valueNum: number | null,
   valueNum2: number | null,
@@ -310,9 +321,7 @@ export function getMatrixCellDisplayValue(
     return `${pairDisplayParts.first} / ${pairDisplayParts.second}`;
   }
 
-  const pairMatch = raw.match(
-    /^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/
-  );
+  const pairMatch = raw.match(MATRIX_CELL_PAIR_RAW_PATTERN);
 
   if (pairMatch) {
     const [, first, second] = pairMatch;
