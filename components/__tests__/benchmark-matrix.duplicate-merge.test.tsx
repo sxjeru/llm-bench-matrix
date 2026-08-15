@@ -274,6 +274,40 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(screen.queryByText("100")).not.toBeInTheDocument();
   });
 
+  test("单双值混合时单元格展示中位数，双值只拿前值参与", () => {
+    render(
+      <BenchmarkMatrix
+        rows={[
+          { value: 44, source: "text:Grok", benchTime: "2026-07-09T07:59:00.000Z" },
+          { value: 46.2, source: "text:Kimi", benchTime: "2026-07-17T07:32:00.000Z" },
+          { value: 54.9, source: "text:Macaron", benchTime: "2026-07-21T22:35:00.000Z" },
+          {
+            value: 46.2,
+            valueNum2: 42.5,
+            valueRaw: "46.2 / 42.5*",
+            source: "text:Hy3",
+            benchTime: "2026-07-06T20:38:00.000Z"
+          }
+        ].map((item, index) => ({
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "MMLU-Pro",
+          benchmarkType: `Knowledge${index}`,
+          benchmarkCanonicalKey: `mmlu-pro:knowledge${index}`,
+          benchTime: item.benchTime,
+          valueRaw: item.valueRaw ?? String(item.value),
+          valueNum: item.value,
+          valueNum2: item.valueNum2 ?? null,
+          valueNote: null,
+          source: item.source
+        }))}
+      />
+    );
+
+    expect(screen.getByText("46.2")).toBeInTheDocument();
+    expect(screen.queryByText("54.9")).not.toBeInTheDocument();
+  });
+
   test("开启显示重名列后，重名 benchmark 恢复为多行展示", () => {
     render(<BenchmarkMatrix rows={[...duplicateBenchmarkRows]} />);
 

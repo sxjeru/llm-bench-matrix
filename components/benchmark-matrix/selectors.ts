@@ -852,10 +852,13 @@ export function buildModelColumns(
     const representativeRow = matchingRows[0];
     if (!representativeRow) return;
 
-    const hasPairValues = matchingRows.some(
+    const numericMatchingRows = matchingRows.filter(
+      (row) => row.valueNum !== null && Number.isFinite(row.valueNum)
+    );
+    const allNumericRowsArePairs = numericMatchingRows.length > 0 && numericMatchingRows.every(
       (row) => (row.valueNum2 ?? null) !== null || hasMatrixCellPairRawValue(row.valueRaw)
     );
-    if (hasPairValues) {
+    if (allNumericRowsArePairs) {
       matchingRows.forEach((row) => {
         const comparableScore = getBenchmarkBestComparableScore(
           row.benchmarkName,

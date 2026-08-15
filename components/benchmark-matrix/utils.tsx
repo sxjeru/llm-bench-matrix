@@ -126,9 +126,9 @@ function isPairMatrixCellEntry(entry: MatrixCellEntry): boolean {
 }
 
 /**
- * 普通单值记录取中位数；偶数条时取指标方向上「更优」的那个中间值（越大越优取较大者，
- * 越小越优取较小者），因此结果始终是真实存在的记录，不会插值出不存在的数值。
- * 双值记录保留原有整条记录择优策略，避免拼出不存在的数值对。
+ * 普通单值或单双值混合取中位数；偶数条时取指标方向上「更优」的那个中间值
+ * （越大越优取较大者，越小越优取较小者），因此结果始终是真实存在的记录。
+ * 双值只拿前值参与排序；纯双值集合仍整条记录择优，避免拼出不存在的数值对。
  */
 export function aggregateMatrixCellEntries(
   entries: MatrixCellEntry[],
@@ -138,8 +138,16 @@ export function aggregateMatrixCellEntries(
     return { entry: null, valueNum: null, valueNum2: null };
   }
 
-  if (entries.some(isPairMatrixCellEntry)) {
-    const preferred = getPreferredMatrixCellEntry(entries, higherIsBetter);
+  const numericEntries = entries.filter(
+    (entry) => entry.valueNum !== null && Number.isFinite(entry.valueNum)
+  );
+
+  if (numericEntries.length === 0) {
+    return { entry: null, valueNum: null, valueNum2: null };
+  }
+
+  if (numericEntries.every(isPairMatrixCellEntry)) {
+    const preferred = getPreferredMatrixCellEntry(numericEntries, higherIsBetter);
     const preferredValueNum = preferred?.valueNum ?? null;
     const preferredValueNum2 = preferred?.valueNum2 ?? null;
 
@@ -148,14 +156,6 @@ export function aggregateMatrixCellEntries(
       valueNum: preferredValueNum !== null && Number.isFinite(preferredValueNum) ? preferredValueNum : null,
       valueNum2: preferredValueNum2 !== null && Number.isFinite(preferredValueNum2) ? preferredValueNum2 : null
     };
-  }
-
-  const numericEntries = entries.filter(
-    (entry) => entry.valueNum !== null && Number.isFinite(entry.valueNum)
-  );
-
-  if (numericEntries.length === 0) {
-    return { entry: null, valueNum: null, valueNum2: null };
   }
 
   const sorted = [...numericEntries].sort((left, right) => {
@@ -171,11 +171,12 @@ export function aggregateMatrixCellEntries(
     ? Math.floor(sorted.length / 2)
     : Math.ceil(sorted.length / 2) - 1;
   const medianEntry = sorted[medianIndex];
+  const medianValueNum2 = medianEntry.valueNum2;
 
   return {
     entry: medianEntry,
     valueNum: medianEntry.valueNum,
-    valueNum2: null
+    valueNum2: medianValueNum2 !== null && Number.isFinite(medianValueNum2) ? medianValueNum2 : null
   };
 }
 

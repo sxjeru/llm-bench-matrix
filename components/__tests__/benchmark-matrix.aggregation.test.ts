@@ -85,7 +85,7 @@ describe("benchmark matrix repeated-value aggregation", () => {
     ])).toMatchObject({ entry: null, valueNum: null, valueNum2: null });
   });
 
-  test("双值记录继续整条记录按指标方向择优", () => {
+  test("纯双值记录继续整条记录按指标方向择优", () => {
     const entries = [
       makeEntry(22, { valueRaw: "22 / 33", valueNum2: 33 }),
       makeEntry(44, { valueRaw: "44 / 55", valueNum2: 55 })
@@ -93,6 +93,51 @@ describe("benchmark matrix repeated-value aggregation", () => {
 
     expect(aggregateMatrixCellEntries(entries, true)).toMatchObject({ valueNum: 44, valueNum2: 55 });
     expect(aggregateMatrixCellEntries(entries, false)).toMatchObject({ valueNum: 22, valueNum2: 33 });
+  });
+
+  test("单双值混合时取中位数，双值只拿前值参与", () => {
+    const pairEntry = makeEntry(46.2, {
+      valueRaw: "46.2 / 42.5*",
+      valueNum2: 42.5,
+      source: "text:Hy3",
+      benchTime: "2026-07-06T20:38:00.000Z"
+    });
+    const entries = [
+      makeEntry(44, { source: "text:Grok", benchTime: "2026-07-09T07:59:00.000Z" }),
+      makeEntry(46.2, { source: "text:GLM-5.2", benchTime: "2026-06-17T08:08:00.000Z" }),
+      pairEntry,
+      makeEntry(54.9, { source: "text:Macaron", benchTime: "2026-07-21T22:35:00.000Z" }),
+      makeEntry(46.2, { source: "text:Kimi", benchTime: "2026-07-17T07:32:00.000Z" }),
+      makeEntry(46.2, { source: "text:GLM-5.3", benchTime: "2026-08-14T13:31:00.000Z" }),
+      makeEntry(46.2, { source: "text:DeepSeek-V4-Pro", benchTime: "2026-08-13T19:46:00.000Z" }),
+      makeEntry(46.2, { source: "text:Smaug", benchTime: "2026-08-11T07:14:00.000Z" }),
+      makeEntry(46.2, { source: "text:DeepSeek-V4-Flash", benchTime: "2026-07-31T14:15:00.000Z" })
+    ];
+
+    const aggregate = aggregateMatrixCellEntries(entries, true);
+    expect(aggregate.valueNum).toBe(46.2);
+    expect(aggregate.entry?.source).not.toBe("text:Macaron");
+    expect(aggregate.entry?.valueRaw).not.toBe("54.9");
+  });
+
+  test("混合数据里双值前值成为中位数时，展示仍跟该条记录同源", () => {
+    const pairEntry = makeEntry(80, {
+      valueRaw: "80 / 10",
+      valueNum2: 10,
+      source: "text:Pair",
+      benchTime: "2026-05-01T00:00:00.000Z"
+    });
+    const entries = [
+      makeEntry(70, { source: "text:S1", benchTime: "2026-03-01T00:00:00.000Z" }),
+      pairEntry,
+      makeEntry(100, { source: "text:S3", benchTime: "2026-06-01T00:00:00.000Z" })
+    ];
+
+    expect(aggregateMatrixCellEntries(entries, true)).toMatchObject({
+      valueNum: 80,
+      valueNum2: 10,
+      entry: expect.objectContaining({ source: "text:Pair", valueRaw: "80 / 10" })
+    });
   });
 
   test("N/A 等含斜杠的占位符不会被当成双值记录，仍走中位数", () => {
