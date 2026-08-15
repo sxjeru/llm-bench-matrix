@@ -1024,7 +1024,7 @@ export function ImportTab({
         {matrixPreview.rows.length > 0 ? (
           <div className="mt-4 space-y-2">
             <h4 className="font-semibold">矩阵预览（可编辑）</h4>
-            <div className="max-h-[420px] overflow-auto rounded-box border border-base-300">
+            <div className="max-h-[620px] overflow-auto rounded-box border border-base-300">
               <table className="table table-zebra table-sm">
                 <thead>
                   <tr>
@@ -1032,7 +1032,6 @@ export function ImportTab({
                       <details className="dropdown dropdown-bottom" data-modality-dropdown="true">
                         <summary className="btn btn-ghost btn-xs h-7 min-h-0 gap-1 px-1 font-semibold">
                           模态
-                          <span className="text-[10px] font-normal opacity-60">全部</span>
                         </summary>
                         <div className="dropdown-content z-[90] mt-1 w-44 rounded-box border border-base-300 bg-base-100 p-2 shadow-xl">
                           <div className="mb-1 text-[11px] opacity-75">统一设置全部模态</div>
