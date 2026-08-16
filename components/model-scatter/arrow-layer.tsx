@@ -104,9 +104,10 @@ export function buildArrowGeometry(
   const approachSlope = 0.72;
   const approachLength = Math.hypot(1, approachSlope);
   const preferredSign = options.forcedSign ?? options.preferredSign ?? 1;
+  const oppositeSign: 1 | -1 = preferredSign === 1 ? -1 : 1;
   const signs: readonly (1 | -1)[] = options.forcedSign
     ? [options.forcedSign]
-    : [preferredSign, -preferredSign];
+    : [preferredSign, oppositeSign];
 
   let best: { geometry: ArrowGeometry; score: number; preference: number } | null = null;
   let preference = 0;

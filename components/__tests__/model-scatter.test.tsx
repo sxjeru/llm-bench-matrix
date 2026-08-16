@@ -99,7 +99,7 @@ function renderScatter() {
 
 function stubScatterChartHostSize() {
   const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     if (!this.classList.contains("scatter-chart-host")) {
       return originalGetBoundingClientRect.call(this);
     }

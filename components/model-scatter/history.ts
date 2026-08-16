@@ -4,6 +4,7 @@ import type {
   ScatterHistoryLookupResult,
   ScatterHistoryMode,
   ScatterHistorySample,
+  ScatterHistoryUnavailableReason,
   ScatterMetric,
   ScatterPoint
 } from "./types";
@@ -187,7 +188,7 @@ export function formatScatterHistoryDate(value: string | null): string {
   return new Date(timestamp).toISOString().slice(0, 10);
 }
 
-export function describeScatterHistoryUnavailable(reason: ScatterHistoryLookupResult["reason"] | undefined): string {
+export function describeScatterHistoryUnavailable(reason: ScatterHistoryUnavailableReason | undefined): string {
   switch (reason) {
     case "unsupported-x":
       return "当前 X 轴没有时间历史，无法绘制历史点";
