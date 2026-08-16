@@ -4,7 +4,7 @@ import { describe, expect, test, vi, beforeEach } from "vitest";
 import { ModelScatter } from "@/components/model-scatter";
 import { ScatterCanvas } from "@/components/model-scatter/scatter-canvas";
 import { ScatterHistoryLayer } from "@/components/model-scatter/history-layer";
-import { buildArrowGeometry } from "@/components/model-scatter/arrow-layer";
+import { buildArrowGeometry, resolveArrowHeadSize } from "@/components/model-scatter/arrow-layer";
 import { isInWorstQuadrant } from "@/components/model-scatter/guide-layer";
 import { toScatterMetric } from "@/components/model-scatter/metrics";
 import { buildScatterDataset, computeAxisDomain } from "@/components/model-scatter/dataset";
@@ -1151,6 +1151,17 @@ describe("ScatterCanvas", () => {
     expect(geometry).not.toBeNull();
     expect(geometry!.end.x).toBeLessThan(300);
     expect(geometry!.end.y).toBeGreaterThan(200);
+  });
+
+  test("短路径或重叠时缩小箭头末端", () => {
+    const long = buildArrowGeometry({ x: 40, y: 200 }, { x: 280, y: 200 });
+    const short = buildArrowGeometry({ x: 180, y: 200 }, { x: 216, y: 200 });
+    expect(resolveArrowHeadSize(36)).toBeLessThan(resolveArrowHeadSize(180));
+    expect(resolveArrowHeadSize(180, 8)).toBeLessThan(resolveArrowHeadSize(180));
+    expect(short?.headSize).toBeLessThan(long?.headSize ?? Number.POSITIVE_INFINITY);
+    expect(long?.headSize).toBeGreaterThan(20);
+    expect(short?.headSize).toBeGreaterThanOrEqual(15);
+    expect(resolveArrowHeadSize(180, 20)).toBeGreaterThanOrEqual(14);
   });
 
   test("Shift 淡化当前模型时历史层同步淡化", () => {

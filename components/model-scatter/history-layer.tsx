@@ -10,7 +10,15 @@ import {
   SCATTER_LABEL_STROKE
 } from "./constants";
 import { formatScatterHistoryDate, formatScatterHistoryModeLabel } from "./history";
-import { buildArrowGeometry, type ArrowObstacle } from "./arrow-layer";
+import {
+  arrowHeadMarkerSize,
+  buildArrowGeometry,
+  SCATTER_ARROW_HEAD_PATH,
+  SCATTER_ARROW_HEAD_REF_X,
+  SCATTER_ARROW_HEAD_REF_Y,
+  SCATTER_ARROW_HEAD_VIEWBOX,
+  type ArrowObstacle
+} from "./arrow-layer";
 import { formatScatterValue } from "./metrics";
 import { getPlacedLabelBox } from "./label-layout";
 import { projectToPixel } from "./projection";
@@ -172,6 +180,7 @@ export function ScatterHistoryLayer({
       data-model-name={point.modelName}
       data-history-mode={point.mode}
       data-curve-sign={geometry?.sign}
+      data-head-size={geometry?.headSize}
       aria-label={`${point.modelName} 的${label}`}
     >
       {isHovered ? (
@@ -215,15 +224,22 @@ export function ScatterHistoryLayer({
             </linearGradient>
             <marker
               id={markerId}
-              viewBox="0 0 10 10"
-              refX="8.5"
-              refY="5"
-              markerWidth="7"
-              markerHeight="7"
+              viewBox={SCATTER_ARROW_HEAD_VIEWBOX}
+              refX={SCATTER_ARROW_HEAD_REF_X}
+              refY={SCATTER_ARROW_HEAD_REF_Y}
+              {...arrowHeadMarkerSize(geometry.headSize)}
               orient="auto-start-reverse"
-              markerUnits="strokeWidth"
+              markerUnits="userSpaceOnUse"
+              overflow="visible"
             >
-              <path d="M 0 0 L 10 5 L 0 10 L 2.5 5 Z" fill={point.color} />
+              <path
+                d={SCATTER_ARROW_HEAD_PATH}
+                fill={point.color}
+                stroke="rgba(11, 16, 32, 0.82)"
+                strokeWidth={0.65}
+                strokeLinejoin="round"
+                paintOrder="stroke"
+              />
             </marker>
           </defs>
           <path

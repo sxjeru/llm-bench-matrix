@@ -31,6 +31,8 @@ type ArrowGeometry = {
   start: { x: number; y: number };
   end: { x: number; y: number };
   sign: 1 | -1;
+  headSize: number;
+  distance: number;
 };
 
 type ArrowGeometryOptions = {
@@ -45,6 +47,28 @@ export type ArrowObstacle = {
   top: number;
   bottom: number;
 };
+
+export const SCATTER_ARROW_HEAD_PATH = "M 0.6 0.8 L 13 5 L 0.6 9.2 L 4 5 Z";
+export const SCATTER_ARROW_HEAD_VIEWBOX = "0 0 13 10";
+export const SCATTER_ARROW_HEAD_REF_X = 12.4;
+export const SCATTER_ARROW_HEAD_REF_Y = 5;
+export const SCATTER_ARROW_HEAD_ASPECT = 10 / 13;
+
+/** 短路径或穿过文字时缩小箭头，避免末端盖住点与标签。 */
+export function resolveArrowHeadSize(distance: number, overlapHits = 0): number {
+  if (!Number.isFinite(distance) || distance <= 0) return 15;
+  const lengthProgress = Math.min(1, Math.max(0, (distance - 28) / 172));
+  const lengthSize = 15 + 7 * Math.sqrt(lengthProgress);
+  const overlapScale = overlapHits <= 0 ? 1 : Math.max(0.82, 1 - overlapHits * 0.025);
+  return Number(Math.max(14, lengthSize * overlapScale).toFixed(2));
+}
+
+export function arrowHeadMarkerSize(headSize: number) {
+  return {
+    markerWidth: headSize,
+    markerHeight: Number((headSize * SCATTER_ARROW_HEAD_ASPECT).toFixed(2))
+  };
+}
 
 type ArrowPoint = { x: number; y: number };
 
@@ -125,13 +149,15 @@ export function buildArrowGeometry(
         x: (pathStart.x + pathEnd.x) / 2 - unitY * curvature * sign,
         y: (pathStart.y + pathEnd.y) / 2 + unitX * curvature * sign
       };
+      const score = scoreArrowObstacles(pathStart, control, pathEnd, obstacles);
       const geometry = {
         path: `M ${pathStart.x} ${pathStart.y} Q ${control.x} ${control.y} ${pathEnd.x} ${pathEnd.y}`,
         start: pathStart,
         end: pathEnd,
-        sign
+        sign,
+        headSize: resolveArrowHeadSize(distance, score),
+        distance
       };
-      const score = scoreArrowObstacles(pathStart, control, pathEnd, obstacles);
       if (!best || score < best.score || (score === best.score && preference < best.preference)) {
         best = { geometry, score, preference };
       }
@@ -200,6 +226,7 @@ export function ScatterArrowLayer({
             data-from-model={from.modelName}
             data-to-model={to.modelName}
             data-curve-sign={geometry.sign}
+            data-head-size={geometry.headSize}
             aria-label={`${from.modelName} 到 ${to.modelName} 的标注箭头`}
           >
             <defs>
@@ -217,15 +244,22 @@ export function ScatterArrowLayer({
               </linearGradient>
               <marker
                 id={markerId}
-                viewBox="0 0 10 10"
-                refX="8.5"
-                refY="5"
-                markerWidth="7"
-                markerHeight="7"
+                viewBox={SCATTER_ARROW_HEAD_VIEWBOX}
+                refX={SCATTER_ARROW_HEAD_REF_X}
+                refY={SCATTER_ARROW_HEAD_REF_Y}
+                {...arrowHeadMarkerSize(geometry.headSize)}
                 orient="auto-start-reverse"
-                markerUnits="strokeWidth"
+                markerUnits="userSpaceOnUse"
+                overflow="visible"
               >
-                <path d="M 0 0 L 10 5 L 0 10 L 2.5 5 Z" fill={to.color} />
+                <path
+                  d={SCATTER_ARROW_HEAD_PATH}
+                  fill={to.color}
+                  stroke="rgba(11, 16, 32, 0.82)"
+                  strokeWidth={0.65}
+                  strokeLinejoin="round"
+                  paintOrder="stroke"
+                />
               </marker>
             </defs>
             <path
