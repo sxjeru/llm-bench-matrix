@@ -31,7 +31,43 @@ export type ScatterMetric = {
   /** 量纲跨数量级的指标（价格、参数量、Cost/Performance 分类）默认建议对数轴 */
   preferLogScale: boolean;
   valueByModel: Map<string, number>;
+  /** 仅 benchmark 行有历史；价格/参数量/总评为空 Map */
+  historyByModel: Map<string, readonly ScatterHistorySample[]>;
 };
+
+/** 某模型在某指标下的一条真实记录，供历史点按时间对齐。 */
+export type ScatterHistorySample = {
+  value: number;
+  benchTime: string | null;
+  recordId: number | null;
+};
+
+export type ScatterHistoryMode = "best" | "worst";
+
+/** 空心历史点：X 取历史极值，Y 取时间最近的同期值。 */
+export type ScatterHistoricalPoint = {
+  modelName: string;
+  providerName: string;
+  color: string;
+  mode: ScatterHistoryMode;
+  x: number;
+  y: number;
+  xBenchTime: string | null;
+  yBenchTime: string | null;
+  currentX: number;
+  currentY: number;
+};
+
+export type ScatterHistoryLookupResult =
+  | { status: "ok"; point: ScatterHistoricalPoint }
+  | { status: "unavailable"; reason: ScatterHistoryUnavailableReason };
+
+export type ScatterHistoryUnavailableReason =
+  | "unsupported-x"
+  | "no-history"
+  | "same-extreme"
+  | "no-y"
+  | "non-positive";
 
 export type ScatterMetricGroup = {
   category: string;

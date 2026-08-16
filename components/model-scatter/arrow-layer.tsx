@@ -28,7 +28,7 @@ type ArrowGeometry = {
   end: { x: number; y: number };
 };
 
-function buildArrowGeometry(
+export function buildArrowGeometry(
   start: { x: number; y: number },
   end: { x: number; y: number }
 ): ArrowGeometry | null {

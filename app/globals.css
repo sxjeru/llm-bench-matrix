@@ -1252,6 +1252,14 @@ input.heatmap-alpha-range::-moz-range-track {
   animation: scatter-arrow-draw 0.38s ease-out forwards;
 }
 
+.scatter-history-ring-outer {
+  filter: drop-shadow(0 0 6px currentColor);
+}
+
+.scatter-history-label {
+  pointer-events: none;
+}
+
 @keyframes scatter-arrow-start-pulse {
   50% {
     opacity: 0.45;
@@ -1266,7 +1274,8 @@ input.heatmap-alpha-range::-moz-range-track {
 
 @media (prefers-reduced-motion: reduce) {
   .scatter-arrow-start-ring,
-  .scatter-arrow-path {
+  .scatter-arrow-path,
+  .scatter-history-arrow-path {
     animation: none;
     stroke-dashoffset: 0;
   }

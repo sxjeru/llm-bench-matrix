@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from "recharts";
 import { ScatterArrowLayer } from "./arrow-layer";
+import { ScatterHistoryLayer } from "./history-layer";
 import {
   SCATTER_AXIS_STROKE,
   SCATTER_AXIS_TICK_COLOR,
@@ -49,7 +50,8 @@ import type {
   ScatterParetoLineStyle,
   ScatterPlacedLabel,
   ScatterPlotDataset,
-  ScatterPoint
+  ScatterPoint,
+  ScatterHistoricalPoint
 } from "./types";
 
 export type ScatterCanvasProps = {
@@ -67,6 +69,7 @@ export type ScatterCanvasProps = {
   labelMode: ScatterLabelMode;
   showGuides: boolean;
   highlightedModel: string | null;
+  historicalPoint?: ScatterHistoricalPoint | null;
   /** 图例上正在悬浮的厂商；其余厂商的点与标签会被淡化 */
   hoveredProvider?: string | null;
   /**
@@ -74,6 +77,7 @@ export type ScatterCanvasProps = {
    * 拖拽平移不会触发。
    */
   onSelectModel?: (modelName: string | null) => void;
+  onToggleHistory?: (modelName: string) => void;
   onZoomChange?: (isZoomed: boolean) => void;
   onVisiblePointsChange?: (points: readonly ScatterPoint[]) => void;
   /** 外部触发的重置计数，每次自增都会把缩放归位 */
@@ -87,6 +91,7 @@ type ScatterDotRenderProps = {
 };
 
 type ScatterClickEvent = {
+  altKey?: boolean;
   ctrlKey?: boolean;
   metaKey?: boolean;
   shiftKey?: boolean;
@@ -173,8 +178,10 @@ export function ScatterCanvas({
   labelMode,
   showGuides,
   highlightedModel,
+  historicalPoint = null,
   hoveredProvider = null,
   onSelectModel,
+  onToggleHistory,
   onZoomChange,
   onVisiblePointsChange,
   resetZoomSignal = 0
@@ -226,11 +233,26 @@ export function ScatterCanvas({
     };
   }, [activeHiddenModelNames, dataset, xMetric.higherIsBetter, yMetric.higherIsBetter]);
 
-  const xValues = useMemo(() => activeDataset.points.map((point) => point.x), [activeDataset.points]);
-  const yValues = useMemo(() => activeDataset.points.map((point) => point.y), [activeDataset.points]);
+  const xValues = useMemo(
+    () => activeDataset.points.map((point) => point.x),
+    [activeDataset.points]
+  );
+  const yValues = useMemo(
+    () => activeDataset.points.map((point) => point.y),
+    [activeDataset.points]
+  );
+  // 历史点只扩轴域，避免被裁切；中位线/参考线仍只看当前散点
+  const domainXValues = useMemo(() => {
+    if (!historicalPoint) return xValues;
+    return [...xValues, historicalPoint.x];
+  }, [xValues, historicalPoint]);
+  const domainYValues = useMemo(() => {
+    if (!historicalPoint) return yValues;
+    return [...yValues, historicalPoint.y];
+  }, [yValues, historicalPoint]);
 
-  const baseXDomain = useMemo(() => computeAxisDomain(xValues, xScale), [xValues, xScale]);
-  const baseYDomain = useMemo(() => computeAxisDomain(yValues, yScale), [yValues, yScale]);
+  const baseXDomain = useMemo(() => computeAxisDomain(domainXValues, xScale), [domainXValues, xScale]);
+  const baseYDomain = useMemo(() => computeAxisDomain(domainYValues, yScale), [domainYValues, yScale]);
 
   // 换轴、换刻度或数据变了就自动作废旧的缩放，不必再走一次 effect 清状态
   const domainKey = useMemo(
@@ -391,6 +413,9 @@ export function ScatterCanvas({
   // 横向空间更宽，刻度可以多给两档；纵向密了会挤成一片
   const xTicks = useMemo(() => buildAxisTicks(xDomain, xScale, 8), [xDomain, xScale]);
   const yTicks = useMemo(() => buildAxisTicks(yDomain, yScale, 6), [yDomain, yScale]);
+  const isHistoricalPointHidden = Boolean(
+    historicalPoint && activeHiddenModelNames.has(historicalPoint.modelName)
+  );
 
   // 滚轮缩放必须拿到非 passive 的监听才能 preventDefault，React 的 onWheel 做不到
   useEffect(() => {
@@ -690,6 +715,11 @@ export function ScatterCanvas({
       const modelName = clickPoint?.payload?.modelName ?? clickPoint?.modelName;
       if (!modelName) return;
 
+      if (event?.altKey) {
+        onToggleHistory?.(modelName);
+        return;
+      }
+
       // Ctrl/Cmd：首点为起点，次点为终点；普通点击会取消待选起点
       if (event?.ctrlKey || event?.metaKey) {
         const startModelName = arrowStartModelNameRef.current;
@@ -727,7 +757,7 @@ export function ScatterCanvas({
 
       onSelectModel?.(modelName);
     },
-    [onSelectModel]
+    [onSelectModel, onToggleHistory]
   );
 
   const handleContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
@@ -767,8 +797,8 @@ export function ScatterCanvas({
         arrowStartModelName
           ? `已选择 ${arrowStartModelName}，按住 Ctrl 点击另一个点作为终点`
           : isZoomed
-            ? "拖拽平移 · 滚轮缩放 · 双击重置 · Ctrl 点击两点添加箭头"
-            : "拖拽平移 · 滚轮缩放 · Ctrl 点击两点添加箭头"
+            ? "拖拽平移 · 滚轮缩放 · 双击重置 · Ctrl 点击两点添加箭头 · Alt 点击查看历史点"
+            : "拖拽平移 · 滚轮缩放 · Ctrl 点击两点添加箭头 · Alt 点击查看历史点"
       }
     >
       <ScatterChart width={width} height={height} margin={{ ...SCATTER_CHART_MARGIN }}>
@@ -866,6 +896,15 @@ export function ScatterCanvas({
           xScale={xScale}
           yScale={yScale}
           plotArea={plotArea}
+        />
+        <ScatterHistoryLayer
+          point={historicalPoint}
+          xDomain={xDomain}
+          yDomain={yDomain}
+          xScale={xScale}
+          yScale={yScale}
+          plotArea={plotArea}
+          opacity={isHistoricalPointHidden ? SCATTER_DIMMED_OPACITY : 1}
         />
       </ScatterChart>
     </div>

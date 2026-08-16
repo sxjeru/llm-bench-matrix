@@ -89,6 +89,7 @@ export const SCATTER_WHEEL_ZOOM_STEP = 1.18;
 
 export const SCATTER_DOT_RADIUS = 5.5;
 export const SCATTER_DOT_RADIUS_PARETO = 7;
+export const SCATTER_HISTORY_DOT_RADIUS = 8;
 export const SCATTER_LABEL_FONT_SIZE = 11;
 export const SCATTER_LABEL_GAP = 3;
 /** 等宽近似系数：Inter 11px 下的平均字宽 / 字号 */

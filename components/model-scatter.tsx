@@ -62,7 +62,20 @@ import {
   type ScatterViewState
 } from "./model-scatter/persistence";
 import { ScatterCanvas } from "./model-scatter/scatter-canvas";
-import type { ModelScatterProps, ScatterAxisScale, ScatterOverlayMode } from "./model-scatter/types";
+import {
+  describeScatterHistoryUnavailable,
+  formatScatterHistoryDate,
+  formatScatterHistoryModeLabel,
+  nextScatterHistoryMode,
+  resolveScatterHistoricalPoint
+} from "./model-scatter/history";
+import type {
+  ModelScatterProps,
+  ScatterAxisScale,
+  ScatterHistoricalPoint,
+  ScatterHistoryMode,
+  ScatterOverlayMode
+} from "./model-scatter/types";
 
 /** 散点图不做重复行拆分：合并同名 benchmark 才能得到干净的轴列表。 */
 const SHOW_DUPLICATE_ROWS = false;
@@ -94,6 +107,11 @@ export function ModelScatter({
   const [hiddenProviders, setHiddenProviders] = useState<string[]>([]);
   const [hoveredProvider, setHoveredProvider] = useState<string | null>(null);
   const [highlightedModel, setHighlightedModel] = useState<string | null>(null);
+  const [historySelection, setHistorySelection] = useState<{
+    modelName: string;
+    mode: ScatterHistoryMode;
+  } | null>(null);
+  const [historyNotice, setHistoryNotice] = useState<string | null>(null);
   const [exportPreset, setExportPreset] = useState<ExportPresetKey>(DEFAULT_EXPORT_PRESET);
   const [includeLegendInExport, setIncludeLegendInExport] = useState(false);
   const [supportsWebpExport, setSupportsWebpExport] = useState(true);
@@ -431,6 +449,54 @@ export function ModelScatter({
     });
   }, [xMetric, yMetric, plottableModelNames, providerNameByModel, colorByModel, viewState.xScale, viewState.yScale]);
 
+  const historicalPoint = useMemo<ScatterHistoricalPoint | null>(() => {
+    if (!historySelection || !xMetric || !yMetric) return null;
+    const current = dataset.points.find((point) => point.modelName === historySelection.modelName);
+    if (!current) return null;
+
+    const result = resolveScatterHistoricalPoint({
+      current,
+      mode: historySelection.mode,
+      xMetric,
+      yMetric,
+      xScale: viewState.xScale,
+      yScale: viewState.yScale
+    });
+    return result.status === "ok" ? result.point : null;
+  }, [dataset.points, historySelection, xMetric, yMetric, viewState.xScale, viewState.yScale]);
+
+  useEffect(() => {
+    if (!historySelection) return;
+    if (!xMetric || !yMetric) {
+      enqueueStateUpdate(() => setHistorySelection(null));
+      return;
+    }
+
+    const current = dataset.points.find((point) => point.modelName === historySelection.modelName);
+    if (!current) {
+      enqueueStateUpdate(() => setHistorySelection(null));
+      return;
+    }
+
+    const result = resolveScatterHistoricalPoint({
+      current,
+      mode: historySelection.mode,
+      xMetric,
+      yMetric,
+      xScale: viewState.xScale,
+      yScale: viewState.yScale
+    });
+    if (result.status !== "ok") {
+      enqueueStateUpdate(() => setHistorySelection(null));
+    }
+  }, [dataset.points, historySelection, xMetric, yMetric, viewState.xScale, viewState.yScale]);
+
+  useEffect(() => {
+    if (!historyNotice) return;
+    const timer = window.setTimeout(() => setHistoryNotice(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [historyNotice]);
+
   // 数据集一变就清空视口覆盖，避免沿用上一组轴/筛选下的可见点
   if (dataset.points !== syncedDatasetPoints) {
     setSyncedDatasetPoints(dataset.points);
@@ -513,6 +579,7 @@ export function ModelScatter({
   const handleChangeAxis = useCallback(
     (axis: "x" | "y", key: string) => {
       const metric = findScatterMetric(metrics, key);
+      setHistorySelection(null);
       setViewState((prev) => ({
         ...prev,
         [axis === "x" ? "xKey" : "yKey"]: key,
@@ -524,6 +591,7 @@ export function ModelScatter({
   );
 
   const handleSwapAxes = useCallback(() => {
+    setHistorySelection(null);
     setViewState((prev) => ({
       ...prev,
       xKey: prev.yKey,
@@ -572,6 +640,43 @@ export function ModelScatter({
     }
   }, []);
 
+  const handleToggleHistory = useCallback(
+    (modelName: string) => {
+      if (!xMetric || !yMetric) return;
+
+      const current = dataset.points.find((point) => point.modelName === modelName);
+      if (!current) return;
+
+      const nextMode = nextScatterHistoryMode(historySelection, modelName);
+      if (!nextMode) {
+        setHistorySelection(null);
+        setHistoryNotice(null);
+        return;
+      }
+
+      const result = resolveScatterHistoricalPoint({
+        current,
+        mode: nextMode,
+        xMetric,
+        yMetric,
+        xScale: viewState.xScale,
+        yScale: viewState.yScale
+      });
+
+      if (result.status !== "ok") {
+        setHistoryNotice(describeScatterHistoryUnavailable(result.reason));
+        if (historySelection?.modelName === modelName) {
+          setHistorySelection(null);
+        }
+        return;
+      }
+
+      setHistorySelection({ modelName, mode: nextMode });
+      setHistoryNotice(null);
+    },
+    [dataset.points, historySelection, xMetric, yMetric, viewState.xScale, viewState.yScale]
+  );
+
   const paretoCount = dataset.points.filter((point) => point.isPareto).length;
   const hasAxes = Boolean(xMetric && yMetric);
   const hasEnoughPoints = dataset.points.length >= 1;
@@ -614,7 +719,10 @@ export function ModelScatter({
           onChangeShowGuides={(value) => setViewState((prev) => ({ ...prev, showGuides: value }))}
           sourceOptions={sourceOptions}
           activeSource={activeSource}
-          onChangeSource={(key) => setViewState((prev) => ({ ...prev, activeSource: key }))}
+          onChangeSource={(key) => {
+            setHistorySelection(null);
+            setViewState((prev) => ({ ...prev, activeSource: key }));
+          }}
           exportPreset={exportPreset}
           onChangeExportPreset={setExportPreset}
           availableExportPresetKeys={availableExportPresetKeys}
@@ -649,12 +757,14 @@ export function ModelScatter({
                     labelMode={viewState.labelMode}
                     showGuides={viewState.showGuides}
                     highlightedModel={highlightedModel}
+                    historicalPoint={historicalPoint}
                     hoveredProvider={hoveredProvider}
                     onSelectModel={(modelName) =>
                       setHighlightedModel((prev) =>
                         modelName === null ? null : prev === modelName ? null : modelName
                       )
                     }
+                    onToggleHistory={handleToggleHistory}
                     onVisiblePointsChange={setVisibleScatterPoints}
                   />
                 )}
@@ -724,6 +834,19 @@ export function ModelScatter({
             >
               已钉住 {highlightedModel} · 点击取消
             </button>
+          ) : null}
+          {historicalPoint ? (
+            <button
+              type="button"
+              className="scatter-btn scatter-note scatter-note-action"
+              onClick={() => setHistorySelection(null)}
+            >
+              {historicalPoint.modelName} · {formatScatterHistoryModeLabel(historicalPoint.mode)} ·{" "}
+              {formatScatterHistoryDate(historicalPoint.xBenchTime)} · 点击取消
+            </button>
+          ) : null}
+          {historyNotice ? (
+            <span className="scatter-note scatter-note-warn">{historyNotice}</span>
           ) : null}
           {/* <span className="scatter-note scatter-note-hint">拖拽平移 · 滚轮以光标为中心放大 · 双击重置</span> */}
           {activeSource === SOURCE_ALL ? (

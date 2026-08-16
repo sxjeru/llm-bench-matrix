@@ -20,7 +20,9 @@ import {
   SUMMARY_CATEGORY_LABEL,
   SYNTHETIC_METRIC_SLUGS
 } from "./constants";
+import type { MatrixCell, MatrixCellEntry } from "@/components/benchmark-matrix/types";
 import type {
+  ScatterHistorySample,
   ScatterMetric,
   ScatterMetricGroup,
   ScatterMetricKind,
@@ -99,6 +101,60 @@ function buildValueByModel(row: MatrixRow): Map<string, number> {
   return valueByModel;
 }
 
+function toHistorySample(entry: MatrixCellEntry): ScatterHistorySample | null {
+  const value = entry.valueNum;
+  if (value === null || !Number.isFinite(value)) return null;
+
+  return {
+    value,
+    benchTime: entry.benchTime ?? null,
+    recordId: typeof entry.recordId === "number" ? entry.recordId : null
+  };
+}
+
+function collectHistorySamples(cell: MatrixCell): ScatterHistorySample[] {
+  const seen = new Set<string>();
+  const samples: ScatterHistorySample[] = [];
+
+  const push = (entry: MatrixCellEntry | undefined) => {
+    if (!entry) return;
+    const sample = toHistorySample(entry);
+    if (!sample) return;
+
+    const key = `${sample.value}::${sample.benchTime ?? ""}::${sample.recordId ?? ""}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    samples.push(sample);
+  };
+
+  cell.allEntries.forEach(push);
+  if (samples.length === 0) {
+    push({
+      recordId: null,
+      valueRaw: cell.valueRaw,
+      valueNum: cell.valueNum,
+      valueNum2: cell.valueNum2,
+      valueNote: cell.valueNote,
+      source: cell.source,
+      benchTime: cell.benchTime
+    });
+  }
+
+  return samples;
+}
+
+function buildHistoryByModel(row: MatrixRow): Map<string, readonly ScatterHistorySample[]> {
+  const historyByModel = new Map<string, readonly ScatterHistorySample[]>();
+  if (row.isPriceRow || row.isInfoRow) return historyByModel;
+
+  row.cells.forEach((cell, modelName) => {
+    const samples = collectHistorySamples(cell);
+    if (samples.length > 0) historyByModel.set(modelName, samples);
+  });
+
+  return historyByModel;
+}
+
 function resolveScatterMetricCategory(row: Pick<MatrixRow, "benchmark" | "category">): string {
   // AA 复合指数在下拉里并入 Summary，与 Overall Score 放一起
   if (AA_SUMMARY_INDEX_LABEL_REGEX.test(row.benchmark.trim())) {
@@ -122,7 +178,8 @@ export function toScatterMetric(row: MatrixRow): ScatterMetric {
     // 价格/参数量，以及分类精确为 Cost、Performance 的指标跨数量级，线性轴会把点挤成一团
     preferLogScale:
       unit === "usd" || unit === "billions" || LOG_SCALE_CATEGORIES.has(row.category),
-    valueByModel: buildValueByModel(row)
+    valueByModel: buildValueByModel(row),
+    historyByModel: buildHistoryByModel(row)
   };
 }
 
@@ -189,7 +246,8 @@ export function buildScatterMetrics(input: BuildScatterMetricsInput): ScatterMet
         higherIsBetter: true,
         unit: "score",
         preferLogScale: false,
-        valueByModel
+        valueByModel,
+        historyByModel: new Map()
       });
     }
   }

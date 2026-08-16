@@ -3,6 +3,7 @@ import { describe, expect, test, vi, beforeEach } from "vitest";
 
 import { ModelScatter } from "@/components/model-scatter";
 import { ScatterCanvas } from "@/components/model-scatter/scatter-canvas";
+import { ScatterHistoryLayer } from "@/components/model-scatter/history-layer";
 import { isInWorstQuadrant } from "@/components/model-scatter/guide-layer";
 import { toScatterMetric } from "@/components/model-scatter/metrics";
 import { buildScatterDataset, computeAxisDomain } from "@/components/model-scatter/dataset";
@@ -93,6 +94,28 @@ function renderScatter() {
       modelParams={modelParams}
     />
   );
+}
+
+function stubScatterChartHostSize() {
+  const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+    if (!this.classList.contains("scatter-chart-host")) {
+      return originalGetBoundingClientRect.call(this);
+    }
+
+    const width = 960;
+    return {
+      left: 0,
+      top: 0,
+      right: width,
+      bottom: 0,
+      width,
+      height: 0,
+      x: 0,
+      y: 0,
+      toJSON: () => ({})
+    } as DOMRect;
+  });
 }
 
 // 顶部指标卡已移除，统计改为说明行的紧凑 chip
@@ -498,6 +521,97 @@ describe("ModelScatter", () => {
 
     expect(container.querySelector(".home-metric-card")).toBeNull();
   });
+
+  function findScatterSymbol(container: HTMLElement, modelName: string): HTMLElement | undefined {
+    return Array.from(container.querySelectorAll(".recharts-scatter-symbol")).find(
+      (symbol) =>
+        symbol.querySelector("text")?.textContent === modelName ||
+        symbol.querySelector(`[data-model-name='${modelName}']`) !== null
+    ) as HTMLElement | undefined;
+  }
+
+  test("价格轴 Alt 点击只提示不支持，不钉住模型", () => {
+    stubScatterChartHostSize();
+    const { container } = renderScatter();
+
+    fireEvent.click(findScatterSymbol(container, "Alpha")!, { altKey: true });
+
+    expect(screen.getByText("当前 X 轴没有时间历史，无法绘制历史点")).toBeInTheDocument();
+    expect(container.querySelector(".scatter-history-layer")).toBeNull();
+    expect(screen.queryByText(/已钉住 Alpha/)).toBeNull();
+  });
+
+  test("X 为有历史的 benchmark 时 Alt 点击循环最优、最差并清除", () => {
+    stubScatterChartHostSize();
+    const extraRows: MatrixInputRow[] = [
+      {
+        recordId: 9001,
+        providerName: "OpenAI",
+        providerDisplayName: "OpenAI",
+        providerBrandColor: null,
+        modelName: "Alpha",
+        benchmarkName: "Bench-One",
+        benchmarkType: "Reasoning",
+        sourceBenchmarkType: null,
+        higherIsBetter: true,
+        benchmarkCanonicalKey: "bench-one",
+        modalities: ["Text"],
+        sourceModalities: null,
+        benchTime: "2026-01-01T00:00:00.000Z",
+        valueRaw: "50",
+        valueNum: 50,
+        valueNum2: null,
+        valueNote: null,
+        source: "text:demo",
+        updatedAt: "2026-01-01T00:00:00.000Z"
+      },
+      {
+        recordId: 9002,
+        providerName: "OpenAI",
+        providerDisplayName: "OpenAI",
+        providerBrandColor: null,
+        modelName: "Alpha",
+        benchmarkName: "Bench-One",
+        benchmarkType: "Reasoning",
+        sourceBenchmarkType: null,
+        higherIsBetter: true,
+        benchmarkCanonicalKey: "bench-one",
+        modalities: ["Text"],
+        sourceModalities: null,
+        benchTime: "2026-02-01T00:00:00.000Z",
+        valueRaw: "99",
+        valueNum: 99,
+        valueNum2: null,
+        valueNote: null,
+        source: "text:demo",
+        updatedAt: "2026-02-01T00:00:00.000Z"
+      }
+    ];
+
+    const { container } = render(
+      <ModelScatter
+        rows={[...rows, ...extraRows]}
+        allRows={[...rows, ...extraRows]}
+        sourceOptions={["text:demo"]}
+        modelPrices={modelPrices}
+        modelParams={modelParams}
+      />
+    );
+
+    pickAxisOption(container, "x", "Bench-One");
+
+    fireEvent.click(findScatterSymbol(container, "Alpha")!, { altKey: true });
+    expect(container.querySelector(".scatter-history-layer")?.getAttribute("data-history-mode")).toBe("best");
+    expect(screen.getByRole("button", { name: /Alpha · 历史最优/ })).toBeInTheDocument();
+
+    fireEvent.click(findScatterSymbol(container, "Alpha")!, { altKey: true });
+    expect(container.querySelector(".scatter-history-layer")?.getAttribute("data-history-mode")).toBe("worst");
+    expect(screen.getByRole("button", { name: /Alpha · 历史最差/ })).toBeInTheDocument();
+
+    fireEvent.click(findScatterSymbol(container, "Alpha")!, { altKey: true });
+    expect(container.querySelector(".scatter-history-layer")).toBeNull();
+    expect(screen.queryByRole("button", { name: /历史最优|历史最差/ })).toBeNull();
+  });
 });
 
 describe("轴选择器（可输入下拉）", () => {
@@ -879,6 +993,91 @@ describe("ScatterCanvas", () => {
     expect(arrows[0]?.getAttribute("data-to-model")).toBe("Beta");
     expect(arrows[1]?.getAttribute("data-from-model")).toBe("Beta");
     expect(arrows[1]?.getAttribute("data-to-model")).toBe("Gamma");
+    expect(onSelectModel).not.toHaveBeenCalled();
+  });
+
+  test("传入历史点时绘制空心环与指向当前点的箭头", () => {
+    const { container } = renderCanvas({
+      historicalPoint: {
+        modelName: "Alpha",
+        providerName: "OpenAI",
+        color: "#ff5533",
+        mode: "best",
+        x: 2,
+        y: 80,
+        xBenchTime: "2026-03-01T00:00:00.000Z",
+        yBenchTime: "2026-03-05T00:00:00.000Z",
+        currentX: 10,
+        currentY: 100
+      }
+    });
+
+    const layer = container.querySelector(".scatter-history-layer");
+    expect(layer).not.toBeNull();
+    expect(layer?.getAttribute("data-history-mode")).toBe("best");
+    expect(container.querySelector(".scatter-history-ring-outer")).not.toBeNull();
+    expect(container.querySelector(".scatter-history-arrow-path")?.getAttribute("d")).toContain("Q");
+    expect(container.querySelector(".scatter-history-label")?.textContent).toBe("历史最优");
+  });
+
+  test("Shift 淡化当前模型时历史层同步淡化", () => {
+    const { container } = renderCanvas({
+      labelMode: "all",
+      historicalPoint: {
+        modelName: "Alpha",
+        providerName: "OpenAI",
+        color: "#ff5533",
+        mode: "best",
+        x: 2,
+        y: 80,
+        xBenchTime: "2026-03-01T00:00:00.000Z",
+        yBenchTime: "2026-03-05T00:00:00.000Z",
+        currentX: 10,
+        currentY: 100
+      }
+    });
+
+    fireEvent.click(findSymbolByModel(container, "Alpha")!, { shiftKey: true });
+
+    expect(container.querySelector(".scatter-history-layer")?.getAttribute("opacity")).toBe(
+      String(SCATTER_DIMMED_OPACITY)
+    );
+  });
+
+  test("历史点或当前点离开缩放视口后不渲染历史层", () => {
+    const { container } = render(
+      <ScatterHistoryLayer
+        point={{
+          modelName: "Alpha",
+          providerName: "OpenAI",
+          color: "#ff5533",
+          mode: "best",
+          x: 20,
+          y: 80,
+          xBenchTime: "2026-03-01T00:00:00.000Z",
+          yBenchTime: "2026-03-05T00:00:00.000Z",
+          currentX: 2,
+          currentY: 50
+        }}
+        xDomain={[0, 10]}
+        yDomain={[0, 100]}
+        xScale="linear"
+        yScale="linear"
+        plotArea={{ left: 70, right: 600, top: 20, bottom: 380 }}
+      />
+    );
+
+    expect(container.querySelector(".scatter-history-layer")).toBeNull();
+  });
+
+  test("Alt 点击点会交给外部历史切换，不钉住模型", () => {
+    const onSelectModel = vi.fn();
+    const onToggleHistory = vi.fn();
+    const { container } = renderCanvas({ labelMode: "all", onSelectModel, onToggleHistory });
+
+    fireEvent.click(findSymbolByModel(container, "Alpha")!, { altKey: true });
+
+    expect(onToggleHistory).toHaveBeenCalledWith("Alpha");
     expect(onSelectModel).not.toHaveBeenCalled();
   });
 
