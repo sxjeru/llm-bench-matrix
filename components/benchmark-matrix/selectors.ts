@@ -56,21 +56,16 @@ import {
   getSourceLabel,
   getSourceValueEntry,
   hasMeaningfulMatrixRawValue,
+  isArtificialAnalysisSource,
   normalizeMatchToken,
   normalizeModalityList,
   parseTimestampMs,
   pickPreferredBenchmarkDisplayName,
-  sourceTabDisplayLabel
+  resolveMatrixCellAggregateModeFromEntries
 } from "./utils";
 
 /** AA 默认排序里沉底的分类：能力评测优先，性能与成本放后 */
 const AA_SECONDARY_CATEGORY_SET = new Set(["cost", "performance"]);
-
-function isArtificialAnalysisSource(activeSource: string): boolean {
-  const sourceKey = activeSource.trim().toLowerCase();
-  if (sourceKey === "artificial analysis") return true;
-  return sourceTabDisplayLabel(activeSource).trim().toLowerCase() === "artificial analysis";
-}
 
 function isAaSecondaryCategory(category: string): boolean {
   return category.split(" / ").some((part) => AA_SECONDARY_CATEGORY_SET.has(part.trim().toLowerCase()));
@@ -896,7 +891,11 @@ export function buildModelColumns(
       : matchingRows.some((candidate) => candidate.higherIsBetter === true)
         ? true
         : !isLowerBetterBenchmark(representativeRow.benchmarkName, representativeRow.benchmarkType);
-    const aggregate = aggregateMatrixCellEntries(entries, higherIsBetter);
+    const aggregate = aggregateMatrixCellEntries(
+      entries,
+      higherIsBetter,
+      resolveMatrixCellAggregateModeFromEntries(entries)
+    );
     // 重名 benchmark 合并后各行的 name / type 可能不同，可比分要用聚合命中的那一行来算
     const scoringRow = (aggregate.entry ? entryRowMap.get(aggregate.entry) : null) ?? representativeRow;
     const comparableScore = getBenchmarkBestComparableScore(
@@ -1101,7 +1100,12 @@ export function buildMatrixRows(
         const sourceEntry = displaySourceValuesInCells && hasMeaningfulMultipleValues
           ? getSourceValueEntry(uniqueEntries, activeSource, matrixRow.higherIsBetter)
           : null;
-        const aggregate = aggregateMatrixCellEntries(cell.allEntries, matrixRow.higherIsBetter);
+        // Artificial Analysis 默认展示最新值；其余 source 仍用中位数
+        const aggregate = aggregateMatrixCellEntries(
+          cell.allEntries,
+          matrixRow.higherIsBetter,
+          resolveMatrixCellAggregateModeFromEntries(cell.allEntries)
+        );
         // 没有 sourceEntry 时整格都以聚合出的那条记录为准：数值、原始文本、货币符号、星标、
         // source 与 benchTime 必须同源，否则会出现「显示 $9.00、排序按 5」这类错位
         const fallbackEntry = aggregate.entry;
@@ -1681,8 +1685,13 @@ export function buildBenchmarkRankingData(
     }
   });
 
+  // 排名弹窗与主表同一口径：按单元格 source 推断，AA 取最新值
   cellsByModel.forEach((cell) => {
-    const aggregate = aggregateMatrixCellEntries(cell.allEntries, matrixRow.higherIsBetter);
+    const aggregate = aggregateMatrixCellEntries(
+      cell.allEntries,
+      matrixRow.higherIsBetter,
+      resolveMatrixCellAggregateModeFromEntries(cell.allEntries)
+    );
     if (aggregate.entry) {
       cell.valueRaw = aggregate.entry.valueRaw;
       cell.valueNote = aggregate.entry.valueNote;

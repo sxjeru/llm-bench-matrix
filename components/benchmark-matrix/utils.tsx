@@ -121,23 +121,100 @@ export type MatrixCellAggregateValues = {
   valueNum2: number | null;
 };
 
+export type MatrixCellAggregateMode = "median" | "latest";
+
 function isPairMatrixCellEntry(entry: MatrixCellEntry): boolean {
   return entry.valueNum2 !== null || hasMatrixCellPairRawValue(entry.valueRaw);
+}
+
+/** 按记录/页签的 source 识别 Artificial Analysis，不依赖当前打开的是哪个页签 */
+export function isArtificialAnalysisSource(source: string | null | undefined): boolean {
+  if (!source) return false;
+  const sourceKey = source.trim().toLowerCase();
+  if (sourceKey === "artificial analysis" || sourceKey === "text:artificial analysis") {
+    return true;
+  }
+  return sourceTabDisplayLabel(source).trim().toLowerCase() === "artificial analysis";
+}
+
+export function resolveMatrixCellAggregateMode(source: string | null | undefined): MatrixCellAggregateMode {
+  return isArtificialAnalysisSource(source) ? "latest" : "median";
+}
+
+export function resolveMatrixCellAggregateModeFromEntries(
+  entries: ReadonlyArray<{ source?: string | null }>
+): MatrixCellAggregateMode {
+  const sources = entries
+    .map((entry) => entry.source)
+    .filter((source): source is string => typeof source === "string" && source.trim().length > 0);
+  if (sources.length === 0) return "median";
+  return sources.every((source) => isArtificialAnalysisSource(source)) ? "latest" : "median";
+}
+
+/** 同一 AA source 的多次导入只保留最新一条，再与其他 source 一起聚合 */
+function collapseArtificialAnalysisEntries(entries: MatrixCellEntry[]): MatrixCellEntry[] {
+  const aaEntries: MatrixCellEntry[] = [];
+  const otherEntries: MatrixCellEntry[] = [];
+
+  for (const entry of entries) {
+    if (isArtificialAnalysisSource(entry.source)) {
+      aaEntries.push(entry);
+    } else {
+      otherEntries.push(entry);
+    }
+  }
+
+  if (aaEntries.length === 0) return entries;
+
+  const latestAa = getLatestMatrixCellEntry(aaEntries);
+  return latestAa ? [...otherEntries, latestAa] : otherEntries;
 }
 
 /**
  * 普通单值或单双值混合取中位数；偶数条时取指标方向上「更优」的那个中间值
  * （越大越优取较大者，越小越优取较小者），因此结果始终是真实存在的记录。
  * 双值只拿前值参与排序；纯双值集合仍整条记录择优，避免拼出不存在的数值对。
+ * Artificial Analysis 按 source 取最新一次同步值，与当前页签无关。
  */
 export function aggregateMatrixCellEntries(
   entries: MatrixCellEntry[],
-  higherIsBetter = true
+  higherIsBetter = true,
+  mode?: MatrixCellAggregateMode
 ): MatrixCellAggregateValues {
-  if (entries.length === 0) {
+  const collapsedEntries = collapseArtificialAnalysisEntries(entries);
+  const effectiveMode = mode ?? resolveMatrixCellAggregateModeFromEntries(collapsedEntries);
+
+  if (collapsedEntries.length === 0) {
     return { entry: null, valueNum: null, valueNum2: null };
   }
 
+  if (effectiveMode === "latest") {
+    return aggregateLatestMatrixCellEntry(collapsedEntries);
+  }
+
+  return aggregateMedianMatrixCellEntries(collapsedEntries, higherIsBetter);
+}
+
+function aggregateLatestMatrixCellEntry(entries: MatrixCellEntry[]): MatrixCellAggregateValues {
+  const latest = getLatestMatrixCellEntry(entries);
+  if (!latest) {
+    return { entry: null, valueNum: null, valueNum2: null };
+  }
+
+  const latestValueNum = latest.valueNum;
+  const latestValueNum2 = latest.valueNum2;
+
+  return {
+    entry: latest,
+    valueNum: latestValueNum !== null && Number.isFinite(latestValueNum) ? latestValueNum : null,
+    valueNum2: latestValueNum2 !== null && Number.isFinite(latestValueNum2) ? latestValueNum2 : null
+  };
+}
+
+function aggregateMedianMatrixCellEntries(
+  entries: MatrixCellEntry[],
+  higherIsBetter: boolean
+): MatrixCellAggregateValues {
   const numericEntries = entries.filter(
     (entry) => entry.valueNum !== null && Number.isFinite(entry.valueNum)
   );

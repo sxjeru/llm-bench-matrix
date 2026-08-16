@@ -10,7 +10,9 @@ import {
 import type { MatrixCellEntry, MatrixInputRow } from "@/components/benchmark-matrix/types";
 import {
   aggregateMatrixCellEntries,
-  getSourceValueDeltaRaw
+  getSourceValueDeltaRaw,
+  resolveMatrixCellAggregateMode,
+  resolveMatrixCellAggregateModeFromEntries
 } from "@/components/benchmark-matrix/utils";
 import { calculateBoxPlotStats } from "@/lib/boxplot-stats";
 import { hasMatrixCellPairRawValue } from "@/components/benchmark-matrix/scoring";
@@ -203,5 +205,63 @@ describe("benchmark matrix repeated-value aggregation", () => {
 
     expect(aggregateMatrixCellEntries(entries).valueNum).toBe(80);
     expect(getSourceValueDeltaRaw(entries, "text:S1", true)).toBe(-5);
+  });
+
+  test("Artificial Analysis 源按记录 source 取最新值，与当前页签无关", () => {
+    const entries = [
+      makeEntry(70, { source: "text:Artificial Analysis", benchTime: "2026-03-01T00:00:00.000Z", recordId: 1 }),
+      makeEntry(80, { source: "text:Artificial Analysis", benchTime: "2026-04-01T00:00:00.000Z", recordId: 2 }),
+      makeEntry(100, { source: "text:Artificial Analysis", benchTime: "2026-05-01T00:00:00.000Z", recordId: 3 })
+    ];
+
+    expect(resolveMatrixCellAggregateMode("text:Artificial Analysis")).toBe("latest");
+    expect(resolveMatrixCellAggregateMode("Artificial Analysis")).toBe("latest");
+    expect(resolveMatrixCellAggregateMode("text:S1")).toBe("median");
+    expect(resolveMatrixCellAggregateModeFromEntries(entries)).toBe("latest");
+    expect(aggregateMatrixCellEntries(entries, true).valueNum).toBe(100);
+    expect(aggregateMatrixCellEntries(entries, true).entry?.recordId).toBe(3);
+    expect(aggregateMatrixCellEntries(entries, true, "median").valueNum).toBe(100);
+  });
+
+  test("Artificial Analysis 在 All 页签也展示最新值，其他 source 仍用中位数", () => {
+    const aaRows = [
+      makeRow("Model A", 70, 0),
+      makeRow("Model A", 80, 1),
+      makeRow("Model A", 100, 2)
+    ].map((row, index) => ({
+      ...row,
+      source: "text:Artificial Analysis",
+      benchTime: `2026-04-0${index + 1}T00:00:00.000Z`
+    }));
+
+    const aaOnOwnTab = buildMatrixRows(aaRows, aaRows, false, false, "text:Artificial Analysis")[0]!;
+    expect(aaOnOwnTab.cells.get("Model A")?.valueNum).toBe(100);
+    expect(aaOnOwnTab.cells.get("Model A")?.displayValue).toBe("100");
+
+    const aaOnAllTab = buildMatrixRows(aaRows, aaRows, false, false, SOURCE_ALL)[0]!;
+    expect(aaOnAllTab.cells.get("Model A")?.valueNum).toBe(100);
+    expect(aaOnAllTab.cells.get("Model A")?.displayValue).toBe("100");
+
+    const otherRows = [
+      makeRow("Model A", 70, 0),
+      makeRow("Model A", 80, 1),
+      makeRow("Model A", 100, 2)
+    ];
+    const otherOnAllTab = buildMatrixRows(otherRows, otherRows, false, false, SOURCE_ALL)[0]!;
+    expect(otherOnAllTab.cells.get("Model A")?.valueNum).toBe(80);
+  });
+
+  test("All 页签混合 source 时，AA 先折叠成最新值再参与中位数", () => {
+    const mixedEntries = [
+      makeEntry(70, { source: "text:Artificial Analysis", benchTime: "2026-03-01T00:00:00.000Z", recordId: 1 }),
+      makeEntry(80, { source: "text:Artificial Analysis", benchTime: "2026-04-01T00:00:00.000Z", recordId: 2 }),
+      makeEntry(100, { source: "text:Artificial Analysis", benchTime: "2026-05-01T00:00:00.000Z", recordId: 3 }),
+      makeEntry(60, { source: "text:S1", benchTime: "2026-04-02T00:00:00.000Z", recordId: 4 }),
+      makeEntry(90, { source: "text:S2", benchTime: "2026-04-03T00:00:00.000Z", recordId: 5 })
+    ];
+
+    expect(resolveMatrixCellAggregateModeFromEntries(mixedEntries)).toBe("median");
+    expect(aggregateMatrixCellEntries(mixedEntries, true).valueNum).toBe(90);
+    expect(aggregateMatrixCellEntries(mixedEntries, true).entry?.source).toBe("text:S2");
   });
 });

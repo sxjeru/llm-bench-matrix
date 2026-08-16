@@ -38,6 +38,8 @@ import {
   areColumnWidthMapsEqual,
   clampColumnWidth,
   compareMatrixCellEntryRecency,
+  getLatestMatrixCellEntry,
+  resolveMatrixCellAggregateModeFromEntries,
   getColumnWidthOverrideKey,
   getMatrixCellSourceValueDedupKey,
   getMatrixCellValueIdentity,
@@ -181,9 +183,15 @@ export function buildAutoModelWidthMap({
     entriesByGroup.get(groupKey)!.push(entry);
 
     const groupHigherIsBetter = higherIsBetterByGroup.get(groupKey) ?? true;
-    const preferred = preferredEntryByGroup.get(groupKey);
-    if (!preferred || (entry.valueNum !== null && (preferred.valueNum === null || (groupHigherIsBetter ? entry.valueNum > preferred.valueNum : entry.valueNum < preferred.valueNum)))) {
-      preferredEntryByGroup.set(groupKey, entry);
+    const groupEntries = entriesByGroup.get(groupKey) ?? [entry];
+    if (resolveMatrixCellAggregateModeFromEntries(groupEntries) === "latest") {
+      const latest = getLatestMatrixCellEntry(groupEntries);
+      if (latest) preferredEntryByGroup.set(groupKey, latest);
+    } else {
+      const preferred = preferredEntryByGroup.get(groupKey);
+      if (!preferred || (entry.valueNum !== null && (preferred.valueNum === null || (groupHigherIsBetter ? entry.valueNum > preferred.valueNum : entry.valueNum < preferred.valueNum)))) {
+        preferredEntryByGroup.set(groupKey, entry);
+      }
     }
 
     modelNameByGroup.set(groupKey, row.modelName);
@@ -193,7 +201,9 @@ export function buildAutoModelWidthMap({
     const modelName = modelNameByGroup.get(groupKey);
     if (!modelName || entries.length === 0) return;
 
-    const preferredEntry = preferredEntryByGroup.get(groupKey) ?? entries[0]!;
+    const preferredEntry = resolveMatrixCellAggregateModeFromEntries(entries) === "latest"
+      ? (getLatestMatrixCellEntry(entries) ?? preferredEntryByGroup.get(groupKey) ?? entries[0]!)
+      : (preferredEntryByGroup.get(groupKey) ?? entries[0]!);
     const displayValue = getMatrixCellDisplayValue(
       preferredEntry.valueNum,
       preferredEntry.valueNum2,
