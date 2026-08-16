@@ -107,10 +107,10 @@ export function ModelScatter({
   const [hiddenProviders, setHiddenProviders] = useState<string[]>([]);
   const [hoveredProvider, setHoveredProvider] = useState<string | null>(null);
   const [highlightedModel, setHighlightedModel] = useState<string | null>(null);
-  const [historySelection, setHistorySelection] = useState<{
+  const [historySelections, setHistorySelections] = useState<Array<{
     modelName: string;
     mode: ScatterHistoryMode;
-  } | null>(null);
+  }>>([]);
   const [historyNotice, setHistoryNotice] = useState<string | null>(null);
   const [exportPreset, setExportPreset] = useState<ExportPresetKey>(DEFAULT_EXPORT_PRESET);
   const [includeLegendInExport, setIncludeLegendInExport] = useState(false);
@@ -449,47 +449,50 @@ export function ModelScatter({
     });
   }, [xMetric, yMetric, plottableModelNames, providerNameByModel, colorByModel, viewState.xScale, viewState.yScale]);
 
-  const historicalPoint = useMemo<ScatterHistoricalPoint | null>(() => {
-    if (!historySelection || !xMetric || !yMetric) return null;
-    const current = dataset.points.find((point) => point.modelName === historySelection.modelName);
-    if (!current) return null;
+  const historicalPoints = useMemo<ScatterHistoricalPoint[]>(() => {
+    if (!xMetric || !yMetric) return [];
 
-    const result = resolveScatterHistoricalPoint({
-      current,
-      mode: historySelection.mode,
-      xMetric,
-      yMetric,
-      xScale: viewState.xScale,
-      yScale: viewState.yScale
+    return historySelections.flatMap((selection) => {
+      const current = dataset.points.find((point) => point.modelName === selection.modelName);
+      if (!current) return [];
+
+      const result = resolveScatterHistoricalPoint({
+        current,
+        mode: selection.mode,
+        xMetric,
+        yMetric,
+        xScale: viewState.xScale,
+        yScale: viewState.yScale
+      });
+      return result.status === "ok" ? [result.point] : [];
     });
-    return result.status === "ok" ? result.point : null;
-  }, [dataset.points, historySelection, xMetric, yMetric, viewState.xScale, viewState.yScale]);
+  }, [dataset.points, historySelections, xMetric, yMetric, viewState.xScale, viewState.yScale]);
 
   useEffect(() => {
-    if (!historySelection) return;
+    if (historySelections.length === 0) return;
     if (!xMetric || !yMetric) {
-      enqueueStateUpdate(() => setHistorySelection(null));
+      enqueueStateUpdate(() => setHistorySelections([]));
       return;
     }
 
-    const current = dataset.points.find((point) => point.modelName === historySelection.modelName);
-    if (!current) {
-      enqueueStateUpdate(() => setHistorySelection(null));
-      return;
-    }
+    const validSelections = historySelections.filter((selection) => {
+      const current = dataset.points.find((point) => point.modelName === selection.modelName);
+      if (!current) return false;
 
-    const result = resolveScatterHistoricalPoint({
-      current,
-      mode: historySelection.mode,
-      xMetric,
-      yMetric,
-      xScale: viewState.xScale,
-      yScale: viewState.yScale
+      return resolveScatterHistoricalPoint({
+        current,
+        mode: selection.mode,
+        xMetric,
+        yMetric,
+        xScale: viewState.xScale,
+        yScale: viewState.yScale
+      }).status === "ok";
     });
-    if (result.status !== "ok") {
-      enqueueStateUpdate(() => setHistorySelection(null));
+
+    if (validSelections.length !== historySelections.length) {
+      enqueueStateUpdate(() => setHistorySelections(validSelections));
     }
-  }, [dataset.points, historySelection, xMetric, yMetric, viewState.xScale, viewState.yScale]);
+  }, [dataset.points, historySelections, xMetric, yMetric, viewState.xScale, viewState.yScale]);
 
   useEffect(() => {
     if (!historyNotice) return;
@@ -579,7 +582,7 @@ export function ModelScatter({
   const handleChangeAxis = useCallback(
     (axis: "x" | "y", key: string) => {
       const metric = findScatterMetric(metrics, key);
-      setHistorySelection(null);
+      setHistorySelections([]);
       setViewState((prev) => ({
         ...prev,
         [axis === "x" ? "xKey" : "yKey"]: key,
@@ -591,7 +594,7 @@ export function ModelScatter({
   );
 
   const handleSwapAxes = useCallback(() => {
-    setHistorySelection(null);
+    setHistorySelections([]);
     setViewState((prev) => ({
       ...prev,
       xKey: prev.yKey,
@@ -647,9 +650,12 @@ export function ModelScatter({
       const current = dataset.points.find((point) => point.modelName === modelName);
       if (!current) return;
 
-      const nextMode = nextScatterHistoryMode(historySelection, modelName);
+      const currentSelection = historySelections.find((selection) => selection.modelName === modelName) ?? null;
+      const nextMode = nextScatterHistoryMode(currentSelection, modelName);
       if (!nextMode) {
-        setHistorySelection(null);
+        setHistorySelections((previous) =>
+          previous.filter((selection) => selection.modelName !== modelName)
+        );
         setHistoryNotice(null);
         return;
       }
@@ -665,16 +671,19 @@ export function ModelScatter({
 
       if (result.status !== "ok") {
         setHistoryNotice(describeScatterHistoryUnavailable(result.reason));
-        if (historySelection?.modelName === modelName) {
-          setHistorySelection(null);
-        }
+        setHistorySelections((previous) =>
+          previous.filter((selection) => selection.modelName !== modelName)
+        );
         return;
       }
 
-      setHistorySelection({ modelName, mode: nextMode });
+      setHistorySelections((previous) => [
+        ...previous.filter((selection) => selection.modelName !== modelName),
+        { modelName, mode: nextMode }
+      ]);
       setHistoryNotice(null);
     },
-    [dataset.points, historySelection, xMetric, yMetric, viewState.xScale, viewState.yScale]
+    [dataset.points, historySelections, xMetric, yMetric, viewState.xScale, viewState.yScale]
   );
 
   const paretoCount = dataset.points.filter((point) => point.isPareto).length;
@@ -720,7 +729,7 @@ export function ModelScatter({
           sourceOptions={sourceOptions}
           activeSource={activeSource}
           onChangeSource={(key) => {
-            setHistorySelection(null);
+            setHistorySelections([]);
             setViewState((prev) => ({ ...prev, activeSource: key }));
           }}
           exportPreset={exportPreset}
@@ -757,7 +766,7 @@ export function ModelScatter({
                     labelMode={viewState.labelMode}
                     showGuides={viewState.showGuides}
                     highlightedModel={highlightedModel}
-                    historicalPoint={historicalPoint}
+                    historicalPoints={historicalPoints}
                     hoveredProvider={hoveredProvider}
                     onSelectModel={(modelName) =>
                       setHighlightedModel((prev) =>
@@ -835,16 +844,21 @@ export function ModelScatter({
               已钉住 {highlightedModel} · 点击取消
             </button>
           ) : null}
-          {historicalPoint ? (
+          {historicalPoints.map((historicalPoint) => (
             <button
+              key={historicalPoint.modelName}
               type="button"
               className="scatter-btn scatter-note scatter-note-action"
-              onClick={() => setHistorySelection(null)}
+              onClick={() =>
+                setHistorySelections((previous) =>
+                  previous.filter((selection) => selection.modelName !== historicalPoint.modelName)
+                )
+              }
             >
               {historicalPoint.modelName} · {formatScatterHistoryModeLabel(historicalPoint.mode)} ·{" "}
               {formatScatterHistoryDate(historicalPoint.xBenchTime)} · 点击取消
             </button>
-          ) : null}
+          ))}
           {historyNotice ? (
             <span className="scatter-note scatter-note-warn">{historyNotice}</span>
           ) : null}

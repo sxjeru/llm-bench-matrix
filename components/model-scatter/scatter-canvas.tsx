@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from "recharts";
 import { ScatterArrowLayer } from "./arrow-layer";
-import { ScatterHistoryLayer } from "./history-layer";
+import { ScatterHistoryLayer, ScatterHistoryTooltip } from "./history-layer";
 import {
   SCATTER_AXIS_STROKE,
   SCATTER_AXIS_TICK_COLOR,
@@ -38,7 +38,12 @@ import { formatScatterAxisTick, getMetricAxisLabel } from "./metrics";
 import { computeParetoFrontier, orderParetoPath } from "./pareto";
 import { ScatterParetoLayer } from "./pareto-layer";
 import { ScatterTrendLineLayer } from "./trend-line-layer";
-import { buildPointProjections, computePlotArea, pixelToAxisRatio } from "./projection";
+import {
+  buildPointProjections,
+  computePlotArea,
+  pixelToAxisRatio,
+  projectToPixel
+} from "./projection";
 import { ScatterTooltip } from "./scatter-tooltip";
 import { buildAxisTicks } from "./ticks";
 import type {
@@ -69,7 +74,7 @@ export type ScatterCanvasProps = {
   labelMode: ScatterLabelMode;
   showGuides: boolean;
   highlightedModel: string | null;
-  historicalPoint?: ScatterHistoricalPoint | null;
+  historicalPoints?: readonly ScatterHistoricalPoint[];
   /** 图例上正在悬浮的厂商；其余厂商的点与标签会被淡化 */
   hoveredProvider?: string | null;
   /**
@@ -178,7 +183,7 @@ export function ScatterCanvas({
   labelMode,
   showGuides,
   highlightedModel,
-  historicalPoint = null,
+  historicalPoints = [],
   hoveredProvider = null,
   onSelectModel,
   onToggleHistory,
@@ -199,6 +204,7 @@ export function ScatterCanvas({
   const [hiddenModelNames, setHiddenModelNames] = useState<Set<string>>(() => new Set());
   const [arrowStartModelName, setArrowStartModelName] = useState<string | null>(null);
   const [arrowAnnotations, setArrowAnnotations] = useState<ScatterArrowAnnotation[]>([]);
+  const [hoveredHistoryModel, setHoveredHistoryModel] = useState<string | null>(null);
 
   const activeHiddenModelNames = useMemo(() => {
     const datasetModelNames = new Set(dataset.points.map((point) => point.modelName));
@@ -243,13 +249,13 @@ export function ScatterCanvas({
   );
   // 历史点只扩轴域，避免被裁切；中位线/参考线仍只看当前散点
   const domainXValues = useMemo(() => {
-    if (!historicalPoint) return xValues;
-    return [...xValues, historicalPoint.x];
-  }, [xValues, historicalPoint]);
+    if (historicalPoints.length === 0) return xValues;
+    return [...xValues, ...historicalPoints.map((point) => point.x)];
+  }, [xValues, historicalPoints]);
   const domainYValues = useMemo(() => {
-    if (!historicalPoint) return yValues;
-    return [...yValues, historicalPoint.y];
-  }, [yValues, historicalPoint]);
+    if (historicalPoints.length === 0) return yValues;
+    return [...yValues, ...historicalPoints.map((point) => point.y)];
+  }, [yValues, historicalPoints]);
 
   const baseXDomain = useMemo(() => computeAxisDomain(domainXValues, xScale), [domainXValues, xScale]);
   const baseYDomain = useMemo(() => computeAxisDomain(domainYValues, yScale), [domainYValues, yScale]);
@@ -413,10 +419,6 @@ export function ScatterCanvas({
   // 横向空间更宽，刻度可以多给两档；纵向密了会挤成一片
   const xTicks = useMemo(() => buildAxisTicks(xDomain, xScale, 8), [xDomain, xScale]);
   const yTicks = useMemo(() => buildAxisTicks(yDomain, yScale, 6), [yDomain, yScale]);
-  const isHistoricalPointHidden = Boolean(
-    historicalPoint && activeHiddenModelNames.has(historicalPoint.modelName)
-  );
-
   // 滚轮缩放必须拿到非 passive 的监听才能 preventDefault，React 的 onWheel 做不到
   useEffect(() => {
     const node = containerRef.current;
@@ -479,6 +481,41 @@ export function ScatterCanvas({
 
     return [...activeDataset.points].sort((left, right) => rank(left) - rank(right));
   }, [activeDataset.points, hoveredProvider, highlightedModel, overlayMode, showPareto]);
+
+  const orderedHistoricalPoints = useMemo(() => {
+    if (!hoveredHistoryModel) return historicalPoints;
+    return [...historicalPoints].sort((left, right) => {
+      if (left.modelName === hoveredHistoryModel) return 1;
+      if (right.modelName === hoveredHistoryModel) return -1;
+      return 0;
+    });
+  }, [historicalPoints, hoveredHistoryModel]);
+
+  const hoveredHistoryTooltip = useMemo(() => {
+    if (!hoveredHistoryModel || !plotArea) return null;
+    const point = historicalPoints.find((item) => item.modelName === hoveredHistoryModel);
+    if (!point) return null;
+
+    const cx = projectToPixel(point.x, xDomain, xScale, plotArea.left, plotArea.right);
+    const cy = projectToPixel(point.y, yDomain, yScale, plotArea.bottom, plotArea.top);
+    const currentCx = projectToPixel(point.currentX, xDomain, xScale, plotArea.left, plotArea.right);
+    if (cx === null || cy === null || currentCx === null) return null;
+
+    const tooltipWidth = 218;
+    const tooltipHeight = 142;
+    const placement = currentCx >= cx ? "left" : "right";
+    const preferredLeft =
+      placement === "left"
+        ? cx - SCATTER_DOT_RADIUS - 12 - tooltipWidth
+        : cx + SCATTER_DOT_RADIUS + 12;
+
+    return {
+      point,
+      placement,
+      left: Math.min(width - tooltipWidth, Math.max(0, preferredLeft)),
+      top: Math.min(height - tooltipHeight, Math.max(0, cy - tooltipHeight - 12))
+    } as const;
+  }, [hoveredHistoryModel, historicalPoints, plotArea, xDomain, yDomain, xScale, yScale, width, height]);
 
   const isInsidePlot = useCallback(
     (pointerX: number, pointerY: number) =>
@@ -896,17 +933,53 @@ export function ScatterCanvas({
           xScale={xScale}
           yScale={yScale}
           plotArea={plotArea}
+          placedLabels={placedLabels}
         />
-        <ScatterHistoryLayer
-          point={historicalPoint}
-          xDomain={xDomain}
-          yDomain={yDomain}
-          xScale={xScale}
-          yScale={yScale}
-          plotArea={plotArea}
-          opacity={isHistoricalPointHidden ? SCATTER_DIMMED_OPACITY : 1}
-        />
+        {orderedHistoricalPoints.map((historicalPoint) => {
+          const arrowIndex = historicalPoints.findIndex(
+            (point) => point.modelName === historicalPoint.modelName
+          );
+          return (
+            <ScatterHistoryLayer
+              key={historicalPoint.modelName}
+              point={historicalPoint}
+              xDomain={xDomain}
+              yDomain={yDomain}
+              xScale={xScale}
+              yScale={yScale}
+              plotArea={plotArea}
+              placedLabels={placedLabels}
+              isHovered={hoveredHistoryModel === historicalPoint.modelName}
+              onHoverChange={(isHovered) =>
+                setHoveredHistoryModel((current) =>
+                  isHovered
+                    ? historicalPoint.modelName
+                    : current === historicalPoint.modelName
+                      ? null
+                      : current
+                )
+              }
+              preferredArrowSign={arrowIndex % 2 === 0 ? 1 : -1}
+              arrowCurvatureScale={1 + Math.floor(arrowIndex / 2) * 0.35}
+              opacity={
+                activeHiddenModelNames.has(historicalPoint.modelName)
+                  ? SCATTER_DIMMED_OPACITY
+                  : 1
+              }
+            />
+          );
+        })}
       </ScatterChart>
+      {hoveredHistoryTooltip ? (
+        <ScatterHistoryTooltip
+          point={hoveredHistoryTooltip.point}
+          xMetric={xMetric}
+          yMetric={yMetric}
+          left={hoveredHistoryTooltip.left}
+          top={hoveredHistoryTooltip.top}
+          placement={hoveredHistoryTooltip.placement}
+        />
+      ) : null}
     </div>
   );
 }

@@ -1260,6 +1260,32 @@ input.heatmap-alpha-range::-moz-range-track {
   pointer-events: none;
 }
 
+.scatter-history-hit-target {
+  cursor: help;
+}
+
+.scatter-history-cursor line {
+  pointer-events: none;
+}
+
+.scatter-history-tooltip-anchor {
+  position: absolute;
+  z-index: 80;
+  pointer-events: none;
+}
+
+.scatter-history-tooltip {
+  width: 206px;
+  pointer-events: none;
+}
+
+.scatter-history-tooltip-date {
+  margin-top: 8px;
+  color: #a9b3c9;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
 @keyframes scatter-arrow-start-pulse {
   50% {
     opacity: 0.45;

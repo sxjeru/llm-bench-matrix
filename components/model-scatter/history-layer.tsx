@@ -1,11 +1,81 @@
 "use client";
 
 import { useId } from "react";
-import { SCATTER_HISTORY_DOT_RADIUS, SCATTER_LABEL_FONT_SIZE, SCATTER_LABEL_STROKE } from "./constants";
+import {
+  SCATTER_CURSOR_DASH,
+  SCATTER_CURSOR_STROKE,
+  SCATTER_CURSOR_WIDTH,
+  SCATTER_HISTORY_DOT_RADIUS,
+  SCATTER_LABEL_FONT_SIZE,
+  SCATTER_LABEL_STROKE
+} from "./constants";
 import { formatScatterHistoryDate, formatScatterHistoryModeLabel } from "./history";
-import { buildArrowGeometry } from "./arrow-layer";
+import { buildArrowGeometry, type ArrowObstacle } from "./arrow-layer";
+import { formatScatterValue } from "./metrics";
+import { getPlacedLabelBox } from "./label-layout";
 import { projectToPixel } from "./projection";
-import type { ScatterAxisBounds, ScatterAxisScale, ScatterHistoricalPoint } from "./types";
+import type {
+  ScatterAxisBounds,
+  ScatterAxisScale,
+  ScatterHistoricalPoint,
+  ScatterMetric,
+  ScatterPlacedLabel
+} from "./types";
+
+type ScatterHistoryTooltipProps = {
+  point: ScatterHistoricalPoint;
+  xMetric: Pick<ScatterMetric, "label" | "unit">;
+  yMetric: Pick<ScatterMetric, "label" | "unit">;
+  left: number;
+  top: number;
+  placement: "left" | "right";
+};
+
+export function ScatterHistoryTooltip({
+  point,
+  xMetric,
+  yMetric,
+  left,
+  top,
+  placement
+}: ScatterHistoryTooltipProps) {
+  const label = formatScatterHistoryModeLabel(point.mode);
+
+  return (
+    <div
+      className="scatter-history-tooltip-anchor"
+      style={{ left, top }}
+      data-placement={placement}
+    >
+      <div className="scatter-tooltip scatter-history-tooltip" role="status">
+        <div className="scatter-tooltip-head">
+          <span
+            className="scatter-tooltip-swatch"
+            style={{ backgroundColor: point.color }}
+            aria-hidden="true"
+          />
+          <span className="scatter-tooltip-model">{point.modelName}</span>
+        </div>
+        <div className="scatter-tooltip-provider">{point.providerName}</div>
+        <div className="scatter-tooltip-badge">{label}</div>
+        <dl className="scatter-tooltip-rows">
+          <div className="scatter-tooltip-row">
+            <dt>{yMetric.label}</dt>
+            <dd>{formatScatterValue(yMetric, point.y)}</dd>
+          </div>
+          <div className="scatter-tooltip-row">
+            <dt>{xMetric.label}</dt>
+            <dd>{formatScatterValue(xMetric, point.x)}</dd>
+          </div>
+        </dl>
+        <div className="scatter-history-tooltip-date">
+          X {formatScatterHistoryDate(point.xBenchTime)} · Y{" "}
+          {formatScatterHistoryDate(point.yBenchTime)}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 type ScatterHistoryLayerProps = {
   point: ScatterHistoricalPoint | null;
@@ -14,6 +84,11 @@ type ScatterHistoryLayerProps = {
   xScale: ScatterAxisScale;
   yScale: ScatterAxisScale;
   plotArea: ScatterAxisBounds | null;
+  placedLabels?: ReadonlyMap<string, ScatterPlacedLabel>;
+  isHovered?: boolean;
+  onHoverChange?: (isHovered: boolean) => void;
+  preferredArrowSign?: 1 | -1;
+  arrowCurvatureScale?: number;
   opacity?: number;
 };
 
@@ -39,6 +114,11 @@ export function ScatterHistoryLayer({
   xScale,
   yScale,
   plotArea,
+  placedLabels,
+  isHovered = false,
+  onHoverChange,
+  preferredArrowSign = 1,
+  arrowCurvatureScale = 1,
   opacity = 1
 }: ScatterHistoryLayerProps) {
   const idPrefix = useId().replaceAll(":", "");
@@ -62,16 +142,27 @@ export function ScatterHistoryLayer({
     projected.cy <= plotArea.bottom;
   if (!isInsidePlot(from) || !isInsidePlot(to)) return null;
 
+  const label = formatScatterHistoryModeLabel(point.mode);
+  const dateLabel = formatScatterHistoryDate(point.xBenchTime);
+  const labelY = from.cy - SCATTER_HISTORY_DOT_RADIUS - 8;
+  const dateY = from.cy + SCATTER_HISTORY_DOT_RADIUS + 12;
+  const labelObstacles: ArrowObstacle[] = [
+    ...(placedLabels
+      ? [...placedLabels.values()].map((placedLabel) => getPlacedLabelBox(placedLabel, SCATTER_LABEL_FONT_SIZE))
+      : []),
+    getPlacedLabelBox({ text: label, x: from.cx, y: labelY, textAnchor: "middle" }, SCATTER_LABEL_FONT_SIZE),
+    getPlacedLabelBox({ text: dateLabel, x: from.cx, y: dateY, textAnchor: "middle" }, 10)
+  ];
   const geometry = buildArrowGeometry(
     { x: from.cx, y: from.cy },
-    { x: to.cx, y: to.cy }
+    { x: to.cx, y: to.cy },
+    labelObstacles,
+    { forcedSign: preferredArrowSign, curvatureScale: arrowCurvatureScale }
   );
   const gradientId = `${idPrefix}-history-gradient`;
   const markerId = `${idPrefix}-history-marker`;
   const isBest = point.mode === "best";
   const strokeDasharray = isBest ? undefined : "4 3";
-  const label = formatScatterHistoryModeLabel(point.mode);
-  const dateLabel = formatScatterHistoryDate(point.xBenchTime);
 
   return (
     <g
@@ -80,8 +171,34 @@ export function ScatterHistoryLayer({
       opacity={opacity}
       data-model-name={point.modelName}
       data-history-mode={point.mode}
+      data-curve-sign={geometry?.sign}
       aria-label={`${point.modelName} 的${label}`}
     >
+      {isHovered ? (
+        <g className="scatter-history-cursor" pointerEvents="none">
+          <line
+            className="scatter-history-cursor-x"
+            x1={from.cx}
+            x2={from.cx}
+            y1={plotArea.top}
+            y2={plotArea.bottom}
+            stroke={SCATTER_CURSOR_STROKE}
+            strokeWidth={SCATTER_CURSOR_WIDTH}
+            strokeDasharray={SCATTER_CURSOR_DASH}
+          />
+          <line
+            className="scatter-history-cursor-y"
+            x1={plotArea.left}
+            x2={plotArea.right}
+            y1={from.cy}
+            y2={from.cy}
+            stroke={SCATTER_CURSOR_STROKE}
+            strokeWidth={SCATTER_CURSOR_WIDTH}
+            strokeDasharray={SCATTER_CURSOR_DASH}
+          />
+        </g>
+      ) : null}
+
       {geometry ? (
         <g className="scatter-history-arrow">
           <defs>
@@ -153,7 +270,7 @@ export function ScatterHistoryLayer({
         className="scatter-history-ring-inner"
         cx={from.cx}
         cy={from.cy}
-        r={SCATTER_HISTORY_DOT_RADIUS - 3}
+        r={SCATTER_HISTORY_DOT_RADIUS - 2}
         fill="none"
         stroke="rgba(11, 16, 32, 0.78)"
         strokeWidth={1.25}
@@ -161,7 +278,7 @@ export function ScatterHistoryLayer({
       <text
         className="scatter-history-label"
         x={from.cx}
-        y={from.cy - SCATTER_HISTORY_DOT_RADIUS - 8}
+        y={labelY}
         textAnchor="middle"
         dominantBaseline="auto"
         fontSize={SCATTER_LABEL_FONT_SIZE}
@@ -177,7 +294,7 @@ export function ScatterHistoryLayer({
       <text
         className="scatter-history-date"
         x={from.cx}
-        y={from.cy + SCATTER_HISTORY_DOT_RADIUS + 12}
+        y={dateY}
         textAnchor="middle"
         dominantBaseline="hanging"
         fontSize={10}
@@ -185,6 +302,23 @@ export function ScatterHistoryLayer({
       >
         {dateLabel}
       </text>
+
+      <circle
+        className="scatter-history-hit-target"
+        cx={from.cx}
+        cy={from.cy}
+        r={SCATTER_HISTORY_DOT_RADIUS + 6}
+        fill="transparent"
+        pointerEvents="all"
+        tabIndex={0}
+        role="img"
+        aria-label={`${point.modelName} ${label}，${dateLabel}`}
+        onMouseEnter={() => onHoverChange?.(true)}
+        onMouseLeave={() => onHoverChange?.(false)}
+        onFocus={() => onHoverChange?.(true)}
+        onBlur={() => onHoverChange?.(false)}
+      />
+
     </g>
   );
 }

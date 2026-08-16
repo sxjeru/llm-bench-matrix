@@ -4,6 +4,7 @@ import { describe, expect, test, vi, beforeEach } from "vitest";
 import { ModelScatter } from "@/components/model-scatter";
 import { ScatterCanvas } from "@/components/model-scatter/scatter-canvas";
 import { ScatterHistoryLayer } from "@/components/model-scatter/history-layer";
+import { buildArrowGeometry } from "@/components/model-scatter/arrow-layer";
 import { isInWorstQuadrant } from "@/components/model-scatter/guide-layer";
 import { toScatterMetric } from "@/components/model-scatter/metrics";
 import { buildScatterDataset, computeAxisDomain } from "@/components/model-scatter/dataset";
@@ -585,6 +586,48 @@ describe("ModelScatter", () => {
         valueNote: null,
         source: "text:demo",
         updatedAt: "2026-02-01T00:00:00.000Z"
+      },
+      {
+        recordId: 9003,
+        providerName: "OpenAI",
+        providerDisplayName: "OpenAI",
+        providerBrandColor: null,
+        modelName: "Beta",
+        benchmarkName: "Bench-One",
+        benchmarkType: "Reasoning",
+        sourceBenchmarkType: null,
+        higherIsBetter: true,
+        benchmarkCanonicalKey: "bench-one",
+        modalities: ["Text"],
+        sourceModalities: null,
+        benchTime: "2026-01-01T00:00:00.000Z",
+        valueRaw: "45",
+        valueNum: 45,
+        valueNum2: null,
+        valueNote: null,
+        source: "text:demo",
+        updatedAt: "2026-01-01T00:00:00.000Z"
+      },
+      {
+        recordId: 9004,
+        providerName: "OpenAI",
+        providerDisplayName: "OpenAI",
+        providerBrandColor: null,
+        modelName: "Beta",
+        benchmarkName: "Bench-One",
+        benchmarkType: "Reasoning",
+        sourceBenchmarkType: null,
+        higherIsBetter: true,
+        benchmarkCanonicalKey: "bench-one",
+        modalities: ["Text"],
+        sourceModalities: null,
+        benchTime: "2026-02-01T00:00:00.000Z",
+        valueRaw: "92",
+        valueNum: 92,
+        valueNum2: null,
+        valueNote: null,
+        source: "text:demo",
+        updatedAt: "2026-02-01T00:00:00.000Z"
       }
     ];
 
@@ -604,13 +647,28 @@ describe("ModelScatter", () => {
     expect(container.querySelector(".scatter-history-layer")?.getAttribute("data-history-mode")).toBe("best");
     expect(screen.getByRole("button", { name: /Alpha · 历史最优/ })).toBeInTheDocument();
 
+    fireEvent.click(findScatterSymbol(container, "Beta")!, { altKey: true });
+    expect(container.querySelectorAll(".scatter-history-layer")).toHaveLength(2);
+    expect(
+      container.querySelector(".scatter-history-layer[data-model-name='Alpha']")?.getAttribute("data-curve-sign")
+    ).toBe("1");
+    expect(
+      container.querySelector(".scatter-history-layer[data-model-name='Beta']")?.getAttribute("data-curve-sign")
+    ).toBe("-1");
+    expect(screen.getByRole("button", { name: /Beta · 历史最优/ })).toBeInTheDocument();
+
     fireEvent.click(findScatterSymbol(container, "Alpha")!, { altKey: true });
-    expect(container.querySelector(".scatter-history-layer")?.getAttribute("data-history-mode")).toBe("worst");
+    expect(
+      container.querySelector(".scatter-history-layer[data-model-name='Alpha']")?.getAttribute("data-history-mode")
+    ).toBe("worst");
+    expect(container.querySelectorAll(".scatter-history-layer")).toHaveLength(2);
     expect(screen.getByRole("button", { name: /Alpha · 历史最差/ })).toBeInTheDocument();
 
     fireEvent.click(findScatterSymbol(container, "Alpha")!, { altKey: true });
-    expect(container.querySelector(".scatter-history-layer")).toBeNull();
-    expect(screen.queryByRole("button", { name: /历史最优|历史最差/ })).toBeNull();
+    expect(container.querySelector(".scatter-history-layer[data-model-name='Alpha']")).toBeNull();
+    expect(container.querySelectorAll(".scatter-history-layer")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /Alpha · 历史最优|Alpha · 历史最差/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Beta · 历史最优/ })).toBeInTheDocument();
   });
 });
 
@@ -991,14 +1049,16 @@ describe("ScatterCanvas", () => {
     expect(arrows).toHaveLength(2);
     expect(arrows[0]?.getAttribute("data-from-model")).toBe("Alpha");
     expect(arrows[0]?.getAttribute("data-to-model")).toBe("Beta");
+    expect(arrows[0]?.getAttribute("data-curve-sign")).toBe("1");
     expect(arrows[1]?.getAttribute("data-from-model")).toBe("Beta");
     expect(arrows[1]?.getAttribute("data-to-model")).toBe("Gamma");
+    expect(arrows[1]?.getAttribute("data-curve-sign")).toBe("-1");
     expect(onSelectModel).not.toHaveBeenCalled();
   });
 
   test("传入历史点时绘制空心环与指向当前点的箭头", () => {
     const { container } = renderCanvas({
-      historicalPoint: {
+      historicalPoints: [{
         modelName: "Alpha",
         providerName: "OpenAI",
         color: "#ff5533",
@@ -1009,21 +1069,21 @@ describe("ScatterCanvas", () => {
         yBenchTime: "2026-03-05T00:00:00.000Z",
         currentX: 10,
         currentY: 100
-      }
+      }]
     });
 
     const layer = container.querySelector(".scatter-history-layer");
     expect(layer).not.toBeNull();
     expect(layer?.getAttribute("data-history-mode")).toBe("best");
     expect(container.querySelector(".scatter-history-ring-outer")).not.toBeNull();
+    expect(container.querySelector(".scatter-history-ring-outer")?.getAttribute("r")).toBe("6");
     expect(container.querySelector(".scatter-history-arrow-path")?.getAttribute("d")).toContain("Q");
     expect(container.querySelector(".scatter-history-label")?.textContent).toBe("历史最优");
   });
 
-  test("Shift 淡化当前模型时历史层同步淡化", () => {
+  test("悬浮历史点时显示历史 tooltip 与十字线", () => {
     const { container } = renderCanvas({
-      labelMode: "all",
-      historicalPoint: {
+      historicalPoints: [{
         modelName: "Alpha",
         providerName: "OpenAI",
         color: "#ff5533",
@@ -1034,7 +1094,80 @@ describe("ScatterCanvas", () => {
         yBenchTime: "2026-03-05T00:00:00.000Z",
         currentX: 10,
         currentY: 100
-      }
+      }]
+    });
+
+    const hitTarget = container.querySelector(".scatter-history-hit-target");
+    expect(hitTarget).not.toBeNull();
+
+    fireEvent.mouseEnter(hitTarget!);
+
+    expect(container.querySelector(".scatter-history-tooltip")).not.toBeNull();
+    expect(container.querySelector(".scatter-history-tooltip")?.textContent).toContain("历史最优");
+    const tooltipAnchor = container.querySelector(".scatter-history-tooltip-anchor");
+    expect(tooltipAnchor?.getAttribute("data-placement")).toBe("left");
+    expect(Number((tooltipAnchor as HTMLElement | null)?.style.left.replace("px", ""))).toBeLessThan(
+      Number(hitTarget?.getAttribute("cx"))
+    );
+    expect(tooltipAnchor?.parentElement).toBe(container.querySelector(".scatter-chart-surface"));
+    expect(container.querySelector(".scatter-history-layer")?.contains(tooltipAnchor)).toBe(false);
+    expect(container.querySelectorAll(".scatter-history-cursor line")).toHaveLength(2);
+    expect(container.querySelector(".scatter-history-cursor-x")?.getAttribute("stroke-dasharray")).toBe(
+      "4 3"
+    );
+
+    fireEvent.mouseLeave(hitTarget!);
+    expect(container.querySelector(".scatter-history-tooltip")).toBeNull();
+  });
+
+  test("箭头会选择避开标签占位框的弧线", () => {
+    const direct = buildArrowGeometry({ x: 100, y: 200 }, { x: 300, y: 200 });
+    const avoided = buildArrowGeometry(
+      { x: 100, y: 200 },
+      { x: 300, y: 200 },
+      [{ left: 150, right: 250, top: 214, bottom: 230 }]
+    );
+
+    expect(direct?.path).toBeTruthy();
+    expect(avoided?.path).toBeTruthy();
+    expect(avoided?.path).not.toBe(direct?.path);
+  });
+
+  test("上弧箭头从目标点斜上方入射", () => {
+    const geometry = buildArrowGeometry(
+      { x: 100, y: 200 },
+      { x: 300, y: 200 },
+      [{ left: 150, right: 250, top: 214, bottom: 230 }]
+    );
+
+    expect(geometry).not.toBeNull();
+    expect(geometry!.end.x).toBeLessThan(300);
+    expect(geometry!.end.y).toBeLessThan(200);
+  });
+
+  test("下弧箭头从目标点斜下方入射", () => {
+    const geometry = buildArrowGeometry({ x: 100, y: 200 }, { x: 300, y: 200 });
+
+    expect(geometry).not.toBeNull();
+    expect(geometry!.end.x).toBeLessThan(300);
+    expect(geometry!.end.y).toBeGreaterThan(200);
+  });
+
+  test("Shift 淡化当前模型时历史层同步淡化", () => {
+    const { container } = renderCanvas({
+      labelMode: "all",
+      historicalPoints: [{
+        modelName: "Alpha",
+        providerName: "OpenAI",
+        color: "#ff5533",
+        mode: "best",
+        x: 2,
+        y: 80,
+        xBenchTime: "2026-03-01T00:00:00.000Z",
+        yBenchTime: "2026-03-05T00:00:00.000Z",
+        currentX: 10,
+        currentY: 100
+      }]
     });
 
     fireEvent.click(findSymbolByModel(container, "Alpha")!, { shiftKey: true });
