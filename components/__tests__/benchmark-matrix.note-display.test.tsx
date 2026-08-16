@@ -11,6 +11,18 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams()
 }));
 
+function restorePrototypeProperty(
+  prototype: object,
+  key: string,
+  descriptor: PropertyDescriptor | undefined
+) {
+  if (descriptor) {
+    Object.defineProperty(prototype, key, descriptor);
+    return;
+  }
+  Reflect.deleteProperty(prototype, key);
+}
+
 describe("BenchmarkMatrix 星号值显示", () => {
   test("货币值展示保留美元符号与千分位", () => {
     render(
@@ -221,16 +233,8 @@ describe("BenchmarkMatrix 星号值显示", () => {
         expect(screen.queryByText("存在多条记录")).not.toBeInTheDocument();
       });
     } finally {
-      if (scrollHeightDescriptor) {
-        Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
-      } else {
-        delete (HTMLElement.prototype as Partial<HTMLElement>).scrollHeight;
-      }
-      if (clientHeightDescriptor) {
-        Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeightDescriptor);
-      } else {
-        delete (HTMLElement.prototype as Partial<HTMLElement>).clientHeight;
-      }
+      restorePrototypeProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
+      restorePrototypeProperty(HTMLElement.prototype, "clientHeight", clientHeightDescriptor);
     }
   });
 
@@ -293,21 +297,9 @@ describe("BenchmarkMatrix 星号值显示", () => {
       expect(maxHeight).toBe("calc(100vh - 16px)");
     } finally {
       Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
-      if (offsetHeightDescriptor) {
-        Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeightDescriptor);
-      } else {
-        delete (HTMLElement.prototype as Partial<HTMLElement>).offsetHeight;
-      }
-      if (scrollHeightDescriptor) {
-        Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
-      } else {
-        delete (HTMLElement.prototype as Partial<HTMLElement>).scrollHeight;
-      }
-      if (clientHeightDescriptor) {
-        Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeightDescriptor);
-      } else {
-        delete (HTMLElement.prototype as Partial<HTMLElement>).clientHeight;
-      }
+      restorePrototypeProperty(HTMLElement.prototype, "offsetHeight", offsetHeightDescriptor);
+      restorePrototypeProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
+      restorePrototypeProperty(HTMLElement.prototype, "clientHeight", clientHeightDescriptor);
     }
   });
 

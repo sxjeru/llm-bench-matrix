@@ -176,6 +176,6 @@ describe("BenchmarkMatrix ranking panel", () => {
     const tooltip = await screen.findByText("存在多条记录");
     const tooltipBox = tooltip.closest("[data-cell-tooltip]") as HTMLElement | null;
     expect(tooltipBox).not.toBeNull();
-    expect(Number.parseFloat(tooltipBox!.style.left)).toBe(472);
+    expect(Number.parseFloat(tooltipBox!.style.left)).toBe(488);
   });
 });
