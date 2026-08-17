@@ -389,14 +389,21 @@ export function normalizeBenchmarkKeyFallback(input: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+const SUPERSCRIPT_SUBSCRIPT_DIGITS = "⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉";
+const SUPERSCRIPT_SUBSCRIPT_DIGIT_REGEX = new RegExp(`[${SUPERSCRIPT_SUBSCRIPT_DIGITS}]`, "g");
+const SUPERSCRIPT_SUBSCRIPT_DIGIT_MAP: Record<string, string> = (() => {
+  const map: Record<string, string> = {};
+  for (let index = 0; index < SUPERSCRIPT_SUBSCRIPT_DIGITS.length; index += 1) {
+    map[SUPERSCRIPT_SUBSCRIPT_DIGITS[index]!] = String(index % 10);
+  }
+  return map;
+})();
+
 export function normalizeBenchmarkDuplicateToken(input: string): string {
-  const normalizedDigits = input.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉]/g, (val) => {
-    const map: Record<string, string> = {
-      "⁰": "0", "¹": "1", "²": "2", "³": "3", "⁴": "4", "⁵": "5", "⁶": "6", "⁷": "7", "⁸": "8", "⁹": "9",
-      "₀": "0", "₁": "1", "₂": "2", "₃": "3", "₄": "4", "₅": "5", "₆": "6", "₇": "7", "₈": "8", "₉": "9"
-    };
-    return map[val] ?? val;
-  });
+  const normalizedDigits = input.replace(
+    SUPERSCRIPT_SUBSCRIPT_DIGIT_REGEX,
+    (val) => SUPERSCRIPT_SUBSCRIPT_DIGIT_MAP[val] ?? val
+  );
 
   return normalizedDigits
     .trim()
@@ -446,6 +453,47 @@ export function getBenchmarkDuplicateKey(canonicalKey: string | null | undefined
   return fallback.length > 0 ? fallback : benchmarkName.trim().toLowerCase();
 }
 
+/**
+ * merged 分组键的两级缓存。
+ *
+ * 一次渲染链里有六七个 selector 各自把全量行遍历一遍求分组键，而键只由
+ * (benchmarkCanonicalKey, benchmarkName) 决定 —— 两万行里通常只有几百个唯一组合，
+ * 且 getBenchmarkDuplicateKey 走的是多个正则替换，重复求值代价明显。
+ *
+ * 第一级按 row 对象引用命中，省掉拼接缓存键的开销；未命中时回落到第二级按字段值命中，
+ * 让不同 row（含 applySourceMeta 投影出的副本）之间也能复用同一次计算。
+ * 这两个字段在 toMatrixInputRow / applySourceMeta 里都是构造新对象时写入、从不原地改写，
+ * 所以按对象引用缓存不会读到过期值。
+ */
+const mergedGroupingKeyByRow = new WeakMap<object, string>();
+const mergedGroupingKeyByBenchmark = new Map<string, string>();
+/** 仅作无界增长兜底：benchmark 种类天然有限，真触到上限就整表丢弃重建 */
+const MERGED_GROUPING_KEY_CACHE_LIMIT = 20000;
+
+function getMergedGroupingKey(
+  row: Pick<MatrixInputRow, "benchmarkName" | "benchmarkCanonicalKey">
+): string {
+  const cachedByRow = mergedGroupingKeyByRow.get(row);
+  if (cachedByRow !== undefined) return cachedByRow;
+
+  const canonicalKey = row.benchmarkCanonicalKey ?? "";
+  // 用长度前缀而不是分隔符拼接，既避免 ("a","bc") 与 ("ab","c") 撞车，
+  // 也不必往源码里塞不可见字符
+  const cacheKey = `${canonicalKey.length}:${canonicalKey}${row.benchmarkName}`;
+  let groupingKey = mergedGroupingKeyByBenchmark.get(cacheKey);
+
+  if (groupingKey === undefined) {
+    groupingKey = `merged::${getBenchmarkDuplicateKey(canonicalKey, row.benchmarkName)}`;
+    if (mergedGroupingKeyByBenchmark.size >= MERGED_GROUPING_KEY_CACHE_LIMIT) {
+      mergedGroupingKeyByBenchmark.clear();
+    }
+    mergedGroupingKeyByBenchmark.set(cacheKey, groupingKey);
+  }
+
+  mergedGroupingKeyByRow.set(row, groupingKey);
+  return groupingKey;
+}
+
 export function getMatrixGroupingKey(
   row: Pick<MatrixInputRow, "benchmarkType" | "benchmarkName" | "benchmarkCanonicalKey">,
   showDuplicateRows: boolean
@@ -455,8 +503,7 @@ export function getMatrixGroupingKey(
     return `raw::${category}::${row.benchmarkName}`;
   }
 
-  const duplicateKey = getBenchmarkDuplicateKey(row.benchmarkCanonicalKey, row.benchmarkName);
-  return `merged::${duplicateKey}`;
+  return getMergedGroupingKey(row);
 }
 
 export function normalizeModalityList(input: string[] | undefined, benchmarkType: string): string[] {

@@ -258,6 +258,30 @@ export function buildCoveredModelsByGroupingKey(allRowsIndex: AllRowsIndex): Map
   return coveredMap;
 }
 
+/** 是否所有行都落在同一个 source 上；发现第二个就停，不必建全量 Set */
+function hasSingleSourceKey(rows: MatrixInputRow[]): boolean {
+  if (rows.length === 0) return false;
+
+  const firstSourceKey = getSourceKey(rows[0]!.source);
+  for (let index = 1; index < rows.length; index += 1) {
+    if (getSourceKey(rows[index]!.source) !== firstSourceKey) return false;
+  }
+
+  return true;
+}
+
+/** 是否只有一个分组键；同样只需找到第二个不同值即可判定 */
+function hasSingleGroupingKey(rows: MatrixInputRow[], showDuplicateRows: boolean): boolean {
+  if (rows.length === 0) return false;
+
+  const firstKey = getMatrixGroupingKey(rows[0]!, showDuplicateRows);
+  for (let index = 1; index < rows.length; index += 1) {
+    if (getMatrixGroupingKey(rows[index]!, showDuplicateRows) !== firstKey) return false;
+  }
+
+  return true;
+}
+
 export function resolveBaseSourceRows(
   allRows: MatrixInputRow[],
   rows: MatrixInputRow[],
@@ -271,14 +295,14 @@ export function resolveBaseSourceRows(
       return allRows;
     }
 
-    const sourceCount = new Set(rows.map((row) => getSourceKey(row.source))).size;
-    const benchmarkCount = new Set(rows.map((row) => getMatrixGroupingKey(row, showDuplicateRows))).size;
-
-    if (sourceCount === 1 && benchmarkCount <= 1) {
-      return allRows;
+    // 这里只关心「恰好一个 source」且「分组键不超过一个」，
+    // 原先为此建了两个全量 Set（各遍历两万行、其中一个还要逐行求分组键）。
+    // 改成发现第二个不同值就收手；source 已经多于一个时，分组键根本不用看。
+    if (!hasSingleSourceKey(rows) || !hasSingleGroupingKey(rows, showDuplicateRows)) {
+      return rows;
     }
 
-    return rows;
+    return allRows;
   }
 
   const sourceScopedRows = scopedRowsBySource.get(activeSource) ?? allRowsBySource.get(activeSource) ?? [];

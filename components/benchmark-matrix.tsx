@@ -74,6 +74,7 @@ import {
 } from "./benchmark-matrix/selectors";
 import { useMatrixSourceTabs } from "./benchmark-matrix/source-tabs";
 import {
+  type MatrixInputRow,
   type RowSortColumn,
   type RowSortMode,
   type Props,
@@ -679,19 +680,28 @@ export function BenchmarkMatrix({
     [rows]
   );
 
+  // allRows 默认就是 rows（见 Props 默认值），此时没有理由把同一个数组再分桶一遍
   const allRowsBySource = useMemo(
-    () => buildRowsBySource(allRows),
-    [allRows]
+    () => (allRows === rows ? scopedRowsBySource : buildRowsBySource(allRows)),
+    [allRows, rows, scopedRowsBySource]
   );
 
-  const allRowsWithSourceMeta = useMemo(
-    () => buildRowsWithSourceMeta(allRows),
-    [allRows]
-  );
+  // source 元信息投影（benchmarkType / modalities 换成 source 自报的值）在两处要用：
+  // 非 All 视图的主链路，以及排名面板的「全部模型」范围。All 视图首屏两处都不碰，
+  // 所以包成一个惰性 getter：真正被问到时才投影，之后在同一份 allRows 上复用结果。
+  // 这样首屏不白算两万行，切 tab、调排名面板参数也不会反复重投影。
+  const getAllRowsWithSourceMeta = useMemo(() => {
+    let projected: MatrixInputRow[] | null = null;
+
+    return () => {
+      projected ??= buildRowsWithSourceMeta(allRows);
+      return projected;
+    };
+  }, [allRows]);
 
   const indexedSourceRows = useMemo(
-    () => (activeSource === SOURCE_ALL ? allRows : allRowsWithSourceMeta),
-    [allRows, allRowsWithSourceMeta, activeSource]
+    () => (activeSource === SOURCE_ALL ? allRows : getAllRowsWithSourceMeta()),
+    [allRows, activeSource, getAllRowsWithSourceMeta]
   );
 
   const allRowsIndex = useMemo(
@@ -1010,7 +1020,9 @@ export function BenchmarkMatrix({
   );
 
   const allRankingModelNames = useMemo(() => {
-    const ordered = Array.from(new Set(allRowsWithSourceMeta.map((row) => row.modelName)));
+    // 这里只取 modelName，而 applySourceMeta 只改写 benchmarkType / modalities，
+    // 所以读 allRows 与读它的 source 投影结果完全等价，省掉一次两万行的对象展开
+    const ordered = Array.from(new Set(allRows.map((row) => row.modelName)));
     const seen = new Set(ordered);
 
     modelPrices.forEach((price) => {
@@ -1028,7 +1040,7 @@ export function BenchmarkMatrix({
     });
 
     return ordered;
-  }, [allRowsWithSourceMeta, modelPrices, modelParams]);
+  }, [allRows, modelPrices, modelParams]);
 
   // 只有「显示 + 计入总评」同时成立的合成行才进入 Overall 打分
   const includePriceRowsInOverall = effectiveShowPriceRows && priceRowsInOverall;
@@ -1174,7 +1186,7 @@ export function BenchmarkMatrix({
       ? allRankingModelNames
       : benchmarkRankingModelNames;
     const sourceRowsForRanking = rankingScope === "all"
-      ? allRowsWithSourceMeta
+      ? getAllRowsWithSourceMeta()
       : baseSourceRows;
     const rankingMatrixRow = matrixRow.isPriceRow
       ? buildPriceMatrixRows(candidateModelNames, modelPrices).find((row) => row.rowKey === matrixRow.rowKey) ?? matrixRow
@@ -1192,7 +1204,7 @@ export function BenchmarkMatrix({
     );
   }, [
     allRankingModelNames,
-    allRowsWithSourceMeta,
+    getAllRowsWithSourceMeta,
     baseSourceRows,
     benchmarkRankingModelNames,
     displayMatrixRows,
