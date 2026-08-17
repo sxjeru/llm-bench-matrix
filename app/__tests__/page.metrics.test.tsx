@@ -85,8 +85,8 @@ describe("HomePage metrics", () => {
   test("公开布局读取全量矩阵数据，source 筛选交给客户端处理", async () => {
     await PublicDashboardLayout({ children: <div /> });
 
-    expect(vi.mocked(getDashboardRows)).toHaveBeenCalledWith(null, null, undefined);
-    expect(vi.mocked(getDashboardStats)).toHaveBeenCalledWith(null);
-    expect(vi.mocked(getSourceOptions)).toHaveBeenCalled();
+    expect(vi.mocked(getDashboardRows)).toHaveBeenCalledWith(null, null, expect.any(String));
+    expect(vi.mocked(getDashboardStats)).toHaveBeenCalledWith(null, expect.any(String));
+    expect(vi.mocked(getSourceOptions)).toHaveBeenCalledWith(expect.any(String));
   });
 });

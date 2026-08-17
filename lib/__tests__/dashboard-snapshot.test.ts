@@ -1,6 +1,34 @@
-import { describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { parseExportFootnote, toPublicModelPrice } from "@/lib/dashboard-snapshot";
+import { getCacheVersion } from "@/lib/cache-versions";
+import { loadPublicDashboardSnapshot, parseExportFootnote, toPublicModelPrice } from "@/lib/dashboard-snapshot";
+import { getDashboardRows, getDashboardStats, getModelParamsRows, getSettings, getSourceOptions } from "@/lib/db/queries";
+import { getModelPricingRows } from "@/lib/model-pricing";
+
+vi.mock("@/lib/cache-versions", () => ({
+  getCacheVersion: vi.fn()
+}));
+
+vi.mock("@/lib/db/queries", () => ({
+  getDashboardRows: vi.fn(async () => []),
+  getDashboardStats: vi.fn(async () => ({
+    providerCount: 0,
+    modelCount: 0,
+    benchmarkCount: 0,
+    totalRecords: 0
+  })),
+  getSourceOptions: vi.fn(async () => []),
+  getModelParamsRows: vi.fn(async () => []),
+  getSettings: vi.fn(async () => ({}))
+}));
+
+vi.mock("@/lib/model-pricing", () => ({
+  getModelPricingRows: vi.fn(async () => [])
+}));
+
+vi.mock("@/components/benchmark-matrix/map-row", () => ({
+  toMatrixInputRow: vi.fn((row: unknown) => row)
+}));
 
 describe("parseExportFootnote", () => {
   test("字符串直接作为脚注文本", () => {
@@ -44,5 +72,39 @@ describe("toPublicModelPrice", () => {
       lastSyncedAt: "2026-05-01T00:00:00.000Z",
       updatedAt: "2026-05-02T00:00:00.000Z"
     });
+  });
+});
+
+describe("loadPublicDashboardSnapshot", () => {
+  beforeEach(() => {
+    vi.mocked(getCacheVersion).mockReset();
+    vi.mocked(getDashboardRows).mockClear();
+    vi.mocked(getDashboardStats).mockClear();
+    vi.mocked(getSourceOptions).mockClear();
+    vi.mocked(getModelParamsRows).mockClear();
+    vi.mocked(getModelPricingRows).mockClear();
+    vi.mocked(getSettings).mockClear();
+    vi.mocked(getCacheVersion).mockImplementation(async (domain) => `${domain}-version`);
+  });
+
+  test("把各域版本作为 forceVersion 传给对应 loader，避免 probe TTL 返回旧 body", async () => {
+    await loadPublicDashboardSnapshot();
+
+    expect(getDashboardRows).toHaveBeenCalledWith(null, null, "dashboard-version");
+    expect(getSourceOptions).toHaveBeenCalledWith("dashboard-version");
+    expect(getDashboardStats).toHaveBeenCalledWith(null, "dashboard-version");
+    expect(getModelPricingRows).toHaveBeenCalledWith("pricing-version");
+    expect(getModelParamsRows).toHaveBeenCalledWith("dashboard-version");
+  });
+
+  test("调用方传入 versions 时不再探测缓存版本", async () => {
+    await loadPublicDashboardSnapshot({
+      dashboard: "forced-dashboard",
+      pricing: "forced-pricing"
+    });
+
+    expect(getCacheVersion).not.toHaveBeenCalled();
+    expect(getDashboardRows).toHaveBeenCalledWith(null, null, "forced-dashboard");
+    expect(getModelPricingRows).toHaveBeenCalledWith("forced-pricing");
   });
 });

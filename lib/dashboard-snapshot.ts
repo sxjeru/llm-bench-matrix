@@ -28,7 +28,6 @@ export type PublicDashboardSnapshot = {
 export type PublicDashboardSnapshotVersions = {
   dashboard: string;
   pricing: string;
-  settings: string;
 };
 
 export type ParsedExportFootnote = {
@@ -86,24 +85,24 @@ export function toPublicModelPrice(row: Pick<
 }
 
 export async function getPublicDashboardSnapshotVersions(): Promise<PublicDashboardSnapshotVersions> {
-  const [dashboard, pricing, settings] = await Promise.all([
+  const [dashboard, pricing] = await Promise.all([
     getCacheVersion("dashboard"),
-    getCacheVersion("pricing"),
-    getCacheVersion("settings")
+    getCacheVersion("pricing")
   ]);
 
-  return { dashboard, pricing, settings };
+  return { dashboard, pricing };
 }
 
 export async function loadPublicDashboardSnapshot(
   versions?: PublicDashboardSnapshotVersions
 ): Promise<PublicDashboardSnapshot> {
+  const resolved = versions ?? await getPublicDashboardSnapshotVersions();
   const [rows, sourceOptions, stats, modelPrices, modelParams, settings] = await Promise.all([
-    getDashboardRows(null, null, versions?.dashboard),
-    getSourceOptions(),
-    getDashboardStats(null),
-    getModelPricingRows(),
-    getModelParamsRows(),
+    getDashboardRows(null, null, resolved.dashboard),
+    getSourceOptions(resolved.dashboard),
+    getDashboardStats(null, resolved.dashboard),
+    getModelPricingRows(resolved.pricing),
+    getModelParamsRows(resolved.dashboard),
     getSettings()
   ]);
 

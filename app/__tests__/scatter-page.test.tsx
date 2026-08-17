@@ -37,8 +37,8 @@ describe("ScatterPage", () => {
   test("公开布局读取全量矩阵数据，source 筛选交给客户端处理", async () => {
     await PublicDashboardLayout({ children: <ScatterPage /> });
 
-    expect(vi.mocked(getDashboardRows)).toHaveBeenCalledWith(null, null, undefined);
-    expect(vi.mocked(getSourceOptions)).toHaveBeenCalled();
-    expect(vi.mocked(getModelParamsRows)).toHaveBeenCalled();
+    expect(vi.mocked(getDashboardRows)).toHaveBeenCalledWith(null, null, expect.any(String));
+    expect(vi.mocked(getSourceOptions)).toHaveBeenCalledWith(expect.any(String));
+    expect(vi.mocked(getModelParamsRows)).toHaveBeenCalledWith(expect.any(String));
   });
 });

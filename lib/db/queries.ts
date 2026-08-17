@@ -58,20 +58,17 @@ export function registerCacheInvalidator(fn: () => void) {
 
 /** invalidateAllCaches 默认会 bump 的缓存版本域 */
 const ALL_CACHE_VERSION_DOMAINS: CacheVersionDomain[] = ["dashboard", "pricing", "admin_entities", "settings"];
-const PUBLIC_DASHBOARD_PATHS = ["/", "/scatter"] as const;
 
 function revalidatePublicDashboardPaths() {
-  for (const path of PUBLIC_DASHBOARD_PATHS) {
-    try {
-      // 快照在 (public)/layout 拉取；page 粒度不会重跑 layout 的 Server Component
-      revalidatePath(path, "layout");
-    } catch (error) {
-      if (error instanceof Error && error.message.includes("static generation store missing")) {
-        continue;
-      }
-
-      throw error;
+  try {
+    // 快照在 (public)/layout 拉取。`("/", "layout")` 会清全站 Client Cache，含 /admin。
+    revalidatePath("/(public)", "layout");
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("static generation store missing")) {
+      return;
     }
+
+    throw error;
   }
 }
 
@@ -275,7 +272,10 @@ async function loadDashboardStats(sourceFilter: string | null): Promise<Dashboar
   };
 }
 
-export async function getDashboardStats(sourceFilter?: string | null): Promise<DashboardStats> {
+export async function getDashboardStats(
+  sourceFilter?: string | null,
+  forceVersion?: string
+): Promise<DashboardStats> {
   const normalizedSourceFilter = sourceFilter?.trim() || null;
   const cacheKey = normalizeSourceFilterKey(normalizedSourceFilter);
 
@@ -286,7 +286,8 @@ export async function getDashboardStats(sourceFilter?: string | null): Promise<D
       versionProbeTtlMs: CACHE_VERSION_PROBE_TTL_MS,
       staleIfErrorMs: CACHE_STALE_IF_ERROR_MS,
       getVersion: getDashboardCacheVersion,
-      loader: () => loadDashboardStats(normalizedSourceFilter)
+      loader: () => loadDashboardStats(normalizedSourceFilter),
+      forceVersion
     }
   );
 }
@@ -351,7 +352,7 @@ async function loadSourceOptions(): Promise<string[]> {
   return Array.from(new Set(normalized));
 }
 
-export async function getSourceOptions(): Promise<string[]> {
+export async function getSourceOptions(forceVersion?: string): Promise<string[]> {
   return withVersionedCache(
     sourceOptionsStore,
     "all",
@@ -359,7 +360,8 @@ export async function getSourceOptions(): Promise<string[]> {
       versionProbeTtlMs: CACHE_VERSION_PROBE_TTL_MS,
       staleIfErrorMs: CACHE_STALE_IF_ERROR_MS,
       getVersion: getDashboardCacheVersion,
-      loader: loadSourceOptions
+      loader: loadSourceOptions,
+      forceVersion
     }
   );
 }
@@ -405,7 +407,7 @@ async function loadModelParamsRows(): Promise<ModelParamsInfo[]> {
     .filter((row) => row.totalParamsB !== null || row.activatedParamsB !== null);
 }
 
-export async function getModelParamsRows(): Promise<ModelParamsInfo[]> {
+export async function getModelParamsRows(forceVersion?: string): Promise<ModelParamsInfo[]> {
   return withVersionedCache(
     modelParamsStore,
     "all",
@@ -413,7 +415,8 @@ export async function getModelParamsRows(): Promise<ModelParamsInfo[]> {
       versionProbeTtlMs: CACHE_VERSION_PROBE_TTL_MS,
       staleIfErrorMs: CACHE_STALE_IF_ERROR_MS,
       getVersion: getDashboardCacheVersion,
-      loader: loadModelParamsRows
+      loader: loadModelParamsRows,
+      forceVersion
     }
   );
 }
