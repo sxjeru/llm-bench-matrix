@@ -1,10 +1,8 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { GET } from "@/app/api/public/dashboard/route";
-import {
-  decodePublicDashboardSnapshot,
-  encodePublicDashboardSnapshot
-} from "@/lib/dashboard-snapshot-cache";
+import type { MatrixInputRow } from "@/components/benchmark-matrix/types";
+import { decodePublicDashboardSnapshot } from "@/lib/dashboard-snapshot-cache";
 import { getPublicDashboardSnapshotVersions, loadPublicDashboardSnapshot } from "@/lib/dashboard-snapshot";
 
 vi.mock("@/lib/dashboard-snapshot", () => ({
@@ -16,13 +14,36 @@ vi.mock("@/lib/dashboard-snapshot", () => ({
   loadPublicDashboardSnapshot: vi.fn()
 }));
 
+const ROWS: MatrixInputRow[] = [
+  {
+    recordId: 1,
+    providerName: "openai",
+    modelName: "GPT-5",
+    benchmarkName: "MMLU",
+    benchmarkType: "General",
+    benchTime: "2026-04-06T00:00:00.000Z",
+    valueRaw: "88.1",
+    valueNum: 88.1
+  },
+  {
+    recordId: 2,
+    providerName: "anthropic",
+    modelName: "Claude",
+    benchmarkName: "MMLU",
+    benchmarkType: "General",
+    benchTime: "2026-04-06T00:00:00.000Z",
+    valueRaw: "N/A",
+    valueNum: null
+  }
+];
+
 const SNAPSHOT = {
   versions: {
     dashboard: "dashboard-version",
     pricing: "pricing-version",
     settings: "settings-version"
   },
-  rows: [],
+  rows: ROWS,
   sourceOptions: [],
   stats: {
     providerCount: 1,
@@ -57,7 +78,19 @@ describe("GET /api/public/dashboard", () => {
       pricing: "pricing-version",
       settings: "settings-version"
     });
-    expect(payload).toEqual(encodePublicDashboardSnapshot(SNAPSHOT));
+    // 载荷必须是列式编码而非行式：rows 被拆成 rowCount + columns
+    expect(payload).not.toHaveProperty("rows");
+    expect(payload.rowCount).toBe(2);
+    expect(Object.keys(payload.columns).sort()).toEqual([
+      "benchTime",
+      "benchmarkName",
+      "benchmarkType",
+      "modelName",
+      "providerName",
+      "recordId",
+      "valueNum",
+      "valueRaw"
+    ]);
     expect(decodePublicDashboardSnapshot(payload)).toEqual(SNAPSHOT);
     expect(response.headers.get("Cache-Control")).toBe("public, max-age=0, must-revalidate");
     expect(response.headers.get("CDN-Cache-Control")).toBe("public, s-maxage=300, stale-while-revalidate=3600");
