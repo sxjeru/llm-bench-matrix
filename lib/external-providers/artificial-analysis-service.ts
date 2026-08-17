@@ -490,6 +490,11 @@ export async function runArtificialAnalysisImport(options: {
     dryRun
   });
 
+  const publicChanged = result.publicChanged || createdModels.length > 0;
+  if (!dryRun && createdModels.length > 0 && !result.publicChanged) {
+    await invalidateAllCaches();
+  }
+
   if (!dryRun) {
     await saveSetting({
       key: ARTIFICIAL_ANALYSIS_SETTINGS_KEY,
@@ -501,6 +506,7 @@ export async function runArtificialAnalysisImport(options: {
 
   return {
     ...result,
+    publicChanged,
     createdModels,
     matchedModelCount: matches.filter(
       (match) => match.matchStatus === "matched" || match.matchStatus === "manual"

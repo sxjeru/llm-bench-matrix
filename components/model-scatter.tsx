@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_EXPORT_PRESET,
@@ -95,7 +95,6 @@ export function ModelScatter({
   modelPrices = [],
   modelParams = []
 }: ModelScatterProps) {
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -387,8 +386,8 @@ export function ModelScatter({
     const nextUrl = query ? `${pathname}?${query}` : pathname;
     if (`${window.location.pathname}${window.location.search}` === nextUrl) return;
 
-    router.replace(nextUrl, { scroll: false });
-  }, [viewState, isHydrated, pathname, router]);
+    window.history.replaceState(window.history.state, "", nextUrl);
+  }, [viewState, isHydrated, pathname]);
 
   const xMetric = useMemo(() => findScatterMetric(metrics, viewState.xKey), [metrics, viewState.xKey]);
   const yMetric = useMemo(() => findScatterMetric(metrics, viewState.yKey), [metrics, viewState.yKey]);

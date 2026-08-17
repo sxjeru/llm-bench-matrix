@@ -18,12 +18,10 @@ import {
 } from "@/components/model-scatter/constants";
 import type { MatrixCell, MatrixInputRow, MatrixRow } from "@/components/benchmark-matrix/types";
 
-const replaceMock = vi.fn();
 let mockSearchParams = new URLSearchParams();
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/scatter",
-  useRouter: () => ({ replace: replaceMock, push: vi.fn(), refresh: vi.fn() }),
   // 惰性读取，测试可在 render 前改写查询串
   useSearchParams: () => mockSearchParams
 }));
@@ -175,7 +173,7 @@ function pickAxisOption(container: HTMLElement, axis: "x" | "y", label: string) 
 }
 
 beforeEach(() => {
-  replaceMock.mockClear();
+  window.history.replaceState(null, "", "/scatter");
   mockSearchParams = new URLSearchParams();
   window.localStorage.clear();
 });
@@ -446,13 +444,14 @@ describe("ModelScatter", () => {
   });
 
   test("视图状态变更会写回 URL", () => {
+    const replaceStateSpy = vi.spyOn(window.history, "replaceState");
     renderScatter();
 
-    replaceMock.mockClear();
+    replaceStateSpy.mockClear();
     fireEvent.click(screen.getByRole("checkbox", { name: /帕累托前沿/ }));
 
-    expect(replaceMock).toHaveBeenCalled();
-    const lastUrl = replaceMock.mock.calls.at(-1)?.[0] as string;
+    expect(replaceStateSpy).toHaveBeenCalled();
+    const lastUrl = replaceStateSpy.mock.calls.at(-1)?.[2] as string;
     expect(lastUrl).toContain("pareto=0");
   });
 

@@ -949,7 +949,11 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
       });
   }
 
-  await invalidateChangedModelPricingCaches();
+  if (changedModels.length > 0) {
+    await invalidateChangedModelPricingCaches();
+  } else {
+    invalidateVersionedCacheStore(adminModelPricingRowsStore);
+  }
 
   const sourceModelCount = Array.from(sourceProviders.values()).reduce(
     (sum, provider) => sum + Object.keys(provider.models).length,

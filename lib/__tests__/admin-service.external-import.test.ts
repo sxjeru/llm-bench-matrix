@@ -22,6 +22,7 @@ type ExistingValueRow = {
   valueRaw: string;
   valueNum: string | null;
   valueNum2: string | null;
+  source: string | null;
 };
 
 type BenchmarkRow = {
@@ -34,6 +35,13 @@ type BenchmarkRow = {
   modalities: string[];
   mergedIntoBenchmarkId: number | null;
   sourceBenchmarkId: string | null;
+};
+
+type SourceMetaRow = {
+  benchmarkId: number;
+  source: string;
+  benchmarkType: string;
+  modalities: string[];
 };
 
 const PROVIDER_ROW = { id: 1, name: "OpenAI", slug: "openai" };
@@ -67,11 +75,13 @@ function createDbMock(
     existingValues?: ExistingValueRow[];
     /** 传入表示该 benchmark 已存在，ensureBenchmark 会复用它 */
     existingBenchmark?: BenchmarkRow | null;
+    existingSourceMeta?: SourceMetaRow[];
   }
 ) {
   const { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } = schema;
   const existingValues = options.existingValues ?? [];
   const existingBenchmark = options.existingBenchmark ?? null;
+  const existingSourceMeta = options.existingSourceMeta ?? [];
 
   const captured = {
     insertedValues: [] as Array<Record<string, unknown>>,
@@ -89,8 +99,16 @@ function createDbMock(
     return {
       from: vi.fn((table: unknown) => {
         // ① 事务开头拉全量 benchmark id，用来判断哪些是本次新建的
-        if (table === benchmarks && keys.length === 1 && keys[0] === "id") {
-          return Promise.resolve(existingBenchmark ? [{ id: existingBenchmark.id }] : []);
+        if (table === benchmarks && keys.includes("canonicalKey")) {
+          return Promise.resolve(existingBenchmark ? [existingBenchmark] : []);
+        }
+
+        if (table === providers && keys.includes("slug")) {
+          return Promise.resolve([PROVIDER_ROW]);
+        }
+
+        if (table === benchmarkSourceMeta) {
+          return { where: vi.fn().mockResolvedValue(existingSourceMeta) };
         }
 
         // ② 同源既有值
@@ -193,7 +211,9 @@ async function setup(options: Parameters<typeof createDbMock>[1] = {}) {
   const mock = createDbMock(schema, options);
   dbClientMock.db = mock.db;
   const { importExternalBenchmarkRows } = await import("@/lib/admin-service");
-  return { mock, importExternalBenchmarkRows };
+  const { revalidatePath } = await import("next/cache");
+  vi.mocked(revalidatePath).mockClear();
+  return { mock, importExternalBenchmarkRows, revalidatePath: vi.mocked(revalidatePath) };
 }
 
 const BASE_ROW = {
@@ -217,6 +237,7 @@ function existingValue(overrides: Partial<ExistingValueRow> = {}): ExistingValue
     valueRaw: "79.1",
     valueNum: "79.100000",
     valueNum2: null,
+    source: "text:Artificial Analysis",
     ...overrides
   };
 }
@@ -241,10 +262,16 @@ describe("importExternalBenchmarkRows", () => {
     expect(result.preview[0]).toMatchObject({ outcome: "inserted", previousValue: null });
   });
 
-  test("同源已有相同值时原地覆盖，不新增行", async () => {
-    const { mock, importExternalBenchmarkRows } = await setup({
+  test("同源已有相同值时不改写时间戳，也不失效公开缓存", async () => {
+    const { mock, importExternalBenchmarkRows, revalidatePath } = await setup({
       existingBenchmark: makeBenchmarkRow(),
-      existingValues: [existingValue({ valueRaw: "79.1", valueNum: "79.100000" })]
+      existingValues: [existingValue({ valueRaw: "79.1", valueNum: "79.100000" })],
+      existingSourceMeta: [{
+        benchmarkId: 20,
+        source: "text:Artificial Analysis",
+        benchmarkType: "Knowledge",
+        modalities: ["Text"]
+      }]
     });
 
     const result = await importExternalBenchmarkRows([{ ...BASE_ROW, rawValue: "79.1" }], {
@@ -254,15 +281,85 @@ describe("importExternalBenchmarkRows", () => {
     expect(result.unchanged).toBe(1);
     expect(result.inserted).toBe(0);
     expect(result.appended).toBe(0);
+    expect(result.publicChanged).toBe(false);
     expect(mock.captured.insertedValues).toHaveLength(0);
-    expect(mock.captured.touchedIds).toContain(501);
+    expect(mock.captured.touchedIds).not.toContain(501);
+    expect(mock.captured.sourceMetaRows).toHaveLength(0);
+    expect(revalidatePath).not.toHaveBeenCalled();
     expect(result.preview[0]).toMatchObject({ outcome: "unchanged", previousValue: "79.1" });
+  });
+
+  test("历史未加前缀的 source 在无变化同步时不误失效", async () => {
+    const { mock, importExternalBenchmarkRows, revalidatePath } = await setup({
+      existingBenchmark: makeBenchmarkRow(),
+      existingValues: [existingValue({ source: "Artificial Analysis" })],
+      existingSourceMeta: [{
+        benchmarkId: 20,
+        source: "Artificial Analysis",
+        benchmarkType: "Knowledge",
+        modalities: ["Text"]
+      }]
+    });
+
+    const result = await importExternalBenchmarkRows([{ ...BASE_ROW, rawValue: "79.1" }], {
+      source: "Artificial Analysis"
+    });
+
+    expect(result.publicChanged).toBe(false);
+    expect(mock.captured.sourceMetaRows).toHaveLength(0);
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  test("历史未加前缀的 source 元数据变化时更新原 source", async () => {
+    const { mock, importExternalBenchmarkRows } = await setup({
+      existingBenchmark: makeBenchmarkRow(),
+      existingValues: [existingValue({ source: "Artificial Analysis" })],
+      existingSourceMeta: [{
+        benchmarkId: 20,
+        source: "Artificial Analysis",
+        benchmarkType: "Old Type",
+        modalities: ["Text"]
+      }]
+    });
+
+    const result = await importExternalBenchmarkRows([{ ...BASE_ROW, rawValue: "79.1" }], {
+      source: "Artificial Analysis"
+    });
+
+    expect(result.publicChanged).toBe(true);
+    expect(mock.captured.sourceMetaRows[0]).toMatchObject({
+      source: "Artificial Analysis",
+      benchmarkType: "Knowledge"
+    });
+  });
+
+  test("数值相同但展示文本变化时保留原测评时间", async () => {
+    const { mock, importExternalBenchmarkRows, revalidatePath } = await setup({
+      existingBenchmark: makeBenchmarkRow(),
+      existingValues: [existingValue({ valueRaw: "79.100" })],
+      existingSourceMeta: [{
+        benchmarkId: 20,
+        source: "text:Artificial Analysis",
+        benchmarkType: "Knowledge",
+        modalities: ["Text"]
+      }]
+    });
+
+    const result = await importExternalBenchmarkRows([{ ...BASE_ROW, rawValue: "79.1" }], {
+      source: "Artificial Analysis",
+      benchTime: new Date("2026-08-17T00:00:00.000Z")
+    });
+
+    expect(result.unchanged).toBe(1);
+    expect(result.publicChanged).toBe(true);
+    expect(mock.captured.rewrites).toEqual([{ valueRaw: "79.1", valueNote: null }]);
+    expect(revalidatePath).toHaveBeenCalled();
   });
 
   test("小到一个最小刻度的差异也算值变化", async () => {
     // numeric(14,6) 是精确十进制，79.099999 与 79.1 是两个真实不同的值，
     // 容差只用来吸收浮点表示误差，不能把相邻刻度也吞掉
-    const { mock, importExternalBenchmarkRows } = await setup({
+    const { mock, importExternalBenchmarkRows, revalidatePath } = await setup({
       existingBenchmark: makeBenchmarkRow(),
       existingValues: [existingValue({ valueRaw: "79.099999", valueNum: "79.099999" })]
     });
@@ -273,7 +370,9 @@ describe("importExternalBenchmarkRows", () => {
 
     expect(result.appended).toBe(1);
     expect(result.unchanged).toBe(0);
+    expect(result.publicChanged).toBe(true);
     expect(mock.captured.insertedValues).toHaveLength(1);
+    expect(revalidatePath).toHaveBeenCalled();
   });
 
   test("上游小数换算带来的浮点尾巴不算值变化", async () => {

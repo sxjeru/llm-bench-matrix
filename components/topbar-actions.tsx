@@ -39,6 +39,7 @@ export function TopbarActions() {
             <Link
               key={href}
               href={href}
+              prefetch={false}
               className={`nav-link ${pathname === href ? "is-active" : ""}`}
               aria-current={pathname === href ? "page" : undefined}
               suppressHydrationWarning

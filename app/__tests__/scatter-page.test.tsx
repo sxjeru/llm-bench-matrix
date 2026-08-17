@@ -22,10 +22,6 @@ vi.mock("@/lib/db/queries", () => ({
 }));
 
 describe("ScatterPage", () => {
-  /**
-   * 与首页一致地走按需重新验证。改动这里就必须同步 invalidateAllCaches 的
-   * revalidatePath 覆盖范围，否则该页会一直停留在旧的静态输出上。
-   */
   test("使用按需重新验证", () => {
     expect(revalidate).toBe(false);
   });

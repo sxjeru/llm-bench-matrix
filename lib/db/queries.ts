@@ -58,6 +58,21 @@ export function registerCacheInvalidator(fn: () => void) {
 
 /** invalidateAllCaches 默认会 bump 的缓存版本域 */
 const ALL_CACHE_VERSION_DOMAINS: CacheVersionDomain[] = ["dashboard", "pricing", "admin_entities"];
+const PUBLIC_DASHBOARD_PATHS = ["/", "/scatter"] as const;
+
+function revalidatePublicDashboardPaths() {
+  for (const path of PUBLIC_DASHBOARD_PATHS) {
+    try {
+      revalidatePath(path, "page");
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("static generation store missing")) {
+        continue;
+      }
+
+      throw error;
+    }
+  }
+}
 
 /**
  * Clear dashboard caches after admin write operations
@@ -80,18 +95,7 @@ export async function invalidateAllCaches(options?: { skipVersionBump?: CacheVer
   const skipped = new Set(options?.skipVersionBump ?? []);
   await bumpCacheVersions(ALL_CACHE_VERSION_DOMAINS.filter((domain) => !skipped.has(domain)));
 
-  try {
-    // "/" 和 "/scatter" 都声明了 revalidate = false，且共用同一批 dashboard/价格/参数量数据。
-    // 单参数的 revalidatePath("/") 只作用于首页，会把 /scatter 留在陈旧的静态输出上，
-    // 故用 layout 形式一次覆盖 root layout 下的全部路由。
-    revalidatePath("/", "layout");
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("static generation store missing")) {
-      return;
-    }
-
-    throw error;
-  }
+  revalidatePublicDashboardPaths();
 }
 
 function normalizeSourceFilterKey(sourceFilter?: string | null): string {

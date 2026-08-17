@@ -4116,6 +4116,7 @@ export type ExternalImportResult = {
   unchanged: number;
   skipped: number;
   createdBenchmarks: string[];
+  publicChanged: boolean;
   benchTime: string;
   dryRun: boolean;
   preview: ExternalImportPreviewRow[];
@@ -4139,6 +4140,7 @@ type ExistingExternalValue = {
   valueRaw: string;
   valueNum: number | null;
   valueNum2: number | null;
+  source: string;
 };
 
 function toComparableNumber(value: unknown): number | null {
@@ -4157,6 +4159,10 @@ function isSameExternalValue(
   };
 
   return sameField(left.valueNum, right.valueNum) && sameField(left.valueNum2, right.valueNum2);
+}
+
+function areSameStringArrays(left: readonly string[], right: readonly string[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 /** `deleteBenchmarkValuesBySource` 同款：带 `text:` 前缀与不带的都要算作同一个来源 */
@@ -4183,7 +4189,7 @@ function buildSourceLookupCandidates(source: string): string[] {
  * 这里按 (model, benchmark, source) 找同源最新值：
  *
  * - 没有 → 插入
- * - 有且数值相同 → 原地刷新 bench_time，不新增行
+ * - 有且数值相同 → 仅在展示文本变化时原地改写，不新增行
  * - 有且数值不同 → 追加一行，旧行留作历史
  *
  * `dryRun` 走完全相同的判定逻辑后回滚，保证「预览」和「执行」不会走出两套结果。
@@ -4215,6 +4221,7 @@ export async function importExternalBenchmarkRows(
     unchanged: 0,
     skipped: rows.length,
     createdBenchmarks: [],
+    publicChanged: false,
     benchTime: benchTime.toISOString(),
     dryRun,
     preview: []
@@ -4230,8 +4237,27 @@ export async function importExternalBenchmarkRows(
       const modelCache = new Map<string, Awaited<ReturnType<typeof ensureModelByProviderId>>>();
       const benchmarkCache = new Map<string, typeof benchmarks.$inferSelect>();
 
-      const preexistingBenchmarkIds = new Set(
-        (await tx.select({ id: benchmarks.id }).from(benchmarks)).map((row) => row.id)
+      const [preexistingBenchmarkRows, preexistingProviderRows, existingSourceMetaRows] = await Promise.all([
+        tx.select({
+          id: benchmarks.id,
+          canonicalKey: benchmarks.canonicalKey,
+          higherIsBetter: benchmarks.higherIsBetter
+        }).from(benchmarks),
+        tx.select({ slug: providers.slug, name: providers.name }).from(providers),
+        tx
+          .select({
+            benchmarkId: benchmarkSourceMeta.benchmarkId,
+            source: benchmarkSourceMeta.source,
+            benchmarkType: benchmarkSourceMeta.benchmarkType,
+            modalities: benchmarkSourceMeta.modalities
+          })
+          .from(benchmarkSourceMeta)
+          .where(inArray(benchmarkSourceMeta.source, sourceCandidates))
+      ]);
+      const preexistingBenchmarkById = new Map(preexistingBenchmarkRows.map((row) => [row.id, row]));
+      const preexistingProviderNameBySlug = new Map(preexistingProviderRows.map((row) => [row.slug, row.name]));
+      const existingSourceMetaByKey = new Map(
+        existingSourceMetaRows.map((row) => [`${row.benchmarkId}::${row.source}`, row])
       );
 
       // 这里一次性把同源的全部历史行捞进内存，再在下面按槽位取最新一条。
@@ -4249,7 +4275,8 @@ export async function importExternalBenchmarkRows(
           benchTime: benchmarkValues.benchTime,
           valueRaw: benchmarkValues.valueRaw,
           valueNum: benchmarkValues.valueNum,
-          valueNum2: benchmarkValues.valueNum2
+          valueNum2: benchmarkValues.valueNum2,
+          source: benchmarkValues.source
         })
         .from(benchmarkValues)
         .where(inArray(benchmarkValues.source, sourceCandidates));
@@ -4265,12 +4292,12 @@ export async function importExternalBenchmarkRows(
           benchTime: row.benchTime,
           valueRaw: row.valueRaw,
           valueNum: toComparableNumber(row.valueNum),
-          valueNum2: toComparableNumber(row.valueNum2)
+          valueNum2: toComparableNumber(row.valueNum2),
+          source: row.source ?? normalizedSource
         });
       }
 
       const insertRows: Array<typeof benchmarkValues.$inferInsert> = [];
-      const touchOnlyIds: number[] = [];
       const rewriteRows: Array<{ id: number; valueRaw: string; valueNote: string | null }> = [];
       const sourceMetaUpsertMap = new Map<
         string,
@@ -4283,6 +4310,7 @@ export async function importExternalBenchmarkRows(
       let appended = 0;
       let unchanged = 0;
       let skipped = 0;
+      let publicChanged = false;
 
       const pushPreview = (row: ExternalImportPreviewRow) => {
         if (preview.length >= EXTERNAL_IMPORT_PREVIEW_LIMIT) return;
@@ -4313,6 +4341,9 @@ export async function importExternalBenchmarkRows(
         if (!provider) {
           provider = await ensureProvider(providerName, { db: tx });
           providerCache.set(providerKey, provider);
+          if (preexistingProviderNameBySlug.get(provider.slug) !== provider.name) {
+            publicChanged = true;
+          }
         }
 
         const modelCanonicalKey = buildModelCanonicalKey(modelName, dedupeRule);
@@ -4340,8 +4371,15 @@ export async function importExternalBenchmarkRows(
             { dedupeRule, db: tx }
           );
           benchmarkCache.set(benchmarkCacheKey, benchmark);
-          if (!preexistingBenchmarkIds.has(benchmark.id)) {
+          const preexistingBenchmark = preexistingBenchmarkById.get(benchmark.id);
+          if (!preexistingBenchmark) {
             createdBenchmarks.add(benchmark.benchmarkName);
+            publicChanged = true;
+          } else if (
+            preexistingBenchmark.canonicalKey !== benchmark.canonicalKey
+            || preexistingBenchmark.higherIsBetter !== benchmark.higherIsBetter
+          ) {
+            publicChanged = true;
           }
         }
 
@@ -4350,35 +4388,46 @@ export async function importExternalBenchmarkRows(
           parseBenchmarkValue(row.rawValue)
         );
 
-        sourceMetaUpsertMap.set(`${benchmark.id}::${normalizedSource}`, {
-          benchmarkId: benchmark.id,
-          source: normalizedSource,
-          benchmarkType,
-          modalities: normalizeModalities(row.modalities?.length ? row.modalities : [benchmarkType])
-        });
-
         const slotKey = `${model.id}:${benchmark.id}`;
         const existing = latestBySlot.get(slotKey);
         const nextValue = { valueNum: parsedValue.valueNum, valueNum2: parsedValue.valueNum2 };
+        const sameValue = existing ? isSameExternalValue(existing, nextValue) : false;
+        const sourceMetaSource = sameValue ? existing!.source : normalizedSource;
+        const sourceMetaKey = `${benchmark.id}::${sourceMetaSource}`;
+        const nextSourceMeta = {
+          benchmarkId: benchmark.id,
+          source: sourceMetaSource,
+          benchmarkType,
+          modalities: normalizeModalities(row.modalities?.length ? row.modalities : [benchmarkType])
+        };
+        const existingSourceMeta = existingSourceMetaByKey.get(sourceMetaKey);
+        if (
+          !existingSourceMeta
+          || existingSourceMeta.benchmarkType !== nextSourceMeta.benchmarkType
+          || !areSameStringArrays(existingSourceMeta.modalities, nextSourceMeta.modalities)
+        ) {
+          sourceMetaUpsertMap.set(sourceMetaKey, nextSourceMeta);
+          publicChanged = true;
+        }
 
-        if (existing && isSameExternalValue(existing, nextValue)) {
+        if (existing && sameValue) {
           unchanged += 1;
-          if (existing.valueRaw === parsedValue.valueRaw) {
-            touchOnlyIds.push(existing.id);
-          } else {
+          if (existing.valueRaw !== parsedValue.valueRaw) {
             rewriteRows.push({
               id: existing.id,
               valueRaw: parsedValue.valueRaw,
               valueNote: parsedValue.valueNote
             });
+            publicChanged = true;
           }
           // 同一批里若有第二行落到同一个槽位，让它跟刚写下的值比
           latestBySlot.set(slotKey, {
             id: existing.id,
-            benchTime,
+            benchTime: existing.benchTime,
             valueRaw: parsedValue.valueRaw,
             valueNum: parsedValue.valueNum,
-            valueNum2: parsedValue.valueNum2
+            valueNum2: parsedValue.valueNum2,
+            source: existing.source
           });
           pushPreview({
             modelName,
@@ -4407,6 +4456,7 @@ export async function importExternalBenchmarkRows(
         } else {
           inserted += 1;
         }
+        publicChanged = true;
 
         pushPreview({
           modelName,
@@ -4422,7 +4472,8 @@ export async function importExternalBenchmarkRows(
           benchTime,
           valueRaw: parsedValue.valueRaw,
           valueNum: parsedValue.valueNum,
-          valueNum2: parsedValue.valueNum2
+          valueNum2: parsedValue.valueNum2,
+          source: normalizedSource
         });
       }
 
@@ -4432,17 +4483,10 @@ export async function importExternalBenchmarkRows(
         await tx.insert(benchmarkValues).values(chunk);
       }
 
-      // 值没变的那批只需要刷新时间戳，合并成一条 UPDATE，避免每次同步几千条单行更新
-      for (let index = 0; index < touchOnlyIds.length; index += EXTERNAL_IMPORT_BATCH_SIZE) {
-        const chunk = touchOnlyIds.slice(index, index + EXTERNAL_IMPORT_BATCH_SIZE);
-        if (chunk.length === 0) continue;
-        await tx.update(benchmarkValues).set({ benchTime }).where(inArray(benchmarkValues.id, chunk));
-      }
-
       for (const rewrite of rewriteRows) {
         await tx
           .update(benchmarkValues)
-          .set({ benchTime, valueRaw: rewrite.valueRaw, valueNote: rewrite.valueNote })
+          .set({ valueRaw: rewrite.valueRaw, valueNote: rewrite.valueNote })
           .where(eq(benchmarkValues.id, rewrite.id));
       }
 
@@ -4472,6 +4516,7 @@ export async function importExternalBenchmarkRows(
         unchanged,
         skipped,
         createdBenchmarks: Array.from(createdBenchmarks),
+        publicChanged,
         benchTime: benchTime.toISOString(),
         dryRun,
         preview
@@ -4486,7 +4531,9 @@ export async function importExternalBenchmarkRows(
 
   try {
     const result = await runTransaction();
-    await invalidateAllCaches();
+    if (result.publicChanged) {
+      await invalidateAllCaches();
+    }
     return result;
   } catch (error) {
     if (error instanceof ExternalImportDryRunRollback) {

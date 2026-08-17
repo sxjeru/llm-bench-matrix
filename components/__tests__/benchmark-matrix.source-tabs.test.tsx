@@ -16,10 +16,43 @@ vi.mock("next/navigation", () => ({
 
 describe("BenchmarkMatrix source tabs", () => {
   beforeEach(() => {
+    window.history.replaceState(null, "", "/");
     window.localStorage.clear();
     for (const key of Array.from(mockSearchParams.keys())) {
       mockSearchParams.delete(key);
     }
+  });
+
+  test("切换 source 仅更新浏览器地址，不发起路由导航", async () => {
+    const replaceStateSpy = vi.spyOn(window.history, "replaceState");
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:Claude Opus 4.7"]}
+        rows={[
+          {
+            providerName: "Anthropic",
+            modelName: "Claude Opus 4.7",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "80",
+            valueNum: 80,
+            source: "text:Claude Opus 4.7"
+          }
+        ]}
+      />
+    );
+
+    replaceStateSpy.mockClear();
+    fireEvent.click(screen.getByRole("tab", { name: "Claude Opus 4.7" }));
+
+    await waitFor(() => {
+      expect(replaceStateSpy).toHaveBeenCalledWith(
+        null,
+        "",
+        "/?source=text%3AClaude+Opus+4.7"
+      );
+    });
   });
 
   test("同系列 source 页签按新版本优先排序（如 Qwen3.6 在 Qwen3.5 前，Claude Sonnet 5 在 Opus 4.8 前）", () => {

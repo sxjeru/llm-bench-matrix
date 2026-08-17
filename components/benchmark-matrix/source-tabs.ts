@@ -34,7 +34,6 @@ type UseMatrixSourceTabsOptions = {
   allSourceOptions: string[];
   isClientReady: boolean;
   pathname: string;
-  router: { replace: (href: string, options?: { scroll?: boolean }) => void };
   searchParams: Pick<URLSearchParams, "get" | "toString">;
   sourceNewReferenceTime: number | null;
   overflowSourceKeys: string[];
@@ -130,7 +129,6 @@ export function useMatrixSourceTabs({
   allSourceOptions,
   isClientReady,
   pathname,
-  router,
   searchParams,
   sourceNewReferenceTime,
   overflowSourceKeys,
@@ -403,7 +401,7 @@ export function useMatrixSourceTabs({
     const params = new URLSearchParams(searchParams.toString());
     const nextSourceParam = nextSource === SOURCE_ALL ? null : nextSource;
 
-    // 点击已选中的页签且 URL 已一致时，跳过 router.replace，避免无效的路由更新与重渲染
+    // 点击已选中的页签且 URL 已一致时，跳过无效的历史状态更新
     if (isSameSource && params.get("source") === nextSourceParam) return;
 
     if (nextSourceParam === null) {
@@ -413,7 +411,7 @@ export function useMatrixSourceTabs({
     }
 
     const query = params.toString();
-    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    window.history.replaceState(window.history.state, "", query ? `${pathname}?${query}` : pathname);
   }
 
   return {

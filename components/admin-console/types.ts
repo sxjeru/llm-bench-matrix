@@ -212,6 +212,7 @@ export type ExternalImportSummary = {
   unchanged: number;
   skipped: number;
   createdBenchmarks: string[];
+  publicChanged: boolean;
   createdModels: string[];
   matchedModelCount: number;
   metricCount: number;

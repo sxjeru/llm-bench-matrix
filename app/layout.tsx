@@ -31,7 +31,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <header className="topbar">
           <div className="container topbar-inner">
-            <Link href="/" className="brand" suppressHydrationWarning>
+            <Link href="/" prefetch={false} className="brand" suppressHydrationWarning>
               LLM Bench Matrix
             </Link>
             <TopbarActions />

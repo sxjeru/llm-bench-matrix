@@ -11,7 +11,7 @@ import {
   useState
 } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   Check,
   TriangleAlert
@@ -208,7 +208,6 @@ export function BenchmarkMatrix({
   const headerInteractionSuppressUntilRef = useRef(0);
   const exportPresetLoadedRef = useRef(false);
   const pathname = usePathname();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showCategory, setShowCategory] = useState(true);
@@ -367,7 +366,6 @@ export function BenchmarkMatrix({
     allSourceOptions,
     isClientReady,
     pathname,
-    router,
     searchParams,
     sourceNewReferenceTime,
     overflowSourceKeys,

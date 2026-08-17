@@ -9,8 +9,10 @@ export async function POST(request: Request) {
 
   try {
     const result = await syncModelsDevPricing();
-    // syncModelsDevPricing 内部已经 bump 过 "pricing"
-    await invalidateAllCaches({ skipVersionBump: ["pricing"] });
+    if (result.changedCount > 0) {
+      // syncModelsDevPricing 内部已经 bump 过 "pricing"
+      await invalidateAllCaches({ skipVersionBump: ["pricing"] });
+    }
     return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json(
