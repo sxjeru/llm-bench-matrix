@@ -1,10 +1,10 @@
 "use client";
 
-import { useOptionalDashboardSnapshot } from "@/components/dashboard-provider";
+import { useDashboardSnapshot } from "@/components/dashboard-provider";
 import { ModelScatter } from "@/components/model-scatter";
 
 export function HomeModelScatter() {
-  const { snapshot, isLoading, error } = useOptionalDashboardSnapshot();
+  const { snapshot, isLoading, error } = useDashboardSnapshot();
 
   if (!snapshot) {
     return (

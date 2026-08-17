@@ -1,10 +1,10 @@
 "use client";
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
-import { useOptionalDashboardSnapshot } from "@/components/dashboard-provider";
+import { useDashboardSnapshot } from "@/components/dashboard-provider";
 
 export function HomeBenchmarkMatrix() {
-  const { snapshot, isLoading, error } = useOptionalDashboardSnapshot();
+  const { snapshot, isLoading, error } = useDashboardSnapshot();
 
   if (!snapshot) {
     return (

@@ -1,9 +1,9 @@
 "use client";
 
-import { useOptionalDashboardSnapshot } from "@/components/dashboard-provider";
+import { useDashboardSnapshot } from "@/components/dashboard-provider";
 
 export function HomeMetrics() {
-  const { snapshot } = useOptionalDashboardSnapshot();
+  const { snapshot } = useDashboardSnapshot();
   const stats = snapshot?.stats;
 
   return (

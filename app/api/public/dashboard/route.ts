@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createRateLimiter, getRateLimitKey } from "@/lib/rate-limit";
 import { ifNoneMatchMatches } from "@/lib/http-etag";
-import { createPublicDashboardSnapshotEtag } from "@/lib/dashboard-snapshot-cache";
+import { createPublicDashboardSnapshotEtag, encodePublicDashboardSnapshot } from "@/lib/dashboard-snapshot-cache";
 import {
   getPublicDashboardSnapshotVersions,
   loadPublicDashboardSnapshot
@@ -54,5 +54,5 @@ export async function GET(request: Request) {
   }
 
   const snapshot = await loadPublicDashboardSnapshot(versions);
-  return NextResponse.json(snapshot, { headers });
+  return NextResponse.json(encodePublicDashboardSnapshot(snapshot), { headers });
 }

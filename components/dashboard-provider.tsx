@@ -8,12 +8,10 @@ import {
   type ReactNode
 } from "react";
 import {
-  createPublicDashboardSnapshotEtag,
-  getPublicDashboardSnapshotCacheKey,
-  type PublicDashboardSnapshot
+  decodePublicDashboardSnapshot,
+  type PublicDashboardSnapshot,
+  type PublicDashboardSnapshotWire
 } from "@/lib/dashboard-snapshot-cache";
-
-const SNAPSHOT_CACHE_KEY = getPublicDashboardSnapshotCacheKey();
 
 type DashboardSnapshotContextValue = {
   snapshot: PublicDashboardSnapshot | null;
@@ -23,71 +21,31 @@ type DashboardSnapshotContextValue = {
 
 const DashboardSnapshotContext = createContext<DashboardSnapshotContextValue | null>(null);
 
-function readCachedSnapshot(): PublicDashboardSnapshot | null {
-  if (typeof window === "undefined") return null;
-
-  try {
-    const raw = window.localStorage.getItem(SNAPSHOT_CACHE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as PublicDashboardSnapshot;
-  } catch {
-    return null;
-  }
-}
-
-function writeCachedSnapshot(snapshot: PublicDashboardSnapshot) {
-  try {
-    window.localStorage.setItem(SNAPSHOT_CACHE_KEY, JSON.stringify(snapshot));
-  } catch {
-    // Quota or private-mode failures should not block rendering.
-  }
-}
-
 export function DashboardProvider({ children }: { children: ReactNode }) {
   const [snapshot, setSnapshot] = useState<PublicDashboardSnapshot | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Provider 挂在 (public)/layout 上，矩阵页与散点图页互相切换时不会重挂，
+  // 因此整个会话只取一次快照；重访由浏览器 HTTP 缓存按 ETag 复用。
   useEffect(() => {
-    const cached = readCachedSnapshot();
-    if (cached) {
-      setSnapshot(cached);
-      setIsLoading(false);
-    }
-
     const controller = new AbortController();
 
     async function loadSnapshot() {
       try {
-        const headers = new Headers();
-        if (cached?.versions) {
-          headers.set("If-None-Match", createPublicDashboardSnapshotEtag(cached.versions));
-        }
-
-        const response = await fetch("/api/public/dashboard", {
-          headers,
-          signal: controller.signal
-        });
-
-        if (response.status === 304 && cached) {
-          setError(null);
-          setIsLoading(false);
-          return;
-        }
-
+        // 不手动带 If-None-Match：交给浏览器自己按 ETag revalidate，
+        // 命中 304 时它会直接复用磁盘上的压缩副本并以 200 交回完整 body。
+        const response = await fetch("/api/public/dashboard", { signal: controller.signal });
         if (!response.ok) {
           throw new Error(`Failed to load dashboard snapshot: ${response.status}`);
         }
 
-        const nextSnapshot = await response.json() as PublicDashboardSnapshot;
-        writeCachedSnapshot(nextSnapshot);
-        setSnapshot(nextSnapshot);
+        const wire = await response.json() as PublicDashboardSnapshotWire;
+        setSnapshot(decodePublicDashboardSnapshot(wire));
         setError(null);
       } catch (loadError) {
         if (controller.signal.aborted) return;
-        if (!cached) {
-          setError(loadError instanceof Error ? loadError.message : "Failed to load dashboard snapshot");
-        }
+        setError(loadError instanceof Error ? loadError.message : "Failed to load dashboard snapshot");
       } finally {
         if (!controller.signal.aborted) {
           setIsLoading(false);
@@ -106,22 +64,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useDashboardSnapshot(): PublicDashboardSnapshot {
+export function useDashboardSnapshot(): DashboardSnapshotContextValue {
   const value = useContext(DashboardSnapshotContext);
   if (!value) {
     throw new Error("useDashboardSnapshot must be used within DashboardProvider");
-  }
-  if (!value.snapshot) {
-    throw new Error("Dashboard snapshot is not ready");
-  }
-
-  return value.snapshot;
-}
-
-export function useOptionalDashboardSnapshot(): DashboardSnapshotContextValue {
-  const value = useContext(DashboardSnapshotContext);
-  if (!value) {
-    throw new Error("useOptionalDashboardSnapshot must be used within DashboardProvider");
   }
 
   return value;

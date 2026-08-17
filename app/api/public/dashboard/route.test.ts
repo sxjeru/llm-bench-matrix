@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { GET } from "@/app/api/public/dashboard/route";
+import {
+  decodePublicDashboardSnapshot,
+  encodePublicDashboardSnapshot
+} from "@/lib/dashboard-snapshot-cache";
 import { getPublicDashboardSnapshotVersions, loadPublicDashboardSnapshot } from "@/lib/dashboard-snapshot";
 
 vi.mock("@/lib/dashboard-snapshot", () => ({
@@ -53,7 +57,8 @@ describe("GET /api/public/dashboard", () => {
       pricing: "pricing-version",
       settings: "settings-version"
     });
-    expect(payload).toEqual(SNAPSHOT);
+    expect(payload).toEqual(encodePublicDashboardSnapshot(SNAPSHOT));
+    expect(decodePublicDashboardSnapshot(payload)).toEqual(SNAPSHOT);
     expect(response.headers.get("Cache-Control")).toBe("public, max-age=0, must-revalidate");
     expect(response.headers.get("CDN-Cache-Control")).toBe("public, s-maxage=300, stale-while-revalidate=3600");
     expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe("public, s-maxage=900, stale-while-revalidate=86400");

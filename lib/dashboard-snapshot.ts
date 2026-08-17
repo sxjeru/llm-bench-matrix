@@ -20,7 +20,8 @@ export { EXPORT_FOOTNOTE_ALIGNS };
 export type { ExportFootnoteAlign, PublicDashboardSnapshot, PublicDashboardSnapshotVersions };
 export {
   createPublicDashboardSnapshotEtag,
-  getPublicDashboardSnapshotCacheKey
+  encodePublicDashboardSnapshot,
+  decodePublicDashboardSnapshot
 } from "@/lib/dashboard-snapshot-cache";
 
 export type ParsedExportFootnote = {

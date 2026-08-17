@@ -5,7 +5,10 @@ import PublicDashboardLayout from "@/app/(public)/layout";
 import HomePage, { revalidate } from "@/app/(public)/page";
 import { DashboardProvider } from "@/components/dashboard-provider";
 import { getDashboardRows, getDashboardStats, getSourceOptions } from "@/lib/db/queries";
-import { getPublicDashboardSnapshotCacheKey, type PublicDashboardSnapshot } from "@/lib/dashboard-snapshot-cache";
+import {
+  encodePublicDashboardSnapshot,
+  type PublicDashboardSnapshot
+} from "@/lib/dashboard-snapshot-cache";
 
 vi.mock("@/components/benchmark-matrix", () => ({
   BenchmarkMatrix: () => <div data-testid="benchmark-matrix" />
@@ -71,7 +74,6 @@ function createSnapshot(overrides: Partial<PublicDashboardSnapshot> = {}): Publi
 
 describe("HomePage metrics", () => {
   afterEach(() => {
-    window.localStorage.clear();
     vi.unstubAllGlobals();
   });
 
@@ -79,9 +81,10 @@ describe("HomePage metrics", () => {
     expect(revalidate).toBe(false);
   });
 
-  test("统计卡片使用本地缓存的聚合统计结果而非 rows 子集", async () => {
-    window.localStorage.setItem(getPublicDashboardSnapshotCacheKey(), JSON.stringify(createSnapshot()));
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 304 })));
+  test("统计卡片使用聚合统计结果而非 rows 子集", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(
+      encodePublicDashboardSnapshot(createSnapshot())
+    )));
 
     render(
       <DashboardProvider>
