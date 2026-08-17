@@ -32,9 +32,17 @@ export function createPublicDashboardSnapshotEtag(versions: PublicDashboardSnaps
   return `"dashboard:${versions.dashboard}:${versions.pricing}:${versions.settings}"`;
 }
 
-/** 统计只由 dashboard 版本域决定，价格与设置的变动不该让这 4 个数字失效。 */
-export function createPublicDashboardStatsEtag(dashboardVersion: string) {
-  return `"dashboard-stats:${dashboardVersion}"`;
+/**
+ * 统计 ETag 按内容而非缓存版本生成。
+ *
+ * 用版本号的话每次请求都得先查一遍 settings 表拿版本，那一次远程往返就是这个
+ * 端点的全部延迟（实测约 100ms）；而 4 个整数本身就足够短，直接编进 ETag 后
+ * 命中进程内缓存的请求可以零数据库往返返回。附带好处是版本号变动但统计未变时
+ * 不再误失效。
+ */
+export function createPublicDashboardStatsEtag(stats: PublicDashboardStats) {
+  const { providerCount, modelCount, benchmarkCount, totalRecords } = stats;
+  return `"dashboard-stats:${providerCount}-${modelCount}-${benchmarkCount}-${totalRecords}"`;
 }
 
 /**

@@ -357,19 +357,37 @@ describe("encode/decodePublicDashboardSnapshot", () => {
 });
 
 describe("createPublicDashboardStatsEtag", () => {
-  test("只随 dashboard 版本变化，与快照 ETag 不会互相串味", () => {
-    const versions = {
+  const STATS = {
+    providerCount: 9,
+    modelCount: 18,
+    benchmarkCount: 27,
+    totalRecords: 36
+  };
+
+  test("按 4 个数字的取值生成，与快照 ETag 不会互相串味", () => {
+    const etag = createPublicDashboardStatsEtag(STATS);
+
+    expect(etag).toBe('"dashboard-stats:9-18-27-36"');
+    expect(etag).not.toBe(createPublicDashboardSnapshotEtag({
       dashboard: "dashboard-version",
       pricing: "pricing-version",
       settings: "settings-version"
-    };
+    }));
+  });
 
-    const statsEtag = createPublicDashboardStatsEtag(versions.dashboard);
+  test("统计不变则 ETag 稳定，任一数字变动都会失效", () => {
+    expect(createPublicDashboardStatsEtag({ ...STATS })).toBe(createPublicDashboardStatsEtag(STATS));
 
-    expect(statsEtag).toBe('"dashboard-stats:dashboard-version"');
-    expect(statsEtag).not.toBe(createPublicDashboardSnapshotEtag(versions));
-    // 价格与设置的变动不该让这 4 个数字失效
-    expect(createPublicDashboardStatsEtag(versions.dashboard)).toBe(statsEtag);
-    expect(createPublicDashboardStatsEtag("next-dashboard-version")).not.toBe(statsEtag);
+    for (const field of ["providerCount", "modelCount", "benchmarkCount", "totalRecords"] as const) {
+      expect(
+        createPublicDashboardStatsEtag({ ...STATS, [field]: STATS[field] + 1 })
+      ).not.toBe(createPublicDashboardStatsEtag(STATS));
+    }
+  });
+
+  test("不同字段的等量变化不会撞出同一个 ETag", () => {
+    // 拼接而非求和：providerCount 少 1、modelCount 多 1 必须是两个不同的 ETag
+    expect(createPublicDashboardStatsEtag({ ...STATS, providerCount: 8, modelCount: 19 }))
+      .not.toBe(createPublicDashboardStatsEtag(STATS));
   });
 });
