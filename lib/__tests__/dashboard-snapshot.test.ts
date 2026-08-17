@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { getCacheVersion } from "@/lib/cache-versions";
+import { createPublicDashboardSnapshotEtag } from "@/lib/dashboard-snapshot-cache";
 import { loadPublicDashboardSnapshot, parseExportFootnote, toPublicModelPrice } from "@/lib/dashboard-snapshot";
 import { getDashboardRows, getDashboardStats, getModelParamsRows, getSettings, getSourceOptions } from "@/lib/db/queries";
 import { getModelPricingRows } from "@/lib/model-pricing";
@@ -95,16 +96,26 @@ describe("loadPublicDashboardSnapshot", () => {
     expect(getDashboardStats).toHaveBeenCalledWith(null, "dashboard-version");
     expect(getModelPricingRows).toHaveBeenCalledWith("pricing-version");
     expect(getModelParamsRows).toHaveBeenCalledWith("dashboard-version");
+    expect(getCacheVersion).toHaveBeenCalledWith("settings");
   });
 
   test("调用方传入 versions 时不再探测缓存版本", async () => {
     await loadPublicDashboardSnapshot({
       dashboard: "forced-dashboard",
-      pricing: "forced-pricing"
+      pricing: "forced-pricing",
+      settings: "forced-settings"
     });
 
     expect(getCacheVersion).not.toHaveBeenCalled();
     expect(getDashboardRows).toHaveBeenCalledWith(null, null, "forced-dashboard");
     expect(getModelPricingRows).toHaveBeenCalledWith("forced-pricing");
+  });
+
+  test("快照 ETag 由三个版本域组成", () => {
+    expect(createPublicDashboardSnapshotEtag({
+      dashboard: "d1",
+      pricing: "p1",
+      settings: "s1"
+    })).toBe('"dashboard:d1:p1:s1"');
   });
 });

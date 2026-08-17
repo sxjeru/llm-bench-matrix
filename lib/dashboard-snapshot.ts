@@ -1,34 +1,27 @@
 import { toMatrixInputRow } from "@/components/benchmark-matrix/map-row";
-import type { MatrixInputRow, ModelParamsInfo, ModelPriceInfo } from "@/components/benchmark-matrix/types";
+import type { ModelPriceInfo } from "@/components/benchmark-matrix/types";
 import { getCacheVersion } from "@/lib/cache-versions";
 import {
   getDashboardRows,
   getDashboardStats,
   getModelParamsRows,
   getSettings,
-  getSourceOptions,
-  type DashboardStats
+  getSourceOptions
 } from "@/lib/db/queries";
 import { getModelPricingRows, type ModelPricingRow } from "@/lib/model-pricing";
+import {
+  EXPORT_FOOTNOTE_ALIGNS,
+  type ExportFootnoteAlign,
+  type PublicDashboardSnapshot,
+  type PublicDashboardSnapshotVersions
+} from "@/lib/dashboard-snapshot-cache";
 
-export const EXPORT_FOOTNOTE_ALIGNS = ["left", "center", "right"] as const;
-
-export type ExportFootnoteAlign = (typeof EXPORT_FOOTNOTE_ALIGNS)[number];
-
-export type PublicDashboardSnapshot = {
-  rows: MatrixInputRow[];
-  sourceOptions: string[];
-  stats: DashboardStats;
-  modelPrices: ModelPriceInfo[];
-  modelParams: ModelParamsInfo[];
-  exportFootnoteText?: string;
-  exportFootnoteAlign: ExportFootnoteAlign;
-};
-
-export type PublicDashboardSnapshotVersions = {
-  dashboard: string;
-  pricing: string;
-};
+export { EXPORT_FOOTNOTE_ALIGNS };
+export type { ExportFootnoteAlign, PublicDashboardSnapshot, PublicDashboardSnapshotVersions };
+export {
+  createPublicDashboardSnapshotEtag,
+  getPublicDashboardSnapshotCacheKey
+} from "@/lib/dashboard-snapshot-cache";
 
 export type ParsedExportFootnote = {
   exportFootnoteText?: string;
@@ -61,7 +54,7 @@ export function parseExportFootnote(rawFootnote: unknown): ParsedExportFootnote 
 export function toPublicModelPrice(row: Pick<
   ModelPricingRow,
   "modelId" | "modelName" | "inputCost" | "outputCost" | "cacheReadCost" | "lastSyncedAt" | "updatedAt"
->): ModelPriceInfo {
+>): PublicDashboardSnapshot["modelPrices"][number] {
   const mapped: ModelPriceInfo = {
     modelName: row.modelName,
     inputCost: row.inputCost,
@@ -85,12 +78,13 @@ export function toPublicModelPrice(row: Pick<
 }
 
 export async function getPublicDashboardSnapshotVersions(): Promise<PublicDashboardSnapshotVersions> {
-  const [dashboard, pricing] = await Promise.all([
+  const [dashboard, pricing, settings] = await Promise.all([
     getCacheVersion("dashboard"),
-    getCacheVersion("pricing")
+    getCacheVersion("pricing"),
+    getCacheVersion("settings")
   ]);
 
-  return { dashboard, pricing };
+  return { dashboard, pricing, settings };
 }
 
 export async function loadPublicDashboardSnapshot(
@@ -107,6 +101,7 @@ export async function loadPublicDashboardSnapshot(
   ]);
 
   return {
+    versions: resolved,
     rows: rows.map(toMatrixInputRow),
     sourceOptions,
     stats,

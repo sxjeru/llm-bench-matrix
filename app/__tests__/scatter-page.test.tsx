@@ -34,11 +34,12 @@ describe("ScatterPage", () => {
     expect(revalidate).toBe(false);
   });
 
-  test("公开布局读取全量矩阵数据，source 筛选交给客户端处理", async () => {
-    await PublicDashboardLayout({ children: <ScatterPage /> });
+  test("公开布局不再服务端读取矩阵数据", () => {
+    const layout = PublicDashboardLayout({ children: <ScatterPage /> });
 
-    expect(vi.mocked(getDashboardRows)).toHaveBeenCalledWith(null, null, expect.any(String));
-    expect(vi.mocked(getSourceOptions)).toHaveBeenCalledWith(expect.any(String));
-    expect(vi.mocked(getModelParamsRows)).toHaveBeenCalledWith(expect.any(String));
+    expect(layout).toBeTruthy();
+    expect(vi.mocked(getDashboardRows)).not.toHaveBeenCalled();
+    expect(vi.mocked(getSourceOptions)).not.toHaveBeenCalled();
+    expect(vi.mocked(getModelParamsRows)).not.toHaveBeenCalled();
   });
 });

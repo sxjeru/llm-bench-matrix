@@ -1,11 +1,20 @@
 "use client";
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
-import { useDashboardSnapshot } from "@/components/dashboard-provider";
+import { useOptionalDashboardSnapshot } from "@/components/dashboard-provider";
 
 export function HomeBenchmarkMatrix() {
-  const { rows, sourceOptions, modelPrices, modelParams, exportFootnoteText, exportFootnoteAlign } =
-    useDashboardSnapshot();
+  const { snapshot, isLoading, error } = useOptionalDashboardSnapshot();
+
+  if (!snapshot) {
+    return (
+      <div className="card" role="status">
+        {error ?? (isLoading ? "正在加载矩阵数据…" : "暂无矩阵数据")}
+      </div>
+    );
+  }
+
+  const { rows, sourceOptions, modelPrices, modelParams, exportFootnoteText, exportFootnoteAlign } = snapshot;
 
   return (
     <BenchmarkMatrix

@@ -1,11 +1,11 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, test, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import PublicDashboardLayout from "@/app/(public)/layout";
 import HomePage, { revalidate } from "@/app/(public)/page";
 import { DashboardProvider } from "@/components/dashboard-provider";
 import { getDashboardRows, getDashboardStats, getSourceOptions } from "@/lib/db/queries";
-import type { PublicDashboardSnapshot } from "@/lib/dashboard-snapshot";
+import { getPublicDashboardSnapshotCacheKey, type PublicDashboardSnapshot } from "@/lib/dashboard-snapshot-cache";
 
 vi.mock("@/components/benchmark-matrix", () => ({
   BenchmarkMatrix: () => <div data-testid="benchmark-matrix" />
@@ -54,6 +54,11 @@ const SNAPSHOT_STATS: PublicDashboardSnapshot["stats"] = {
 
 function createSnapshot(overrides: Partial<PublicDashboardSnapshot> = {}): PublicDashboardSnapshot {
   return {
+    versions: {
+      dashboard: "dashboard-version",
+      pricing: "pricing-version",
+      settings: "settings-version"
+    },
     rows: [],
     sourceOptions: ["text:only", "text:another"],
     stats: SNAPSHOT_STATS,
@@ -65,28 +70,39 @@ function createSnapshot(overrides: Partial<PublicDashboardSnapshot> = {}): Publi
 }
 
 describe("HomePage metrics", () => {
+  afterEach(() => {
+    window.localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
   test("首页使用按需重新验证", () => {
     expect(revalidate).toBe(false);
   });
 
-  test("统计卡片使用聚合统计结果而非 rows 子集", () => {
+  test("统计卡片使用本地缓存的聚合统计结果而非 rows 子集", async () => {
+    window.localStorage.setItem(getPublicDashboardSnapshotCacheKey(), JSON.stringify(createSnapshot()));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 304 })));
+
     render(
-      <DashboardProvider snapshot={createSnapshot()}>
+      <DashboardProvider>
         <HomePage />
       </DashboardProvider>
     );
 
-    expect(screen.getByText("Providers").parentElement).toHaveTextContent("9");
+    await waitFor(() => {
+      expect(screen.getByText("Providers").parentElement).toHaveTextContent("9");
+    });
     expect(screen.getByText("Models").parentElement).toHaveTextContent("18");
     expect(screen.getByText("Benchmarks").parentElement).toHaveTextContent("27");
     expect(screen.getByText("总记录").parentElement).toHaveTextContent("36");
   });
 
-  test("公开布局读取全量矩阵数据，source 筛选交给客户端处理", async () => {
-    await PublicDashboardLayout({ children: <div /> });
+  test("公开布局不再服务端读取矩阵数据", () => {
+    const layout = PublicDashboardLayout({ children: <div /> });
 
-    expect(vi.mocked(getDashboardRows)).toHaveBeenCalledWith(null, null, expect.any(String));
-    expect(vi.mocked(getDashboardStats)).toHaveBeenCalledWith(null, expect.any(String));
-    expect(vi.mocked(getSourceOptions)).toHaveBeenCalledWith(expect.any(String));
+    expect(layout).toBeTruthy();
+    expect(vi.mocked(getDashboardRows)).not.toHaveBeenCalled();
+    expect(vi.mocked(getDashboardStats)).not.toHaveBeenCalled();
+    expect(vi.mocked(getSourceOptions)).not.toHaveBeenCalled();
   });
 });
