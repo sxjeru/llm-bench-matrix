@@ -1,9 +1,12 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { Analytics } from "@vercel/analytics/next";
+import { GithubStarBadge } from "@/components/github-star-badge";
 import { TopbarActions } from "@/components/topbar-actions";
 import { UmamiAnalytics } from "@/components/umami-analytics";
 import { VercountPageview } from "@/components/vercount-pageview";
+import { GITHUB_REPO_URL } from "@/lib/github-stars";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -31,9 +34,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <header className="topbar">
           <div className="container topbar-inner">
-            <Link href="/" prefetch={false} className="brand" suppressHydrationWarning>
-              LLM Bench Matrix
-            </Link>
+            <div className="brand-group">
+              <Link href="/" prefetch={false} className="brand" suppressHydrationWarning>
+                LLM Bench Matrix
+              </Link>
+              <Suspense fallback={null}>
+                <GithubStarBadge />
+              </Suspense>
+            </div>
             <TopbarActions />
           </div>
         </header>
@@ -61,7 +69,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 Crafted with <span className="footnote-heart">♥</span> by {" "}
                 <a
                   className="site-footnote-link"
-                  href="https://github.com/sxjeru/llm-bench-matrix"
+                  href={GITHUB_REPO_URL}
                   target="_blank"
                   rel="noreferrer"
                   suppressHydrationWarning

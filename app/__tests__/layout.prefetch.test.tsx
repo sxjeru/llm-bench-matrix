@@ -1,7 +1,8 @@
-import { isValidElement, type ReactElement, type ReactNode } from "react";
+import { isValidElement, Suspense, type ReactElement, type ReactNode } from "react";
 import { describe, expect, test } from "vitest";
 
 import RootLayout from "@/app/layout";
+import { GithubStarBadge } from "@/components/github-star-badge";
 
 function findElementByClassName(node: ReactNode, className: string): ReactElement<Record<string, unknown>> | null {
   if (Array.isArray(node)) {
@@ -26,5 +27,18 @@ describe("RootLayout prefetch", () => {
     expect(brandLink).not.toBeNull();
     expect(brandLink?.props.href).toBe("/");
     expect(brandLink?.props.prefetch).toBe(false);
+  });
+
+  test("标题右侧挂载 GitHub star 徽标", () => {
+    const layout = RootLayout({ children: <div>content</div> });
+    const brandGroup = findElementByClassName(layout, "brand-group");
+    const children = Array.isArray(brandGroup?.props.children)
+      ? brandGroup.props.children
+      : [];
+    const suspense = children.find((child) => isValidElement(child) && child.type === Suspense);
+
+    expect(brandGroup).not.toBeNull();
+    expect(suspense).toBeDefined();
+    expect((suspense as ReactElement<{ children?: ReactNode }>).props.children).toEqual(<GithubStarBadge />);
   });
 });
