@@ -63,6 +63,7 @@ import {
   pickPreferredBenchmarkDisplayName,
   resolveMatrixCellAggregateModeFromEntries
 } from "./utils";
+import type { SourceValueMode } from "./utils";
 
 /** AA 默认排序里沉底的分类：能力评测优先，性能与成本放后 */
 const AA_SECONDARY_CATEGORY_SET = new Set(["cost", "performance"]);
@@ -935,7 +936,8 @@ export function buildMatrixRows(
   coveragePrunedRows: MatrixInputRow[],
   showDuplicateRows: boolean,
   displaySourceValuesInCells: boolean,
-  activeSource: string
+  activeSource: string,
+  sourceValueMode: SourceValueMode = "latest"
 ): MatrixRow[] {
   const matrixMap = new Map<
     string,
@@ -1098,7 +1100,7 @@ export function buildMatrixRows(
         // 目前 Source 原值展示并非只认当前 activeSource：当前 source 无记录时会回退到跨 source 的最优值；
         // 命中当前 source 时，多次导入取最新一条（见 getSourceValueEntry）
         const sourceEntry = displaySourceValuesInCells && hasMeaningfulMultipleValues
-          ? getSourceValueEntry(uniqueEntries, activeSource, matrixRow.higherIsBetter)
+          ? getSourceValueEntry(uniqueEntries, activeSource, matrixRow.higherIsBetter, sourceValueMode)
           : null;
         // Artificial Analysis 默认展示最新值；其余 source 仍用中位数
         const aggregate = aggregateMatrixCellEntries(

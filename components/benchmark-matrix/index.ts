@@ -73,6 +73,7 @@ export {
   getSourceValueEntry,
   getSourceValueDeltaRaw,
   getSourceValueDisplayItem,
+  type SourceValueMode,
   parseTimestampMs,
   getSourceKey,
   getSourceLabel,

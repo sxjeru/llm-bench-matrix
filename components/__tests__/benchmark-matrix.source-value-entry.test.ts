@@ -39,6 +39,15 @@ describe("同 source 多次导入的原始值取值", () => {
     expect(getSourceValueEntry(entries, "text:S1", false)?.valueRaw).toBe("12");
   });
 
+  test("最大值模式取当前 source 多条记录中的最大值", () => {
+    const entries = [
+      makeEntry({ valueRaw: "80", benchTime: "2026-05-01T00:00:00.000Z", recordId: 2 }),
+      makeEntry({ valueRaw: "85", benchTime: "2026-04-01T00:00:00.000Z", recordId: 1 })
+    ];
+
+    expect(getSourceValueEntry(entries, "text:S1", false, "max")?.valueRaw).toBe("85");
+  });
+
   test("最新一条是占位值时跳过，取最新的有效记录", () => {
     const entries = [
       makeEntry({ valueRaw: "N/A", benchTime: "2026-05-01T00:00:00.000Z", recordId: 3 }),

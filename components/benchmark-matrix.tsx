@@ -128,7 +128,8 @@ import {
   enqueueStateUpdate,
   getSourceValueDeltaRaw,
   getSourceValueDisplayItem,
-  getSourceKey
+  getSourceKey,
+  type SourceValueMode
 } from "./benchmark-matrix/index";
 
 const PRICE_ROW_KEY_SET = new Set([
@@ -213,6 +214,7 @@ export function BenchmarkMatrix({
   const [showCategory, setShowCategory] = useState(true);
   const [showDuplicateRows, setShowDuplicateRows] = useState(false);
   const [showSourceValues, setShowSourceValues] = useState(false);
+  const [showSourceValueMax, setShowSourceValueMax] = useState(false);
   const [showSourceValueDeltas, setShowSourceValueDeltas] = useState(false);
   const [showPriceRows, setShowPriceRows] = useState(false);
   const [showParamsRows, setShowParamsRows] = useState(false);
@@ -378,6 +380,7 @@ export function BenchmarkMatrix({
   });
 
   const displaySourceValuesInCells = showSourceValues && hasSourceData && activeSource !== SOURCE_ALL;
+  const sourceValueMode: SourceValueMode = showSourceValueMax ? "max" : "latest";
   const displaySourceValueDeltasInCells = displaySourceValuesInCells && showSourceValueDeltas;
   const effectiveShowPriceRows = showPriceRows && modelPrices.length > 0;
   const hasParamsData = modelParams.length > 0;
@@ -898,8 +901,8 @@ export function BenchmarkMatrix({
   );
 
   const matrixRows = useMemo(
-    () => buildMatrixRows(baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource),
-    [baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource]
+    () => buildMatrixRows(baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource, sourceValueMode),
+    [baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource, sourceValueMode]
   );
 
   function getRowSortCycle(): RowSortMode[] {
@@ -1233,6 +1236,7 @@ export function BenchmarkMatrix({
     coveragePrunedRows,
     showDuplicateRows,
     displaySourceValuesInCells,
+    sourceValueMode,
     displaySourceValueDeltasInCells,
     activeSource,
     activeSourceRef,
@@ -1520,6 +1524,7 @@ export function BenchmarkMatrix({
         setParamsRowsInOverall={setParamsRowsInOverall}
         hasSourceData={hasSourceData}
         displaySourceValuesInCells={displaySourceValuesInCells}
+        displaySourceValueMax={showSourceValueMax}
         onSourceValuesButtonClick={(event) => {
           if (isCompareModifierClick(event)) {
             event.preventDefault();
@@ -1528,10 +1533,18 @@ export function BenchmarkMatrix({
             return;
           }
 
+          if (event.shiftKey) {
+            event.preventDefault();
+            setShowSourceValues(true);
+            setShowSourceValueMax((prev) => !prev);
+            return;
+          }
+
           setShowSourceValues((prev) => {
             const next = !prev;
             if (!next) {
               setShowSourceValueDeltas(false);
+              setShowSourceValueMax(false);
             }
             return next;
           });
@@ -2190,10 +2203,10 @@ export function BenchmarkMatrix({
                     const hasMultipleActiveSourceValues = cell?.hasMultipleActiveSourceValues ?? false;
                     const uniqueEntries = cell?.uniqueEntries ?? [];
                     const sourceValueItem = displaySourceValuesInCells && cell?.hasMeaningfulMultipleValues
-                      ? getSourceValueDisplayItem(uniqueEntries, activeSource, matrixRow.higherIsBetter)
+                      ? getSourceValueDisplayItem(uniqueEntries, activeSource, matrixRow.higherIsBetter, sourceValueMode)
                       : null;
                     const sourceValueDeltaRaw = displaySourceValueDeltasInCells && cell?.hasMeaningfulMultipleValues
-                      ? getSourceValueDeltaRaw(cell.allEntries, activeSource, matrixRow.higherIsBetter)
+                      ? getSourceValueDeltaRaw(cell.allEntries, activeSource, matrixRow.higherIsBetter, sourceValueMode)
                       : null;
                     const shouldRenderSourceValues = Boolean(sourceValueItem);
                     // 展示 source 原值时，tooltip 收敛到当前 source 的记录，与单元格里的取值范围一致

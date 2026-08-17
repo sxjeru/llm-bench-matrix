@@ -46,7 +46,8 @@ import {
   getMatrixGroupingKey,
   getModelColumnWidthKey,
   getSourceValueDeltaRaw,
-  getSourceValueDisplayItem
+  getSourceValueDisplayItem,
+  type SourceValueMode
 } from "./utils";
 import { isSourceHeaderPrefixMatch } from "./model-matching";
 
@@ -85,6 +86,7 @@ type BuildAutoModelWidthMapOptions = {
   displaySourceValuesInCells: boolean;
   displaySourceValueDeltasInCells: boolean;
   activeSource: string;
+  sourceValueMode: SourceValueMode;
 };
 
 type BuildModelColumnMetaOptions = {
@@ -150,7 +152,8 @@ export function buildAutoModelWidthMap({
   showDuplicateRows,
   displaySourceValuesInCells,
   displaySourceValueDeltasInCells,
-  activeSource
+  activeSource,
+  sourceValueMode
 }: BuildAutoModelWidthMapOptions): Map<string, number> {
   const map = new Map<string, number>();
   const valueWidthByModel = new Map<string, number>();
@@ -227,10 +230,10 @@ export function buildAutoModelWidthMap({
     const questionMarkPadding = hasMeaningfulMultipleValues || noteText.length > 0 ? 16 : 0;
     const groupHigherIsBetter = higherIsBetterByGroup.get(groupKey) ?? true;
     const sourceValueItem = hasMeaningfulMultipleValues
-      ? getSourceValueDisplayItem(uniqueEntries, activeSource, groupHigherIsBetter)
+      ? getSourceValueDisplayItem(uniqueEntries, activeSource, groupHigherIsBetter, sourceValueMode)
       : null;
     const sourceDeltaRaw = displaySourceValueDeltasInCells && hasMeaningfulMultipleValues
-      ? getSourceValueDeltaRaw(uniqueEntries, activeSource, groupHigherIsBetter)
+      ? getSourceValueDeltaRaw(uniqueEntries, activeSource, groupHigherIsBetter, sourceValueMode)
       : null;
     const sourceDeltaPadding = sourceDeltaRaw !== null
       ? Math.min(28, 9 + formatComparisonDeltaValue(sourceDeltaRaw).length * 3)
@@ -542,6 +545,7 @@ export function useMatrixColumnWidths({
   displaySourceValuesInCells,
   displaySourceValueDeltasInCells,
   activeSource,
+  sourceValueMode,
   activeSourceRef,
   activeColumnWidthMap,
   setActiveColumnWidthMap,
@@ -562,9 +566,10 @@ export function useMatrixColumnWidths({
       showDuplicateRows,
       displaySourceValuesInCells,
       displaySourceValueDeltasInCells,
-      activeSource
+      activeSource,
+      sourceValueMode
     }),
-    [modelColumns, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, displaySourceValueDeltasInCells, activeSource]
+    [modelColumns, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, displaySourceValueDeltasInCells, activeSource, sourceValueMode]
   );
 
   useEffect(() => {

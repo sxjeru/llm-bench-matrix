@@ -76,6 +76,7 @@ type TopControlsProps = {
   setParamsRowsInOverall: Dispatch<SetStateAction<boolean>>;
   hasSourceData: boolean;
   displaySourceValuesInCells: boolean;
+  displaySourceValueMax: boolean;
   onSourceValuesButtonClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 };
 
@@ -189,6 +190,7 @@ export function BenchmarkMatrixTopControls({
   setParamsRowsInOverall,
   hasSourceData,
   displaySourceValuesInCells,
+  displaySourceValueMax,
   onSourceValuesButtonClick
 }: TopControlsProps) {
   const renderSourceTabLabel = (source: SourceOption) => (
@@ -565,11 +567,11 @@ export function BenchmarkMatrixTopControls({
           <button
             type="button"
             className="btn btn-xs btn-ghost"
-            title="普通点击切换当前 source 最新值；按住 Ctrl 点击切换差值徽标"
+            title="普通点击切换当前 source 最新值；按住 Shift 点击切换多条记录最大值；按住 Ctrl 点击切换差值徽标"
             onClick={onSourceValuesButtonClick}
           >
-            {displaySourceValuesInCells ? <Eye size={14} /> : <EyeOff size={14} />}
-            显示原始值
+            {displaySourceValuesInCells || displaySourceValueMax ? <Eye size={14} /> : <EyeOff size={14} />}
+            {displaySourceValueMax ? "显示最大值" : "显示原始值"}
           </button>
         ) : null}
       </div>

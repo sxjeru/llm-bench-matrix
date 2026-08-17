@@ -463,6 +463,24 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(deltaBadge).toBeNull();
   });
 
+  test("按住 Shift 点击原始值后，显示当前 source 多条记录中的最大值", async () => {
+    const user = userEvent.setup();
+
+    render(<BenchmarkMatrix rows={[...repeatedSourceImportRows]} sourceOptions={["text:S1", "text:S2"]} />);
+
+    await user.click(screen.getByRole("tab", { name: "S1" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "显示原始值" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "显示原始值" }), { shiftKey: true });
+
+    expect(screen.getByRole("button", { name: "显示最大值" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "显示最大值" }).querySelector("svg")).toBeInTheDocument();
+    expect(screen.getByText("85")).toBeInTheDocument();
+    expect(screen.queryByText("80")).not.toBeInTheDocument();
+  });
+
   test("开启原始值后，同 source 多条记录仍保留问号与 tooltip", async () => {
     const user = userEvent.setup();
 

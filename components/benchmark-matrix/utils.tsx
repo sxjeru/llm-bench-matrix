@@ -122,6 +122,7 @@ export type MatrixCellAggregateValues = {
 };
 
 export type MatrixCellAggregateMode = "median" | "latest";
+export type SourceValueMode = "latest" | "max";
 
 function isPairMatrixCellEntry(entry: MatrixCellEntry): boolean {
   return entry.valueNum2 !== null || hasMatrixCellPairRawValue(entry.valueRaw);
@@ -291,17 +292,34 @@ export function getLatestMatrixCellEntry(entries: MatrixCellEntry[]): MatrixCell
   );
 }
 
-export function getSourceValueEntry(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): MatrixCellEntry | null {
+export function getSourceValueEntry(
+  entries: MatrixCellEntry[],
+  activeSource: string,
+  higherIsBetter = true,
+  mode: SourceValueMode = "latest"
+): MatrixCellEntry | null {
   if (activeSource === SOURCE_ALL) {
     return getPreferredMatrixCellEntry(entries, higherIsBetter);
   }
   const filtered = entries.filter((item) => getSourceKey(item.source) === activeSource);
+  if (mode === "max") {
+    return filtered.reduce<MatrixCellEntry | null>((maximum, entry) => {
+      if (entry.valueNum === null || !Number.isFinite(entry.valueNum)) return maximum;
+      if (!maximum || maximum.valueNum === null || !Number.isFinite(maximum.valueNum)) return entry;
+      return entry.valueNum > maximum.valueNum ? entry : maximum;
+    }, null) ?? getLatestMatrixCellEntry(filtered);
+  }
   // 同一 source 下多次导入时取最新一次，而非指标方向上的最优值
   return getLatestMatrixCellEntry(filtered);
 }
 
-export function getSourceValueDeltaRaw(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): number | null {
-  const sourceEntry = getSourceValueEntry(entries, activeSource, higherIsBetter);
+export function getSourceValueDeltaRaw(
+  entries: MatrixCellEntry[],
+  activeSource: string,
+  higherIsBetter = true,
+  mode: SourceValueMode = "latest"
+): number | null {
+  const sourceEntry = getSourceValueEntry(entries, activeSource, higherIsBetter, mode);
   const aggregate = aggregateMatrixCellEntries(entries, higherIsBetter);
 
   if (!sourceEntry || sourceEntry.valueNum === null || aggregate.valueNum === null) {
@@ -316,8 +334,13 @@ export function getSourceValueDeltaRaw(entries: MatrixCellEntry[], activeSource:
   return delta;
 }
 
-export function getSourceValueDisplayItem(entries: MatrixCellEntry[], activeSource: string, higherIsBetter = true): SourceValueDisplayItem | null {
-  const entry = getSourceValueEntry(entries, activeSource, higherIsBetter);
+export function getSourceValueDisplayItem(
+  entries: MatrixCellEntry[],
+  activeSource: string,
+  higherIsBetter = true,
+  mode: SourceValueMode = "latest"
+): SourceValueDisplayItem | null {
+  const entry = getSourceValueEntry(entries, activeSource, higherIsBetter, mode);
 
   if (!entry) {
     return null;
