@@ -304,6 +304,7 @@ describe("ExternalImportTab", () => {
         unchanged: 1,
         skipped: 0,
         createdBenchmarks: ["MMLU-Pro"],
+        publicChanged: true,
         createdModels: [],
         matchedModelCount: 1,
         metricCount: 1,
