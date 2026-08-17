@@ -652,7 +652,7 @@ async function getActiveModelRows(): Promise<DbModel[]> {
   });
 }
 
-export async function getModelPricingRows(): Promise<ModelPricingRow[]> {
+export async function getModelPricingRows(forceVersion?: string): Promise<ModelPricingRow[]> {
   return withVersionedCache(
     modelPricingRowsStore,
     "all",
@@ -660,7 +660,8 @@ export async function getModelPricingRows(): Promise<ModelPricingRow[]> {
       versionProbeTtlMs: MODEL_PRICING_VERSION_PROBE_TTL_MS,
       staleIfErrorMs: MODEL_PRICING_STALE_IF_ERROR_MS,
       getVersion: getModelPricingCacheVersion,
-      loader: loadModelPricingRows
+      loader: loadModelPricingRows,
+      forceVersion
     }
   );
 }

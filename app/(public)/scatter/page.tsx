@@ -1,7 +1,4 @@
-import { ModelScatter } from "@/components/model-scatter";
-import { toMatrixInputRow } from "@/components/benchmark-matrix/map-row";
-import { getDashboardRows, getModelParamsRows, getSourceOptions } from "@/lib/db/queries";
-import { getModelPricingRows } from "@/lib/model-pricing";
+import { HomeModelScatter } from "@/components/home-model-scatter";
 import type { Metadata } from "next";
 import { Suspense } from "react";
 
@@ -13,16 +10,7 @@ export const metadata: Metadata = {
     "在二维平面上比较大模型：任选两个指标作为横纵轴，叠加帕累托前沿，快速找出同等价位或同等参数量下不被压制的模型。"
 };
 
-export default async function ScatterPage() {
-  const [rows, sourceOptions, modelPrices, modelParams] = await Promise.all([
-    getDashboardRows(null, null),
-    getSourceOptions(),
-    getModelPricingRows(),
-    getModelParamsRows()
-  ]);
-
-  const mappedRows = rows.map(toMatrixInputRow);
-
+export default function ScatterPage() {
   return (
     <>
       <section className="sr-only">
@@ -34,12 +22,7 @@ export default async function ScatterPage() {
       </section>
 
       <Suspense fallback={null}>
-        <ModelScatter
-          rows={mappedRows}
-          sourceOptions={sourceOptions}
-          modelPrices={modelPrices}
-          modelParams={modelParams}
-        />
+        <HomeModelScatter />
       </Suspense>
     </>
   );

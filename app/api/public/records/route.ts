@@ -4,13 +4,16 @@ import { toMatrixInputRow } from "@/components/benchmark-matrix/map-row";
 import { getDashboardRows } from "@/lib/db/queries";
 import { createRateLimiter, getRateLimitKey } from "@/lib/rate-limit";
 import { getCacheVersion } from "@/lib/cache-versions";
+import { ifNoneMatchMatches } from "@/lib/http-etag";
+import {
+  PUBLIC_CACHE_CONTROL_BROWSER,
+  PUBLIC_CACHE_CONTROL_CDN,
+  PUBLIC_CACHE_CONTROL_VERCEL,
+  PUBLIC_NO_STORE_CACHE_CONTROL
+} from "../cache-headers";
 
 // 60 requests per IP per 60-second window
 const limiter = createRateLimiter(60, 60_000);
-const CACHE_CONTROL_BROWSER = "public, max-age=0, must-revalidate";
-// 数据仅在后台写入后变化；长 CDN TTL + 版本 ETag，减少 origin 回源流量
-const CACHE_CONTROL_CDN = "public, s-maxage=300, stale-while-revalidate=3600";
-const CACHE_CONTROL_VERCEL = "public, s-maxage=900, stale-while-revalidate=86400";
 
 function normalizeRequestedLimit(value: string | null) {
   const limitRaw = Number.parseInt(value || "300", 10);
@@ -32,25 +35,6 @@ function createRecordsEtag(dashboardVersion: string, pricingVersion: string, req
   return `"records:${dashboardVersion}:${pricingVersion}:limit:${requestedLimit}:${hash}"`;
 }
 
-function normalizeEtagToken(token: string) {
-  return token.trim().replace(/^W\//, "");
-}
-
-function ifNoneMatchMatches(ifNoneMatchHeader: string | null, etag: string) {
-  if (!ifNoneMatchHeader) return false;
-
-  const trimmedHeader = ifNoneMatchHeader.trim();
-  if (trimmedHeader === "*") return true;
-
-  const normalizedEtag = normalizeEtagToken(etag);
-  const tokens = trimmedHeader.match(/(?:W\/)?"[^\"]*"|\*/g) ?? [];
-
-  return tokens.some((token) => {
-    if (token === "*") return true;
-    return normalizeEtagToken(token) === normalizedEtag;
-  });
-}
-
 export async function GET(request: Request) {
   const clientKey = getRateLimitKey(request);
   const rateLimit = limiter.check(clientKey);
@@ -61,7 +45,7 @@ export async function GET(request: Request) {
       {
         status: 429,
         headers: {
-          "Cache-Control": "private, no-store, no-cache, must-revalidate, max-age=0",
+          "Cache-Control": PUBLIC_NO_STORE_CACHE_CONTROL,
           "Retry-After": String(Math.ceil(rateLimit.retryAfterMs / 1000)),
           "X-RateLimit-Remaining": "0"
         }
@@ -81,9 +65,9 @@ export async function GET(request: Request) {
   const etag = createRecordsEtag(dashboardVersion, pricingVersion, limit);
 
   const headers = {
-    "Cache-Control": CACHE_CONTROL_BROWSER,
-    "CDN-Cache-Control": CACHE_CONTROL_CDN,
-    "Vercel-CDN-Cache-Control": CACHE_CONTROL_VERCEL,
+    "Cache-Control": PUBLIC_CACHE_CONTROL_BROWSER,
+    "CDN-Cache-Control": PUBLIC_CACHE_CONTROL_CDN,
+    "Vercel-CDN-Cache-Control": PUBLIC_CACHE_CONTROL_VERCEL,
     "X-Dashboard-Version": dashboardVersion,
     "X-Pricing-Version": pricingVersion,
     ETag: etag,

@@ -26,8 +26,12 @@ import { HeatmapPanel } from "./benchmark-matrix/heatmap-panel";
 import { useMatrixImageActions } from "./benchmark-matrix/image-actions";
 import { ModelFilterPanel } from "./benchmark-matrix/model-filter-panel";
 import {
-  MatrixCellTooltip,
-  OverallScoreTooltip
+  MatrixCellTooltipHost,
+  OverallScoreTooltipHost,
+  type CellTooltip,
+  type CellTooltipHandle,
+  type OverallTooltip,
+  type OverallTooltipHandle
 } from "./benchmark-matrix/tooltips";
 import { BenchmarkMatrixTopControls } from "./benchmark-matrix/top-controls";
 import {
@@ -70,8 +74,7 @@ import {
 } from "./benchmark-matrix/selectors";
 import { useMatrixSourceTabs } from "./benchmark-matrix/source-tabs";
 import {
-  type MatrixCellEntry,
-  type OverallModelSummary,
+  type MatrixInputRow,
   type RowSortColumn,
   type RowSortMode,
   type Props,
@@ -151,6 +154,27 @@ const BOX_PLOT_TOOLTIP_LEFT_OFFSET = 88;
 const FRONTEND_TABLE_PAIR_VALUE_REGEX =
   /^\s*((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?[^\s/]*)\s*\/\s*((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?.*)\s*$/;
 const PAIR_VALUE_SLASH_CLASS_NAME = "mx-[2px] opacity-85";
+
+/** 单行渲染所需的名次阈值与色阶基准，由 rowRenderMetricsByKey 预先算好 */
+type RowRenderMetrics = {
+  isRowLowerBetter: boolean;
+  primaryComparableTop: number | null;
+  primaryComparableSecond: number | null;
+  secondaryComparableTop: number | null;
+  secondaryComparableSecond: number | null;
+  sourceDeltaAbsP90: number | null;
+  compareAbsEffectiveDeltaP90: number | null;
+};
+
+const EMPTY_ROW_RENDER_METRICS: RowRenderMetrics = {
+  isRowLowerBetter: false,
+  primaryComparableTop: null,
+  primaryComparableSecond: null,
+  secondaryComparableTop: null,
+  secondaryComparableSecond: null,
+  sourceDeltaAbsP90: null,
+  compareAbsEffectiveDeltaP90: null
+};
 
 /**
  * 单元格里的「A / B」两段值。
@@ -286,20 +310,8 @@ export function BenchmarkMatrix({
   const [copyNotice, setCopyNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [copyNoticeVisible, setCopyNoticeVisible] = useState(false);
   const [sourceNewReferenceTime, setSourceNewReferenceTime] = useState<number | null>(null);
-  const [activeCellTooltip, setActiveCellTooltip] = useState<{
-    x: number;
-    y: number;
-    entries: MatrixCellEntry[];
-    note: string | null;
-    targetHeight?: number;
-  } | null>(null);
-  const [activeOverallTooltip, setActiveOverallTooltip] = useState<{
-    x: number;
-    y: number;
-    modelName: string;
-    summary: OverallModelSummary;
-    targetHeight?: number;
-  } | null>(null);
+  const cellTooltipHandleRef = useRef<CellTooltipHandle | null>(null);
+  const overallTooltipHandleRef = useRef<OverallTooltipHandle | null>(null);
   const cellTooltipScrollableRef = useRef(false);
 
   const cancelCellTooltipHide = useCallback(() => {
@@ -312,34 +324,42 @@ export function BenchmarkMatrix({
     cellTooltipScrollableRef.current = scrollable;
   }, []);
 
-  const showCellTooltip = useCallback((
-    tooltip: {
-      x: number;
-      y: number;
-      entries: MatrixCellEntry[];
-      note: string | null;
-      targetHeight?: number;
-    }
-  ) => {
+  const showCellTooltip = useCallback((tooltip: CellTooltip) => {
     cancelCellTooltipHide();
     cellTooltipScrollableRef.current = false;
-    setActiveCellTooltip(tooltip);
+    cellTooltipHandleRef.current?.show(tooltip);
   }, [cancelCellTooltipHide]);
 
   const hideCellTooltip = useCallback((immediate = false) => {
     cancelCellTooltipHide();
     if (immediate || !cellTooltipScrollableRef.current) {
       cellTooltipScrollableRef.current = false;
-      setActiveCellTooltip(null);
+      cellTooltipHandleRef.current?.hide();
       return;
     }
 
     cellTooltipHideTimerRef.current = window.setTimeout(() => {
       cellTooltipHideTimerRef.current = null;
       cellTooltipScrollableRef.current = false;
-      setActiveCellTooltip(null);
+      cellTooltipHandleRef.current?.hide();
     }, CELL_TOOLTIP_HIDE_DELAY_MS);
   }, [cancelCellTooltipHide]);
+
+  const showOverallTooltip = useCallback((tooltip: OverallTooltip) => {
+    overallTooltipHandleRef.current?.show(tooltip);
+  }, []);
+
+  const hideOverallTooltip = useCallback(() => {
+    overallTooltipHandleRef.current?.hide();
+  }, []);
+
+  const handleCellTooltipHoverChange = useCallback((hovered: boolean) => {
+    if (hovered) {
+      cancelCellTooltipHide();
+      return;
+    }
+    hideCellTooltip();
+  }, [cancelCellTooltipHide, hideCellTooltip]);
 
   useEffect(() => {
     return () => {
@@ -660,19 +680,28 @@ export function BenchmarkMatrix({
     [rows]
   );
 
+  // allRows 默认就是 rows（见 Props 默认值），此时没有理由把同一个数组再分桶一遍
   const allRowsBySource = useMemo(
-    () => buildRowsBySource(allRows),
-    [allRows]
+    () => (allRows === rows ? scopedRowsBySource : buildRowsBySource(allRows)),
+    [allRows, rows, scopedRowsBySource]
   );
 
-  const allRowsWithSourceMeta = useMemo(
-    () => buildRowsWithSourceMeta(allRows),
-    [allRows]
-  );
+  // source 元信息投影（benchmarkType / modalities 换成 source 自报的值）在两处要用：
+  // 非 All 视图的主链路，以及排名面板的「全部模型」范围。All 视图首屏两处都不碰，
+  // 所以包成一个惰性 getter：真正被问到时才投影，之后在同一份 allRows 上复用结果。
+  // 这样首屏不白算两万行，切 tab、调排名面板参数也不会反复重投影。
+  const getAllRowsWithSourceMeta = useMemo(() => {
+    let projected: MatrixInputRow[] | null = null;
+
+    return () => {
+      projected ??= buildRowsWithSourceMeta(allRows);
+      return projected;
+    };
+  }, [allRows]);
 
   const indexedSourceRows = useMemo(
-    () => (activeSource === SOURCE_ALL ? allRows : allRowsWithSourceMeta),
-    [allRows, allRowsWithSourceMeta, activeSource]
+    () => (activeSource === SOURCE_ALL ? allRows : getAllRowsWithSourceMeta()),
+    [allRows, activeSource, getAllRowsWithSourceMeta]
   );
 
   const allRowsIndex = useMemo(
@@ -991,7 +1020,9 @@ export function BenchmarkMatrix({
   );
 
   const allRankingModelNames = useMemo(() => {
-    const ordered = Array.from(new Set(allRowsWithSourceMeta.map((row) => row.modelName)));
+    // 这里只取 modelName，而 applySourceMeta 只改写 benchmarkType / modalities，
+    // 所以读 allRows 与读它的 source 投影结果完全等价，省掉一次两万行的对象展开
+    const ordered = Array.from(new Set(allRows.map((row) => row.modelName)));
     const seen = new Set(ordered);
 
     modelPrices.forEach((price) => {
@@ -1009,7 +1040,7 @@ export function BenchmarkMatrix({
     });
 
     return ordered;
-  }, [allRowsWithSourceMeta, modelPrices, modelParams]);
+  }, [allRows, modelPrices, modelParams]);
 
   // 只有「显示 + 计入总评」同时成立的合成行才进入 Overall 打分
   const includePriceRowsInOverall = effectiveShowPriceRows && priceRowsInOverall;
@@ -1155,7 +1186,7 @@ export function BenchmarkMatrix({
       ? allRankingModelNames
       : benchmarkRankingModelNames;
     const sourceRowsForRanking = rankingScope === "all"
-      ? allRowsWithSourceMeta
+      ? getAllRowsWithSourceMeta()
       : baseSourceRows;
     const rankingMatrixRow = matrixRow.isPriceRow
       ? buildPriceMatrixRows(candidateModelNames, modelPrices).find((row) => row.rowKey === matrixRow.rowKey) ?? matrixRow
@@ -1173,7 +1204,7 @@ export function BenchmarkMatrix({
     );
   }, [
     allRankingModelNames,
-    allRowsWithSourceMeta,
+    getAllRowsWithSourceMeta,
     baseSourceRows,
     benchmarkRankingModelNames,
     displayMatrixRows,
@@ -1268,6 +1299,131 @@ export function BenchmarkMatrix({
     [modelColumns, overallSummaryByModel]
   );
 
+  // 每行的名次阈值与 P90 基准原先在 render 体内逐行现算，
+  // 于是选中行、展开排名、拖拽列宽这些与数值无关的交互也要把整表重算一遍。
+  // 依赖只取 modelColumns（列名序列）而非 modelColumnMeta，列宽变化便不再触发重算。
+  const rowRenderMetricsByKey = useMemo(() => {
+    const metricsByKey = new Map<string, RowRenderMetrics>();
+
+    displayMatrixRows.forEach((matrixRow) => {
+      const isRowLowerBetter = isLowerBetterBenchmark(
+        matrixRow.benchmark,
+        matrixRow.category,
+        matrixRow.higherIsBetter
+      );
+
+      const primaryComparableValues: number[] = [];
+      const secondaryComparableValues: number[] = [];
+      const sourceDeltaAbsValues: number[] = [];
+      const compareAbsEffectiveDeltaValues: number[] = [];
+
+      const baselineValueNum = compareBaselineModelName
+        ? matrixRow.cells.get(compareBaselineModelName)?.valueNum ?? null
+        : null;
+      const shouldCollectCompareDelta = isCompareActive
+        && compareBaselineModelName !== null
+        && baselineValueNum !== null;
+
+      modelColumns.forEach((modelName) => {
+        const cell = matrixRow.cells.get(modelName);
+        if (!cell) return;
+
+        const { valueNum, valueNum2 } = cell;
+
+        if (valueNum !== null && Number.isFinite(valueNum)) {
+          const score = getMatrixRowComparableScore(matrixRow, valueNum);
+          if (Number.isFinite(score)) {
+            primaryComparableValues.push(score);
+          }
+        }
+
+        if (valueNum2 !== null && Number.isFinite(valueNum2)) {
+          const score2 = getMatrixRowComparableScore(matrixRow, valueNum2);
+          if (Number.isFinite(score2)) {
+            secondaryComparableValues.push(score2);
+          }
+        }
+
+        if (displaySourceValueDeltasInCells && cell.hasMeaningfulMultipleValues) {
+          const deltaRaw = getSourceValueDeltaRaw(cell.allEntries, activeSource, matrixRow.higherIsBetter);
+          if (deltaRaw !== null) {
+            const deltaAbs = Math.abs(deltaRaw);
+            if (Number.isFinite(deltaAbs)) {
+              sourceDeltaAbsValues.push(deltaAbs);
+            }
+          }
+        }
+
+        if (
+          shouldCollectCompareDelta
+          && modelName !== compareBaselineModelName
+          && compareModelSet.has(modelName)
+          && valueNum !== null
+          && Number.isFinite(valueNum)
+        ) {
+          const compareDeltaRaw = valueNum - baselineValueNum!;
+          const compareDeltaEffective = isRowLowerBetter ? -compareDeltaRaw : compareDeltaRaw;
+          const compareDeltaAbs = Math.abs(compareDeltaEffective);
+          if (Number.isFinite(compareDeltaAbs)) {
+            compareAbsEffectiveDeltaValues.push(compareDeltaAbs);
+          }
+        }
+      });
+
+      const primaryComparableDistinctDesc = Array.from(new Set(primaryComparableValues)).sort((a, b) => b - a);
+      const secondaryComparableDistinctDesc = Array.from(new Set(secondaryComparableValues)).sort((a, b) => b - a);
+
+      metricsByKey.set(matrixRow.rowKey, {
+        isRowLowerBetter,
+        primaryComparableTop: primaryComparableDistinctDesc[0] ?? null,
+        primaryComparableSecond: primaryComparableDistinctDesc[1] ?? null,
+        secondaryComparableTop: secondaryComparableDistinctDesc[0] ?? null,
+        secondaryComparableSecond: secondaryComparableDistinctDesc[1] ?? null,
+        sourceDeltaAbsP90: sourceDeltaAbsValues.length > 0
+          ? Math.max(
+              getSortedQuantile(sourceDeltaAbsValues.sort((a, b) => a - b), 0.9),
+              Number.EPSILON
+            )
+          : null,
+        compareAbsEffectiveDeltaP90: compareAbsEffectiveDeltaValues.length > 0
+          ? Math.max(
+              getSortedQuantile(compareAbsEffectiveDeltaValues.sort((a, b) => a - b), 0.9),
+              Number.EPSILON
+            )
+          : null
+      });
+    });
+
+    return metricsByKey;
+  }, [
+    displayMatrixRows,
+    modelColumns,
+    displaySourceValueDeltasInCells,
+    activeSource,
+    isCompareActive,
+    compareBaselineModelName,
+    compareModelSet
+  ]);
+
+  // 名次样式与行无关，只随导出模式切换，没必要在每行重建对象
+  const topRankSegmentStyle = useMemo<CSSProperties>(() => ({ fontWeight: 800 }), []);
+  const secondRankSegmentStyle = useMemo<CSSProperties>(
+    () => isExportCaptureMode
+      ? {
+          display: "inline-block",
+          borderBottom: "1.5px solid rgba(15, 23, 42, 0.45)",
+          paddingBottom: "0.5px",
+          lineHeight: 1
+        }
+      : {
+          textDecoration: "underline",
+          textDecorationColor: "rgba(15, 23, 42, 0.35)",
+          textDecorationThickness: "1px",
+          textUnderlineOffset: "2px"
+        },
+    [isExportCaptureMode]
+  );
+
   function getSortModeLabel(column: RowSortColumn): string {
     if (rowSortState.column !== column) return "";
     const effectiveMode = getEffectiveSortMode(rowSortState.mode);
@@ -1297,7 +1453,7 @@ export function BenchmarkMatrix({
     setExpandedRankingRowKey((prev) => (prev === rowKey ? null : prev));
     setRankingPopoverPosition(null);
     hideCellTooltip(true);
-    setActiveOverallTooltip(null);
+    hideOverallTooltip();
     window.getSelection()?.removeAllRanges();
   }
 
@@ -1944,11 +2100,15 @@ export function BenchmarkMatrix({
             {displayMatrixRows.map((matrixRow, rowIndex) => {
               const rowKey = matrixRow.rowKey;
               const isLastMatrixRow = rowIndex === displayMatrixRows.length - 1;
-              const isRowLowerBetter = isLowerBetterBenchmark(
-                matrixRow.benchmark,
-                matrixRow.category,
-                matrixRow.higherIsBetter
-              );
+              const {
+                isRowLowerBetter,
+                primaryComparableTop,
+                primaryComparableSecond,
+                secondaryComparableTop,
+                secondaryComparableSecond,
+                sourceDeltaAbsP90,
+                compareAbsEffectiveDeltaP90
+              } = rowRenderMetricsByKey.get(rowKey) ?? EMPTY_ROW_RENDER_METRICS;
               // 合成行可以只做展示不进总评，此时把行名压暗以示区分
               const isRowExcludedFromOverall = matrixRow.isPriceRow
                 ? !priceRowsInOverall
@@ -1978,94 +2138,11 @@ export function BenchmarkMatrix({
               const rowRightEdgeStyle = isSelectedRow
                 ? { borderRight: `1px solid ${selectedRowColor}` }
                 : undefined;
-              const primaryComparableValues = modelColumnMeta
-                .map((model) => {
-                  const valueNum = matrixRow.cells.get(model.modelName)?.valueNum;
-                  if (valueNum === null || valueNum === undefined || !Number.isFinite(valueNum)) {
-                    return null;
-                  }
-
-                  return getMatrixRowComparableScore(matrixRow, valueNum);
-                })
-                .filter((value): value is number => value !== null && Number.isFinite(value));
-              const secondaryComparableValues = modelColumnMeta
-                .map((model) => {
-                  const valueNum2 = matrixRow.cells.get(model.modelName)?.valueNum2;
-                  if (valueNum2 === null || valueNum2 === undefined || !Number.isFinite(valueNum2)) {
-                    return null;
-                  }
-
-                  return getMatrixRowComparableScore(matrixRow, valueNum2);
-                })
-                .filter((value): value is number => value !== null && Number.isFinite(value));
-              const primaryComparableDistinctDesc = Array.from(new Set(primaryComparableValues)).sort((a, b) => b - a);
-              const secondaryComparableDistinctDesc = Array.from(new Set(secondaryComparableValues)).sort((a, b) => b - a);
-              const primaryComparableTop = primaryComparableDistinctDesc[0] ?? null;
-              const primaryComparableSecond = primaryComparableDistinctDesc[1] ?? null;
-              const secondaryComparableTop = secondaryComparableDistinctDesc[0] ?? null;
-              const secondaryComparableSecond = secondaryComparableDistinctDesc[1] ?? null;
-              const sourceDeltaAbsValues = displaySourceValueDeltasInCells
-                ? modelColumnMeta
-                    .map((model) => {
-                      const cell = matrixRow.cells.get(model.modelName);
-                      if (!cell?.hasMeaningfulMultipleValues) {
-                        return null;
-                      }
-
-                      const deltaRaw = getSourceValueDeltaRaw(cell.allEntries, activeSource, matrixRow.higherIsBetter);
-                      return deltaRaw === null ? null : Math.abs(deltaRaw);
-                    })
-                    .filter((value): value is number => value !== null && Number.isFinite(value))
-                : [];
-              const sourceDeltaAbsP90 = sourceDeltaAbsValues.length > 0
-                ? Math.max(
-                    getSortedQuantile(sourceDeltaAbsValues.sort((a, b) => a - b), 0.9),
-                    Number.EPSILON
-                  )
-                : null;
-              const topRankSegmentStyle = {
-                fontWeight: 800
-              };
-              const secondRankSegmentStyle = isExportCaptureMode
-                ? {
-                    display: "inline-block",
-                    borderBottom: "1.5px solid rgba(15, 23, 42, 0.45)",
-                    paddingBottom: "0.5px",
-                    lineHeight: 1
-                  }
-                : {
-                    textDecoration: "underline",
-                    textDecorationColor: "rgba(15, 23, 42, 0.35)",
-                    textDecorationThickness: "1px",
-                    textUnderlineOffset: "2px"
-                  };
 
               const baselineCellForRow = compareBaselineModelName
                 ? matrixRow.cells.get(compareBaselineModelName)
                 : undefined;
               const baselineValueNum = baselineCellForRow?.valueNum ?? null;
-              const compareAbsEffectiveDeltaValues =
-                isCompareActive && compareBaselineModelName && baselineValueNum !== null
-                  ? modelColumnMeta
-                      .filter((model) => compareModelSet.has(model.modelName) && model.modelName !== compareBaselineModelName)
-                      .map((model) => {
-                        const compareCellNum = matrixRow.cells.get(model.modelName)?.valueNum;
-                        if (compareCellNum === null || compareCellNum === undefined || !Number.isFinite(compareCellNum)) {
-                          return null;
-                        }
-
-                        const deltaRaw = compareCellNum - baselineValueNum;
-                        const deltaEffective = isRowLowerBetter ? -deltaRaw : deltaRaw;
-                        return Math.abs(deltaEffective);
-                      })
-                      .filter((value): value is number => value !== null && Number.isFinite(value))
-                  : [];
-              const compareAbsEffectiveDeltaP90 = compareAbsEffectiveDeltaValues.length > 0
-                ? Math.max(
-                    getSortedQuantile(compareAbsEffectiveDeltaValues.sort((a, b) => a - b), 0.9),
-                    Number.EPSILON
-                  )
-                : null;
               return (
                 <tr
                   key={rowKey}
@@ -2089,7 +2166,7 @@ export function BenchmarkMatrix({
                         return shouldClose ? null : rowKey;
                       });
                       hideCellTooltip(true);
-                      setActiveOverallTooltip(null);
+                      hideOverallTooltip();
                       return;
                     }
 
@@ -2600,7 +2677,7 @@ export function BenchmarkMatrix({
                           onMouseEnter={(event) => {
                             if (!summary) return;
                             const rect = event.currentTarget.getBoundingClientRect();
-                            setActiveOverallTooltip({
+                            showOverallTooltip({
                               x: rect.left + rect.width / 2,
                               y: rect.top - 6,
                               modelName: model.modelName,
@@ -2608,7 +2685,7 @@ export function BenchmarkMatrix({
                               targetHeight: rect.height
                             });
                           }}
-                          onMouseLeave={() => setActiveOverallTooltip(null)}
+                          onMouseLeave={hideOverallTooltip}
                         >
                           ?
                         </span>
@@ -2733,19 +2810,13 @@ export function BenchmarkMatrix({
         />
       )}
 
-      <MatrixCellTooltip
-        tooltip={activeCellTooltip}
+      <MatrixCellTooltipHost
+        handleRef={cellTooltipHandleRef}
         onScrollableChange={handleCellTooltipScrollableChange}
-        onHoverChange={(hovered) => {
-          if (hovered) {
-            cancelCellTooltipHide();
-            return;
-          }
-          hideCellTooltip();
-        }}
+        onHoverChange={handleCellTooltipHoverChange}
       />
 
-      <OverallScoreTooltip tooltip={activeOverallTooltip} />
+      <OverallScoreTooltipHost handleRef={overallTooltipHandleRef} />
 
       {displayMatrixRows.length === 0 ? (
         <div className="mt-3 text-sm opacity-75">当前筛选条件下暂无数据。</div>

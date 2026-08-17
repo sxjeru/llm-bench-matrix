@@ -1,10 +1,11 @@
 /* eslint-disable react-hooks/set-state-in-effect */
-import { useRef, useState, useLayoutEffect } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { formatTooltipTime } from "./formatters";
 import { getMatrixCellDisplayValue } from "./scoring";
 import type { MatrixCellEntry, OverallModelSummary } from "./types";
 
-type CellTooltip = {
+export type CellTooltip = {
   x: number;
   y: number;
   entries: MatrixCellEntry[];
@@ -12,7 +13,7 @@ type CellTooltip = {
   targetHeight?: number;
 };
 
-type OverallTooltip = {
+export type OverallTooltip = {
   x: number;
   y: number;
   modelName: string;
@@ -193,4 +194,74 @@ export function OverallScoreTooltip({ tooltip }: OverallScoreTooltipProps) {
       <span className="mt-1 block text-[10px] text-slate-300">注：表格主展示名次按原始总评分计算</span>
     </div>
   );
+}
+
+export type CellTooltipHandle = {
+  show: (tooltip: CellTooltip) => void;
+  hide: () => void;
+};
+
+export type OverallTooltipHandle = {
+  show: (tooltip: OverallTooltip) => void;
+  hide: () => void;
+};
+
+type MatrixCellTooltipHostProps = {
+  handleRef: RefObject<CellTooltipHandle | null>;
+  onHoverChange?: (hovered: boolean) => void;
+  onScrollableChange?: (scrollable: boolean) => void;
+};
+
+/**
+ * 把 tooltip 的可见态关在自己的组件里。
+ * 矩阵表格有上万个单元格，如果 hover 态存在父组件上，
+ * 每次移动鼠标都会让整张表重新走一遍 render；这里只重渲染 tooltip 自身。
+ */
+export function MatrixCellTooltipHost({
+  handleRef,
+  onHoverChange,
+  onScrollableChange
+}: MatrixCellTooltipHostProps) {
+  const [tooltip, setTooltip] = useState<CellTooltip | null>(null);
+
+  useLayoutEffect(() => {
+    handleRef.current = {
+      show: (next) => setTooltip(next),
+      hide: () => setTooltip(null)
+    };
+
+    return () => {
+      handleRef.current = null;
+    };
+  }, [handleRef]);
+
+  return (
+    <MatrixCellTooltip
+      tooltip={tooltip}
+      onHoverChange={onHoverChange}
+      onScrollableChange={onScrollableChange}
+    />
+  );
+}
+
+type OverallScoreTooltipHostProps = {
+  handleRef: RefObject<OverallTooltipHandle | null>;
+};
+
+/** 与 MatrixCellTooltipHost 同理：总评列 hover 不该牵动整张表 */
+export function OverallScoreTooltipHost({ handleRef }: OverallScoreTooltipHostProps) {
+  const [tooltip, setTooltip] = useState<OverallTooltip | null>(null);
+
+  useLayoutEffect(() => {
+    handleRef.current = {
+      show: (next) => setTooltip(next),
+      hide: () => setTooltip(null)
+    };
+
+    return () => {
+      handleRef.current = null;
+    };
+  }, [handleRef]);
+
+  return <OverallScoreTooltip tooltip={tooltip} />;
 }
