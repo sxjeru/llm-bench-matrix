@@ -57,13 +57,14 @@ export function registerCacheInvalidator(fn: () => void) {
 }
 
 /** invalidateAllCaches 默认会 bump 的缓存版本域 */
-const ALL_CACHE_VERSION_DOMAINS: CacheVersionDomain[] = ["dashboard", "pricing", "admin_entities"];
+const ALL_CACHE_VERSION_DOMAINS: CacheVersionDomain[] = ["dashboard", "pricing", "admin_entities", "settings"];
 const PUBLIC_DASHBOARD_PATHS = ["/", "/scatter"] as const;
 
 function revalidatePublicDashboardPaths() {
   for (const path of PUBLIC_DASHBOARD_PATHS) {
     try {
-      revalidatePath(path, "page");
+      // 快照在 (public)/layout 拉取；page 粒度不会重跑 layout 的 Server Component
+      revalidatePath(path, "layout");
     } catch (error) {
       if (error instanceof Error && error.message.includes("static generation store missing")) {
         continue;
