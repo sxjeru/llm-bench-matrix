@@ -16,15 +16,7 @@ import {
   type PublicDashboardSnapshotVersions
 } from "@/lib/dashboard-snapshot-cache";
 
-export { EXPORT_FOOTNOTE_ALIGNS };
-export type { ExportFootnoteAlign, PublicDashboardSnapshot, PublicDashboardSnapshotVersions };
-export {
-  createPublicDashboardSnapshotEtag,
-  encodePublicDashboardSnapshot,
-  decodePublicDashboardSnapshot
-} from "@/lib/dashboard-snapshot-cache";
-
-export type ParsedExportFootnote = {
+type ParsedExportFootnote = {
   exportFootnoteText?: string;
   exportFootnoteAlign: ExportFootnoteAlign;
 };

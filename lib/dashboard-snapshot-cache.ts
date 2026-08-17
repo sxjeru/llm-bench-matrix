@@ -10,7 +10,7 @@ export type PublicDashboardSnapshotVersions = {
   settings: string;
 };
 
-export type PublicDashboardStats = {
+type PublicDashboardStats = {
   providerCount: number;
   modelCount: number;
   benchmarkCount: number;
@@ -42,7 +42,7 @@ export function createPublicDashboardSnapshotEtag(versions: PublicDashboardSnaps
  * - `{ d, c }`：字典列，`c[i]` 是该行在字典 `d` 中的下标，`-1` 表示该行没有这个字段。
  * - `{ v }`：原始列，用于 recordId 这类几乎不重复、建字典反而更大的字段。
  */
-export type EncodedColumn =
+type EncodedColumn =
   | { d: unknown[]; c: number[] }
   | { v: unknown[] };
 

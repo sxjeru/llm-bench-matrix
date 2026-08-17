@@ -1,4 +1,4 @@
-export function normalizeEtagToken(token: string) {
+function normalizeEtagToken(token: string) {
   return token.trim().replace(/^W\//, "");
 }
 
