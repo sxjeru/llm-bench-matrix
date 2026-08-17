@@ -10,7 +10,7 @@ export type PublicDashboardSnapshotVersions = {
   settings: string;
 };
 
-type PublicDashboardStats = {
+export type PublicDashboardStats = {
   providerCount: number;
   modelCount: number;
   benchmarkCount: number;
@@ -30,6 +30,11 @@ export type PublicDashboardSnapshot = {
 
 export function createPublicDashboardSnapshotEtag(versions: PublicDashboardSnapshotVersions) {
   return `"dashboard:${versions.dashboard}:${versions.pricing}:${versions.settings}"`;
+}
+
+/** 统计只由 dashboard 版本域决定，价格与设置的变动不该让这 4 个数字失效。 */
+export function createPublicDashboardStatsEtag(dashboardVersion: string) {
+  return `"dashboard-stats:${dashboardVersion}"`;
 }
 
 /**

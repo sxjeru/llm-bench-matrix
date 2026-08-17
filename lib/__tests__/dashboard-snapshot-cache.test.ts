@@ -4,6 +4,8 @@ import { toMatrixInputRow } from "@/components/benchmark-matrix/map-row";
 import type { MatrixInputRow } from "@/components/benchmark-matrix/types";
 import type { DashboardRow } from "@/lib/db/queries";
 import {
+  createPublicDashboardSnapshotEtag,
+  createPublicDashboardStatsEtag,
   decodePublicDashboardSnapshot,
   encodePublicDashboardSnapshot,
   type PublicDashboardSnapshot,
@@ -351,5 +353,23 @@ describe("encode/decodePublicDashboardSnapshot", () => {
 
     expect(columnarSize).toBeLessThan(rowWiseSize * 0.5);
     expect(transport(snapshot)).toStrictEqual(snapshot);
+  });
+});
+
+describe("createPublicDashboardStatsEtag", () => {
+  test("只随 dashboard 版本变化，与快照 ETag 不会互相串味", () => {
+    const versions = {
+      dashboard: "dashboard-version",
+      pricing: "pricing-version",
+      settings: "settings-version"
+    };
+
+    const statsEtag = createPublicDashboardStatsEtag(versions.dashboard);
+
+    expect(statsEtag).toBe('"dashboard-stats:dashboard-version"');
+    expect(statsEtag).not.toBe(createPublicDashboardSnapshotEtag(versions));
+    // 价格与设置的变动不该让这 4 个数字失效
+    expect(createPublicDashboardStatsEtag(versions.dashboard)).toBe(statsEtag);
+    expect(createPublicDashboardStatsEtag("next-dashboard-version")).not.toBe(statsEtag);
   });
 });

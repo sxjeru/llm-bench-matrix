@@ -72,6 +72,26 @@ function createSnapshot(overrides: Partial<PublicDashboardSnapshot> = {}): Publi
   };
 }
 
+/**
+ * 指标卡与矩阵各走一个端点，mock 必须按 URL 分派，
+ * 否则统计那一路会误命中完整快照的载荷。
+ */
+function stubFetchByRoute(snapshot: PublicDashboardSnapshot) {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+
+    if (url === "/api/public/dashboard/stats") {
+      return Response.json({ stats: snapshot.stats });
+    }
+
+    if (url === "/api/public/dashboard") {
+      return Response.json(encodePublicDashboardSnapshot(snapshot));
+    }
+
+    throw new Error(`unexpected fetch: ${url}`);
+  }));
+}
+
 describe("HomePage metrics", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -82,9 +102,7 @@ describe("HomePage metrics", () => {
   });
 
   test("统计卡片使用聚合统计结果而非 rows 子集", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json(
-      encodePublicDashboardSnapshot(createSnapshot())
-    )));
+    stubFetchByRoute(createSnapshot());
 
     render(
       <DashboardProvider>

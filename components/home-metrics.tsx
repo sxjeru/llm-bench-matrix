@@ -3,8 +3,7 @@
 import { useDashboardSnapshot } from "@/components/dashboard-provider";
 
 export function HomeMetrics() {
-  const { snapshot } = useDashboardSnapshot();
-  const stats = snapshot?.stats;
+  const { stats } = useDashboardSnapshot();
 
   return (
     <section className="home-metrics-grid">
