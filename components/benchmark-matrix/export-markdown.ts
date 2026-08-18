@@ -68,9 +68,7 @@ function formatOverallScoreText(
   summary: OverallModelSummary | undefined,
   decimals: number
 ): string {
-  const hasRawScore = summary?.rawScore !== null && summary?.rawScore !== undefined
-    && summary.rawRank !== null && summary.rawRank !== undefined;
-  if (!hasRawScore || !summary) return "--";
+  if (summary?.rawScore == null || summary.rawRank == null) return "--";
 
   return `${summary.rawScore.toFixed(decimals)} (${summary.rawRank})`;
 }
