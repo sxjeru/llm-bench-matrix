@@ -133,6 +133,7 @@ import {
   getSourceValueDeltaRaw,
   getSourceValueDisplayItem,
   getSourceKey,
+  buildMatrixMarkdownTable,
   type SourceValueMode
 } from "./benchmark-matrix/index";
 
@@ -1317,6 +1318,61 @@ export function BenchmarkMatrix({
     [modelColumns, overallSummaryByModel]
   );
 
+  const copyTableMarkdownToClipboard = useCallback(async () => {
+    setIsExportMenuOpen(false);
+    setSuppressHoverMenu(true);
+    setCopyNotice(null);
+    setCopyNoticeVisible(false);
+
+    try {
+      const markdown = buildMatrixMarkdownTable({
+        rows: displayMatrixRows,
+        modelColumns,
+        showCategory,
+        displaySourceValuesInCells,
+        activeSource,
+        sourceValueMode,
+        shouldShowOverallSummary,
+        overallSummaryByModel,
+        overallScoreDisplayDecimalsByModel
+      });
+
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(markdown);
+      } else if (navigator.clipboard?.write && typeof ClipboardItem !== "undefined") {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "text/plain": new Blob([markdown], { type: "text/plain" })
+          })
+        ]);
+      } else {
+        throw new Error("当前浏览器不支持文本剪贴板");
+      }
+
+      setCopyNotice({ type: "success", message: "已复制 Markdown 表格到剪贴板" });
+    } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : "";
+      setCopyNotice({
+        type: "error",
+        message: rawMessage || "复制失败，请检查浏览器剪贴板权限"
+      });
+    }
+  }, [
+    activeSource,
+    displayMatrixRows,
+    displaySourceValuesInCells,
+    modelColumns,
+    overallScoreDisplayDecimalsByModel,
+    overallSummaryByModel,
+    setCopyNotice,
+    setCopyNoticeVisible,
+    setIsExportMenuOpen,
+    setSuppressHoverMenu,
+    shouldShowOverallSummary,
+    showCategory,
+    sourceValueMode
+  ]);
+
   // 每行的名次阈值与 P90 基准原先在 render 体内逐行现算，
   // 于是选中行、展开排名、拖拽列宽这些与数值无关的交互也要把整表重算一遍。
   // 依赖只取 modelColumns（列名序列）而非 modelColumnMeta，列宽变化便不再触发重算。
@@ -1672,6 +1728,7 @@ export function BenchmarkMatrix({
         isImageActionBusy={isImageActionBusy}
         downloadTableImage={downloadTableImage}
         copyTableImageToClipboard={copyTableImageToClipboard}
+        copyTableMarkdownToClipboard={copyTableMarkdownToClipboard}
         isDownloadingTableImage={isDownloadingTableImage}
         isCopyingTableImage={isCopyingTableImage}
         exportPreset={exportPreset}

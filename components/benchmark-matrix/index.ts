@@ -121,3 +121,8 @@ export {
   renderElementToImageBlob,
   withTimeout
 } from "./export-image";
+
+export {
+  escapeMarkdownTableCell,
+  buildMatrixMarkdownTable
+} from "./export-markdown";

@@ -5,7 +5,8 @@ import {
   Eye,
   EyeOff,
   ImageDown,
-  Minimize2
+  Minimize2,
+  Table2
 } from "lucide-react";
 import type { Dispatch, MouseEvent as ReactMouseEvent, RefObject, SetStateAction } from "react";
 import {
@@ -50,6 +51,7 @@ type TopControlsProps = {
   isImageActionBusy: boolean;
   downloadTableImage: () => void;
   copyTableImageToClipboard: () => void;
+  copyTableMarkdownToClipboard: () => void;
   isDownloadingTableImage: boolean;
   isCopyingTableImage: boolean;
   exportPreset: ExportPresetKey;
@@ -164,6 +166,7 @@ export function BenchmarkMatrixTopControls({
   isImageActionBusy,
   downloadTableImage,
   copyTableImageToClipboard,
+  copyTableMarkdownToClipboard,
   isDownloadingTableImage,
   isCopyingTableImage,
   exportPreset,
@@ -482,6 +485,15 @@ export function BenchmarkMatrixTopControls({
             >
               <Copy size={14} />
               {isCopyingTableImage ? "复制中..." : "复制到剪贴板"}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="btn btn-sm btn-ghost w-full justify-start"
+              onClick={copyTableMarkdownToClipboard}
+            >
+              <Table2 size={14} />
+              复制 Markdown 表格
             </button>
             {hasFootnoteText && (
               <label className="label mt-1 cursor-pointer justify-start gap-2 px-3 hover:bg-base-200/50">
