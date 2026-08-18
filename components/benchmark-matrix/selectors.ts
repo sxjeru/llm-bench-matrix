@@ -179,10 +179,14 @@ export function buildRowsBySource(rows: MatrixInputRow[]): Map<string, MatrixInp
 
   rows.forEach((row) => {
     const sourceKey = getSourceKey(row.source);
-    if (!map.has(sourceKey)) {
-      map.set(sourceKey, []);
+    let bucket = map.get(sourceKey);
+    if (!bucket) {
+      bucket = [];
+      map.set(sourceKey, bucket);
     }
-    map.get(sourceKey)!.push(applySourceMeta(row));
+    // All 视图只按 source 分桶，不改写 benchmarkType / modalities；
+    // 非 All 再由 resolveBaseSourceRows 做 source 元信息投影。
+    bucket.push(row);
   });
 
   return map;
@@ -306,7 +310,7 @@ export function resolveBaseSourceRows(
 
   const sourceScopedRows = scopedRowsBySource.get(activeSource) ?? allRowsBySource.get(activeSource) ?? [];
   if (sourceScopedRows.length > 0) {
-    return sourceScopedRows;
+    return buildRowsWithSourceMeta(sourceScopedRows);
   }
 
   return rows;
@@ -970,10 +974,17 @@ export function buildMatrixRows(
     }
   >();
 
+  const prunedGroupingKeys = new Set<string>();
+  coveragePrunedRows.forEach((row) => {
+    prunedGroupingKeys.add(getMatrixGroupingKey(row, showDuplicateRows));
+  });
+
   baseSourceRows.forEach((row, rowIndex) => {
+    const matrixKey = getMatrixGroupingKey(row, showDuplicateRows);
+    if (!prunedGroupingKeys.has(matrixKey)) return;
+
     const category = row.benchmarkType || "General";
     const benchmark = row.benchmarkName;
-    const matrixKey = getMatrixGroupingKey(row, showDuplicateRows);
     const normalizedModalities = normalizeModalityList(row.modalities, row.benchmarkType);
     const initialHigherIsBetter = typeof row.higherIsBetter === "boolean"
       ? row.higherIsBetter
@@ -1105,6 +1116,11 @@ export function buildMatrixRows(
       const finalizedCells = new Map<string, MatrixCell>();
 
       matrixRow.cells.forEach((cell, modelName) => {
+        if (cell.allEntries.length === 1) {
+          finalizedCells.set(modelName, cell);
+          return;
+        }
+
         const uniqueEntriesMap = new Map<string, MatrixCellEntry>();
         cell.allEntries.forEach((entry) => {
           const dedupKey = getMatrixCellSourceValueDedupKey(entry);

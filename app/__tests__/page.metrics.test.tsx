@@ -1,9 +1,12 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import { isValidElement, type ReactElement, type ReactNode } from "react";
+
 import PublicDashboardLayout from "@/app/(public)/layout";
 import HomePage, { revalidate } from "@/app/(public)/page";
 import { DashboardProvider } from "@/components/dashboard-provider";
+import { HomeMetrics } from "@/components/home-metrics";
 import { getDashboardRows, getDashboardStats, getSourceOptions } from "@/lib/db/queries";
 import {
   encodePublicDashboardSnapshot,
@@ -125,5 +128,16 @@ describe("HomePage metrics", () => {
     expect(vi.mocked(getDashboardRows)).not.toHaveBeenCalled();
     expect(vi.mocked(getDashboardStats)).not.toHaveBeenCalled();
     expect(vi.mocked(getSourceOptions)).not.toHaveBeenCalled();
+  });
+
+  test("首页不再内嵌矩阵，改由公开布局 keep-alive 挂载", () => {
+    const page = HomePage() as ReactElement<{ children?: ReactNode }>;
+    const children = Array.isArray(page.props.children) ? page.props.children : [page.props.children];
+    const layout = PublicDashboardLayout({ children: <div /> }) as ReactElement<{ children?: ReactNode }>;
+
+    expect(children.some((child) => isValidElement(child) && child.type === HomeMetrics)).toBe(true);
+    expect(children.every((child) => !isValidElement(child) || child.type === HomeMetrics || child.type === "section")).toBe(true);
+    expect((layout.props.children as ReactElement).type).toEqual(expect.any(Function));
+    expect(((layout.props.children as ReactElement).type as { name?: string }).name).toBe("PublicDashboardKeepAlive");
   });
 });

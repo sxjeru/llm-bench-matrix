@@ -33,6 +33,7 @@ type UseMatrixSourceTabsOptions = {
   allRows: MatrixInputRow[];
   allSourceOptions: string[];
   isClientReady: boolean;
+  urlSyncEnabled: boolean;
   pathname: string;
   searchParams: Pick<URLSearchParams, "get" | "toString">;
   sourceNewReferenceTime: number | null;
@@ -128,6 +129,7 @@ export function useMatrixSourceTabs({
   allRows,
   allSourceOptions,
   isClientReady,
+  urlSyncEnabled,
   pathname,
   searchParams,
   sourceNewReferenceTime,
@@ -194,6 +196,8 @@ export function useMatrixSourceTabs({
   };
 
   useEffect(() => {
+    if (!urlSyncEnabled) return;
+
     const sourceFromUrl = searchParams.get("source");
     const isKnown = sourceFromUrl
       ? sourceOptions.some((item) => item.key === sourceFromUrl)
@@ -219,7 +223,7 @@ export function useMatrixSourceTabs({
       const nextMode: RowSortMode = nextSource === SOURCE_ALL ? "data" : "source";
       setRowSortState((prev) => (prev.mode === nextMode ? prev : { ...prev, mode: nextMode }));
     }
-  }, [searchParams, sourceOptions, setRowSortState, skipSelectionPersistenceOnceRef]);
+  }, [urlSyncEnabled, searchParams, sourceOptions, setRowSortState, skipSelectionPersistenceOnceRef]);
 
   useLayoutEffect(() => {
     if (!isClientReady) return;
@@ -392,11 +396,13 @@ export function useMatrixSourceTabs({
     const isSameSource = activeSourceRef.current === nextSource;
     if (!isSameSource) {
       skipSelectionPersistenceOnceRef.current = true;
-      pendingSourceSyncRef.current = nextSource;
+      pendingSourceSyncRef.current = urlSyncEnabled ? nextSource : null;
       setActiveSource(nextSource);
       const nextMode: RowSortMode = nextSource === SOURCE_ALL ? "data" : "source";
       setRowSortState((prev) => (prev.mode === nextMode ? prev : { ...prev, mode: nextMode }));
     }
+
+    if (!urlSyncEnabled) return;
 
     const params = new URLSearchParams(searchParams.toString());
     const nextSourceParam = nextSource === SOURCE_ALL ? null : nextSource;

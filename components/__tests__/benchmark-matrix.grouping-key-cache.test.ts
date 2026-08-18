@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getMatrixGroupingKey } from "@/components/benchmark-matrix/utils";
+import { applySourceMeta, getMatrixGroupingKey, isArtificialAnalysisSource } from "@/components/benchmark-matrix/utils";
 import { resolveBaseSourceRows, buildRowsBySource } from "@/components/benchmark-matrix/selectors";
 import { SOURCE_ALL } from "@/components/benchmark-matrix/constants";
 import type { MatrixInputRow } from "@/components/benchmark-matrix/types";
@@ -135,5 +135,54 @@ describe("resolveBaseSourceRows 的 All 视图短路", () => {
     ];
 
     expect(resolve(scoped)).toBe(scoped);
+  });
+});
+
+describe("buildRowsBySource 延迟 source 元信息投影", () => {
+  it("无 source 投影字段时 applySourceMeta 复用原对象", () => {
+    const row = makeRow({ source: "text:A" });
+    expect(applySourceMeta(row)).toBe(row);
+  });
+
+  it("分桶保留原始 row 引用，All 视图不改写 benchmarkType", () => {
+    const row = makeRow({
+      source: "text:A",
+      benchmarkType: "Knowledge",
+      sourceBenchmarkType: "Reasoning",
+      sourceModalities: ["Vision"]
+    });
+    const bySource = buildRowsBySource([row]);
+
+    expect(bySource.get("text:A")![0]).toBe(row);
+    expect(bySource.get("text:A")![0]!.benchmarkType).toBe("Knowledge");
+  });
+
+  it("非 All 视图才投影 source 自报的类型与模态", () => {
+    const row = makeRow({
+      source: "text:A",
+      benchmarkType: "Knowledge",
+      sourceBenchmarkType: "Reasoning",
+      sourceModalities: ["Vision"]
+    });
+    const bySource = buildRowsBySource([row]);
+    const resolved = resolveBaseSourceRows([row], [row], bySource, bySource, "text:A", false);
+
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0]).not.toBe(row);
+    expect(resolved[0]!.benchmarkType).toBe("Reasoning");
+    expect(resolved[0]!.modalities).toEqual(["Vision"]);
+  });
+});
+
+describe("isArtificialAnalysisSource 缓存", () => {
+  it("空值不是 AA，常见写法命中且重复查询稳定", () => {
+    expect(isArtificialAnalysisSource(null)).toBe(false);
+    expect(isArtificialAnalysisSource(undefined)).toBe(false);
+    expect(isArtificialAnalysisSource("text:S1")).toBe(false);
+
+    expect(isArtificialAnalysisSource("text:Artificial Analysis")).toBe(true);
+    expect(isArtificialAnalysisSource("Artificial Analysis")).toBe(true);
+    expect(isArtificialAnalysisSource("text:artificial analysis")).toBe(true);
+    expect(isArtificialAnalysisSource("text:Artificial Analysis")).toBe(true);
   });
 });

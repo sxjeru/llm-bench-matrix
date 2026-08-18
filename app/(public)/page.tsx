@@ -1,6 +1,4 @@
-import { HomeBenchmarkMatrix } from "@/components/home-benchmark-matrix";
 import { HomeMetrics } from "@/components/home-metrics";
-import { Suspense } from "react";
 
 export const revalidate = false;
 
@@ -16,10 +14,6 @@ export default function HomePage() {
       </section>
 
       <HomeMetrics />
-
-      <Suspense fallback={null}>
-        <HomeBenchmarkMatrix />
-      </Suspense>
     </>
   );
 }

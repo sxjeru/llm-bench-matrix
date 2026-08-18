@@ -161,4 +161,6 @@ export type ModelScatterProps = {
   sourceOptions?: string[];
   modelPrices?: ModelPriceInfo[];
   modelParams?: ModelParamsInfo[];
+  /** 为 false 时仍更新视图，但不写地址栏。keep-alive 隐藏态由调用方关闭。 */
+  urlSyncEnabled?: boolean;
 };

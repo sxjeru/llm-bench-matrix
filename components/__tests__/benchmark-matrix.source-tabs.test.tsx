@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
 import { formatTooltipTime } from "@/components/benchmark-matrix/formatters";
+import { HOME_PATH, SCATTER_PATH } from "@/lib/public-routes";
 
 const mockSearchParams = new URLSearchParams();
+const pathnameState = vi.hoisted(() => ({ value: "/" }));
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/",
+  usePathname: () => pathnameState.value,
   useRouter: () => ({
     replace: vi.fn()
   }),
@@ -16,7 +18,8 @@ vi.mock("next/navigation", () => ({
 
 describe("BenchmarkMatrix source tabs", () => {
   beforeEach(() => {
-    window.history.replaceState(null, "", "/");
+    pathnameState.value = HOME_PATH;
+    window.history.replaceState(null, "", HOME_PATH);
     window.localStorage.clear();
     for (const key of Array.from(mockSearchParams.keys())) {
       mockSearchParams.delete(key);
@@ -51,6 +54,76 @@ describe("BenchmarkMatrix source tabs", () => {
         null,
         "",
         "/?source=text%3AClaude+Opus+4.7"
+      );
+    });
+  });
+
+  test("urlSyncEnabled=false 时仍切换页签，但不改写地址栏", async () => {
+    pathnameState.value = SCATTER_PATH;
+    window.history.replaceState(null, "", SCATTER_PATH);
+    const replaceStateSpy = vi.spyOn(window.history, "replaceState");
+
+    render(
+      <BenchmarkMatrix
+        urlSyncEnabled={false}
+        sourceOptions={["text:Claude Opus 4.7"]}
+        rows={[
+          {
+            providerName: "Anthropic",
+            modelName: "Claude Opus 4.7",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "80",
+            valueNum: 80,
+            source: "text:Claude Opus 4.7"
+          }
+        ]}
+      />
+    );
+
+    replaceStateSpy.mockClear();
+    fireEvent.click(screen.getByRole("tab", { name: "Claude Opus 4.7" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Claude Opus 4.7" })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(replaceStateSpy).not.toHaveBeenCalled();
+    expect(window.location.pathname).toBe(SCATTER_PATH);
+  });
+
+  test("非首页默认仍同步 source 到当前路径", async () => {
+    pathnameState.value = "/admin";
+    window.history.replaceState(null, "", "/admin");
+    const replaceStateSpy = vi.spyOn(window.history, "replaceState");
+
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:Claude Opus 4.7"]}
+        rows={[
+          {
+            providerName: "Anthropic",
+            modelName: "Claude Opus 4.7",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "80",
+            valueNum: 80,
+            source: "text:Claude Opus 4.7"
+          }
+        ]}
+      />
+    );
+
+    replaceStateSpy.mockClear();
+    fireEvent.click(screen.getByRole("tab", { name: "Claude Opus 4.7" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Claude Opus 4.7" })).toHaveAttribute("aria-selected", "true");
+      expect(replaceStateSpy).toHaveBeenCalledWith(
+        null,
+        "",
+        "/admin?source=text%3AClaude+Opus+4.7"
       );
     });
   });

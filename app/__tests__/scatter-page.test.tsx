@@ -1,3 +1,4 @@
+import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { describe, expect, test, vi } from "vitest";
 
 import PublicDashboardLayout from "@/app/(public)/layout";
@@ -41,5 +42,16 @@ describe("ScatterPage", () => {
     expect(vi.mocked(getDashboardRows)).not.toHaveBeenCalled();
     expect(vi.mocked(getSourceOptions)).not.toHaveBeenCalled();
     expect(vi.mocked(getModelParamsRows)).not.toHaveBeenCalled();
+  });
+
+  test("散点页只保留 SEO 文案，图表由 layout keep-alive 挂载", () => {
+    const page = ScatterPage();
+    const layout = PublicDashboardLayout({ children: <ScatterPage /> }) as ReactElement<{ children?: ReactNode }>;
+
+    expect(isValidElement(page)).toBe(true);
+    expect((page as ReactElement).type).toBe("section");
+    expect(layout.type).toBeDefined();
+    expect((layout.props.children as ReactElement).type).toEqual(expect.any(Function));
+    expect(((layout.props.children as ReactElement).type as { name?: string }).name).toBe("PublicDashboardKeepAlive");
   });
 });

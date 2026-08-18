@@ -4,9 +4,17 @@ import {
   createContext,
   useContext,
   useEffect,
+  useMemo,
   useState,
   type ReactNode
 } from "react";
+import {
+  buildAllRowsIndex,
+  buildRowsBySource,
+  buildRowsWithSourceMeta,
+  type AllRowsIndex
+} from "@/components/benchmark-matrix/selectors";
+import type { MatrixInputRow } from "@/components/benchmark-matrix/types";
 import {
   decodePublicDashboardSnapshot,
   type PublicDashboardSnapshot,
@@ -14,12 +22,20 @@ import {
   type PublicDashboardStats
 } from "@/lib/dashboard-snapshot-cache";
 
+/** All 默认视图下两页共用的索引；不包含 prune / matrixRows（散点 alwaysKeep 与矩阵不同）。 */
+export type SharedDashboardDerived = {
+  rowsBySource: Map<string, MatrixInputRow[]>;
+  mergedAllRowsIndex: AllRowsIndex;
+  getAllRowsWithSourceMeta: () => MatrixInputRow[];
+};
+
 type DashboardSnapshotContextValue = {
   snapshot: PublicDashboardSnapshot | null;
   /** 指标卡用的 4 个统计数字：快照未到时先由轻量端点供给 */
   stats: PublicDashboardStats | null;
   isLoading: boolean;
   error: string | null;
+  derived: SharedDashboardDerived | null;
 };
 
 const DashboardSnapshotContext = createContext<DashboardSnapshotContextValue | null>(null);
@@ -81,9 +97,27 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     return () => controller.abort();
   }, []);
 
+  const derived = useMemo<SharedDashboardDerived | null>(() => {
+    if (!snapshot) return null;
+
+    const rows = snapshot.rows;
+    const rowsBySource = buildRowsBySource(rows);
+    const mergedAllRowsIndex = buildAllRowsIndex(rows, false);
+    let projected: MatrixInputRow[] | null = null;
+
+    return {
+      rowsBySource,
+      mergedAllRowsIndex,
+      getAllRowsWithSourceMeta: () => {
+        projected ??= buildRowsWithSourceMeta(rows);
+        return projected;
+      }
+    };
+  }, [snapshot]);
+
   return (
     <DashboardSnapshotContext.Provider
-      value={{ snapshot, stats: snapshot?.stats ?? fastStats, isLoading, error }}
+      value={{ snapshot, stats: snapshot?.stats ?? fastStats, isLoading, error, derived }}
     >
       {children}
     </DashboardSnapshotContext.Provider>
@@ -97,4 +131,18 @@ export function useDashboardSnapshot(): DashboardSnapshotContextValue {
   }
 
   return value;
+}
+
+/**
+ * 首页矩阵/散点传入的就是 snapshot.rows 时复用 Provider 里算好的分桶与 All 索引。
+ * 单测直接挂 BenchmarkMatrix / ModelScatter（无 Provider）时返回 null，走组件本地计算。
+ */
+export function useSharedMatrixDerived(
+  rows: MatrixInputRow[],
+  allRows: MatrixInputRow[]
+): SharedDashboardDerived | null {
+  const value = useContext(DashboardSnapshotContext);
+  if (!value?.derived || !value.snapshot) return null;
+  if (value.snapshot.rows !== rows || rows !== allRows) return null;
+  return value.derived;
 }

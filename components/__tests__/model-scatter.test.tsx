@@ -13,15 +13,18 @@ import {
   SCATTER_CHART_MARGIN,
   SCATTER_CURSOR_STROKE,
   SCATTER_DIMMED_OPACITY,
+  SCATTER_PARETO_STORAGE_KEY,
   SCATTER_X_AXIS_HEIGHT,
   SCATTER_Y_AXIS_WIDTH
 } from "@/components/model-scatter/constants";
 import type { MatrixCell, MatrixInputRow, MatrixRow } from "@/components/benchmark-matrix/types";
+import { SCATTER_PATH } from "@/lib/public-routes";
 
 let mockSearchParams = new URLSearchParams();
+const pathnameState = vi.hoisted(() => ({ value: "/scatter" }));
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/scatter",
+  usePathname: () => pathnameState.value,
   // 惰性读取，测试可在 render 前改写查询串
   useSearchParams: () => mockSearchParams
 }));
@@ -173,7 +176,8 @@ function pickAxisOption(container: HTMLElement, axis: "x" | "y", label: string) 
 }
 
 beforeEach(() => {
-  window.history.replaceState(null, "", "/scatter");
+  pathnameState.value = SCATTER_PATH;
+  window.history.replaceState(null, "", SCATTER_PATH);
   mockSearchParams = new URLSearchParams();
   window.localStorage.clear();
 });
@@ -453,6 +457,30 @@ describe("ModelScatter", () => {
     expect(replaceStateSpy).toHaveBeenCalled();
     const lastUrl = replaceStateSpy.mock.calls.at(-1)?.[2] as string;
     expect(lastUrl).toContain("pareto=0");
+  });
+
+  test("urlSyncEnabled=false 时仍更新视图并写本地偏好，但不改写地址栏", () => {
+    window.history.replaceState(null, "", "/?source=text%3Ademo");
+    const replaceStateSpy = vi.spyOn(window.history, "replaceState");
+
+    render(
+      <ModelScatter
+        rows={rows}
+        allRows={rows}
+        sourceOptions={["text:demo"]}
+        modelPrices={modelPrices}
+        modelParams={modelParams}
+        urlSyncEnabled={false}
+      />
+    );
+    replaceStateSpy.mockClear();
+    fireEvent.click(screen.getByRole("checkbox", { name: /帕累托前沿/ }));
+
+    expect(paretoCount()).toBe("--");
+    // urlSyncEnabled 只管地址栏：本地偏好照旧持久化
+    expect(window.localStorage.getItem(SCATTER_PARETO_STORAGE_KEY)).toBe("0");
+    expect(replaceStateSpy).not.toHaveBeenCalled();
+    expect(`${window.location.pathname}${window.location.search}`).toBe("/?source=text%3Ademo");
   });
 
   test("URL 参数优先于默认值", () => {

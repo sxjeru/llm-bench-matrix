@@ -1,9 +1,14 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { DashboardProvider } from "@/components/dashboard-provider";
+import {
+  DashboardProvider,
+  useDashboardSnapshot,
+  useSharedMatrixDerived
+} from "@/components/dashboard-provider";
 import { HomeBenchmarkMatrix } from "@/components/home-benchmark-matrix";
 import { HomeMetrics } from "@/components/home-metrics";
+import * as selectors from "@/components/benchmark-matrix/selectors";
 import type { MatrixInputRow } from "@/components/benchmark-matrix/types";
 import {
   encodePublicDashboardSnapshot,
@@ -302,5 +307,86 @@ describe("DashboardProvider", () => {
       expect(screen.getByText("Providers").parentElement).toHaveTextContent("1");
     });
     expect(screen.getByText("总记录").parentElement).toHaveTextContent("4");
+  });
+
+  test("快照到达后提供 All 默认 derived，相同 rows 引用可复用", async () => {
+    const spyBySource = vi.spyOn(selectors, "buildRowsBySource");
+    const spyIndex = vi.spyOn(selectors, "buildAllRowsIndex");
+    const spyMeta = vi.spyOn(selectors, "buildRowsWithSourceMeta");
+    stubFetchByRoute();
+
+    function Probe() {
+      const { snapshot, derived } = useDashboardSnapshot();
+      const shared = useSharedMatrixDerived(snapshot?.rows ?? [], snapshot?.rows ?? []);
+      const mismatch = useSharedMatrixDerived(snapshot ? [...snapshot.rows] : [], snapshot ? [...snapshot.rows] : []);
+
+      if (!snapshot || !derived) return null;
+
+      return (
+        <>
+          <span data-testid="shared-same">{shared === derived ? "yes" : "no"}</span>
+          <span data-testid="mismatch">{mismatch ? "yes" : "no"}</span>
+          <span data-testid="index-size">{String(derived.mergedAllRowsIndex.modelProviderMap.size)}</span>
+        </>
+      );
+    }
+
+    render(
+      <DashboardProvider>
+        <Probe />
+      </DashboardProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("shared-same")).toHaveTextContent("yes");
+    });
+
+    expect(screen.getByTestId("mismatch")).toHaveTextContent("no");
+    expect(spyBySource).toHaveBeenCalledTimes(1);
+    expect(spyIndex).toHaveBeenCalledTimes(1);
+    expect(spyIndex.mock.calls[0]?.[1]).toBe(false);
+    expect(spyMeta).not.toHaveBeenCalled();
+  });
+
+  test("getAllRowsWithSourceMeta 惰性计算且同一份快照只投影一次", async () => {
+    const spyMeta = vi.spyOn(selectors, "buildRowsWithSourceMeta");
+    stubFetchByRoute();
+
+    let getter: (() => MatrixInputRow[]) | null = null;
+
+    function Probe() {
+      const { derived } = useDashboardSnapshot();
+      getter = derived?.getAllRowsWithSourceMeta ?? null;
+      return derived ? <span data-testid="ready">ready</span> : null;
+    }
+
+    render(
+      <DashboardProvider>
+        <Probe />
+      </DashboardProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("ready")).toBeInTheDocument();
+    });
+
+    expect(spyMeta).not.toHaveBeenCalled();
+    expect(getter).not.toBeNull();
+
+    const first = getter!();
+    const second = getter!();
+
+    expect(first).toBe(second);
+    expect(spyMeta).toHaveBeenCalledTimes(1);
+  });
+
+  test("没有 Provider 时 useSharedMatrixDerived 返回 null", () => {
+    function Outside() {
+      const shared = useSharedMatrixDerived(ROWS, ROWS);
+      return <span data-testid="outside">{shared ? "yes" : "no"}</span>;
+    }
+
+    render(<Outside />);
+    expect(screen.getByTestId("outside")).toHaveTextContent("no");
   });
 });
