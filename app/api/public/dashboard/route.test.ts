@@ -93,8 +93,8 @@ describe("GET /api/public/dashboard", () => {
     ]);
     expect(decodePublicDashboardSnapshot(payload)).toEqual(SNAPSHOT);
     expect(response.headers.get("Cache-Control")).toBe("public, max-age=0, must-revalidate");
-    expect(response.headers.get("CDN-Cache-Control")).toBe("public, s-maxage=300, stale-while-revalidate=3600");
-    expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe("public, s-maxage=900, stale-while-revalidate=86400");
+    expect(response.headers.get("CDN-Cache-Control")).toBe("public, s-maxage=0, must-revalidate");
+    expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe("public, s-maxage=0, must-revalidate");
     expect(response.headers.get("X-Dashboard-Version")).toBe("dashboard-version");
     expect(response.headers.get("X-Pricing-Version")).toBe("pricing-version");
     expect(response.headers.get("X-Settings-Version")).toBe("settings-version");

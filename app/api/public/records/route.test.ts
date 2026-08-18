@@ -28,8 +28,8 @@ describe("GET /api/public/records", () => {
     expect(getCacheVersion).toHaveBeenCalledWith("pricing");
     expect(getDashboardRows).toHaveBeenCalledWith(300, null, "dashboard-version");
     expect(response.headers.get("Cache-Control")).toBe("public, max-age=0, must-revalidate");
-    expect(response.headers.get("CDN-Cache-Control")).toBe("public, s-maxage=300, stale-while-revalidate=3600");
-    expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe("public, s-maxage=900, stale-while-revalidate=86400");
+    expect(response.headers.get("CDN-Cache-Control")).toBe("public, s-maxage=0, must-revalidate");
+    expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe("public, s-maxage=0, must-revalidate");
     expect(response.headers.get("X-Dashboard-Version")).toBe("dashboard-version");
     expect(response.headers.get("X-Pricing-Version")).toBe("pricing-version");
     expect(response.headers.get("ETag")).toBe('"records:dashboard-version:pricing-version:limit:300:f23a4e48f80ed64c"');
