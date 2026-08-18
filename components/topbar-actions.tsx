@@ -4,10 +4,11 @@ import Link from "next/link";
 import { LogOut, ScatterChart, Shield, Table2 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
+import { HOME_PATH, SCATTER_PATH, isHomePath, isScatterPath } from "@/lib/public-routes";
 
 const PAGE_LINKS = [
-  { href: "/", label: "矩阵", icon: Table2 },
-  { href: "/scatter", label: "散点图", icon: ScatterChart }
+  { href: HOME_PATH, label: "矩阵", icon: Table2, isActive: isHomePath },
+  { href: SCATTER_PATH, label: "散点图", icon: ScatterChart, isActive: isScatterPath }
 ] as const;
 
 export function TopbarActions() {
@@ -35,19 +36,24 @@ export function TopbarActions() {
     <nav className="nav">
       {isAdminArea ? null : (
         <div className="nav-links">
-          {PAGE_LINKS.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              prefetch={false}
-              className={`nav-link ${pathname === href ? "is-active" : ""}`}
-              aria-current={pathname === href ? "page" : undefined}
-              suppressHydrationWarning
-            >
-              <Icon size={15} />
-              <span>{label}</span>
-            </Link>
-          ))}
+          {PAGE_LINKS.map(({ href, label, icon: Icon, isActive }) => {
+            // 用与 keep-alive 同一套路由判定，/scatter/xxx 这类嵌套路径也算命中
+            const active = isActive(pathname);
+
+            return (
+              <Link
+                key={href}
+                href={href}
+                prefetch={false}
+                className={`nav-link ${active ? "is-active" : ""}`}
+                aria-current={active ? "page" : undefined}
+                suppressHydrationWarning
+              >
+                <Icon size={15} />
+                <span>{label}</span>
+              </Link>
+            );
+          })}
         </div>
       )}
 

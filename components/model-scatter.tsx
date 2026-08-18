@@ -33,6 +33,7 @@ import {
 } from "@/components/benchmark-matrix/selectors";
 import type { ExportPresetKey } from "@/components/benchmark-matrix/types";
 import { normalizeMatchToken, sourceTabDisplayLabel, enqueueStateUpdate } from "@/components/benchmark-matrix/utils";
+import { useSharedMatrixDerived } from "@/components/dashboard-provider";
 import { resolveProviderBrandColorForDarkTheme } from "@/lib/provider-config";
 import { ScatterChartHost } from "./model-scatter/chart-host";
 import {
@@ -93,7 +94,8 @@ export function ModelScatter({
   allRows: allRowsProp,
   sourceOptions: sourceOptionsProp = [],
   modelPrices = [],
-  modelParams = []
+  modelParams = [],
+  urlSyncEnabled = true
 }: ModelScatterProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -204,18 +206,45 @@ export function ModelScatter({
     [allRows, sourceOptionsProp]
   );
 
-  const scopedRowsBySource = useMemo(() => buildRowsBySource(rows), [rows]);
-  const allRowsBySource = useMemo(() => buildRowsBySource(allRows), [allRows]);
-  const allRowsWithSourceMeta = useMemo(() => buildRowsWithSourceMeta(allRows), [allRows]);
+  const sharedDerived = useSharedMatrixDerived(rows, allRows);
+
+  const scopedRowsBySource = useMemo(
+    () => sharedDerived?.rowsBySource ?? buildRowsBySource(rows),
+    [rows, sharedDerived]
+  );
+  const allRowsBySource = useMemo(
+    () => (allRows === rows ? scopedRowsBySource : buildRowsBySource(allRows)),
+    [allRows, rows, scopedRowsBySource]
+  );
+  const getAllRowsWithSourceMeta = useMemo(() => {
+    if (sharedDerived) return sharedDerived.getAllRowsWithSourceMeta;
+
+    let projected: typeof allRows | null = null;
+
+    return () => {
+      projected ??= buildRowsWithSourceMeta(allRows);
+      return projected;
+    };
+  }, [allRows, sharedDerived]);
 
   const indexedSourceRows = useMemo(
-    () => (activeSource === SOURCE_ALL ? allRows : allRowsWithSourceMeta),
-    [activeSource, allRows, allRowsWithSourceMeta]
+    () => (activeSource === SOURCE_ALL ? allRows : getAllRowsWithSourceMeta()),
+    [activeSource, allRows, getAllRowsWithSourceMeta]
   );
 
   const allRowsIndex = useMemo(
-    () => buildAllRowsIndex(indexedSourceRows, SHOW_DUPLICATE_ROWS),
-    [indexedSourceRows]
+    () => {
+      if (
+        sharedDerived
+        && activeSource === SOURCE_ALL
+        && indexedSourceRows === allRows
+      ) {
+        return sharedDerived.mergedAllRowsIndex;
+      }
+
+      return buildAllRowsIndex(indexedSourceRows, SHOW_DUPLICATE_ROWS);
+    },
+    [activeSource, allRows, indexedSourceRows, sharedDerived]
   );
 
   const baseSourceRows = useMemo(
@@ -380,14 +409,18 @@ export function ModelScatter({
   useEffect(() => {
     if (!isHydrated) return;
 
+    // 本地偏好与地址栏分开：urlSyncEnabled 只管 URL，
+    // keep-alive 隐藏态或内嵌复用时仍要记住用户选的轴与开关。
     saveScatterPreferences(viewState);
+
+    if (!urlSyncEnabled) return;
 
     const query = buildScatterSearchParams(viewState, searchParamsRef.current);
     const nextUrl = query ? `${pathname}?${query}` : pathname;
     if (`${window.location.pathname}${window.location.search}` === nextUrl) return;
 
     window.history.replaceState(window.history.state, "", nextUrl);
-  }, [viewState, isHydrated, pathname]);
+  }, [viewState, isHydrated, pathname, urlSyncEnabled]);
 
   const xMetric = useMemo(() => findScatterMetric(metrics, viewState.xKey), [metrics, viewState.xKey]);
   const yMetric = useMemo(() => findScatterMetric(metrics, viewState.yKey), [metrics, viewState.yKey]);

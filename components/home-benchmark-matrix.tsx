@@ -3,7 +3,7 @@
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
 import { useDashboardSnapshot } from "@/components/dashboard-provider";
 
-export function HomeBenchmarkMatrix() {
+export function HomeBenchmarkMatrix({ urlSyncEnabled = true }: { urlSyncEnabled?: boolean }) {
   const { snapshot, isLoading, error } = useDashboardSnapshot();
 
   if (!snapshot) {
@@ -24,6 +24,7 @@ export function HomeBenchmarkMatrix() {
       modelParams={modelParams}
       exportFootnoteText={exportFootnoteText}
       exportFootnoteAlign={exportFootnoteAlign}
+      urlSyncEnabled={urlSyncEnabled}
     />
   );
 }

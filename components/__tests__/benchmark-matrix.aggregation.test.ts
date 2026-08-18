@@ -264,4 +264,38 @@ describe("benchmark matrix repeated-value aggregation", () => {
     expect(aggregateMatrixCellEntries(mixedEntries, true).valueNum).toBe(90);
     expect(aggregateMatrixCellEntries(mixedEntries, true).entry?.source).toBe("text:S2");
   });
+
+  test("单条记录的单元格跳过去重与聚合，展示值与原始记录一致", () => {
+    const rows = [makeRow("Model A", 70, 0)];
+    const matrixRow = buildMatrixRows(rows, rows, false, false, SOURCE_ALL)[0]!;
+    const cell = matrixRow.cells.get("Model A")!;
+
+    expect(cell.allEntries).toHaveLength(1);
+    expect(cell.uniqueEntries).toEqual(cell.allEntries);
+    expect(cell.valueNum).toBe(70);
+    expect(cell.displayValue).toBe("70");
+    expect(cell.hasMeaningfulMultipleValues).toBe(false);
+  });
+
+  test("只为 coverage 里出现的分组键建行，firstSeenIndex 仍取自 base 首次出现位置", () => {
+    const base = [
+      makeRow("M1", 10, 0),
+      {
+        ...makeRow("M1", 20, 1),
+        benchmarkName: "Hidden Bench",
+        benchmarkCanonicalKey: "hidden-bench:general"
+      },
+      {
+        ...makeRow("M2", 30, 2),
+        benchmarkName: "Late Bench",
+        benchmarkCanonicalKey: "late-bench:general"
+      }
+    ];
+    const pruned = [base[2]!];
+    const rows = buildMatrixRows(base, pruned, false, false, SOURCE_ALL);
+
+    expect(rows.map((row) => row.benchmark)).toEqual(["Late Bench"]);
+    expect(rows[0]!.firstSeenIndex).toBe(2);
+    expect(rows[0]!.cells.get("M2")?.valueNum).toBe(30);
+  });
 });

@@ -1,6 +1,4 @@
-import { HomeModelScatter } from "@/components/home-model-scatter";
 import type { Metadata } from "next";
-import { Suspense } from "react";
 
 export const revalidate = false;
 
@@ -12,18 +10,12 @@ export const metadata: Metadata = {
 
 export default function ScatterPage() {
   return (
-    <>
-      <section className="sr-only">
-        <h1>模型二维分析</h1>
-        <p>
-          任选两个评测指标作为横纵轴绘制散点图，支持帕累托前沿、对数刻度与厂商配色，
-          用于比较大模型在性能与成本之间的权衡。
-        </p>
-      </section>
-
-      <Suspense fallback={null}>
-        <HomeModelScatter />
-      </Suspense>
-    </>
+    <section className="sr-only">
+      <h1>模型二维分析</h1>
+      <p>
+        任选两个评测指标作为横纵轴绘制散点图，支持帕累托前沿、对数刻度与厂商配色，
+        用于比较大模型在性能与成本之间的权衡。
+      </p>
+    </section>
   );
 }

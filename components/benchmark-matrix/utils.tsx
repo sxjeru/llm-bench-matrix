@@ -31,11 +31,16 @@ export function enqueueStateUpdate(callback: () => void) {
 
 export function applySourceMeta(row: MatrixInputRow): MatrixInputRow {
   const sourceBenchmarkType = row.sourceBenchmarkType?.trim();
+  const nextBenchmarkType = sourceBenchmarkType || row.benchmarkType;
+  const nextModalities = row.sourceModalities ?? row.modalities;
+  if (nextBenchmarkType === row.benchmarkType && nextModalities === row.modalities) {
+    return row;
+  }
 
   return {
     ...row,
-    benchmarkType: sourceBenchmarkType || row.benchmarkType,
-    modalities: row.sourceModalities ?? row.modalities
+    benchmarkType: nextBenchmarkType,
+    modalities: nextModalities
   };
 }
 
@@ -128,14 +133,27 @@ function isPairMatrixCellEntry(entry: MatrixCellEntry): boolean {
   return entry.valueNum2 !== null || hasMatrixCellPairRawValue(entry.valueRaw);
 }
 
+const ARTIFICIAL_ANALYSIS_SOURCE_CACHE_LIMIT = 4096;
+const artificialAnalysisSourceCache = new Map<string, boolean>();
+
 /** 按记录/页签的 source 识别 Artificial Analysis，不依赖当前打开的是哪个页签 */
 export function isArtificialAnalysisSource(source: string | null | undefined): boolean {
   if (!source) return false;
+
+  const cached = artificialAnalysisSourceCache.get(source);
+  if (cached !== undefined) return cached;
+
   const sourceKey = source.trim().toLowerCase();
-  if (sourceKey === "artificial analysis" || sourceKey === "text:artificial analysis") {
-    return true;
+  const result =
+    sourceKey === "artificial analysis"
+    || sourceKey === "text:artificial analysis"
+    || sourceTabDisplayLabel(source).trim().toLowerCase() === "artificial analysis";
+
+  if (artificialAnalysisSourceCache.size >= ARTIFICIAL_ANALYSIS_SOURCE_CACHE_LIMIT) {
+    artificialAnalysisSourceCache.clear();
   }
-  return sourceTabDisplayLabel(source).trim().toLowerCase() === "artificial analysis";
+  artificialAnalysisSourceCache.set(source, result);
+  return result;
 }
 
 export function resolveMatrixCellAggregateMode(source: string | null | undefined): MatrixCellAggregateMode {

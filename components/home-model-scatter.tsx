@@ -3,7 +3,7 @@
 import { useDashboardSnapshot } from "@/components/dashboard-provider";
 import { ModelScatter } from "@/components/model-scatter";
 
-export function HomeModelScatter() {
+export function HomeModelScatter({ urlSyncEnabled = true }: { urlSyncEnabled?: boolean }) {
   const { snapshot, isLoading, error } = useDashboardSnapshot();
 
   if (!snapshot) {
@@ -22,6 +22,7 @@ export function HomeModelScatter() {
       sourceOptions={sourceOptions}
       modelPrices={modelPrices}
       modelParams={modelParams}
+      urlSyncEnabled={urlSyncEnabled}
     />
   );
 }

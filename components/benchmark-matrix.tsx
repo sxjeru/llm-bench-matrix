@@ -72,6 +72,7 @@ import {
   resolveBaseSourceRows,
   sortMatrixRows
 } from "./benchmark-matrix/selectors";
+import { useSharedMatrixDerived } from "./dashboard-provider";
 import { useMatrixSourceTabs } from "./benchmark-matrix/source-tabs";
 import {
   type MatrixInputRow,
@@ -205,7 +206,8 @@ export function BenchmarkMatrix({
   modelPrices = [],
   modelParams = [],
   exportFootnoteText,
-  exportFootnoteAlign
+  exportFootnoteAlign,
+  urlSyncEnabled = true
 }: Props) {
   const sectionRef = useRef<HTMLElement | null>(null);
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
@@ -387,6 +389,7 @@ export function BenchmarkMatrix({
     allRows,
     allSourceOptions,
     isClientReady,
+    urlSyncEnabled,
     pathname,
     searchParams,
     sourceNewReferenceTime,
@@ -675,9 +678,11 @@ export function BenchmarkMatrix({
     });
   }
 
+  const sharedDerived = useSharedMatrixDerived(rows, allRows);
+
   const scopedRowsBySource = useMemo(
-    () => buildRowsBySource(rows),
-    [rows]
+    () => sharedDerived?.rowsBySource ?? buildRowsBySource(rows),
+    [rows, sharedDerived]
   );
 
   // allRows 默认就是 rows（见 Props 默认值），此时没有理由把同一个数组再分桶一遍
@@ -691,13 +696,15 @@ export function BenchmarkMatrix({
   // 所以包成一个惰性 getter：真正被问到时才投影，之后在同一份 allRows 上复用结果。
   // 这样首屏不白算两万行，切 tab、调排名面板参数也不会反复重投影。
   const getAllRowsWithSourceMeta = useMemo(() => {
+    if (sharedDerived) return sharedDerived.getAllRowsWithSourceMeta;
+
     let projected: MatrixInputRow[] | null = null;
 
     return () => {
       projected ??= buildRowsWithSourceMeta(allRows);
       return projected;
     };
-  }, [allRows]);
+  }, [allRows, sharedDerived]);
 
   const indexedSourceRows = useMemo(
     () => (activeSource === SOURCE_ALL ? allRows : getAllRowsWithSourceMeta()),
@@ -705,8 +712,19 @@ export function BenchmarkMatrix({
   );
 
   const allRowsIndex = useMemo(
-    () => buildAllRowsIndex(indexedSourceRows, showDuplicateRows),
-    [indexedSourceRows, showDuplicateRows]
+    () => {
+      if (
+        sharedDerived
+        && activeSource === SOURCE_ALL
+        && !showDuplicateRows
+        && indexedSourceRows === allRows
+      ) {
+        return sharedDerived.mergedAllRowsIndex;
+      }
+
+      return buildAllRowsIndex(indexedSourceRows, showDuplicateRows);
+    },
+    [allRows, indexedSourceRows, sharedDerived, showDuplicateRows, activeSource]
   );
 
   const coveredModelsByGroupingKey = useMemo(

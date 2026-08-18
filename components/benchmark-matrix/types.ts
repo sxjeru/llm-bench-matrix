@@ -151,6 +151,8 @@ export type Props = {
   modelParams?: ModelParamsInfo[];
   exportFootnoteText?: string;
   exportFootnoteAlign?: "left" | "center" | "right";
+  /** 为 false 时仍切换页签，但不读写地址栏。keep-alive 隐藏态由调用方关闭。 */
+  urlSyncEnabled?: boolean;
 };
 
 export type ModelParamsInfo = {
