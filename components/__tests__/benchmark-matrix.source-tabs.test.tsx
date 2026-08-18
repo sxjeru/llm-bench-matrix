@@ -666,7 +666,7 @@ describe("BenchmarkMatrix source tabs", () => {
 
     expect(alphaTab.querySelector("span.bg-emerald-300")).not.toBeNull();
     expect(betaTab.querySelector("span.bg-emerald-300")).toBeNull();
-    expect(gammaTab.querySelector("span.bg-emerald-300")).toBeNull();
+    expect(gammaTab.querySelector("span.bg-emerald-300")).not.toBeNull();
 
     nowSpy.mockRestore();
   });
@@ -762,11 +762,12 @@ describe("BenchmarkMatrix source tabs", () => {
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(referenceTime.getTime());
 
     const olderUpdatedAt = "2026-04-01T08:30:00.000Z";
+    const secondLatestUpdatedAt = "2026-05-08T12:00:00.000Z";
     const latestUpdatedAt = "2026-05-09T18:08:00.000Z";
 
     render(
       <BenchmarkMatrix
-        sourceOptions={["text:Epsilon", "text:Zeta"]}
+        sourceOptions={["text:Epsilon", "text:Eta", "text:Zeta"]}
         rows={[
           {
             providerName: "Provider E",
@@ -778,6 +779,17 @@ describe("BenchmarkMatrix source tabs", () => {
             valueNum: 73,
             valueNote: null,
             source: "text:Epsilon"
+          },
+          {
+            providerName: "Provider H",
+            modelName: "Model H",
+            benchmarkName: "Bench-H",
+            benchmarkType: "General",
+            benchTime: secondLatestUpdatedAt,
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Eta"
           },
           {
             providerName: "Provider Z",
@@ -806,6 +818,66 @@ describe("BenchmarkMatrix source tabs", () => {
     const epsilonTab = screen.getByRole("tab", { name: "Epsilon" });
     expect(epsilonTab.getAttribute("title") ?? "").not.toContain("最近更新");
     expect(epsilonTab.querySelector("span.bg-emerald-300")).toBeNull();
+
+    nowSpy.mockRestore();
+  });
+
+  test("超出近期窗口时仍为最后两个更新的 source 页签展示 new 标记", async () => {
+    const referenceTime = new Date("2026-06-10T12:00:00.000Z");
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(referenceTime.getTime());
+
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:Alpha", "text:Beta", "text:Gamma"]}
+        rows={[
+          {
+            providerName: "Provider A",
+            modelName: "Model A",
+            benchmarkName: "Bench-A",
+            benchmarkType: "General",
+            benchTime: "2026-04-01T00:00:00.000Z",
+            updatedAt: "2026-05-09T10:00:00.000Z",
+            valueRaw: "81",
+            valueNum: 81,
+            valueNote: null,
+            source: "text:Alpha"
+          },
+          {
+            providerName: "Provider B",
+            modelName: "Model B",
+            benchmarkName: "Bench-B",
+            benchmarkType: "General",
+            benchTime: "2026-04-02T00:00:00.000Z",
+            valueRaw: "79",
+            valueNum: 79,
+            valueNote: null,
+            source: "text:Beta"
+          },
+          {
+            providerName: "Provider C",
+            modelName: "Model C",
+            benchmarkName: "Bench-C",
+            benchmarkType: "General",
+            benchTime: "2026-05-03T00:00:00.000Z",
+            valueRaw: "78",
+            valueNum: 78,
+            valueNote: null,
+            source: "text:Gamma"
+          }
+        ]}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Alpha" }).querySelector("span.bg-emerald-300")).not.toBeNull();
+    });
+
+    expect(screen.getByRole("tab", { name: "Alpha" }).querySelector("span.bg-emerald-300")).not.toBeNull();
+    expect(screen.getByRole("tab", { name: "Beta" }).querySelector("span.bg-emerald-300")).toBeNull();
+    expect(screen.getByRole("tab", { name: "Gamma" }).querySelector("span.bg-emerald-300")).not.toBeNull();
+    expect(screen.getByRole("tab", { name: "Alpha" }).getAttribute("title") ?? "").toContain("最近更新");
+    expect(screen.getByRole("tab", { name: "Gamma" }).getAttribute("title") ?? "").toContain("最近更新");
+    expect(screen.getByRole("tab", { name: "Beta" }).getAttribute("title") ?? "").not.toContain("最近更新");
 
     nowSpy.mockRestore();
   });

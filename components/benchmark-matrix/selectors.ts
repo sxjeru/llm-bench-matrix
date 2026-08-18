@@ -9,6 +9,7 @@ import {
   PRICE_INPUT_ROW_KEY,
   PRICE_OUTPUT_ROW_KEY,
   SOURCE_ALL,
+  SOURCE_NEW_LATEST_COUNT,
   SOURCE_NEW_WINDOW_MS
 } from "./constants";
 import {
@@ -154,20 +155,18 @@ export function buildSourceNewStateByKey(
     );
   }
 
-  let latestSourceKey: string | null = null;
-  let latestSourceUpdatedAt = Number.NEGATIVE_INFINITY;
-  latestUpdateBySource.forEach((updatedAtMs, sourceKey) => {
-    if (updatedAtMs > latestSourceUpdatedAt) {
-      latestSourceKey = sourceKey;
-      latestSourceUpdatedAt = updatedAtMs;
-    }
-  });
+  const latestSourceKeys = new Set(
+    Array.from(latestUpdateBySource.entries())
+      .sort(([keyA, timeA], [keyB, timeB]) => timeB - timeA || keyA.localeCompare(keyB))
+      .slice(0, SOURCE_NEW_LATEST_COUNT)
+      .map(([sourceKey]) => sourceKey)
+  );
 
   const stateByKey = new Map<string, { updatedAtMs: number; isNew: boolean }>();
   latestUpdateBySource.forEach((updatedAtMs, sourceKey) => {
     const ageMs = sourceNewReferenceTime - updatedAtMs;
     const isRecent = ageMs >= 0 && ageMs <= SOURCE_NEW_WINDOW_MS;
-    const isLatest = sourceKey === latestSourceKey;
+    const isLatest = latestSourceKeys.has(sourceKey);
 
     stateByKey.set(sourceKey, { updatedAtMs, isNew: isRecent || isLatest });
   });
