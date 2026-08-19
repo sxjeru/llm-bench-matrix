@@ -419,4 +419,21 @@ describe("BenchmarkMatrix 总评行", () => {
     expect(container.querySelectorAll('[data-metric-type="price"]')).toHaveLength(0);
     expect(screen.queryByText("Input Price")).not.toBeInTheDocument();
   });
+
+  test("仅有空费用价格行时不会因持久化开关渲染空价格行", async () => {
+    window.localStorage.setItem("benchmark-matrix:show-price-rows", "1");
+
+    const { container } = render(
+      <BenchmarkMatrix
+        rows={[...rows]}
+        modelPrices={[
+          { modelName: "Unmatched", inputCost: null, outputCost: null, cacheReadCost: null }
+        ]}
+      />
+    );
+
+    expect(container.querySelector("table")).not.toBeNull();
+    expect(container.querySelectorAll('[data-metric-type="price"]')).toHaveLength(0);
+    expect(screen.queryByText("Input Price")).not.toBeInTheDocument();
+  });
 });

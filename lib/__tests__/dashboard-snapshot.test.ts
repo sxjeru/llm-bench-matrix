@@ -118,4 +118,41 @@ describe("loadPublicDashboardSnapshot", () => {
       settings: "s1"
     })).toBe('"dashboard:d1:p1:s1"');
   });
+
+  test("公开快照丢掉三项费用全空的价格行", async () => {
+    vi.mocked(getModelPricingRows).mockResolvedValueOnce([
+      {
+        modelId: 7,
+        modelName: "GPT-5",
+        inputCost: 1.2,
+        outputCost: 3.4,
+        cacheReadCost: 0.1,
+        lastSyncedAt: "2026-05-01T00:00:00.000Z",
+        updatedAt: "2026-05-02T00:00:00.000Z"
+      },
+      {
+        modelId: 8,
+        modelName: "Unmatched",
+        inputCost: null,
+        outputCost: null,
+        cacheReadCost: null,
+        lastSyncedAt: "2026-05-01T00:00:00.000Z",
+        updatedAt: "2026-05-02T00:00:00.000Z"
+      }
+    ] as never);
+
+    const snapshot = await loadPublicDashboardSnapshot();
+
+    expect(snapshot.modelPrices).toEqual([
+      {
+        modelId: 7,
+        modelName: "GPT-5",
+        inputCost: 1.2,
+        outputCost: 3.4,
+        cacheReadCost: 0.1,
+        lastSyncedAt: "2026-05-01T00:00:00.000Z",
+        updatedAt: "2026-05-02T00:00:00.000Z"
+      }
+    ]);
+  });
 });

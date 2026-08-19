@@ -1,5 +1,5 @@
 import { toMatrixInputRow } from "@/components/benchmark-matrix/map-row";
-import type { ModelPriceInfo } from "@/components/benchmark-matrix/types";
+import { hasPublicModelPriceCost, type ModelPriceInfo } from "@/components/benchmark-matrix/types";
 import { getCacheVersion } from "@/lib/cache-versions";
 import {
   getDashboardRows,
@@ -98,7 +98,7 @@ export async function loadPublicDashboardSnapshot(
     rows: rows.map(toMatrixInputRow),
     sourceOptions,
     stats,
-    modelPrices: modelPrices.map(toPublicModelPrice),
+    modelPrices: modelPrices.map(toPublicModelPrice).filter(hasPublicModelPriceCost),
     modelParams,
     ...parseExportFootnote(settings.export_footnote_text)
   };

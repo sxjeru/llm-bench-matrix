@@ -176,6 +176,17 @@ export type ModelPriceInfo = {
   updatedAt?: string | null;
 };
 
+/** 公开矩阵/散点只认 input/output/cache 三项费用；全空的未匹配行不能当成“有价格数据”。 */
+export function hasPublicModelPriceCost(
+  price: Pick<ModelPriceInfo, "inputCost" | "outputCost" | "cacheReadCost">
+): boolean {
+  return (
+    (typeof price.inputCost === "number" && Number.isFinite(price.inputCost))
+    || (typeof price.outputCost === "number" && Number.isFinite(price.outputCost))
+    || (typeof price.cacheReadCost === "number" && Number.isFinite(price.cacheReadCost))
+  );
+}
+
 export type HeatmapPresetKey = "classic" | "coolwarm" | "mintsun" | "colorblind";
 export type HeatmapPresetSelection = HeatmapPresetKey | "custom";
 export type HeatmapPaletteHex = {

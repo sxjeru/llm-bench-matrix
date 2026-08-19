@@ -31,7 +31,7 @@ import {
   buildSourceOptions,
   resolveBaseSourceRows
 } from "@/components/benchmark-matrix/selectors";
-import type { ExportPresetKey } from "@/components/benchmark-matrix/types";
+import { hasPublicModelPriceCost, type ExportPresetKey } from "@/components/benchmark-matrix/types";
 import { normalizeMatchToken, sourceTabDisplayLabel, enqueueStateUpdate } from "@/components/benchmark-matrix/utils";
 import { useSharedMatrixDerived } from "@/components/dashboard-provider";
 import { resolveProviderBrandColorForDarkTheme } from "@/lib/provider-config";
@@ -326,7 +326,7 @@ export function ModelScatter({
   );
 
   const priceMatrixRows = useMemo(
-    () => (modelPrices.length > 0 ? buildPriceMatrixRows(baseModelColumns, modelPrices) : []),
+    () => (modelPrices.some(hasPublicModelPriceCost) ? buildPriceMatrixRows(baseModelColumns, modelPrices) : []),
     [baseModelColumns, modelPrices]
   );
 

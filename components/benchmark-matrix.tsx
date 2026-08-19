@@ -79,6 +79,7 @@ import {
   type RowSortColumn,
   type RowSortMode,
   type Props,
+  hasPublicModelPriceCost,
   type HeatmapPresetKey,
   type HeatmapPresetSelection,
   type HeatmapPaletteHex,
@@ -406,7 +407,8 @@ export function BenchmarkMatrix({
   const displaySourceValuesInCells = showSourceValues && hasSourceData && activeSource !== SOURCE_ALL;
   const sourceValueMode: SourceValueMode = showSourceValueMax ? "max" : "latest";
   const displaySourceValueDeltasInCells = displaySourceValuesInCells && showSourceValueDeltas;
-  const effectiveShowPriceRows = showPriceRows && modelPrices.length > 0;
+  const hasPriceData = modelPrices.some(hasPublicModelPriceCost);
+  const effectiveShowPriceRows = showPriceRows && hasPriceData;
   const hasParamsData = modelParams.length > 0;
   const effectiveShowParamsRows = showParamsRows && hasParamsData;
 
@@ -1039,16 +1041,20 @@ export function BenchmarkMatrix({
   );
 
   const allRankingModelNames = useMemo(() => {
+    // 排名弹窗未展开、或范围不是「全部模型」时，不必扫两万行 allRows / 全量价格名。
+    if (!expandedRankingRowKey || rankingScope !== "all") {
+      return benchmarkRankingModelNames;
+    }
+
     // 这里只取 modelName，而 applySourceMeta 只改写 benchmarkType / modalities，
     // 所以读 allRows 与读它的 source 投影结果完全等价，省掉一次两万行的对象展开
     const ordered = Array.from(new Set(allRows.map((row) => row.modelName)));
     const seen = new Set(ordered);
 
     modelPrices.forEach((price) => {
-      if (!seen.has(price.modelName)) {
-        seen.add(price.modelName);
-        ordered.push(price.modelName);
-      }
+      if (!hasPublicModelPriceCost(price) || seen.has(price.modelName)) return;
+      seen.add(price.modelName);
+      ordered.push(price.modelName);
     });
 
     modelParams.forEach((params) => {
@@ -1059,7 +1065,7 @@ export function BenchmarkMatrix({
     });
 
     return ordered;
-  }, [allRows, modelPrices, modelParams]);
+  }, [allRows, benchmarkRankingModelNames, expandedRankingRowKey, modelParams, modelPrices, rankingScope]);
 
   // 只有「显示 + 计入总评」同时成立的合成行才进入 Overall 打分
   const includePriceRowsInOverall = effectiveShowPriceRows && priceRowsInOverall;
@@ -1745,7 +1751,7 @@ export function BenchmarkMatrix({
         setShowLowCoverageRows={handleSetShowLowCoverageRows}
         showPriceRows={showPriceRows}
         setShowPriceRows={setShowPriceRows}
-        hasPriceData={modelPrices.length > 0}
+        hasPriceData={hasPriceData}
         priceRowsInOverall={priceRowsInOverall}
         setPriceRowsInOverall={setPriceRowsInOverall}
         showParamsRows={showParamsRows}
