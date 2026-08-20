@@ -20,34 +20,21 @@ import { revalidatePath } from "next/cache";
 import { bumpCacheVersions } from "@/lib/cache-versions";
 import { invalidateAllCaches } from "@/lib/db/queries";
 
-describe("invalidateAllCaches 的页面重新验证", () => {
+describe("invalidateAllCaches 不触发 ISR 页面重生", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  test("仅重新验证公开路由组 layout，避免根 layout 清到 /admin", async () => {
+  test("不调用 revalidatePath，避免 Vercel 把静态首页打进按需重生锁", async () => {
     await invalidateAllCaches();
 
-    expect(vi.mocked(revalidatePath)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(revalidatePath)).toHaveBeenCalledWith("/(public)", "layout");
+    expect(vi.mocked(revalidatePath)).not.toHaveBeenCalled();
   });
 
-  test("可忽略异常不会阻断缓存失效", async () => {
-    vi.mocked(revalidatePath).mockImplementationOnce(() => {
-      throw new Error("Invariant: static generation store missing in revalidatePath");
-    });
+  test("跳过版本 bump 时也不触发页面重新验证", async () => {
+    await invalidateAllCaches({ skipVersionBump: ["pricing"] });
 
-    await expect(invalidateAllCaches()).resolves.toBeUndefined();
-    expect(vi.mocked(revalidatePath)).toHaveBeenCalledTimes(1);
-  });
-
-  test("revalidatePath 抛其他错误时继续向上抛出", async () => {
-    vi.mocked(revalidatePath).mockImplementationOnce(() => {
-      throw new Error("boom");
-    });
-
-    await expect(invalidateAllCaches()).rejects.toThrow("boom");
-    expect(vi.mocked(revalidatePath)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(revalidatePath)).not.toHaveBeenCalled();
   });
 });
 
@@ -66,11 +53,5 @@ describe("invalidateAllCaches 的缓存版本 bump", () => {
     await invalidateAllCaches({ skipVersionBump: ["pricing"] });
 
     expect(vi.mocked(bumpCacheVersions)).toHaveBeenCalledWith(["dashboard", "admin_entities", "settings"]);
-  });
-
-  test("跳过版本 bump 时仍然重新验证页面", async () => {
-    await invalidateAllCaches({ skipVersionBump: ["pricing"] });
-
-    expect(vi.mocked(revalidatePath)).toHaveBeenCalledWith("/(public)", "layout");
   });
 });

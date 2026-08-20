@@ -1,5 +1,4 @@
 import { and, count, countDistinct, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db/client";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 import { normalizeProviderConfig } from "@/lib/provider-config";
@@ -59,22 +58,13 @@ export function registerCacheInvalidator(fn: () => void) {
 /** invalidateAllCaches 默认会 bump 的缓存版本域 */
 const ALL_CACHE_VERSION_DOMAINS: CacheVersionDomain[] = ["dashboard", "pricing", "admin_entities", "settings"];
 
-function revalidatePublicDashboardPaths() {
-  try {
-    // 快照在 (public)/layout 拉取。`("/", "layout")` 会清全站 Client Cache，含 /admin。
-    revalidatePath("/(public)", "layout");
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("static generation store missing")) {
-      return;
-    }
-
-    throw error;
-  }
-}
-
 /**
  * Clear dashboard caches after admin write operations
  * (import, merge, delete, etc.) so subsequent reads reflect updated data.
+ *
+ * 公开页已是静态壳 + 客户端拉 `/api/public/dashboard`，新鲜度靠版本号 / ETag。
+ * 不要再 revalidatePath 公开 layout：Vercel ISR 会把 `revalidate = false` 的首页
+ * 打进按需重生锁，导入后访问 `/` 会卡死。
  *
  * skipVersionBump 用于调用链上已经 bump 过的域：lib/model-pricing 的写函数内部会
  * 自行 bump "pricing"，价格相关路由再无条件走这里就会重复写一次 settings 表。
@@ -92,8 +82,6 @@ export async function invalidateAllCaches(options?: { skipVersionBump?: CacheVer
 
   const skipped = new Set(options?.skipVersionBump ?? []);
   await bumpCacheVersions(ALL_CACHE_VERSION_DOMAINS.filter((domain) => !skipped.has(domain)));
-
-  revalidatePublicDashboardPaths();
 }
 
 function normalizeSourceFilterKey(sourceFilter?: string | null): string {

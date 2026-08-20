@@ -8,9 +8,17 @@ vi.mock("@/lib/db/client", () => ({
   }
 }));
 
-vi.mock("next/cache", () => ({
-  revalidatePath: vi.fn()
-}));
+/**
+ * 只替换 invalidateAllCaches：admin-service 还会在模块顶层调用同一模块导出的
+ * registerCacheInvalidator，整包替换会让它变成 undefined 并在 import 阶段直接抛错。
+ */
+vi.mock("@/lib/db/queries", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/db/queries")>();
+  return {
+    ...actual,
+    invalidateAllCaches: vi.fn().mockResolvedValue(undefined)
+  };
+});
 
 type Schema = typeof import("@/lib/db/schema");
 
@@ -211,9 +219,9 @@ async function setup(options: Parameters<typeof createDbMock>[1] = {}) {
   const mock = createDbMock(schema, options);
   dbClientMock.db = mock.db;
   const { importExternalBenchmarkRows } = await import("@/lib/admin-service");
-  const { revalidatePath } = await import("next/cache");
-  vi.mocked(revalidatePath).mockClear();
-  return { mock, importExternalBenchmarkRows, revalidatePath: vi.mocked(revalidatePath) };
+  const { invalidateAllCaches } = await import("@/lib/db/queries");
+  vi.mocked(invalidateAllCaches).mockClear();
+  return { mock, importExternalBenchmarkRows, invalidateAllCaches: vi.mocked(invalidateAllCaches) };
 }
 
 const BASE_ROW = {
@@ -263,7 +271,7 @@ describe("importExternalBenchmarkRows", () => {
   });
 
   test("同源已有相同值时不改写时间戳，也不失效公开缓存", async () => {
-    const { mock, importExternalBenchmarkRows, revalidatePath } = await setup({
+    const { mock, importExternalBenchmarkRows, invalidateAllCaches } = await setup({
       existingBenchmark: makeBenchmarkRow(),
       existingValues: [existingValue({ valueRaw: "79.1", valueNum: "79.100000" })],
       existingSourceMeta: [{
@@ -285,12 +293,12 @@ describe("importExternalBenchmarkRows", () => {
     expect(mock.captured.insertedValues).toHaveLength(0);
     expect(mock.captured.touchedIds).not.toContain(501);
     expect(mock.captured.sourceMetaRows).toHaveLength(0);
-    expect(revalidatePath).not.toHaveBeenCalled();
+    expect(invalidateAllCaches).not.toHaveBeenCalled();
     expect(result.preview[0]).toMatchObject({ outcome: "unchanged", previousValue: "79.1" });
   });
 
   test("历史未加前缀的 source 在无变化同步时不误失效", async () => {
-    const { mock, importExternalBenchmarkRows, revalidatePath } = await setup({
+    const { mock, importExternalBenchmarkRows, invalidateAllCaches } = await setup({
       existingBenchmark: makeBenchmarkRow(),
       existingValues: [existingValue({ source: "Artificial Analysis" })],
       existingSourceMeta: [{
@@ -307,7 +315,7 @@ describe("importExternalBenchmarkRows", () => {
 
     expect(result.publicChanged).toBe(false);
     expect(mock.captured.sourceMetaRows).toHaveLength(0);
-    expect(revalidatePath).not.toHaveBeenCalled();
+    expect(invalidateAllCaches).not.toHaveBeenCalled();
   });
 
   test("历史未加前缀的 source 元数据变化时更新原 source", async () => {
@@ -334,7 +342,7 @@ describe("importExternalBenchmarkRows", () => {
   });
 
   test("数值相同但展示文本变化时保留原测评时间", async () => {
-    const { mock, importExternalBenchmarkRows, revalidatePath } = await setup({
+    const { mock, importExternalBenchmarkRows, invalidateAllCaches } = await setup({
       existingBenchmark: makeBenchmarkRow(),
       existingValues: [existingValue({ valueRaw: "79.100" })],
       existingSourceMeta: [{
@@ -353,13 +361,13 @@ describe("importExternalBenchmarkRows", () => {
     expect(result.unchanged).toBe(1);
     expect(result.publicChanged).toBe(true);
     expect(mock.captured.rewrites).toEqual([{ valueRaw: "79.1", valueNote: null }]);
-    expect(revalidatePath).toHaveBeenCalled();
+    expect(invalidateAllCaches).toHaveBeenCalled();
   });
 
   test("小到一个最小刻度的差异也算值变化", async () => {
     // numeric(14,6) 是精确十进制，79.099999 与 79.1 是两个真实不同的值，
     // 容差只用来吸收浮点表示误差，不能把相邻刻度也吞掉
-    const { mock, importExternalBenchmarkRows, revalidatePath } = await setup({
+    const { mock, importExternalBenchmarkRows, invalidateAllCaches } = await setup({
       existingBenchmark: makeBenchmarkRow(),
       existingValues: [existingValue({ valueRaw: "79.099999", valueNum: "79.099999" })]
     });
@@ -372,7 +380,7 @@ describe("importExternalBenchmarkRows", () => {
     expect(result.unchanged).toBe(0);
     expect(result.publicChanged).toBe(true);
     expect(mock.captured.insertedValues).toHaveLength(1);
-    expect(revalidatePath).toHaveBeenCalled();
+    expect(invalidateAllCaches).toHaveBeenCalled();
   });
 
   test("上游小数换算带来的浮点尾巴不算值变化", async () => {
