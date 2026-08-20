@@ -8,6 +8,15 @@ export async function flushQueuedStateUpdates() {
   });
 }
 
+/** Drain React `startTransition` updates scheduled after snapshot decode. */
+export async function flushDeferredDerived() {
+  await act(async () => {
+    await new Promise<void>((resolve) => {
+      window.requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
 export async function renderReady(
   ui: ReactElement,
   options?: RenderOptions

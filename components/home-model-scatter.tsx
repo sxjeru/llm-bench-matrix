@@ -4,12 +4,12 @@ import { useDashboardSnapshot } from "@/components/dashboard-provider";
 import { ModelScatter } from "@/components/model-scatter";
 
 export function HomeModelScatter({ urlSyncEnabled = true }: { urlSyncEnabled?: boolean }) {
-  const { snapshot, isLoading, error } = useDashboardSnapshot();
+  const { snapshot, derived, isLoading, error } = useDashboardSnapshot();
 
-  if (!snapshot) {
+  if (!snapshot || !derived) {
     return (
       <div className="card" role="status">
-        {error ?? (isLoading ? "正在加载散点图数据…" : "暂无散点图数据")}
+        {error ?? (isLoading || snapshot ? "正在加载散点图数据…" : "暂无散点图数据")}
       </div>
     );
   }

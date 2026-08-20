@@ -2,9 +2,9 @@
 
 import {
   createContext,
+  startTransition,
   useContext,
   useEffect,
-  useMemo,
   useState,
   type ReactNode
 } from "react";
@@ -40,8 +40,24 @@ type DashboardSnapshotContextValue = {
 
 const DashboardSnapshotContext = createContext<DashboardSnapshotContextValue | null>(null);
 
+function buildSharedDashboardDerived(rows: MatrixInputRow[]): SharedDashboardDerived {
+  const rowsBySource = buildRowsBySource(rows);
+  const mergedAllRowsIndex = buildAllRowsIndex(rows, false);
+  let projected: MatrixInputRow[] | null = null;
+
+  return {
+    rowsBySource,
+    mergedAllRowsIndex,
+    getAllRowsWithSourceMeta: () => {
+      projected ??= buildRowsWithSourceMeta(rows);
+      return projected;
+    }
+  };
+}
+
 export function DashboardProvider({ children }: { children: ReactNode }) {
   const [snapshot, setSnapshot] = useState<PublicDashboardSnapshot | null>(null);
+  const [derived, setDerived] = useState<SharedDashboardDerived | null>(null);
   const [fastStats, setFastStats] = useState<PublicDashboardStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -79,9 +95,15 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         }
 
         const wire = await response.json() as PublicDashboardSnapshotWire;
+        const nextSnapshot = decodePublicDashboardSnapshot(wire);
+        if (controller.signal.aborted) return;
         snapshotArrived = true;
-        setSnapshot(decodePublicDashboardSnapshot(wire));
+        setSnapshot(nextSnapshot);
         setError(null);
+        startTransition(() => {
+          if (controller.signal.aborted) return;
+          setDerived(buildSharedDashboardDerived(nextSnapshot.rows));
+        });
       } catch (loadError) {
         if (controller.signal.aborted) return;
         setError(loadError instanceof Error ? loadError.message : "Failed to load dashboard snapshot");
@@ -96,24 +118,6 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     void loadSnapshot();
     return () => controller.abort();
   }, []);
-
-  const derived = useMemo<SharedDashboardDerived | null>(() => {
-    if (!snapshot) return null;
-
-    const rows = snapshot.rows;
-    const rowsBySource = buildRowsBySource(rows);
-    const mergedAllRowsIndex = buildAllRowsIndex(rows, false);
-    let projected: MatrixInputRow[] | null = null;
-
-    return {
-      rowsBySource,
-      mergedAllRowsIndex,
-      getAllRowsWithSourceMeta: () => {
-        projected ??= buildRowsWithSourceMeta(rows);
-        return projected;
-      }
-    };
-  }, [snapshot]);
 
   return (
     <DashboardSnapshotContext.Provider

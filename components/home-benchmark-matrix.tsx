@@ -4,12 +4,12 @@ import { BenchmarkMatrix } from "@/components/benchmark-matrix";
 import { useDashboardSnapshot } from "@/components/dashboard-provider";
 
 export function HomeBenchmarkMatrix({ urlSyncEnabled = true }: { urlSyncEnabled?: boolean }) {
-  const { snapshot, isLoading, error } = useDashboardSnapshot();
+  const { snapshot, derived, isLoading, error } = useDashboardSnapshot();
 
-  if (!snapshot) {
+  if (!snapshot || !derived) {
     return (
       <div className="card" role="status">
-        {error ?? (isLoading ? "正在加载矩阵数据…" : "暂无矩阵数据")}
+        {error ?? (isLoading || snapshot ? "正在加载矩阵数据…" : "暂无矩阵数据")}
       </div>
     );
   }

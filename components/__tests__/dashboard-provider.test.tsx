@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { flushDeferredDerived } from "@/tests/flush-microtasks";
 
 import {
   DashboardProvider,
@@ -122,8 +123,10 @@ describe("DashboardProvider", () => {
     );
 
     expect(screen.getByRole("status")).toHaveTextContent("正在加载矩阵数据");
+    expect(screen.queryByTestId("benchmark-matrix")).not.toBeInTheDocument();
 
-    await waitFor(() => {
+    await waitFor(async () => {
+      await flushDeferredDerived();
       expect(screen.getByTestId("benchmark-matrix")).toBeInTheDocument();
     });
 
@@ -163,7 +166,8 @@ describe("DashboardProvider", () => {
       </DashboardProvider>
     );
 
-    await waitFor(() => {
+    await waitFor(async () => {
+      await flushDeferredDerived();
       expect(screen.getByTestId("benchmark-matrix")).toBeInTheDocument();
     });
   });
@@ -258,7 +262,8 @@ describe("DashboardProvider", () => {
 
     pendingSnapshot.settle(Response.json(encodePublicDashboardSnapshot(SNAPSHOT)));
 
-    await waitFor(() => {
+    await waitFor(async () => {
+      await flushDeferredDerived();
       expect(screen.getByTestId("benchmark-matrix")).toBeInTheDocument();
     });
     expect(screen.getByText("Providers").parentElement).toHaveTextContent("1");
@@ -274,7 +279,8 @@ describe("DashboardProvider", () => {
       </DashboardProvider>
     );
 
-    await waitFor(() => {
+    await waitFor(async () => {
+      await flushDeferredDerived();
       expect(screen.getByTestId("benchmark-matrix")).toBeInTheDocument();
     });
 
@@ -294,7 +300,8 @@ describe("DashboardProvider", () => {
       </DashboardProvider>
     );
 
-    await waitFor(() => {
+    await waitFor(async () => {
+      await flushDeferredDerived();
       expect(screen.getByTestId("benchmark-matrix")).toBeInTheDocument();
     });
 
@@ -337,7 +344,8 @@ describe("DashboardProvider", () => {
       </DashboardProvider>
     );
 
-    await waitFor(() => {
+    await waitFor(async () => {
+      await flushDeferredDerived();
       expect(screen.getByTestId("shared-same")).toHaveTextContent("yes");
     });
 
@@ -366,7 +374,8 @@ describe("DashboardProvider", () => {
       </DashboardProvider>
     );
 
-    await waitFor(() => {
+    await waitFor(async () => {
+      await flushDeferredDerived();
       expect(screen.getByTestId("ready")).toBeInTheDocument();
     });
 
