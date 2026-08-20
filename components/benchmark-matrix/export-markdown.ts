@@ -16,6 +16,7 @@ export type BuildMatrixMarkdownTableOptions = {
 
 export function escapeMarkdownTableCell(value: string): string {
   return value
+    .replace(/\\/g, "\\\\")
     .replace(/\|/g, "\\|")
     .replace(/\r\n|\r|\n/g, " ")
     .trim();

@@ -69,6 +69,10 @@ describe("escapeMarkdownTableCell", () => {
   test("转义竖线并把换行压成空格", () => {
     expect(escapeMarkdownTableCell("a|b\nc")).toBe("a\\|b c");
   });
+
+  test("先转义反斜杠再转义竖线，避免 \\| 被解析成未转义列分隔", () => {
+    expect(escapeMarkdownTableCell("a\\|b")).toBe("a\\\\\\|b");
+  });
 });
 
 describe("buildMatrixMarkdownTable", () => {
