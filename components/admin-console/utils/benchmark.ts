@@ -5,6 +5,7 @@ import {
   LOWER_IS_BETTER_PREVIEW_RULES,
   OMNIDOCBENCH_15_MATCHER
 } from "../constants";
+import type { MergedRecord } from "../types";
 
 export function getTextImportBenchmarkKey(benchmarkName: string, benchmarkType: string): string {
   return `${benchmarkName}@@${benchmarkType}`;
@@ -148,5 +149,43 @@ export function getBenchmarkSearchCandidateIds(
     .sort((a, b) => b.score - a.score || a.index - b.index)
     .slice(0, 30)
     .map((item) => item.id);
+}
+
+export function getMergedBenchmarkRecordsForSourceName(
+  inputValue: string,
+  mergedRecords: MergedRecord[]
+): MergedRecord[] {
+  const normalizedInput = inputValue.trim().toLowerCase();
+  if (!normalizedInput) return [];
+
+  return mergedRecords.filter((record) => (
+    record.entityType === "benchmark"
+    && record.sourceName.trim().toLowerCase() === normalizedInput
+  ));
+}
+
+export function getMergedBenchmarkTargetIdsBySourceName(
+  mergedRecords: MergedRecord[]
+): Map<string, number[]> {
+  const map = new Map<string, number[]>();
+
+  mergedRecords.forEach((record) => {
+    if (record.entityType !== "benchmark") return;
+
+    const key = record.sourceName.trim().toLowerCase();
+    if (!key) return;
+
+    const existing = map.get(key) ?? [];
+    if (!existing.includes(record.targetId)) {
+      existing.push(record.targetId);
+    }
+    map.set(key, existing);
+  });
+
+  return map;
+}
+
+export function formatMergedBenchmarkCandidateLabel(sourceName: string, targetLabel: string): string {
+  return `${sourceName} -> ${targetLabel}`;
 }
 

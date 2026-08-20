@@ -5,6 +5,7 @@ import type {
   BenchmarkWarningItem,
   BenchmarkWarningLevel,
   MatrixPreviewRow,
+  MergedRecord,
   ModelDedupeRule,
   ModelOption,
   ModelWarningItem,
@@ -15,6 +16,7 @@ import type {
 import {
   buildBenchmarkCompareKey,
   getBenchmarkExactLookupKey,
+  getMergedBenchmarkTargetIdsBySourceName,
   getTextImportBenchmarkKey,
   isLowerBetterPreviewBenchmark,
   removeParenthesesContent,
@@ -61,6 +63,7 @@ type UseImportPreviewStateOptions = {
   existingBenchmarkExactMap: Map<string, BenchmarkOption>;
   existingBenchmarkByNameMap: Map<string, BenchmarkOption[]>;
   existingBenchmarkModalitiesMap: Map<string, string[]>;
+  mergedRecords?: MergedRecord[];
 };
 
 /**
@@ -160,7 +163,8 @@ export function useImportPreviewState({
   existingModelByCompareKey,
   existingBenchmarkExactMap,
   existingBenchmarkByNameMap,
-  existingBenchmarkModalitiesMap
+  existingBenchmarkModalitiesMap,
+  mergedRecords = []
 }: UseImportPreviewStateOptions) {
   const modelWarnings = useMemo(() => {
     const importedModels = Array.from(new Set(textImportDraftRows.map((item) => item.modelName.trim()).filter(Boolean)));
@@ -256,6 +260,8 @@ export function useImportPreviewState({
 
     const warnings: BenchmarkWarningItem[] = [];
 
+    const mergedBenchmarkTargetIdsBySourceName = getMergedBenchmarkTargetIdsBySourceName(mergedRecords);
+
     importedBenchmarks.forEach(({ benchmarkName, benchmarkType }, key) => {
       const reasons: string[] = [];
       let level: BenchmarkWarningLevel = "info";
@@ -288,7 +294,8 @@ export function useImportPreviewState({
 
       const exactExisting = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(benchmarkName, benchmarkType));
       const sameNameExisting = existingBenchmarkByNameMap.get(benchmarkName.trim().toLowerCase()) ?? [];
-      if (exactExisting || sameNameExisting.length > 0) {
+      const mergedTargetIds = mergedBenchmarkTargetIdsBySourceName.get(benchmarkName.trim().toLowerCase()) ?? [];
+      if (exactExisting || sameNameExisting.length > 0 || mergedTargetIds.length > 0) {
         if (reasons.length === 0) return;
 
         warnings.push({
@@ -358,7 +365,7 @@ export function useImportPreviewState({
     });
 
     return warnings;
-  }, [benchmarks, textImportDraftRows, existingBenchmarkExactMap, existingBenchmarkByNameMap]);
+  }, [benchmarks, textImportDraftRows, existingBenchmarkExactMap, existingBenchmarkByNameMap, mergedRecords]);
 
   const benchmarkWarningMap = useMemo(
     () => new Map(benchmarkWarnings.map((item) => [item.key, item])),
@@ -388,6 +395,7 @@ export function useImportPreviewState({
     });
 
     const candidateMap = new Map<string, Set<number>>();
+    const mergedBenchmarkTargetIdsBySourceName = getMergedBenchmarkTargetIdsBySourceName(mergedRecords);
 
     importedBenchmarks.forEach(({ benchmarkName, benchmarkType }, key) => {
       const candidates = new Set<number>();
@@ -401,6 +409,10 @@ export function useImportPreviewState({
       // 2. 同名 benchmark（即使类型不同）
       const sameNameExisting = existingBenchmarkByNameMap.get(benchmarkName.trim().toLowerCase()) ?? [];
       sameNameExisting.forEach((item) => candidates.add(item.id));
+
+      // 2.5 已合并 source 名称（A 已并入 B 后再次导入 A）
+      const mergedTargetIds = mergedBenchmarkTargetIdsBySourceName.get(benchmarkName.trim().toLowerCase()) ?? [];
+      mergedTargetIds.forEach((id) => candidates.add(id));
 
       // 3. 硬编码别名
       const aliasTargetName = resolveHardcodedBenchmarkAliasTarget(benchmarkName);
@@ -449,7 +461,7 @@ export function useImportPreviewState({
       result.set(key, Array.from(ids));
     });
     return result;
-  }, [benchmarks, textImportDraftRows, existingBenchmarkExactMap, existingBenchmarkByNameMap]);
+  }, [benchmarks, textImportDraftRows, existingBenchmarkExactMap, existingBenchmarkByNameMap, mergedRecords]);
 
   const benchmarksWithParentheses = useMemo(() => {
     const found = new Map<string, { key: string; benchmarkName: string; benchmarkType: string }>();

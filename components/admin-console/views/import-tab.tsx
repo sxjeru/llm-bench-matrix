@@ -11,12 +11,18 @@ import type {
   BenchmarkWarningItem,
   ImportWarning,
   MatrixPreviewRow,
+  MergedRecord,
   ModelWarningItem,
   PreviewRow,
   StructuredCsvImportRow,
   TextImportPreviewRow
 } from "../types";
-import { getOmniDocBenchNormalizeHint, getBenchmarkSearchCandidateIds } from "../utils/benchmark";
+import {
+  formatMergedBenchmarkCandidateLabel,
+  getMergedBenchmarkRecordsForSourceName,
+  getOmniDocBenchNormalizeHint,
+  getBenchmarkSearchCandidateIds
+} from "../utils/benchmark";
 import { buildStructuredCsvText } from "../utils/csv";
 import { toDomSafeId } from "../utils/dom";
 import { formatPreviewNumericValue } from "../utils/import-values";
@@ -74,6 +80,7 @@ type MatrixBenchmarkCandidateFieldProps = {
   benchmarkName: string;
   inputValue: string;
   hasExactMatch: boolean;
+  exactMatchTitle?: string;
   candidateOptions: BenchmarkCandidateOption[];
   isOpen: boolean;
   setOpenMatrixBenchmarkCandidateFor: Dispatch<SetStateAction<string | null>>;
@@ -99,6 +106,7 @@ function MatrixBenchmarkCandidateField({
   benchmarkName,
   inputValue,
   hasExactMatch,
+  exactMatchTitle = "已匹配库内同名 benchmark",
   candidateOptions,
   isOpen,
   setOpenMatrixBenchmarkCandidateFor,
@@ -245,7 +253,7 @@ function MatrixBenchmarkCandidateField({
           );
         }}
       />
-      {hasExactMatch ? <ExactMatchDot title="已匹配库内同名 benchmark" /> : null}
+      {hasExactMatch ? <ExactMatchDot title={exactMatchTitle} /> : null}
       {dropdown}
     </div>
   );
@@ -515,6 +523,7 @@ type ImportTabProps = {
   setTextImportPreviewVisibleCount: Dispatch<SetStateAction<number>>;
   textImportPreviewVisibleCount: number;
   benchmarks: BenchmarkOption[];
+  mergedRecords?: MergedRecord[];
 };
 
 export function ImportTab({
@@ -622,7 +631,8 @@ export function ImportTab({
   textImportPreviewTableRows,
   visibleResolvedTextImportPreviewRows,
   setTextImportPreviewVisibleCount,
-  benchmarks
+  benchmarks,
+  mergedRecords = []
 }: ImportTabProps) {
   function renderModalityBadge(modalityInput: string, key: string) {
     return <ModalityBadge key={key} modalityInput={modalityInput} />;
@@ -635,9 +645,11 @@ export function ImportTab({
 
   function hasExactBenchmarkMatch(inputValue: string) {
     const normalizedInput = inputValue.trim().toLowerCase();
-    return normalizedInput.length > 0 && benchmarks.some((item) => (
+    if (!normalizedInput) return false;
+
+    return benchmarks.some((item) => (
       item.benchmarkName.trim().toLowerCase() === normalizedInput
-    ));
+    )) || getMergedBenchmarkRecordsForSourceName(inputValue, mergedRecords).length > 0;
   }
 
   const sharedMatrixModalities = useMemo(() => {
@@ -1164,7 +1176,28 @@ export function ImportTab({
                           <div className="space-y-1">
                             {(() => {
                               const benchmarkInputValue = matrixBenchmarkNameDrafts[matrixRow.key] ?? matrixRow.benchmarkName;
+                              const mergedBenchmarkRecords = getMergedBenchmarkRecordsForSourceName(
+                                benchmarkInputValue,
+                                mergedRecords
+                              );
                               const hasBenchmarkMatch = hasExactBenchmarkMatch(benchmarkInputValue);
+                              const mergedExactMatchTitle = mergedBenchmarkRecords.length > 0
+                                ? `已匹配合并记录：${formatMergedBenchmarkCandidateLabel(
+                                  mergedBenchmarkRecords[0].sourceName,
+                                  benchmarks.find((item) => item.id === mergedBenchmarkRecords[0].targetId)?.benchmarkName
+                                    ?? mergedBenchmarkRecords[0].targetName
+                                )}`
+                                : "已匹配库内同名 benchmark";
+                              const mergedLabelByTargetId = new Map(
+                                mergedBenchmarkRecords.map((record) => [
+                                  record.targetId,
+                                  formatMergedBenchmarkCandidateLabel(
+                                    record.sourceName,
+                                    benchmarks.find((item) => item.id === record.targetId)?.benchmarkName
+                                      ?? record.targetName
+                                  )
+                                ])
+                              );
                               const benchmarkCandidateTargetIds = Array.from(new Set([
                                 ...(benchmarkMergeCandidateMap.get(matrixRow.key) ?? []),
                                 ...(warning?.candidateTargetIds ?? []),
@@ -1175,7 +1208,7 @@ export function ImportTab({
                                 const target = benchmarkEntityOptions.find((item) => String(item.id) === String(targetId));
                                 return {
                                   targetId,
-                                  label: target?.label ?? `#${targetId}`
+                                  label: mergedLabelByTargetId.get(targetId) ?? target?.label ?? `#${targetId}`
                                 };
                               });
 
@@ -1186,6 +1219,7 @@ export function ImportTab({
                                     benchmarkName={matrixRow.benchmarkName}
                                     inputValue={benchmarkInputValue}
                                     hasExactMatch={hasBenchmarkMatch}
+                                    exactMatchTitle={mergedExactMatchTitle}
                                     candidateOptions={benchmarkCandidateOptions}
                                     isOpen={benchmarkCandidateOptions.length > 0 && openMatrixBenchmarkCandidateFor === matrixRow.key}
                                     setOpenMatrixBenchmarkCandidateFor={setOpenMatrixBenchmarkCandidateFor}

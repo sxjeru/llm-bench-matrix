@@ -1804,6 +1804,66 @@ describe("AdminConsole text import", () => {
     expect(optionButton).toBeInTheDocument();
   });
 
+  test("再次导入已合并 benchmark 时矩阵预览显示绿点且下拉展示 A -> B", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "A",
+          benchmarkType: "Type-A",
+          rawValue: "70.1",
+          valueNum: 70.1,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    mockFetchSequence(previewResponse);
+    await renderReady(
+      <AdminConsole
+        {...buildProps()}
+        mergedRecords={[
+          {
+            entityType: "benchmark",
+            sourceId: 99,
+            sourceName: "A",
+            targetId: 12,
+            targetName: "Bench-2 (Type-B)"
+          }
+        ]}
+      />
+    );
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const matrixTable = await findMatrixPreviewTable();
+    const benchmarkInput = within(matrixTable).getByDisplayValue("A") as HTMLInputElement;
+    const field = benchmarkInput.closest("[data-matrix-benchmark-candidate-container='true']");
+    if (!field) {
+      throw new Error("Benchmark candidate field not found");
+    }
+
+    expect(within(field as HTMLElement).getByTitle("已匹配合并记录：A -> Bench-2")).toBeInTheDocument();
+
+    await user.click(benchmarkInput);
+
+    expect(screen.getByRole("option", {
+      name: /A -> Bench-2 \[12\]/
+    })).toBeInTheDocument();
+  });
+
   test("矩阵预览中的重复嫌疑 benchmark 候选显示重复率与冲突数", async () => {
     const user = userEvent.setup();
 

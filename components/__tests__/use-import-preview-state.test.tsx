@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import { useImportPreviewState } from "@/components/admin-console/hooks/use-import-preview-state";
 import type {
   BenchmarkOption,
+  MergedRecord,
   ModelOption,
   ProviderOption,
   TextImportPreviewRow,
@@ -492,5 +493,53 @@ describe("useImportPreviewState Hook - benchmarkPreviewValueOverlapPayload", () 
     expect(item.candidateBenchmarkIds).toContain(101);
     expect(item.candidateBenchmarkIds).toContain(201);
     expect(item.candidateBenchmarkIds.length).toBe(2);
+  });
+});
+
+describe("useImportPreviewState Hook - merged benchmark reimport", () => {
+  test("再次导入已合并的 benchmark 时，将目标加入候选且不产生未知警告", () => {
+    const draftRow: TextImportPreviewRow = {
+      rowNumber: 1,
+      providerName: "OpenAI",
+      modelName: "Model A",
+      benchmarkName: "A",
+      benchmarkType: "Type-A",
+      rawValue: "70.1",
+      valueNum: 70.1,
+      valueNum2: null,
+      valueNote: null,
+      source: null,
+      valid: true
+    };
+
+    const targetBenchmark: BenchmarkOption = {
+      id: 12,
+      benchmarkName: "Bench-2",
+      benchmarkType: "Type-B",
+      modalities: ["Vision"]
+    };
+
+    const mergedRecords: MergedRecord[] = [
+      {
+        entityType: "benchmark",
+        sourceId: 99,
+        sourceName: "A",
+        targetId: 12,
+        targetName: "Bench-2 (Type-B)"
+      }
+    ];
+
+    const options = createMockOptions({
+      benchmarks: [targetBenchmark],
+      textImportDraftRows: [draftRow],
+      existingBenchmarkExactMap: new Map([["bench-2@@type-b", targetBenchmark]]),
+      existingBenchmarkByNameMap: new Map([["bench-2", [targetBenchmark]]]),
+      mergedRecords
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+
+    expect(result.current.benchmarkWarnings).toEqual([]);
+    expect(result.current.benchmarkMergeCandidateMap.get("A@@Type-A")).toEqual([12]);
   });
 });

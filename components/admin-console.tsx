@@ -430,7 +430,8 @@ export function AdminConsole({
     existingModelByCompareKey,
     existingBenchmarkExactMap,
     existingBenchmarkByNameMap,
-    existingBenchmarkModalitiesMap
+    existingBenchmarkModalitiesMap,
+    mergedRecords: mergedRecordList
   });
 
   useEffect(() => {
@@ -3351,6 +3352,7 @@ export function AdminConsole({
             setTextImportPreviewVisibleCount={setTextImportPreviewVisibleCount}
             textImportPreviewVisibleCount={textImportPreviewVisibleCount}
             benchmarks={benchmarks}
+            mergedRecords={mergedRecordList}
           />
         ) : null}
 
