@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderReady } from "@/tests/flush-microtasks";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
@@ -418,8 +419,8 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     }
   });
 
-  test("显示跨页签模型覆盖率并隐藏 0 覆盖模型", () => {
-    render(
+  test("显示跨页签模型覆盖率并隐藏 0 覆盖模型", async () => {
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:S1", "text:S2"]}
         rows={[...baseRows]}
@@ -440,7 +441,7 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     expect(screen.getByText(/覆盖率 50%/)).toBeInTheDocument();
   });
 
-  test("点击模型列后按展示行重算模型筛选覆盖率", () => {
+  test("点击模型列后按展示行重算模型筛选覆盖率", async () => {
     const scopedAllRows = [
       ...baseRows,
       {
@@ -469,7 +470,7 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
       }
     ] as const;
 
-    render(
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:S1", "text:S2"]}
         rows={[...baseRows]}
@@ -487,7 +488,7 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     expect(screen.getByLabelText("Model C").closest("label")).toHaveTextContent("100%");
   });
 
-  test("单 provider 超过 8 个模型时会默认折叠后续模型，并支持展开", () => {
+  test("单 provider 超过 8 个模型时会默认折叠后续模型，并支持展开", async () => {
     const providerRows: Array<{
       providerName: string;
       modelName: string;
@@ -525,7 +526,7 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
       });
     });
 
-    render(
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:mega"]}
         rows={[...providerRows]}
@@ -544,7 +545,7 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     expect(screen.getByLabelText("Model 10")).toBeInTheDocument();
   });
 
-  test("provider 内模型按当前覆盖率降序排序", () => {
+  test("provider 内模型按当前覆盖率降序排序", async () => {
     const benchmarks = ["Bench-1", "Bench-2", "Bench-3", "Bench-4"] as const;
     const rows: Array<{
       providerName: string;
@@ -580,7 +581,7 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     pushRows("Model B", 2); // 50%
     pushRows("Model C", 3); // 75%
 
-    render(
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:sort"]}
         rows={[...rows]}
@@ -605,8 +606,8 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     expect(orderedModels.slice(0, 3)).toEqual(["Model A", "Model C", "Model B"]);
   });
 
-  test("Category / Benchmark 表头显示唯一项计数", () => {
-    render(
+  test("Category / Benchmark 表头显示唯一项计数", async () => {
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:S1", "text:S2"]}
         rows={[...baseRows]}
@@ -618,8 +619,8 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     expect(screen.getByRole("button", { name: /Benchmark/})).toHaveTextContent("(2)");
   });
 
-  test("列较少时表格按内容宽度展示，不强制拉伸填满", () => {
-    const { container } = render(
+  test("列较少时表格按内容宽度展示，不强制拉伸填满", async () => {
+    const { container } = await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:S1"]}
         rows={[...baseRows]}
@@ -816,8 +817,8 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     vi.restoreAllMocks();
   });
 
-  test("表头 tooltip 仅显示点击动作且会随排序状态更新", () => {
-    render(
+  test("表头 tooltip 仅显示点击动作且会随排序状态更新", async () => {
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:S1", "text:S2"]}
         rows={[...baseRows]}
@@ -834,8 +835,8 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     expect(benchmarkSortButton).toHaveAttribute("title", "点击按数据量排序");
   });
 
-  test("显示低覆盖行按钮 tooltip 标明过滤条件", () => {
-    render(
+  test("显示低覆盖行按钮 tooltip 标明过滤条件", async () => {
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:S1", "text:S2"]}
         rows={[...baseRows]}
@@ -850,7 +851,7 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
 
   });
 
-  test("All 默认隐藏低覆盖时不显示分类为 Performance 的行，开启后恢复", () => {
+  test("All 默认隐藏低覆盖时不显示分类为 Performance 的行，开启后恢复", async () => {
     const performanceRows = [
       {
         providerName: "OpenAI",
@@ -902,7 +903,7 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
       }
     ] as const;
 
-    render(
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:S1"]}
         rows={[...baseRows, ...performanceRows]}
@@ -995,7 +996,7 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
   test("刷新到非全部 source 页签时，默认进入 source 导入顺序模式", async () => {
     mockSearchParams.set("source", "text:S1");
 
-    render(
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:S1", "text:S2"]}
         rows={[...baseRows]}
@@ -1070,7 +1071,7 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
       }
     ] as const;
 
-    const { container } = render(
+    const { container } = await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:S1"]}
         rows={[...multiImportRows]}
@@ -1098,8 +1099,8 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     expect(benchmarkOrder.slice(0, 4)).toEqual(["Bench-A", "Bench-B", "Bench-C", "Bench-D"]);
   });
 
-  test("provider 按覆盖率排序，且当前页签相关 provider 始终置顶", () => {
-    const { container } = render(
+  test("provider 按覆盖率排序，且当前页签相关 provider 始终置顶", async () => {
+    const { container } = await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:Gemma 4", "text:OpenAI", "text:Anthropic"]}
         rows={[...providerOrderRows]}
@@ -1117,8 +1118,8 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     expect(providerOrder.slice(0, 3)).toEqual(["Gemma", "OpenAI", "Anthropic"]);
   });
 
-  test("source 命中列会输出导出边框兜底所需 data 属性", () => {
-    const { container } = render(
+  test("source 命中列会输出导出边框兜底所需 data 属性", async () => {
+    const { container } = await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:Gemma 4", "text:OpenAI", "text:Anthropic"]}
         rows={[...providerOrderRows]}
@@ -1135,8 +1136,8 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     expect(sourceMatchedCells.length).toBeGreaterThan(0);
   });
 
-  test("列排序支持同级数字+B规则：31B 在 E4B 前", () => {
-    render(
+  test("列排序支持同级数字+B规则：31B 在 E4B 前", async () => {
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:Gemma 4"]}
         rows={[...columnSortRows]}
@@ -1155,8 +1156,8 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     expect(modelHeaders.slice(0, 2)).toEqual(["Gemma 4 31B", "Gemma 4 E4B"]);
   });
 
-  test("同 provider 列排序优先版本，其次参数规模：Qwen3.6 > Qwen3.5，且 397B > 122B", () => {
-    render(
+  test("同 provider 列排序优先版本，其次参数规模：Qwen3.6 > Qwen3.5，且 397B > 122B", async () => {
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:Qwen"]}
         rows={[...qwenSortRows]}
@@ -1179,8 +1180,8 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     ]);
   });
 
-  test("同 provider 列排序优先同变体分组：Pro 放一起后再是 Flash", () => {
-    render(
+  test("同 provider 列排序优先同变体分组：Pro 放一起后再是 Flash", async () => {
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:Step"]}
         rows={[...variantGroupSortRows]}
@@ -1204,8 +1205,8 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     ]);
   });
 
-  test("双值场景下第一名加粗、第二名下划线（前后值独立排序）", () => {
-    render(
+  test("双值场景下第一名加粗、第二名下划线（前后值独立排序）", async () => {
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:pair"]}
         rows={[...pairMaxSplitRows]}
@@ -1222,8 +1223,8 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     expect(screen.getByText("90")).toHaveStyle("text-decoration: underline");
   });
 
-  test("前端表格双值展示使用紧凑分隔符", () => {
-    const { container } = render(
+  test("前端表格双值展示使用紧凑分隔符", async () => {
+    const { container } = await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:pair"]}
         rows={[...pairCompactDisplayRows]}
@@ -1237,8 +1238,8 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     expect(cell).not.toHaveTextContent("48.2 / 46.6*");
   });
 
-  test("按双值 benchmark 排列模型列时第二个值参与排序", () => {
-    render(
+  test("按双值 benchmark 排列模型列时第二个值参与排序", async () => {
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:pair"]}
         rows={[...pairColumnSortRows]}
@@ -1261,8 +1262,8 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     expect(modelHeaders.slice(0, 2)).toEqual(["Model Z Better Second", "Model A Primary"]);
   });
 
-  test("单值场景下第一名加粗、第二名下划线", () => {
-    render(
+  test("单值场景下第一名加粗、第二名下划线", async () => {
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:single"]}
         rows={[...singleRankRows]}

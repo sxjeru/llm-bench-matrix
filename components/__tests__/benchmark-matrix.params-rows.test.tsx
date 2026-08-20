@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderReady } from "@/tests/flush-microtasks";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
@@ -151,8 +152,11 @@ describe("BenchmarkMatrix 参数量展示", () => {
     window.localStorage.clear();
   });
 
-  test("默认不显示参数量，开启后出现 Model Info 行且不带表头徽标", () => {
-    const { container } = render(<BenchmarkMatrix rows={rows} allRows={rows} modelParams={modelParams} />);
+  test("默认不显示参数量，开启后出现 Model Info 行且不带表头徽标", async () => {
+    const { container } = await renderReady(<BenchmarkMatrix rows={rows} allRows={rows} modelParams={modelParams} />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /显示参数量/ })).toBeInTheDocument();
+    });
 
     expect(container.querySelectorAll('[data-metric-type="info"]')).toHaveLength(0);
 
@@ -177,8 +181,11 @@ describe("BenchmarkMatrix 参数量展示", () => {
     expect(screen.queryByText("MoE")).toBeNull();
   });
 
-  test("名次样式只落在斜杠两侧的数值上", () => {
-    const { container } = render(<BenchmarkMatrix rows={rows} allRows={rows} modelParams={modelParams} />);
+  test("名次样式只落在斜杠两侧的数值上", async () => {
+    const { container } = await renderReady(<BenchmarkMatrix rows={rows} allRows={rows} modelParams={modelParams} />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /显示参数量/ })).toBeInTheDocument();
+    });
 
     fireEvent.click(screen.getByRole("button", { name: /显示参数量/ }));
 
@@ -201,8 +208,11 @@ describe("BenchmarkMatrix 参数量展示", () => {
     expect(denseCell.querySelector("span")?.style.fontWeight).toBe("800");
   });
 
-  test("Ctrl 点击开关切换是否计入总评，未计入时行名压暗", () => {
-    render(<BenchmarkMatrix rows={rows} allRows={rows} modelParams={modelParams} />);
+  test("Ctrl 点击开关切换是否计入总评，未计入时行名压暗", async () => {
+    await renderReady(<BenchmarkMatrix rows={rows} allRows={rows} modelParams={modelParams} />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /显示参数量/ })).toBeInTheDocument();
+    });
 
     const paramsToggle = screen.getByRole("button", { name: /显示参数量/ });
     fireEvent.click(paramsToggle);
@@ -217,8 +227,11 @@ describe("BenchmarkMatrix 参数量展示", () => {
     expect(screen.getByText("Activated %")).toBeInTheDocument();
   });
 
-  test("没有参数量数据时不渲染开关", () => {
-    render(<BenchmarkMatrix rows={rows} allRows={rows} modelParams={[]} />);
+  test("没有参数量数据时不渲染开关", async () => {
+    await renderReady(<BenchmarkMatrix rows={rows} allRows={rows} modelParams={[]} />);
+    await waitFor(() => {
+      expect(screen.getByText("Bench-01")).toBeInTheDocument();
+    });
 
     expect(screen.queryByRole("button", { name: /显示参数量/ })).toBeNull();
   });

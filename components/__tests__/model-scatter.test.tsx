@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { renderReady } from "@/tests/flush-microtasks";
 import { describe, expect, test, vi, beforeEach } from "vitest";
 
 import { ModelScatter } from "@/components/model-scatter";
@@ -86,8 +87,8 @@ const modelParams = MODEL_SPECS.map((spec, index) => ({
   note: null
 }));
 
-function renderScatter() {
-  return render(
+async function renderScatter() {
+  return renderReady(
     <ModelScatter
       rows={rows}
       allRows={rows}
@@ -183,8 +184,8 @@ beforeEach(() => {
 });
 
 describe("ModelScatter", () => {
-  test("默认渲染 Overall Score × Output Price", () => {
-    const { container } = renderScatter();
+  test("默认渲染 Overall Score × Output Price", async () => {
+    const { container } = await renderScatter();
 
     expect(axisLabel(container, "y")).toBe("Overall Score");
     expect(axisLabel(container, "x")).toBe("Output Price");
@@ -192,8 +193,8 @@ describe("ModelScatter", () => {
     expect(axisInput(container, "x").getAttribute("role")).toBe("combobox");
   });
 
-  test("导出默认不含底部图例，并可切换为包含图例", () => {
-    renderScatter();
+  test("导出默认不含底部图例，并可切换为包含图例", async () => {
+    await renderScatter();
 
     const legendSelect = screen.getByRole("combobox", { name: "导出图例" });
     expect(legendSelect).toHaveValue("exclude");
@@ -202,16 +203,16 @@ describe("ModelScatter", () => {
     expect(legendSelect).toHaveValue("include");
   });
 
-  test("统计出可比模型数与帕累托前沿数", () => {
-    renderScatter();
+  test("统计出可比模型数与帕累托前沿数", async () => {
+    await renderScatter();
 
     expect(comparableModelCount()).toBe("4");
     // Delta 又贵又弱，被 Alpha 全面压制
     expect(paretoCount()).toBe("3");
   });
 
-  test("关闭帕累托开关后不再统计前沿", () => {
-    renderScatter();
+  test("关闭帕累托开关后不再统计前沿", async () => {
+    await renderScatter();
 
     const toggle = screen.getByRole("checkbox", { name: /帕累托前沿/ });
     expect(paretoCount()).toBe("3");
@@ -223,8 +224,8 @@ describe("ModelScatter", () => {
     expect(paretoCount()).toBe("3");
   });
 
-  test("双线性且两轴方向一致时切换为散点趋势线", () => {
-    const { container } = renderScatter();
+  test("双线性且两轴方向一致时切换为散点趋势线", async () => {
+    const { container } = await renderScatter();
 
     pickAxisOption(container, "y", "Bench-Two");
     pickAxisOption(container, "x", "Bench-One");
@@ -234,8 +235,8 @@ describe("ModelScatter", () => {
     expect(paretoCount()).toBe("--");
   });
 
-  test("任一坐标轴切为对数后恢复帕累托前沿", () => {
-    const { container } = renderScatter();
+  test("任一坐标轴切为对数后恢复帕累托前沿", async () => {
+    const { container } = await renderScatter();
 
     pickAxisOption(container, "y", "Bench-Two");
     pickAxisOption(container, "x", "Bench-One");
@@ -247,8 +248,8 @@ describe("ModelScatter", () => {
     expect(screen.getByRole("checkbox", { name: /淡化非前沿/ })).toBeInTheDocument();
   });
 
-  test("交换按钮互换双轴", () => {
-    const { container } = renderScatter();
+  test("交换按钮互换双轴", async () => {
+    const { container } = await renderScatter();
 
     fireEvent.click(screen.getByRole("button", { name: "交换 X / Y 轴" }));
 
@@ -256,8 +257,8 @@ describe("ModelScatter", () => {
     expect(axisLabel(container, "x")).toBe("Overall Score");
   });
 
-  test("切换 Y 轴指标后卡片与前沿同步更新", () => {
-    const { container } = renderScatter();
+  test("切换 Y 轴指标后卡片与前沿同步更新", async () => {
+    const { container } = await renderScatter();
 
     pickAxisOption(container, "y", "Params");
 
@@ -266,8 +267,8 @@ describe("ModelScatter", () => {
     expect(Number(paretoCount())).toBeGreaterThan(0);
   });
 
-  test("轴选择器按分类分组，且总评排在最前", () => {
-    const { container } = renderScatter();
+  test("轴选择器按分类分组，且总评排在最前", async () => {
+    const { container } = await renderScatter();
 
     fireEvent.focus(axisInput(container, "y"));
     const groups = Array.from(container.querySelectorAll(".scatter-combobox-group")).map(
@@ -279,7 +280,7 @@ describe("ModelScatter", () => {
     expect(groups).toContain("Model Info");
   });
 
-  test("Cost 排第二，Performance 在价格之后；AA Index 归入 Summary", () => {
+  test("Cost 排第二，Performance 在价格之后；AA Index 归入 Summary", async () => {
     const extraRows = MODEL_SPECS.flatMap((spec, index) => [
       {
         recordId: 1000 + index * 3,
@@ -346,7 +347,7 @@ describe("ModelScatter", () => {
       }
     ]);
 
-    const { container } = render(
+    const { container } = await renderReady(
       <ModelScatter
         rows={[...rows, ...extraRows]}
         allRows={[...rows, ...extraRows]}
@@ -381,8 +382,8 @@ describe("ModelScatter", () => {
     expect(optionLabels).toContain("Overall Score");
   });
 
-  test("方向提示随指标切换", () => {
-    const { container } = renderScatter();
+  test("方向提示随指标切换", async () => {
+    const { container } = await renderScatter();
 
     const xField = container.querySelector("#scatter-axis-x")!.closest(".scatter-axis-field")!;
     expect(xField.textContent).toContain("越小越好");
@@ -391,8 +392,8 @@ describe("ModelScatter", () => {
     expect(yField.textContent).toContain("越大越好");
   });
 
-  test("点击图例可隐藏厂商，前沿随之重算", () => {
-    renderScatter();
+  test("点击图例可隐藏厂商，前沿随之重算", async () => {
+    await renderScatter();
 
     expect(comparableModelCount()).toBe("4");
     expect(legendCount("OpenAI")).toBe("2");
@@ -405,8 +406,8 @@ describe("ModelScatter", () => {
     expect(legendCount("Anthropic")).toBe("2");
   });
 
-  test("图例只统计当前双轴下实际绘制的模型", () => {
-    render(
+  test("图例只统计当前双轴下实际绘制的模型", async () => {
+    await renderReady(
       <ModelScatter
         rows={rows}
         allRows={rows}
@@ -421,8 +422,8 @@ describe("ModelScatter", () => {
     expect(legendCount("Anthropic")).toBe("1");
   });
 
-  test("图例全部隐藏时给出空态引导", () => {
-    renderScatter();
+  test("图例全部隐藏时给出空态引导", async () => {
+    await renderScatter();
 
     fireEvent.click(screen.getByRole("button", { name: /OpenAI/ }));
     fireEvent.click(screen.getByRole("button", { name: /Anthropic/ }));
@@ -431,25 +432,25 @@ describe("ModelScatter", () => {
     expect(comparableModelCount()).toBe("0");
   });
 
-  test("不再渲染模型层叠筛选面板", () => {
-    renderScatter();
+  test("不再渲染模型层叠筛选面板", async () => {
+    await renderScatter();
 
     expect(screen.queryByText(/模型层叠筛选/)).toBeNull();
     expect(screen.queryByRole("button", { name: "全选模型" })).toBeNull();
     expect(screen.queryByPlaceholderText("筛选 Benchmark")).toBeNull();
   });
 
-  test("提供全屏切换按钮", () => {
-    renderScatter();
+  test("提供全屏切换按钮", async () => {
+    await renderScatter();
 
     const fullscreenButton = screen.getByRole("button", { name: "全屏" });
     expect(fullscreenButton).toBeInTheDocument();
     expect(fullscreenButton.getAttribute("aria-pressed")).toBe("false");
   });
 
-  test("视图状态变更会写回 URL", () => {
+  test("视图状态变更会写回 URL", async () => {
     const replaceStateSpy = vi.spyOn(window.history, "replaceState");
-    renderScatter();
+    await renderScatter();
 
     replaceStateSpy.mockClear();
     fireEvent.click(screen.getByRole("checkbox", { name: /帕累托前沿/ }));
@@ -459,11 +460,11 @@ describe("ModelScatter", () => {
     expect(lastUrl).toContain("pareto=0");
   });
 
-  test("urlSyncEnabled=false 时仍更新视图并写本地偏好，但不改写地址栏", () => {
+  test("urlSyncEnabled=false 时仍更新视图并写本地偏好，但不改写地址栏", async () => {
     window.history.replaceState(null, "", "/?source=text%3Ademo");
     const replaceStateSpy = vi.spyOn(window.history, "replaceState");
 
-    render(
+    await renderReady(
       <ModelScatter
         rows={rows}
         allRows={rows}
@@ -483,44 +484,44 @@ describe("ModelScatter", () => {
     expect(`${window.location.pathname}${window.location.search}`).toBe("/?source=text%3Ademo");
   });
 
-  test("URL 参数优先于默认值", () => {
+  test("URL 参数优先于默认值", async () => {
     mockSearchParams = new URLSearchParams("x=params&y=price-output&pareto=0&labels=none");
 
-    const { container } = renderScatter();
+    const { container } = await renderScatter();
 
     expect(axisLabel(container, "x")).toBe("Params");
     expect(axisLabel(container, "y")).toBe("Output Price");
     expect(paretoCount()).toBe("--");
   });
 
-  test("URL 参数优先于 localStorage 存档", () => {
+  test("URL 参数优先于 localStorage 存档", async () => {
     window.localStorage.setItem("model-scatter:axis-x", "price-input");
     window.localStorage.setItem("model-scatter:axis-y", "overall");
     mockSearchParams = new URLSearchParams("x=price-output");
 
-    const { container } = renderScatter();
+    const { container } = await renderScatter();
 
     expect(axisLabel(container, "x")).toBe("Output Price");
   });
 
-  test("没有 URL 参数时读取 localStorage 存档", () => {
+  test("没有 URL 参数时读取 localStorage 存档", async () => {
     window.localStorage.setItem("model-scatter:axis-x", "price-input");
 
-    const { container } = renderScatter();
+    const { container } = await renderScatter();
 
     expect(axisLabel(container, "x")).toBe("Input Price");
   });
 
-  test("存档里的轴已失效时回落到默认轴", () => {
+  test("存档里的轴已失效时回落到默认轴", async () => {
     window.localStorage.setItem("model-scatter:axis-x", "no-such-metric");
 
-    const { container } = renderScatter();
+    const { container } = await renderScatter();
 
     expect(axisLabel(container, "x")).toBe("Output Price");
   });
 
-  test("来源下拉不显示 text: 之类的前缀", () => {
-    const { container } = renderScatter();
+  test("来源下拉不显示 text: 之类的前缀", async () => {
+    const { container } = await renderScatter();
 
     const sourceSelect = container.querySelector<HTMLSelectElement>("#scatter-source")!;
     const labels = Array.from(sourceSelect.options).map((option) => option.text);
@@ -529,8 +530,8 @@ describe("ModelScatter", () => {
     expect(labels.some((label) => label.includes("text:"))).toBe(false);
   });
 
-  test("自定义按钮带 scatter-btn 类，避开全局 button 样式覆盖", () => {
-    const { container } = renderScatter();
+  test("自定义按钮带 scatter-btn 类，避开全局 button 样式覆盖", async () => {
+    const { container } = await renderScatter();
 
     const swapButton = container.querySelector(".scatter-swap-btn")!;
     expect(swapButton.classList.contains("scatter-btn")).toBe(true);
@@ -544,8 +545,8 @@ describe("ModelScatter", () => {
     });
   });
 
-  test("不再渲染顶部指标卡", () => {
-    const { container } = renderScatter();
+  test("不再渲染顶部指标卡", async () => {
+    const { container } = await renderScatter();
 
     expect(container.querySelector(".home-metric-card")).toBeNull();
   });
@@ -558,9 +559,9 @@ describe("ModelScatter", () => {
     ) as HTMLElement | undefined;
   }
 
-  test("价格轴 Alt 点击只提示不支持，不钉住模型", () => {
+  test("价格轴 Alt 点击只提示不支持，不钉住模型", async () => {
     stubScatterChartHostSize();
-    const { container } = renderScatter();
+    const { container } = await renderScatter();
 
     fireEvent.click(findScatterSymbol(container, "Alpha")!, { altKey: true });
 
@@ -569,7 +570,7 @@ describe("ModelScatter", () => {
     expect(screen.queryByText(/已钉住 Alpha/)).toBeNull();
   });
 
-  test("X 为有历史的 benchmark 时 Alt 点击循环最优、最差并清除", () => {
+  test("X 为有历史的 benchmark 时 Alt 点击循环最优、最差并清除", async () => {
     stubScatterChartHostSize();
     const extraRows: MatrixInputRow[] = [
       {
@@ -658,7 +659,7 @@ describe("ModelScatter", () => {
       }
     ];
 
-    const { container } = render(
+    const { container } = await renderReady(
       <ModelScatter
         rows={[...rows, ...extraRows]}
         allRows={[...rows, ...extraRows]}
@@ -700,8 +701,8 @@ describe("ModelScatter", () => {
 });
 
 describe("轴选择器（可输入下拉）", () => {
-  test("聚焦即展开，按分类分组列出全部指标", () => {
-    const { container } = renderScatter();
+  test("聚焦即展开，按分类分组列出全部指标", async () => {
+    const { container } = await renderScatter();
     const labels = openAxisOptions(container, "y");
 
     expect(labels).toContain("Overall Score");
@@ -709,8 +710,8 @@ describe("轴选择器（可输入下拉）", () => {
     expect(labels).toContain("Bench-One");
   });
 
-  test("输入关键词即时筛选", () => {
-    const { container } = renderScatter();
+  test("输入关键词即时筛选", async () => {
+    const { container } = await renderScatter();
     const labels = openAxisOptions(container, "y", "price");
 
     expect(labels).toContain("Output Price");
@@ -718,22 +719,22 @@ describe("轴选择器（可输入下拉）", () => {
     expect(labels).not.toContain("Overall Score");
   });
 
-  test("按分类名也能搜到", () => {
-    const { container } = renderScatter();
+  test("按分类名也能搜到", async () => {
+    const { container } = await renderScatter();
     const labels = openAxisOptions(container, "x", "Model Info");
 
     expect(labels).toContain("Params");
   });
 
-  test("无匹配时给出空态而不是空白列表", () => {
-    const { container } = renderScatter();
+  test("无匹配时给出空态而不是空白列表", async () => {
+    const { container } = await renderScatter();
     openAxisOptions(container, "x", "zzz-not-a-metric");
 
     expect(container.querySelector(".scatter-combobox-empty")?.textContent).toBe("没有匹配的指标");
   });
 
-  test("点击选项完成切换并收起", () => {
-    const { container } = renderScatter();
+  test("点击选项完成切换并收起", async () => {
+    const { container } = await renderScatter();
 
     pickAxisOption(container, "x", "Params");
 
@@ -741,8 +742,8 @@ describe("轴选择器（可输入下拉）", () => {
     expect(container.querySelector(".scatter-combobox-list")).toBeNull();
   });
 
-  test("方向键 + 回车可选中", () => {
-    const { container } = renderScatter();
+  test("方向键 + 回车可选中", async () => {
+    const { container } = await renderScatter();
     const input = axisInput(container, "y");
 
     fireEvent.focus(input);
@@ -753,8 +754,8 @@ describe("轴选择器（可输入下拉）", () => {
     expect(axisLabel(container, "y")).toBe("Input Price");
   });
 
-  test("Esc 关闭并还原成当前选中项", () => {
-    const { container } = renderScatter();
+  test("Esc 关闭并还原成当前选中项", async () => {
+    const { container } = await renderScatter();
     const input = axisInput(container, "y");
 
     fireEvent.focus(input);
@@ -767,8 +768,8 @@ describe("轴选择器（可输入下拉）", () => {
     expect(input.value).toBe("Overall Score");
   });
 
-  test("输入时自动放开低覆盖指标", () => {
-    const { container } = renderScatter();
+  test("输入时自动放开低覆盖指标", async () => {
+    const { container } = await renderScatter();
 
     const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
     expect(toggle.checked).toBe(false);
@@ -779,8 +780,8 @@ describe("轴选择器（可输入下拉）", () => {
     expect(toggle.checked).toBe(true);
   });
 
-  test("仅聚焦不输入时不改动低覆盖开关", () => {
-    const { container } = renderScatter();
+  test("仅聚焦不输入时不改动低覆盖开关", async () => {
+    const { container } = await renderScatter();
     const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
 
     fireEvent.focus(axisInput(container, "x"));
@@ -788,8 +789,8 @@ describe("轴选择器（可输入下拉）", () => {
     expect(toggle.checked).toBe(false);
   });
 
-  test("清空输入不会把低覆盖开关又关回去", () => {
-    const { container } = renderScatter();
+  test("清空输入不会把低覆盖开关又关回去", async () => {
+    const { container } = await renderScatter();
     const input = axisInput(container, "x");
     const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
 

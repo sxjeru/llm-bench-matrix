@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
+import { renderReady } from "@/tests/flush-microtasks";
 import { describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
@@ -37,8 +38,8 @@ const rows = [
 ] as const;
 
 describe("BenchmarkMatrix 列宽拖拽防误触", () => {
-  test("拖拽列宽把手后立即点击 Benchmark 表头，不会触发排序切换", () => {
-    render(<BenchmarkMatrix rows={[...rows]} />);
+  test("拖拽列宽把手后立即点击 Benchmark 表头，不会触发排序切换", async () => {
+    await renderReady(<BenchmarkMatrix rows={[...rows]} />);
 
     const benchmarkSortButton = screen.getByRole("button", { name: /Benchmark/ });
     const resizeHandle = screen.getByLabelText("调整 Benchmark 列宽");

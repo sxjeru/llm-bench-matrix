@@ -1,7 +1,8 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { act, fireEvent, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
+import { renderReady } from "@/tests/flush-microtasks";
 
 const mockSearchParams = new URLSearchParams();
 const mockReplace = vi.fn();
@@ -49,8 +50,8 @@ const rows = [
   { providerName: "OpenAI", modelName: "Model A", benchmarkName: "Bench-Low", benchmarkType: "General", benchmarkCanonicalKey: "bench-low:general", benchTime: "2026-04-06T00:00:00.000Z", valueRaw: "50", valueNum: 50, valueNote: null, source: "text:S1" }
 ] as const;
 
-function renderMatrix() {
-  return render(
+async function renderMatrix() {
+  return renderReady(
     <BenchmarkMatrix
       sourceOptions={["text:S1"]}
       rows={[...rows]}
@@ -62,15 +63,19 @@ describe("BenchmarkMatrix 搜索筛选与低覆盖率状态恢复", () => {
   beforeEach(() => {
     window.localStorage.clear();
     mockReplace.mockClear();
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
 
     for (const key of Array.from(mockSearchParams.keys())) {
       mockSearchParams.delete(key);
     }
   });
 
-  test("输入搜索关键字会过滤行，并在搜索时自动启用显示低覆盖率行，搜索清除后恢复原始隐藏状态", () => {
-    renderMatrix();
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test("输入搜索关键字会过滤行，并在搜索时自动启用显示低覆盖率行，搜索清除后恢复原始隐藏状态", async () => {
+    await renderMatrix();
 
     // 默认 showLowCoverageRows 为 false，全部视图下 Bench-Low (20% coverage) 应该被隐藏
     expect(screen.queryByText("Bench-Low")).not.toBeInTheDocument();
@@ -84,6 +89,9 @@ describe("BenchmarkMatrix 搜索筛选与低覆盖率状态恢复", () => {
     // 300ms 后触发搜索，并且应该启用 showLowCoverageRows
     act(() => {
       vi.advanceTimersByTime(300);
+    });
+    act(() => {
+      vi.runAllTicks();
     });
 
     // 此时 Bench-Low 应该被过滤出来并显示
@@ -99,8 +107,8 @@ describe("BenchmarkMatrix 搜索筛选与低覆盖率状态恢复", () => {
     expect(screen.getByText("Bench-High")).toBeInTheDocument();
   });
 
-  test("若搜索前低覆盖行已经是显示状态，搜索结束后应当保持显示", () => {
-    renderMatrix();
+  test("若搜索前低覆盖行已经是显示状态，搜索结束后应当保持显示", async () => {
+    await renderMatrix();
 
     // 展开并手动勾选“显示低覆盖行”
     const toggleButton = screen.getByRole("button", { name: "显示低覆盖行" });
@@ -116,6 +124,9 @@ describe("BenchmarkMatrix 搜索筛选与低覆盖率状态恢复", () => {
     act(() => {
       vi.advanceTimersByTime(300);
     });
+    act(() => {
+      vi.runAllTicks();
+    });
 
     expect(screen.getByText("Bench-Low")).toBeInTheDocument();
     expect(screen.queryByText("Bench-High")).not.toBeInTheDocument();
@@ -129,8 +140,8 @@ describe("BenchmarkMatrix 搜索筛选与低覆盖率状态恢复", () => {
     expect(screen.getByText("Bench-High")).toBeInTheDocument();
   });
 
-  test("若输入包含单引号 ('), 不触发搜索", () => {
-    renderMatrix();
+  test("若输入包含单引号 ('), 不触发搜索", async () => {
+    await renderMatrix();
 
     const searchInput = screen.getByPlaceholderText("筛选 Benchmark");
     fireEvent.change(searchInput, { target: { value: "Bench'" } });
@@ -138,14 +149,17 @@ describe("BenchmarkMatrix 搜索筛选与低覆盖率状态恢复", () => {
     act(() => {
       vi.advanceTimersByTime(300);
     });
+    act(() => {
+      vi.runAllTicks();
+    });
 
     // 包含单引号，不应触发搜索过滤 (Bench-High 仍然存在)
     expect(screen.getByText("Bench-High")).toBeInTheDocument();
     expect(screen.queryByText("Bench-Low")).not.toBeInTheDocument();
   });
 
-  test("在搜索中手动修改低覆盖状态，清除搜索后应保持手动修改后的状态", () => {
-    renderMatrix();
+  test("在搜索中手动修改低覆盖状态，清除搜索后应保持手动修改后的状态", async () => {
+    await renderMatrix();
 
     // 初始：隐藏低覆盖行 (Bench-Low 不存在)
     expect(screen.queryByText("Bench-Low")).not.toBeInTheDocument();
@@ -155,6 +169,9 @@ describe("BenchmarkMatrix 搜索筛选与低覆盖率状态恢复", () => {
 
     act(() => {
       vi.advanceTimersByTime(300);
+    });
+    act(() => {
+      vi.runAllTicks();
     });
 
     // 搜索启动，开启低覆盖，两者都匹配且显示
@@ -187,7 +204,7 @@ describe("BenchmarkMatrix 搜索筛选与低覆盖率状态恢复", () => {
     ] as const;
 
     const footnoteText = "制表时间：{time} | 数据更新时间：{source_time} | 数据源：{data_source} | 原始：{origin_source}";
-    render(
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:S1", "text:S2"]}
         rows={[...customRows]}
@@ -200,6 +217,7 @@ describe("BenchmarkMatrix 搜索筛选与低覆盖率状态恢复", () => {
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(100);
+      vi.runAllTicks();
     });
 
     // 默认是全部页签，因此数据源占位符是“全数据源”，原始数据源是 __ALL__
@@ -213,6 +231,7 @@ describe("BenchmarkMatrix 搜索筛选与低覆盖率状态恢复", () => {
     fireEvent.click(exportButton);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(100);
+      vi.runAllTicks();
     });
 
     // 切换后，数据更新日期应该是 S2 的最大更新日期 2026-01-15，数据源是 S2，原始数据源是 text:S2

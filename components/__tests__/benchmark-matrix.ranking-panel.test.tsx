@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
+import { renderReady } from "@/tests/flush-microtasks";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
@@ -49,8 +50,8 @@ describe("BenchmarkMatrix ranking panel", () => {
     }
   });
 
-  test("Ctrl/Cmd clicking a benchmark row expands a model ranking chart", () => {
-    const { container } = render(<BenchmarkMatrix rows={[...rows]} allRows={[...rows]} />);
+  test("Ctrl/Cmd clicking a benchmark row expands a model ranking chart", async () => {
+    const { container } = await renderReady(<BenchmarkMatrix rows={[...rows]} allRows={[...rows]} />);
 
     const benchRow = screen.getByText("Bench-1").closest("tr");
     expect(benchRow).not.toBeNull();
@@ -77,8 +78,8 @@ describe("BenchmarkMatrix ranking panel", () => {
     expect(container.querySelector("[data-benchmark-ranking-panel]")).toBeNull();
   });
 
-  test("Ctrl/Cmd clicking a price row expands a lower-price ranking chart", () => {
-    const { container } = render(
+  test("Ctrl/Cmd clicking a price row expands a lower-price ranking chart", async () => {
+    const { container } = await renderReady(
       <BenchmarkMatrix
         rows={[...rows]}
         allRows={[...rows]}
@@ -113,7 +114,7 @@ describe("BenchmarkMatrix ranking panel", () => {
   });
 
   test("箱线图 tooltip 相对条带中心偏左", async () => {
-    const { container } = render(
+    const { container } = await renderReady(
       <BenchmarkMatrix
         rows={[
           ...rows,

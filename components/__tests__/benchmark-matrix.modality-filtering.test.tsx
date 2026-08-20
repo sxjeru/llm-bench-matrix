@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
+import { renderReady } from "@/tests/flush-microtasks";
 import { describe, expect, test, vi } from "vitest";
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
 import type { MatrixInputRow } from "@/components/benchmark-matrix/types";
@@ -42,8 +43,8 @@ const rows: MatrixInputRow[] = [
 ];
 
 describe("BenchmarkMatrix modality filtering", () => {
-  test("toggling modality checkboxes updates rendered rows dynamically", () => {
-    render(
+  test("toggling modality checkboxes updates rendered rows dynamically", async () => {
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:S1"]}
         rows={[...rows]}
@@ -73,8 +74,8 @@ describe("BenchmarkMatrix modality filtering", () => {
     expect(screen.getByText("VisionBench")).toBeInTheDocument();
   });
 
-  test("clicking outside the modality dropdown closes it", () => {
-    const { container } = render(
+  test("clicking outside the modality dropdown closes it", async () => {
+    const { container } = await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:S1"]}
         rows={[...rows]}

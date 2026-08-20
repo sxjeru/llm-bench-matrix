@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
+import { renderReady } from "@/tests/flush-microtasks";
 import { describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix, __buildOverallScoreDisplayDecimalsMapForTest } from "@/components/benchmark-matrix";
@@ -208,8 +209,8 @@ describe("BenchmarkMatrix 总评行", () => {
     expect(decimalsMap.get("Model F")).toBe(1);
   });
 
-  test("表格末尾展示原始总评与原始名次", () => {
-    const { container } = render(<BenchmarkMatrix rows={[...rows]} />);
+  test("表格末尾展示原始总评与原始名次", async () => {
+    const { container } = await renderReady(<BenchmarkMatrix rows={[...rows]} />);
 
     const overallRow = container.querySelector('tr[data-overall-row="1"]');
     expect(overallRow).not.toBeNull();
@@ -224,8 +225,8 @@ describe("BenchmarkMatrix 总评行", () => {
     expect(modelBCell!.textContent ?? "").toMatch(/\d+(?:\.\d+)?\s*\(\d+\)/);
   });
 
-  test("点击总评行后按总评排名排序列，再次点击可恢复", () => {
-    const { container } = render(<BenchmarkMatrix rows={[...rows]} />);
+  test("点击总评行后按总评排名排序列，再次点击可恢复", async () => {
+    const { container } = await renderReady(<BenchmarkMatrix rows={[...rows]} />);
 
     const initialOrder = getModelHeaderOrder();
     expect(initialOrder.length).toBe(3);
@@ -240,8 +241,8 @@ describe("BenchmarkMatrix 总评行", () => {
     expect(getModelHeaderOrder()).toEqual(initialOrder);
   });
 
-  test("点击总评行 tooltip 图标不会触发排序", () => {
-    const { container } = render(<BenchmarkMatrix rows={[...rows]} />);
+  test("点击总评行 tooltip 图标不会触发排序", async () => {
+    const { container } = await renderReady(<BenchmarkMatrix rows={[...rows]} />);
     const initialOrder = getModelHeaderOrder();
 
     const overallRow = container.querySelector('tr[data-overall-row="1"]');
@@ -261,7 +262,7 @@ describe("BenchmarkMatrix 总评行", () => {
 
 
   test("问号 tooltip 展示覆盖率修正后的分数与名次", async () => {
-    const { container } = render(<BenchmarkMatrix rows={[...rows]} />);
+    const { container } = await renderReady(<BenchmarkMatrix rows={[...rows]} />);
 
     const trigger = container.querySelector('[data-overall-tooltip-trigger="Model C"]') as HTMLElement | null;
     expect(trigger).not.toBeNull();
@@ -273,8 +274,8 @@ describe("BenchmarkMatrix 总评行", () => {
     expect(screen.getByText(/主展示名次按原始总评分计算/)).toBeInTheDocument();
   });
 
-  test("当行数据标记 higherIsBetter=false 时，显示低值更优提示", () => {
-    render(
+  test("当行数据标记 higherIsBetter=false 时，显示低值更优提示", async () => {
+    await renderReady(
       <BenchmarkMatrix
         rows={[
           {
@@ -308,8 +309,8 @@ describe("BenchmarkMatrix 总评行", () => {
     expect(screen.getByTitle("该项目为低值更优")).toBeInTheDocument();
   });
 
-  test("显示价格后在 benchmark 前插入三行价格，默认不计入总评覆盖率", () => {
-    const { container } = render(
+  test("显示价格后在 benchmark 前插入三行价格，默认不计入总评覆盖率", async () => {
+    const { container } = await renderReady(
       <BenchmarkMatrix
         rows={[...rows]}
         modelPrices={[
@@ -374,10 +375,10 @@ describe("BenchmarkMatrix 总评行", () => {
     expect(screen.getByText(/覆盖率：/)).toHaveTextContent("2/3");
   });
 
-  test("Ctrl 点击价格开关把价格行纳入总评，未纳入时行名压暗", () => {
+  test("Ctrl 点击价格开关把价格行纳入总评，未纳入时行名压暗", async () => {
     window.localStorage.clear();
 
-    const { container } = render(
+    const { container } = await renderReady(
       <BenchmarkMatrix
         rows={[...rows]}
         modelPrices={[
@@ -414,7 +415,7 @@ describe("BenchmarkMatrix 总评行", () => {
   test("无价格数据时不会因持久化开关渲染空价格行", async () => {
     window.localStorage.setItem("benchmark-matrix:show-price-rows", "1");
 
-    const { container } = render(<BenchmarkMatrix rows={[...rows]} />);
+    const { container } = await renderReady(<BenchmarkMatrix rows={[...rows]} />);
 
     expect(container.querySelectorAll('[data-metric-type="price"]')).toHaveLength(0);
     expect(screen.queryByText("Input Price")).not.toBeInTheDocument();
@@ -423,7 +424,7 @@ describe("BenchmarkMatrix 总评行", () => {
   test("仅有空费用价格行时不会因持久化开关渲染空价格行", async () => {
     window.localStorage.setItem("benchmark-matrix:show-price-rows", "1");
 
-    const { container } = render(
+    const { container } = await renderReady(
       <BenchmarkMatrix
         rows={[...rows]}
         modelPrices={[

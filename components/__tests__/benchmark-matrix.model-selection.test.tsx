@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
+import { renderReady } from "@/tests/flush-microtasks";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
@@ -53,8 +54,8 @@ const rows = [
   }
 ] as const;
 
-function renderMatrix() {
-  return render(
+async function renderMatrix() {
+  return renderReady(
     <BenchmarkMatrix
       sourceOptions={["text:S1", "text:S2"]}
       rows={[...rows]}
@@ -72,8 +73,8 @@ describe("BenchmarkMatrix 模型筛选按页签记忆", () => {
     }
   });
 
-  test("不同页签默认按本页签模型勾选，并独立记忆各自模型筛选", () => {
-    renderMatrix();
+  test("不同页签默认按本页签模型勾选，并独立记忆各自模型筛选", async () => {
+    await renderMatrix();
 
     fireEvent.click(screen.getByRole("button", { name: "展开模型筛选" }));
     expect(screen.getByText(/已选模型/)).toHaveTextContent("已选模型 3/3");
@@ -97,8 +98,8 @@ describe("BenchmarkMatrix 模型筛选按页签记忆", () => {
     expect(screen.getByText(/已选模型/)).toHaveTextContent("已选模型 2/3");
   });
 
-  test("刷新后可从浏览器恢复页签对应的模型筛选", () => {
-    const first = renderMatrix();
+  test("刷新后可从浏览器恢复页签对应的模型筛选", async () => {
+    const first = await renderMatrix();
 
     fireEvent.click(screen.getByRole("button", { name: "展开模型筛选" }));
     fireEvent.click(screen.getByRole("tab", { name: "S1" }));
@@ -107,15 +108,15 @@ describe("BenchmarkMatrix 模型筛选按页签记忆", () => {
 
     first.unmount();
 
-    renderMatrix();
+    await renderMatrix();
 
     fireEvent.click(screen.getByRole("button", { name: "展开模型筛选" }));
     fireEvent.click(screen.getByRole("tab", { name: "S1" }));
     expect(screen.getByText(/已选模型/)).toHaveTextContent("已选模型 1/3");
   });
 
-  test("shift 点击表头可取消该模型筛选", () => {
-    renderMatrix();
+  test("shift 点击表头可取消该模型筛选", async () => {
+    await renderMatrix();
 
     fireEvent.click(screen.getByRole("button", { name: "展开模型筛选" }));
     expect(screen.getByText(/已选模型/)).toHaveTextContent("已选模型 3/3");

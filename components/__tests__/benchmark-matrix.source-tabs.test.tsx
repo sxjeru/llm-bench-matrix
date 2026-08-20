@@ -1,9 +1,11 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { flushQueuedStateUpdates, renderReady } from "@/tests/flush-microtasks";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
 import { formatTooltipTime } from "@/components/benchmark-matrix/formatters";
 import { HOME_PATH, SCATTER_PATH } from "@/lib/public-routes";
+import * as selectors from "@/components/benchmark-matrix/selectors";
 
 const mockSearchParams = new URLSearchParams();
 const pathnameState = vi.hoisted(() => ({ value: "/" }));
@@ -28,7 +30,7 @@ describe("BenchmarkMatrix source tabs", () => {
 
   test("切换 source 仅更新浏览器地址，不发起路由导航", async () => {
     const replaceStateSpy = vi.spyOn(window.history, "replaceState");
-    render(
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:Claude Opus 4.7"]}
         rows={[
@@ -63,7 +65,7 @@ describe("BenchmarkMatrix source tabs", () => {
     window.history.replaceState(null, "", SCATTER_PATH);
     const replaceStateSpy = vi.spyOn(window.history, "replaceState");
 
-    render(
+    await renderReady(
       <BenchmarkMatrix
         urlSyncEnabled={false}
         sourceOptions={["text:Claude Opus 4.7"]}
@@ -97,7 +99,7 @@ describe("BenchmarkMatrix source tabs", () => {
     window.history.replaceState(null, "", "/admin");
     const replaceStateSpy = vi.spyOn(window.history, "replaceState");
 
-    render(
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:Claude Opus 4.7"]}
         rows={[
@@ -128,8 +130,8 @@ describe("BenchmarkMatrix source tabs", () => {
     });
   });
 
-  test("同系列 source 页签按新版本优先排序（如 Qwen3.6 在 Qwen3.5 前，Claude Sonnet 5 在 Opus 4.8 前）", () => {
-    render(
+  test("同系列 source 页签按新版本优先排序（如 Qwen3.6 在 Qwen3.5 前，Claude Sonnet 5 在 Opus 4.8 前）", async () => {
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={[
           "text:Qwen3.5",
@@ -171,8 +173,8 @@ describe("BenchmarkMatrix source tabs", () => {
     expect(claudeTabs).toEqual(["Claude Sonnet 5", "Claude Opus 4.8", "Claude Opus 4.7"]);
   });
 
-  test("同系列 source 页签中带版本的 Muse Spark 1.1 排在无版本 Muse Spark 前面", () => {
-    render(
+  test("同系列 source 页签中带版本的 Muse Spark 1.1 排在无版本 Muse Spark 前面", async () => {
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={[
           "text:Muse Spark",
@@ -203,8 +205,8 @@ describe("BenchmarkMatrix source tabs", () => {
     expect(museTabs).toEqual(["Muse Spark 1.1", "Muse Spark", "Muse Spark Thinking"]);
   });
 
-  test("Nemotron 组内页签按 ultra > super > nano 顺序排序", () => {
-    render(
+  test("Nemotron 组内页签按 ultra > super > nano 顺序排序", async () => {
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={[
           "text:Nemotron 3 Nano",
@@ -235,8 +237,8 @@ describe("BenchmarkMatrix source tabs", () => {
     expect(nemotronTabs).toEqual(["Nemotron 3 Ultra", "Nemotron 3 Super", "Nemotron 3 Nano"]);
   });
 
-  test("同版本 source 页签按 xxB 大小降序排序", () => {
-    render(
+  test("同版本 source 页签按 xxB 大小降序排序", async () => {
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={[
           "text:Ornith-1.0-9B",
@@ -268,7 +270,7 @@ describe("BenchmarkMatrix source tabs", () => {
   });
 
   test("source 页签文本使用 provider 颜色，首字符加粗，选中后恢复白色加粗", async () => {
-    render(
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:Claude Opus 4.7"]}
         rows={[
@@ -310,8 +312,8 @@ describe("BenchmarkMatrix source tabs", () => {
     expect(visibleText).toHaveClass("font-bold");
   });
 
-  test("未配置自定义 provider 颜色的 source 页签不使用 fallback 颜色", () => {
-    render(
+  test("未配置自定义 provider 颜色的 source 页签不使用 fallback 颜色", async () => {
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:Claude Opus 4.7"]}
         rows={[
@@ -336,7 +338,7 @@ describe("BenchmarkMatrix source tabs", () => {
     expect(label.style.color).toBe("");
   });
 
-  test("同一模型重复多行不改变页签配色，且同 rank 取先出现的那行", () => {
+  test("同一模型重复多行不改变页签配色，且同 rank 取先出现的那行", async () => {
     // 配色候选按 (modelName, provider, brandColor, sourceKey) 去重后再匹配。
     // 这里让同一组合重复 200 行，并在后面放一个同 rank 的竞争者：
     // 去重必须保持首次出现的顺序，否则先遇到的那行就不再胜出。
@@ -354,7 +356,7 @@ describe("BenchmarkMatrix source tabs", () => {
       source: "text:Claude Opus 4.7"
     }));
 
-    render(
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:Claude Opus 4.7"]}
         rows={[
@@ -382,8 +384,8 @@ describe("BenchmarkMatrix source tabs", () => {
     expect(coloredLabel).toHaveStyle({ color: "rgb(240, 240, 240)" });
   });
 
-  test("非全部 source 页签优先展示 source 同系列模型，再按系列覆盖率和模型名排序", () => {
-    render(
+  test("非全部 source 页签优先展示 source 同系列模型，再按系列覆盖率和模型名排序", async () => {
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:Claude Opus 4.7"]}
         rows={[
@@ -523,8 +525,8 @@ describe("BenchmarkMatrix source tabs", () => {
     ]);
   });
 
-  test("非全部 source 页签会把同模型家族放在一起", () => {
-    render(
+  test("非全部 source 页签会把同模型家族放在一起", async () => {
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:MiniMax M3"]}
         rows={[
@@ -590,8 +592,8 @@ describe("BenchmarkMatrix source tabs", () => {
     expect(headers).toEqual(["MiniMax M3", "MiniMax M2.7", "Claude Sonnet 4.6"]);
   });
 
-  test("当 rows 仅有单一 source 时，也会按 sourceOptions 展示全部页签", () => {
-    render(
+  test("当 rows 仅有单一 source 时，也会按 sourceOptions 展示全部页签", async () => {
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:Model A", "text:Qwen3.5-27B", "text:Gemini-2.5-Pro"]}
         rows={[
@@ -632,7 +634,7 @@ describe("BenchmarkMatrix source tabs", () => {
   });
 
   test("从 Gemma 4 切回全部时，模型选择会恢复到全量 allRows", async () => {
-    render(
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:Gemma 4", "text:Seed2.0"]}
         rows={[
@@ -687,7 +689,7 @@ describe("BenchmarkMatrix source tabs", () => {
   test("带 source 参数时优先使用当前 source 结果里的 benchmark 类型", async () => {
     mockSearchParams.set("source", "text:Seed2.0-0428");
 
-    render(
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:Seed2.0-0428"]}
         rows={[
@@ -732,7 +734,7 @@ describe("BenchmarkMatrix source tabs", () => {
     const referenceTime = new Date("2026-05-10T12:00:00.000Z");
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(referenceTime.getTime());
 
-    render(
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:Alpha", "text:Beta", "text:Gamma"]}
         rows={[
@@ -796,7 +798,7 @@ describe("BenchmarkMatrix source tabs", () => {
 
     const latestUpdatedAt = "2026-05-09T18:08:00.000Z";
 
-    render(
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:Delta"]}
         rows={[
@@ -830,7 +832,7 @@ describe("BenchmarkMatrix source tabs", () => {
   test("缺少时间戳时不展示 new 标记与最近更新提示", async () => {
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(new Date("2026-05-10T12:00:00.000Z").getTime());
 
-    render(
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:NoTime-A", "text:NoTime-B"]}
         rows={[
@@ -884,7 +886,7 @@ describe("BenchmarkMatrix source tabs", () => {
     const secondLatestUpdatedAt = "2026-05-08T12:00:00.000Z";
     const latestUpdatedAt = "2026-05-09T18:08:00.000Z";
 
-    render(
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:Epsilon", "text:Eta", "text:Zeta"]}
         rows={[
@@ -945,7 +947,7 @@ describe("BenchmarkMatrix source tabs", () => {
     const referenceTime = new Date("2026-06-10T12:00:00.000Z");
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(referenceTime.getTime());
 
-    render(
+    await renderReady(
       <BenchmarkMatrix
         sourceOptions={["text:Alpha", "text:Beta", "text:Gamma"]}
         rows={[
@@ -1031,7 +1033,7 @@ describe("BenchmarkMatrix source tabs", () => {
       return makeRect(120, 36);
     });
 
-    const { container } = render(
+    const { container } = await renderReady(
       <BenchmarkMatrix
         sourceOptions={[
           "text:S1",
@@ -1142,7 +1144,7 @@ describe("BenchmarkMatrix source tabs", () => {
       return makeRect(120, 36);
     });
 
-    const { container } = render(
+    const { container } = await renderReady(
       <BenchmarkMatrix
         sourceOptions={[
           "text:S1",
@@ -1224,6 +1226,65 @@ describe("BenchmarkMatrix source tabs", () => {
       const placeholder = container.querySelector('[data-source-tab-placeholder="text:S1"]');
       expect(placeholder).toHaveTextContent("S1");
     });
+  });
+
+  test("首屏要等 enqueueStateUpdate 刷完才渲染页签", async () => {
+    const row = {
+      providerName: "Anthropic",
+      modelName: "Claude Opus 4.7",
+      benchmarkName: "Bench-1",
+      benchmarkType: "General",
+      benchTime: "2026-04-06T00:00:00.000Z",
+      valueRaw: "80",
+      valueNum: 80,
+      source: "text:Claude Opus 4.7"
+    };
+
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:Claude Opus 4.7"]}
+        rows={[row]}
+      />
+    );
+
+    expect(screen.queryByRole("tab", { name: "Claude Opus 4.7" })).not.toBeInTheDocument();
+
+    await flushQueuedStateUpdates();
+
+    expect(screen.getByRole("tab", { name: "Claude Opus 4.7" })).toBeInTheDocument();
+  });
+
+  test("省略可选数组时父组件重渲染不会让 buildSourceOptions 再算一遍", async () => {
+    const row = {
+      providerName: "Anthropic",
+      modelName: "Claude Opus 4.7",
+      benchmarkName: "Bench-1",
+      benchmarkType: "General",
+      benchTime: "2026-04-06T00:00:00.000Z",
+      valueRaw: "80",
+      valueNum: 80,
+      source: "text:Claude Opus 4.7"
+    };
+    const rows = [row];
+    const spy = vi.spyOn(selectors, "buildSourceOptions");
+
+    function Parent({ tick }: { tick: number }) {
+      return (
+        <div data-tick={tick}>
+          <BenchmarkMatrix rows={rows} />
+        </div>
+      );
+    }
+
+    const { rerender } = await renderReady(<Parent tick={0} />);
+    const callsAfterReady = spy.mock.calls.length;
+    expect(callsAfterReady).toBeGreaterThan(0);
+
+    rerender(<Parent tick={1} />);
+    await flushQueuedStateUpdates();
+
+    expect(spy.mock.calls.length).toBe(callsAfterReady);
+    expect(screen.getByRole("tab", { name: "Claude Opus 4.7" })).toBeInTheDocument();
   });
 
 });

@@ -2,6 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { type ClipboardEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { EMPTY_SOURCE_OPTIONS } from "@/components/benchmark-matrix/constants";
 import { formatDateTimeLocalInputValue } from "@/components/benchmark-matrix/formatters";
 import { getJson, postFormData, postJson } from "./admin-console/api";
 import { useEntityLookups } from "./admin-console/hooks/use-entity-lookups";
@@ -146,7 +147,7 @@ export function AdminConsole({
   providers,
   models,
   benchmarks,
-  sourceOptions = [],
+  sourceOptions = EMPTY_SOURCE_OPTIONS,
   mergedRecords,
   initialSettings
 }: Props) {

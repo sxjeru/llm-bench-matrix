@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderReady } from "@/tests/flush-microtasks";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
@@ -143,8 +144,8 @@ describe("BenchmarkMatrix 模型比较", () => {
     }
   });
 
-  test("Ctrl/Cmd 点击可建立基准与比较模型，并显示差值徽标", () => {
-    const { container } = render(<BenchmarkMatrix rows={[...compareRows]} allRows={[...compareRows]} />);
+  test("Ctrl/Cmd 点击可建立基准与比较模型，并显示差值徽标", async () => {
+    const { container } = await renderReady(<BenchmarkMatrix rows={[...compareRows]} allRows={[...compareRows]} />);
 
     const headerA = screen.getByRole("columnheader", { name: /Model A/ });
     const headerB = screen.getByRole("columnheader", { name: /Model B/ });
@@ -165,7 +166,7 @@ describe("BenchmarkMatrix 模型比较", () => {
   });
 
   test("比较模式会适度扩展默认列宽，避免徽标拥挤", async () => {
-    render(<BenchmarkMatrix rows={[...compareRows]} allRows={[...compareRows]} />);
+    await renderReady(<BenchmarkMatrix rows={[...compareRows]} allRows={[...compareRows]} />);
 
     const headerA = screen.getByRole("columnheader", { name: /Model A/ });
     const headerB = screen.getByRole("columnheader", { name: /Model B/ });
@@ -183,7 +184,7 @@ describe("BenchmarkMatrix 模型比较", () => {
   });
 
   test("比较模式下手动拖窄后不会被强制抬高", async () => {
-    render(<BenchmarkMatrix rows={[...compareRows]} allRows={[...compareRows]} />);
+    await renderReady(<BenchmarkMatrix rows={[...compareRows]} allRows={[...compareRows]} />);
 
     const headerA = screen.getByRole("columnheader", { name: /Model A/ });
     const headerB = screen.getByRole("columnheader", { name: /Model B/ });
@@ -219,8 +220,8 @@ describe("BenchmarkMatrix 模型比较", () => {
     });
   });
 
-  test("低值更优 benchmark 中，数值下降应为绿色，数值上升应为红色", () => {
-    const { container } = render(<BenchmarkMatrix rows={[...lowerBetterRows]} allRows={[...lowerBetterRows]} />);
+  test("低值更优 benchmark 中，数值下降应为绿色，数值上升应为红色", async () => {
+    const { container } = await renderReady(<BenchmarkMatrix rows={[...lowerBetterRows]} allRows={[...lowerBetterRows]} />);
 
     const headerA = screen.getByRole("columnheader", { name: /Model A/ });
     const headerB = screen.getByRole("columnheader", { name: /Model B/ });
@@ -237,8 +238,8 @@ describe("BenchmarkMatrix 模型比较", () => {
     expect(container.querySelector('[data-compare-delta-badge="1"][data-compare-direction="up"][data-compare-color-direction="down"]')).not.toBeNull();
   });
 
-  test("Ctrl/Cmd 点击不会触发行存在性过滤，普通点击仍按原行为过滤", () => {
-    render(<BenchmarkMatrix rows={[...presenceRows]} allRows={[...presenceRows]} />);
+  test("Ctrl/Cmd 点击不会触发行存在性过滤，普通点击仍按原行为过滤", async () => {
+    await renderReady(<BenchmarkMatrix rows={[...presenceRows]} allRows={[...presenceRows]} />);
 
     const headerB = screen.getByRole("columnheader", { name: /Model B/ });
 

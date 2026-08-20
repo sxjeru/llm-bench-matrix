@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
+import { renderReady } from "@/tests/flush-microtasks";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
@@ -64,8 +65,8 @@ const rows = [
   }
 ] as const;
 
-function renderMatrix() {
-  return render(<BenchmarkMatrix rows={[...rows]} allRows={[...rows]} />);
+async function renderMatrix() {
+  return renderReady(<BenchmarkMatrix rows={[...rows]} allRows={[...rows]} />);
 }
 
 describe("BenchmarkMatrix 临时隐藏行", () => {
@@ -77,8 +78,8 @@ describe("BenchmarkMatrix 临时隐藏行", () => {
     }
   });
 
-  test("shift 点击行会临时隐藏该行，重新挂载后恢复", () => {
-    const firstRender = renderMatrix();
+  test("shift 点击行会临时隐藏该行，重新挂载后恢复", async () => {
+    const firstRender = await renderMatrix();
 
     const benchOneRow = screen.getByText("Bench-1").closest("tr");
     expect(benchOneRow).not.toBeNull();
@@ -97,7 +98,7 @@ describe("BenchmarkMatrix 临时隐藏行", () => {
     expect(screen.getByText("Bench-2")).toBeInTheDocument();
 
     firstRender.unmount();
-    renderMatrix();
+    await renderMatrix();
 
     expect(screen.getByText("Bench-1")).toBeInTheDocument();
     expect(screen.getByText("Bench-2")).toBeInTheDocument();

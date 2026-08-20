@@ -89,6 +89,9 @@ import {
   type BenchmarkRankingScaleMode,
   type BenchmarkRankingScope,
   SOURCE_ALL,
+  EMPTY_SOURCE_OPTIONS,
+  EMPTY_MODEL_PRICES,
+  EMPTY_MODEL_PARAMS,
   OVERALL_ROW_KEY,
   PARAMS_ACTIVE_RATIO_ROW_KEY,
   PARAMS_ROW_KEY,
@@ -204,9 +207,9 @@ function renderFrontendTableCellText(value: string, segmentStyle?: CSSProperties
 export function BenchmarkMatrix({
   rows,
   allRows = rows,
-  sourceOptions: allSourceOptions = [],
-  modelPrices = [],
-  modelParams = [],
+  sourceOptions: allSourceOptions = EMPTY_SOURCE_OPTIONS,
+  modelPrices = EMPTY_MODEL_PRICES,
+  modelParams = EMPTY_MODEL_PARAMS,
   exportFootnoteText,
   exportFootnoteAlign,
   urlSyncEnabled = true

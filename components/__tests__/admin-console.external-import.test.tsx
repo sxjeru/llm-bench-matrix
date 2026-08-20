@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { renderReady } from "@/tests/flush-microtasks";
 import userEvent from "@testing-library/user-event";
 import { ExternalImportTab } from "@/components/admin-console/views/external-import-tab";
 import type { ExternalImportSnapshot, ExternalMappingDraft } from "@/components/admin-console/types";
@@ -103,7 +104,7 @@ function makeSnapshot(overrides: Partial<ExternalImportSnapshot> = {}): External
   };
 }
 
-function renderTab(overrides: Partial<Parameters<typeof ExternalImportTab>[0]> = {}) {
+async function renderTab(overrides: Partial<Parameters<typeof ExternalImportTab>[0]> = {}) {
   const snapshot = overrides.snapshot === undefined ? makeSnapshot() : overrides.snapshot;
   const drafts: Record<number, ExternalMappingDraft> = {};
   for (const row of snapshot?.mappings ?? []) {
@@ -147,12 +148,12 @@ function renderTab(overrides: Partial<Parameters<typeof ExternalImportTab>[0]> =
     ...overrides
   };
 
-  render(<ExternalImportTab {...props} />);
+  await renderReady(<ExternalImportTab {...props} />);
 }
 
 describe("ExternalImportTab", () => {
-  test("渲染指标目录，并标出需要 ×100 的小数量纲", () => {
-    renderTab();
+  test("渲染指标目录，并标出需要 ×100 的小数量纲", async () => {
+    await renderTab();
 
     expect(screen.getByText("evaluations.mmlu_pro")).toBeInTheDocument();
     expect(screen.getByDisplayValue("MMLU-Pro")).toBeInTheDocument();
@@ -162,21 +163,21 @@ describe("ExternalImportTab", () => {
   test("勾选数据项会回调 onToggleMetric", async () => {
     const user = userEvent.setup();
     const onToggleMetric = vi.fn();
-    renderTab({ onToggleMetric });
+    await renderTab({ onToggleMetric });
 
     await user.click(screen.getByLabelText("选择数据项 Time To First Token"));
 
     expect(onToggleMetric).toHaveBeenCalledWith("performance.median_time_to_first_token_seconds");
   });
 
-  test("把「默认取上游最高强度」的匹配来源翻译成中文说明", () => {
-    renderTab();
+  test("把「默认取上游最高强度」的匹配来源翻译成中文说明", async () => {
+    await renderTab();
 
     expect(screen.getByText("本地未标强度，默认取上游最高档")).toBeInTheDocument();
   });
 
-  test("统计里单独给出「默认取最高强度」的条数", () => {
-    renderTab();
+  test("统计里单独给出「默认取最高强度」的条数", async () => {
+    await renderTab();
 
     const card = screen.getByText("默认取最高强度").parentElement!;
     expect(card).toHaveTextContent("1");
@@ -185,7 +186,7 @@ describe("ExternalImportTab", () => {
   test("手动改绑上游条目会回调 onUpdateMappingDraft", async () => {
     const user = userEvent.setup();
     const onUpdateMappingDraft = vi.fn();
-    renderTab({ onUpdateMappingDraft });
+    await renderTab({ onUpdateMappingDraft });
 
     const input = screen.getByLabelText("GPT 5.4 的上游条目");
     await user.click(input);
@@ -209,7 +210,7 @@ describe("ExternalImportTab", () => {
   test("已忽略的模型仍可编辑上游条目，编辑后自动取消忽略", async () => {
     const user = userEvent.setup();
     const onUpdateMappingDraft = vi.fn();
-    renderTab({
+    await renderTab({
       onUpdateMappingDraft,
       snapshot: makeSnapshot({
         mappings: [
@@ -253,7 +254,7 @@ describe("ExternalImportTab", () => {
 
   test("上游条目支持输入筛选", async () => {
     const user = userEvent.setup();
-    renderTab();
+    await renderTab();
 
     const input = screen.getByLabelText("GPT 5.4 的上游条目");
     await user.click(input);
@@ -267,7 +268,7 @@ describe("ExternalImportTab", () => {
   test("上游独有模型默认不勾选，勾选后回调 onToggleCreateModel", async () => {
     const user = userEvent.setup();
     const onToggleCreateModel = vi.fn();
-    renderTab({ onToggleCreateModel });
+    await renderTab({ onToggleCreateModel });
 
     const checkbox = screen.getByLabelText("创建 Kimi K3 (max)");
     expect(checkbox).not.toBeChecked();
@@ -276,16 +277,16 @@ describe("ExternalImportTab", () => {
     expect(onToggleCreateModel).toHaveBeenCalledWith("aa-new");
   });
 
-  test("未配置 API key 时给出提示并禁用预览/导入", () => {
-    renderTab({ snapshot: makeSnapshot({ apiKeyConfigured: false }) });
+  test("未配置 API key 时给出提示并禁用预览/导入", async () => {
+    await renderTab({ snapshot: makeSnapshot({ apiKeyConfigured: false }) });
 
     expect(screen.getByText(/未配置/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /预览导入/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: /执行导入/ })).toBeDisabled();
   });
 
-  test("上游条目被多个本地模型绑定时给出冲突告警", () => {
-    renderTab({
+  test("上游条目被多个本地模型绑定时给出冲突告警", async () => {
+    await renderTab({
       snapshot: makeSnapshot({
         conflicts: [{ externalModelId: "aa-xhigh", externalModelName: "GPT 5.4 (xhigh)", modelIds: [1, 2] }]
       })
@@ -294,8 +295,8 @@ describe("ExternalImportTab", () => {
     expect(screen.getByText(/被多个本地模型同时绑定/)).toBeInTheDocument();
   });
 
-  test("预览结果按新增/追加/覆盖分别统计", () => {
-    renderTab({
+  test("预览结果按新增/追加/覆盖分别统计", async () => {
+    await renderTab({
       summary: {
         source: "text:Artificial Analysis",
         total: 3,
@@ -336,8 +337,8 @@ describe("ExternalImportTab", () => {
     expect(screen.getByText("覆盖（值未变）")).toBeInTheDocument();
   });
 
-  test("尚未拉取上游时给出引导文案", () => {
-    renderTab({ snapshot: null });
+  test("尚未拉取上游时给出引导文案", async () => {
+    await renderTab({ snapshot: null });
 
     expect(screen.getByText(/点击「拉取上游」后在这里选择要导入的数据项/)).toBeInTheDocument();
     expect(screen.getByText("尚未拉取上游数据")).toBeInTheDocument();

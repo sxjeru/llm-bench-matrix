@@ -4,6 +4,9 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_EXPORT_PRESET,
+  EMPTY_MODEL_PARAMS,
+  EMPTY_MODEL_PRICES,
+  EMPTY_SOURCE_OPTIONS,
   EXPORT_PRESET_MAP,
   PARAMS_ROWS_IN_OVERALL_STORAGE_KEY,
   PRICE_ROWS_IN_OVERALL_STORAGE_KEY,
@@ -92,9 +95,9 @@ function readStoredBoolean(storageKey: string): boolean {
 export function ModelScatter({
   rows,
   allRows: allRowsProp,
-  sourceOptions: sourceOptionsProp = [],
-  modelPrices = [],
-  modelParams = [],
+  sourceOptions: sourceOptionsProp = EMPTY_SOURCE_OPTIONS,
+  modelPrices = EMPTY_MODEL_PRICES,
+  modelParams = EMPTY_MODEL_PARAMS,
   urlSyncEnabled = true
 }: ModelScatterProps) {
   const pathname = usePathname();

@@ -1,4 +1,8 @@
-import type { HeatmapPaletteHex } from "./types";
+import type { HeatmapPaletteHex, ModelParamsInfo, ModelPriceInfo } from "./types";
+
+export const EMPTY_SOURCE_OPTIONS: string[] = [];
+export const EMPTY_MODEL_PRICES: ModelPriceInfo[] = [];
+export const EMPTY_MODEL_PARAMS: ModelParamsInfo[] = [];
 
 export const LOWER_IS_BETTER_RULES: RegExp[] = [
   /omnidocbench\s*1\.5/i,

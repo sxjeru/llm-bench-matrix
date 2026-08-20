@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { renderReady } from "@/tests/flush-microtasks";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 
@@ -263,7 +264,7 @@ describe("AdminConsole text import", () => {
     const user = userEvent.setup();
     const fetchMock = mockFetchSequence({ prices: [] });
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await user.click(screen.getByRole("tab", { name: "价格管理" }));
 
@@ -292,7 +293,7 @@ describe("AdminConsole text import", () => {
       ]
     });
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await user.click(screen.getByRole("tab", { name: "价格管理" }));
     expect(await screen.findByText("Auto Model")).toBeInTheDocument();
@@ -346,7 +347,7 @@ describe("AdminConsole text import", () => {
       ]
     });
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await user.click(screen.getByRole("tab", { name: "价格管理" }));
     expect(await screen.findByText("B Newer Model")).toBeInTheDocument();
@@ -361,7 +362,7 @@ describe("AdminConsole text import", () => {
     const user = userEvent.setup();
     const fetchMock = mockFetchSequence({ prices: [buildPriceRow({ modelId: 1, modelName: "Model A", inputCost: 1 })] });
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await user.click(screen.getByRole("tab", { name: "价格管理" }));
     expect(await screen.findByText("Model A")).toBeInTheDocument();
@@ -406,7 +407,7 @@ describe("AdminConsole text import", () => {
     const user = userEvent.setup();
     const fetchMock = mockFetchSequence({ prices: [buildPriceRow({ modelId: 1, modelName: "Model A", inputCost: 1 })] });
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await user.click(screen.getByRole("tab", { name: "价格管理" }));
     expect(await screen.findByText("Model A")).toBeInTheDocument();
@@ -476,7 +477,7 @@ describe("AdminConsole text import", () => {
     };
 
     mockFetchSequence(previewResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -545,7 +546,7 @@ describe("AdminConsole text import", () => {
     };
 
     const fetchMock = mockFetchSequence(previewResponse, importResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -644,7 +645,7 @@ describe("AdminConsole text import", () => {
     };
 
     const fetchMock = mockFetchSequence(previewResponse, importResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -735,7 +736,7 @@ describe("AdminConsole text import", () => {
     };
 
     const fetchMock = mockFetchSequence(previewResponse, importResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -801,7 +802,7 @@ describe("AdminConsole text import", () => {
     };
 
     mockFetchSequence(previewResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -866,7 +867,7 @@ describe("AdminConsole text import", () => {
     };
 
     mockFetchSequence(previewResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -907,7 +908,7 @@ describe("AdminConsole text import", () => {
     };
 
     mockFetchSequence(previewResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -951,7 +952,7 @@ describe("AdminConsole text import", () => {
     };
 
     mockFetchSequence(previewResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -1010,7 +1011,7 @@ describe("AdminConsole text import", () => {
     };
 
     mockFetchSequence(previewResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -1056,7 +1057,7 @@ describe("AdminConsole text import", () => {
     };
 
     const fetchMock = mockFetchSequence(previewResponse, importResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -1105,7 +1106,7 @@ describe("AdminConsole text import", () => {
     };
 
     const fetchMock = mockFetchSequence(previewResponse, importResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -1164,7 +1165,7 @@ describe("AdminConsole text import", () => {
     };
 
     const fetchMock = mockFetchSequence(previewResponse, importResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -1210,7 +1211,7 @@ describe("AdminConsole text import", () => {
     };
 
     mockFetchSequence(previewResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -1258,7 +1259,7 @@ describe("AdminConsole text import", () => {
     };
 
     mockFetchSequence(previewResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -1312,7 +1313,7 @@ describe("AdminConsole text import", () => {
     };
 
     const fetchMock = mockFetchSequence(previewResponse, importResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -1370,7 +1371,7 @@ describe("AdminConsole text import", () => {
     };
 
     const fetchMock = mockFetchSequence(previewResponse, importResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -1435,7 +1436,7 @@ describe("AdminConsole text import", () => {
     };
 
     const fetchMock = mockFetchSequence(previewResponse, importResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -1521,7 +1522,7 @@ describe("AdminConsole text import", () => {
     };
 
     const fetchMock = mockFetchSequence(previewResponse, importResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -1596,7 +1597,7 @@ describe("AdminConsole text import", () => {
       { id: 3, providerId: 1, modelName: "qwen3.6-3b-1b", canonicalKey: "qwen3.6-3b-1b" }
     ];
 
-    render(<AdminConsole {...props} />);
+    await renderReady(<AdminConsole {...props} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -1661,7 +1662,7 @@ describe("AdminConsole text import", () => {
     ];
 
     mockFetchSequence(previewResponse);
-    render(<AdminConsole {...props} />);
+    await renderReady(<AdminConsole {...props} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -1722,7 +1723,7 @@ describe("AdminConsole text import", () => {
     };
 
     const fetchMock = mockFetchSequence(previewResponse, importResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -1782,7 +1783,7 @@ describe("AdminConsole text import", () => {
     };
 
     mockFetchSequence(previewResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -1870,7 +1871,7 @@ describe("AdminConsole text import", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -1929,7 +1930,7 @@ describe("AdminConsole text import", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -1977,7 +1978,7 @@ describe("AdminConsole text import", () => {
     };
 
     const fetchMock = mockFetchSequence(previewResponse, importResponse);
-    render(
+    await renderReady(
       <AdminConsole
         {...{
           ...buildProps(),
@@ -2055,7 +2056,7 @@ describe("AdminConsole text import", () => {
     };
 
     const fetchMock = mockFetchSequence(previewResponse, importResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -2137,7 +2138,7 @@ describe("AdminConsole text import", () => {
     };
 
     mockFetchSequence(previewResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -2219,7 +2220,7 @@ describe("AdminConsole text import", () => {
     };
 
     const fetchMock = mockFetchSequence(workbookPreviewResponse, importResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement | null;
     if (!fileInput) {
@@ -2308,7 +2309,7 @@ describe("AdminConsole text import", () => {
     };
 
     const fetchMock = mockFetchSequence(previewResponse, importResponse);
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await user.type(screen.getByLabelText("粘贴 CSV / 文本"), "model,benchmark,value\nGPT-5-mini,SWE-bench,71.2");
     await user.click(screen.getByRole("button", { name: "预览导入结果" }));
@@ -2377,7 +2378,7 @@ describe("AdminConsole text import", () => {
     };
 
     const fetchMock = mockFetchSequence(previewResponse, importResponse);
-    render(<AdminConsole {...buildPropsWithDisplayName()} />);
+    await renderReady(<AdminConsole {...buildPropsWithDisplayName()} />);
 
     await user.type(screen.getByLabelText("粘贴 CSV / 文本"), "model,benchmark,value\nGPT-4.1,SWE-bench,75.1");
     await user.click(screen.getByRole("button", { name: "预览导入结果" }));
@@ -2441,7 +2442,7 @@ describe("AdminConsole text import", () => {
     };
 
     const fetchMock = mockFetchSequence(previewResponse, importResponse);
-    render(<AdminConsole {...buildPropsWithDisplayNameAndPrefixRule()} />);
+    await renderReady(<AdminConsole {...buildPropsWithDisplayNameAndPrefixRule()} />);
 
     await user.type(screen.getByLabelText("粘贴 CSV / 文本"), "model,benchmark,value\nOtherModel,SWE-bench,72.3");
     await user.click(screen.getByRole("button", { name: "预览导入结果" }));
@@ -2547,7 +2548,7 @@ describe("AdminConsole data maintenance", () => {
       consistencyAfterNormalizedResponse
     );
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await user.click(screen.getByRole("tab", { name: "数据维护" }));
     await user.click(screen.getByRole("button", { name: "开始一致性检测" }));
@@ -2642,7 +2643,7 @@ describe("AdminConsole data maintenance", () => {
 
     mockFetchSequence(consistencyResponse);
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await user.click(screen.getByRole("tab", { name: "数据维护" }));
     await user.click(screen.getByRole("button", { name: "开始一致性检测" }));
@@ -2722,7 +2723,7 @@ describe("AdminConsole data maintenance", () => {
       consistencyAfterSplitResponse
     );
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await user.click(screen.getByRole("tab", { name: "数据维护" }));
     await user.click(screen.getByRole("button", { name: "开始一致性检测" }));
@@ -2791,7 +2792,7 @@ describe("AdminConsole provider config", () => {
   test("删除前缀规则后其余输入值保持对应行", async () => {
     const user = userEvent.setup();
 
-    render(
+    await renderReady(
       <AdminConsole
         {...buildProps()}
         providers={[
@@ -2831,7 +2832,7 @@ describe("AdminConsole provider config", () => {
     const user = userEvent.setup();
     const fetchMock = mockFetchSequence({ provider: { id: 1 } });
 
-    render(
+    await renderReady(
       <AdminConsole
         {...buildProps()}
         providers={[
@@ -2890,7 +2891,7 @@ describe("AdminConsole provider config", () => {
     const user = userEvent.setup();
     const fetchMock = mockFetchSequence({ ok: true, providerId: 1, transferTargetProviderId: 2, transferredModelCount: 1 });
 
-    render(
+    await renderReady(
       <AdminConsole
         {...buildProps()}
         providers={[
@@ -2958,7 +2959,7 @@ describe("AdminConsole provider config", () => {
     const user = userEvent.setup();
     const fetchMock = mockFetchSequence({ provider: { id: 1 } });
 
-    render(
+    await renderReady(
       <AdminConsole
         {...buildProps()}
         providers={[
@@ -3010,7 +3011,7 @@ describe("AdminConsole provider config", () => {
     const user = userEvent.setup();
     const fetchMock = mockFetchSequence({ provider: { id: 1 } });
 
-    render(
+    await renderReady(
       <AdminConsole
         {...buildPropsWithDisplayName()}
         providers={[
@@ -3046,7 +3047,7 @@ describe("AdminConsole provider config", () => {
   test("展示归并目标列表隐藏已归并的 provider", async () => {
     const user = userEvent.setup();
 
-    render(
+    await renderReady(
       <AdminConsole
         {...buildPropsWithDisplayName()}
         providers={[
@@ -3068,7 +3069,7 @@ describe("AdminConsole provider config", () => {
   test("Provider 搜索支持按 displayName 过滤并展示模型列表", async () => {
     const user = userEvent.setup();
 
-    render(<AdminConsole {...buildPropsWithDisplayName()} />);
+    await renderReady(<AdminConsole {...buildPropsWithDisplayName()} />);
 
     await user.click(screen.getByRole("tab", { name: "Provider 配置" }));
 
@@ -3099,7 +3100,7 @@ describe("AdminConsole merge interactions", () => {
     const duplicateResult = buildDuplicateDetectionResponse();
     mockFetchSequence(duplicateResult);
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await openMergeTab(user);
     await user.click(screen.getByRole("button", { name: "检测重复候选" }));
@@ -3145,7 +3146,7 @@ describe("AdminConsole merge interactions", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await openMergeTab(user);
     await user.click(screen.getByRole("button", { name: "检测重复候选" }));
@@ -3197,7 +3198,7 @@ describe("AdminConsole merge interactions", () => {
     });
     const fetchMock = mockFetchSequence(duplicateResult, { ok: true }, { ok: true });
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await openMergeTab(user);
     await user.click(screen.getByRole("button", { name: "检测重复候选" }));
@@ -3239,7 +3240,7 @@ describe("AdminConsole merge interactions", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await openMergeTab(user);
 
@@ -3259,7 +3260,7 @@ describe("AdminConsole merge interactions", () => {
     const duplicateResult = buildDuplicateDetectionResponse();
     const fetchMock = mockFetchSequence(duplicateResult, { ok: true });
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await openMergeTab(user);
     await user.click(screen.getByRole("button", { name: "检测重复候选" }));
@@ -3308,7 +3309,7 @@ describe("AdminConsole rename tab", () => {
       action: "renamed"
     });
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await user.click(screen.getByRole("tab", { name: "名称维护" }));
 
@@ -3364,7 +3365,7 @@ describe("AdminConsole rename tab", () => {
       action: "renamed"
     });
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await user.click(screen.getByRole("tab", { name: "名称维护" }));
     await user.selectOptions(screen.getByRole("combobox"), "benchmark");
@@ -3421,7 +3422,7 @@ describe("AdminConsole rename tab", () => {
       action: "renamed"
     });
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await user.click(screen.getByRole("tab", { name: "名称维护" }));
     await user.selectOptions(screen.getByRole("combobox"), "source");
@@ -3479,7 +3480,7 @@ describe("AdminConsole rename tab", () => {
       mergedSourceName: "Bench-2"
     });
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await user.click(screen.getByRole("tab", { name: "名称维护" }));
     await user.selectOptions(screen.getByRole("combobox"), "benchmark");
@@ -3538,7 +3539,7 @@ describe("AdminConsole rename tab", () => {
       { id: 12, benchmarkName: "Bench-1", benchmarkType: "Type-B", modalities: ["Vision"] }
     ];
 
-    render(<AdminConsole {...props} />);
+    await renderReady(<AdminConsole {...props} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -3588,7 +3589,7 @@ describe("AdminConsole rename tab", () => {
       { id: 11, benchmarkName: "SomeBench (Elo)", benchmarkType: "General", modalities: ["Text"] }
     ];
 
-    render(<AdminConsole {...props} />);
+    await renderReady(<AdminConsole {...props} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -3643,7 +3644,7 @@ describe("AdminConsole rename tab", () => {
       { id: 13, benchmarkName: "SearchableBench", benchmarkType: "General", modalities: ["Text"] }
     ];
 
-    render(<AdminConsole {...props} />);
+    await renderReady(<AdminConsole {...props} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -3694,7 +3695,7 @@ describe("AdminConsole rename tab", () => {
       { id: 11, benchmarkName: "Bench-1", benchmarkType: "Type-A", modalities: ["Text"] }
     ];
 
-    render(<AdminConsole {...props} />);
+    await renderReady(<AdminConsole {...props} />);
 
     await fillCsvText(user, "dummy");
     await triggerPreview(user);
@@ -3726,7 +3727,7 @@ describe("AdminConsole 批量保存", () => {
       { prices: priceRows }
     );
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await user.click(screen.getByRole("tab", { name: "价格管理" }));
     expect(await screen.findByText("Alpha Model")).toBeInTheDocument();
@@ -3781,7 +3782,7 @@ describe("AdminConsole 批量保存", () => {
       ]
     });
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await user.click(screen.getByRole("tab", { name: "价格管理" }));
     expect(await screen.findByText("Alpha Model")).toBeInTheDocument();
@@ -3810,7 +3811,7 @@ describe("AdminConsole 批量保存", () => {
     const user = userEvent.setup();
     mockFetchSequence({ prices: [buildPriceRow({ modelId: 1, modelName: "Model A", inputCost: 1 })] });
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await user.click(screen.getByRole("tab", { name: "价格管理" }));
     expect(await screen.findByText("Model A")).toBeInTheDocument();
@@ -3840,7 +3841,7 @@ describe("AdminConsole 批量保存", () => {
       ]
     });
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await user.click(screen.getByRole("tab", { name: "价格管理" }));
     expect(await screen.findByText("Model A")).toBeInTheDocument();
@@ -3862,7 +3863,7 @@ describe("AdminConsole 批量保存", () => {
     mockFetchSequence({ prices: [buildPriceRow({ modelId: 1, modelName: "Model A", inputCost: 1 })] });
 
     try {
-      render(<AdminConsole {...buildProps()} />);
+      await renderReady(<AdminConsole {...buildProps()} />);
 
       await user.click(screen.getByRole("tab", { name: "价格管理" }));
       expect(await screen.findByText("Model A")).toBeInTheDocument();
@@ -3899,7 +3900,7 @@ describe("AdminConsole 批量保存", () => {
       { params: paramsRows }
     );
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await user.click(screen.getByRole("tab", { name: "模型参数" }));
     expect(await screen.findByText("Alpha Model")).toBeInTheDocument();
@@ -3943,7 +3944,7 @@ describe("AdminConsole 批量保存", () => {
       params: [buildParamsRow({ modelId: 1, modelName: "Alpha Model" })]
     });
 
-    render(<AdminConsole {...buildProps()} />);
+    await renderReady(<AdminConsole {...buildProps()} />);
 
     await user.click(screen.getByRole("tab", { name: "模型参数" }));
     expect(await screen.findByText("Alpha Model")).toBeInTheDocument();

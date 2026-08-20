@@ -1,6 +1,6 @@
 import { cleanup } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
-import { afterEach, beforeEach, vi } from "vitest";
+import { afterEach, vi } from "vitest";
 
 vi.mock("@/lib/cache-versions", () => ({
   bumpCacheVersions: vi.fn().mockResolvedValue(undefined),
@@ -19,10 +19,6 @@ if (typeof Element !== "undefined") {
     });
   }
 }
-
-beforeEach(() => {
-  vi.stubGlobal("queueMicrotask", (callback: VoidFunction) => callback());
-});
 
 afterEach(() => {
   cleanup();

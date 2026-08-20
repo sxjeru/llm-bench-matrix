@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderReady } from "@/tests/flush-microtasks";
 import { describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
@@ -24,8 +25,8 @@ function restorePrototypeProperty(
 }
 
 describe("BenchmarkMatrix 星号值显示", () => {
-  test("货币值展示保留美元符号与千分位", () => {
-    render(
+  test("货币值展示保留美元符号与千分位", async () => {
+    await renderReady(
       <BenchmarkMatrix
         rows={[
           {
@@ -48,7 +49,7 @@ describe("BenchmarkMatrix 星号值显示", () => {
   });
 
   test("单元格只显示净值，备注通过问号展示", async () => {
-    const { container } = render(
+    const { container } = await renderReady(
       <BenchmarkMatrix
         rows={[
           {
@@ -82,8 +83,8 @@ describe("BenchmarkMatrix 星号值显示", () => {
     expect(await screen.findByText("注释：data from the technical report")).toBeInTheDocument();
   });
 
-  test("带#前缀的数值保留#符号显示", () => {
-    render(
+  test("带#前缀的数值保留#符号显示", async () => {
+    await renderReady(
       <BenchmarkMatrix
         rows={[
           {
@@ -119,7 +120,7 @@ describe("BenchmarkMatrix 星号值显示", () => {
   });
 
   test("tooltip 会隐藏数值和 source 都相同的重复记录", async () => {
-    const { container } = render(
+    const { container } = await renderReady(
       <BenchmarkMatrix
         rows={[
           {
@@ -197,7 +198,7 @@ describe("BenchmarkMatrix 星号值显示", () => {
     });
 
     try {
-      const { container } = render(
+      const { container } = await renderReady(
         <BenchmarkMatrix
           rows={Array.from({ length: 24 }, (_, index) => ({
             providerName: "OpenAI",
@@ -265,7 +266,7 @@ describe("BenchmarkMatrix 星号值显示", () => {
     });
 
     try {
-      const { container } = render(
+      const { container } = await renderReady(
         <BenchmarkMatrix
           rows={Array.from({ length: 24 }, (_, index) => ({
             providerName: "OpenAI",
@@ -303,8 +304,8 @@ describe("BenchmarkMatrix 星号值显示", () => {
     }
   });
 
-  test("遇到注释为 x 的，在表格数值后直接显示 x 且不展示问号标记", () => {
-    const { container } = render(
+  test("遇到注释为 x 的，在表格数值后直接显示 x 且不展示问号标记", async () => {
+    const { container } = await renderReady(
       <BenchmarkMatrix
         rows={[
           {
@@ -330,8 +331,8 @@ describe("BenchmarkMatrix 星号值显示", () => {
     expect(questionMark).toBeUndefined();
   });
 
-  test("双值单元格保留每段数字后紧贴的后缀", () => {
-    render(
+  test("双值单元格保留每段数字后紧贴的后缀", async () => {
+    await renderReady(
       <BenchmarkMatrix
         rows={[
           {

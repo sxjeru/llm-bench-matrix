@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { renderReady } from "@/tests/flush-microtasks";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -242,8 +243,8 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     }
   });
 
-  test("显示重名列默认关闭时，按 canonicalKey 冒号前缀合并重名 benchmark", () => {
-    render(<BenchmarkMatrix rows={[...duplicateBenchmarkRows]} />);
+  test("显示重名列默认关闭时，按 canonicalKey 冒号前缀合并重名 benchmark", async () => {
+    await renderReady(<BenchmarkMatrix rows={[...duplicateBenchmarkRows]} />);
 
     expect(screen.getAllByText("MMLU-Pro")).toHaveLength(1);
     expect(screen.getByText("Knowledge / Knowledge123")).toBeInTheDocument();
@@ -251,8 +252,8 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(screen.queryByText("80")).not.toBeInTheDocument();
   });
 
-  test("偶数条单值记录默认展示更优的中间值", () => {
-    render(
+  test("偶数条单值记录默认展示更优的中间值", async () => {
+    await renderReady(
       <BenchmarkMatrix
         rows={[70, 80, 82, 100].map((value, index) => ({
           providerName: "OpenAI",
@@ -274,8 +275,8 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(screen.queryByText("100")).not.toBeInTheDocument();
   });
 
-  test("单双值混合时单元格展示中位数，双值只拿前值参与", () => {
-    render(
+  test("单双值混合时单元格展示中位数，双值只拿前值参与", async () => {
+    await renderReady(
       <BenchmarkMatrix
         rows={[
           { value: 44, source: "text:Grok", benchTime: "2026-07-09T07:59:00.000Z" },
@@ -308,8 +309,8 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(screen.queryByText("54.9")).not.toBeInTheDocument();
   });
 
-  test("开启显示重名列后，重名 benchmark 恢复为多行展示", () => {
-    render(<BenchmarkMatrix rows={[...duplicateBenchmarkRows]} />);
+  test("开启显示重名列后，重名 benchmark 恢复为多行展示", async () => {
+    await renderReady(<BenchmarkMatrix rows={[...duplicateBenchmarkRows]} />);
 
     fireEvent.click(screen.getByRole("button", { name: /显示重名行|显示重名列/ }));
 
@@ -321,8 +322,8 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(screen.getByText("82")).toBeInTheDocument();
   });
 
-  test("括号语义不同的 benchmark 不应被误合并", () => {
-    render(
+  test("括号语义不同的 benchmark 不应被误合并", async () => {
+    await renderReady(
       <BenchmarkMatrix
         rows={[
           {
@@ -359,8 +360,8 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     expect(screen.getByText("81.2")).toBeInTheDocument();
   });
 
-  test("识别 @ 和 ^ 符号的语义差异，不应被误合并", () => {
-    render(
+  test("识别 @ 和 ^ 符号的语义差异，不应被误合并", async () => {
+    await renderReady(
       <BenchmarkMatrix
         rows={[
           {
@@ -400,7 +401,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
   test("全部页签不显示 Source 原值开关，切换到具体 source 后才显示", async () => {
     const user = userEvent.setup();
 
-    render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
+    await renderReady(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
     expect(screen.queryByRole("button", { name: "显示原始值" })).not.toBeInTheDocument();
     expect(screen.getByText("82")).toBeInTheDocument();
@@ -417,7 +418,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
   test("开启 Source 原值后，合并单元格展示当前 source 的原始值", async () => {
     const user = userEvent.setup();
 
-    render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
+    await renderReady(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
     await user.click(screen.getByRole("tab", { name: "S1" }));
     await waitFor(() => {
@@ -440,7 +441,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
   test("同一 source 多次导入时，原始值取最新一次而非该 source 的最优值", async () => {
     const user = userEvent.setup();
 
-    render(<BenchmarkMatrix rows={[...repeatedSourceImportRows]} sourceOptions={["text:S1", "text:S2"]} />);
+    await renderReady(<BenchmarkMatrix rows={[...repeatedSourceImportRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
     await user.click(screen.getByRole("tab", { name: "S1" }));
     await waitFor(() => {
@@ -466,7 +467,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
   test("按住 Shift 点击原始值后，显示当前 source 多条记录中的最大值", async () => {
     const user = userEvent.setup();
 
-    render(<BenchmarkMatrix rows={[...repeatedSourceImportRows]} sourceOptions={["text:S1", "text:S2"]} />);
+    await renderReady(<BenchmarkMatrix rows={[...repeatedSourceImportRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
     await user.click(screen.getByRole("tab", { name: "S1" }));
     await waitFor(() => {
@@ -484,7 +485,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
   test("开启原始值后，同 source 多条记录仍保留问号与 tooltip", async () => {
     const user = userEvent.setup();
 
-    render(<BenchmarkMatrix rows={[...medianDeltaRows]} sourceOptions={["text:S1", "text:S2"]} />);
+    await renderReady(<BenchmarkMatrix rows={[...medianDeltaRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
     await user.click(screen.getByRole("tab", { name: "S1" }));
     await waitFor(() => {
@@ -516,7 +517,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
   test("开启原始值后，当前 source 只有一条记录时不显示问号", async () => {
     const user = userEvent.setup();
 
-    render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
+    await renderReady(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
     // 关闭原始值时跨 source 存在多个取值，问号可见
     const defaultCell = screen.getByText("82").closest("td")!;
@@ -537,7 +538,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
   test("开启 Source 原值后，双值单元格仍按解析后的数值对分段展示", async () => {
     const user = userEvent.setup();
 
-    render(
+    await renderReady(
       <BenchmarkMatrix
         rows={[
           {
@@ -587,7 +588,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
   test("Source 差值徽标仅在修饰键点击时出现，且方向和文案与底层数值一致", async () => {
     const user = userEvent.setup();
 
-    render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
+    await renderReady(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
     await user.click(screen.getByRole("tab", { name: "S1" }));
     await waitFor(() => {
@@ -616,7 +617,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
   test("Compare 模式下 compare 徽标优先于 source 差值徽标，且不会重复显示", async () => {
     const user = userEvent.setup();
 
-    render(<BenchmarkMatrix rows={[...duplicateSourceCompareRows]} sourceOptions={["text:S1", "text:S2"]} />);
+    await renderReady(<BenchmarkMatrix rows={[...duplicateSourceCompareRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
     await user.click(screen.getByRole("tab", { name: "S1" }));
     await waitFor(() => {
@@ -643,7 +644,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
   test("关闭 Source 原值后恢复默认聚合值展示", async () => {
     const user = userEvent.setup();
 
-    render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
+    await renderReady(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
     await user.click(screen.getByRole("tab", { name: "S1" }));
     await waitFor(() => {
@@ -662,7 +663,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
   test("切回全部页签后隐藏 Source 原值开关", async () => {
     const user = userEvent.setup();
 
-    render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
+    await renderReady(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
     await user.click(screen.getByRole("tab", { name: "S1" }));
     await waitFor(() => {
@@ -676,8 +677,8 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     });
   });
 
-  test("没有 source 数据时不显示原始值按钮", () => {
-    render(
+  test("没有 source 数据时不显示原始值按钮", async () => {
+    await renderReady(
       <BenchmarkMatrix
         rows={[
           {
@@ -701,7 +702,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
 
   test("Ctrl+点击 Source 原值按钮会开启差值视图并显示 delta 徽标", async () => {
     const user = userEvent.setup();
-    render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
+    await renderReady(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
     // 切换到 S1 页签以显示按钮
     await user.click(screen.getByRole("tab", { name: "S1" }));
@@ -726,7 +727,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     // 预先将开关状态写入 localStorage
     window.localStorage.setItem(SHOW_SOURCE_VALUES_STORAGE_KEY, "1");
 
-    render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
+    await renderReady(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
     // 两条记录取更优侧的中间值，越大越优所以是 82
     expect(screen.getByText("82")).toBeInTheDocument();
@@ -747,7 +748,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
     // 初始为关闭状态
     window.localStorage.setItem(SHOW_SOURCE_VALUES_STORAGE_KEY, "0");
 
-    render(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
+    await renderReady(<BenchmarkMatrix rows={[...duplicateSourceRows]} sourceOptions={["text:S1", "text:S2"]} />);
 
     // 切换到 S1 页签以显示按钮
     await user.click(screen.getByRole("tab", { name: "S1" }));
@@ -817,7 +818,7 @@ describe("BenchmarkMatrix 重名 benchmark 合并", () => {
       }
     ] as const;
 
-    const { container } = render(
+    const { container } = await renderReady(
       <BenchmarkMatrix
         rows={[...lowerIsBetterRows]}
         sourceOptions={["text:S1", "text:S2"]}
