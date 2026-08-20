@@ -336,6 +336,52 @@ describe("BenchmarkMatrix source tabs", () => {
     expect(label.style.color).toBe("");
   });
 
+  test("同一模型重复多行不改变页签配色，且同 rank 取先出现的那行", () => {
+    // 配色候选按 (modelName, provider, brandColor, sourceKey) 去重后再匹配。
+    // 这里让同一组合重复 200 行，并在后面放一个同 rank 的竞争者：
+    // 去重必须保持首次出现的顺序，否则先遇到的那行就不再胜出。
+    const repeated = Array.from({ length: 200 }, (_, index) => ({
+      providerName: "Anthropic",
+      providerDisplayName: "Anthropic",
+      providerBrandColor: "#f0f0f0",
+      modelName: "Claude Opus 4.7",
+      benchmarkName: `Bench-${index}`,
+      benchmarkType: "General",
+      benchTime: "2026-04-06T00:00:00.000Z",
+      valueRaw: "80",
+      valueNum: 80,
+      valueNote: null,
+      source: "text:Claude Opus 4.7"
+    }));
+
+    render(
+      <BenchmarkMatrix
+        sourceOptions={["text:Claude Opus 4.7"]}
+        rows={[
+          ...repeated,
+          {
+            providerName: "Anthropic",
+            providerDisplayName: "Anthropic Later",
+            providerBrandColor: "#0a0a0a",
+            modelName: "Claude Opus 4.7 Extra",
+            benchmarkName: "Bench-late",
+            benchmarkType: "General",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "81",
+            valueNum: 81,
+            valueNote: null,
+            source: "text:Claude Opus 4.7"
+          }
+        ]}
+      />
+    );
+
+    const sourceTab = screen.getByRole("tab", { name: "Claude Opus 4.7" });
+    const coloredLabel = sourceTab.querySelector(".source-tab-label") as HTMLElement;
+
+    expect(coloredLabel).toHaveStyle({ color: "rgb(240, 240, 240)" });
+  });
+
   test("非全部 source 页签优先展示 source 同系列模型，再按系列覆盖率和模型名排序", () => {
     render(
       <BenchmarkMatrix

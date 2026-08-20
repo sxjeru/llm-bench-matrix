@@ -329,7 +329,23 @@ function compareTieredModelByVersionThenTier(left: string, right: string): numbe
   return compareModelTierPriority(leftTierToken.tier, rightTierToken.tier);
 }
 
+const MODEL_FAMILY_MATCH_KEY_CACHE_LIMIT = 4096;
+const modelFamilyMatchKeyCache = new Map<string, string>();
+
 export function getModelFamilyMatchKey(modelName: string): string {
+  const cached = modelFamilyMatchKeyCache.get(modelName);
+  if (cached !== undefined) return cached;
+
+  const result = computeModelFamilyMatchKey(modelName);
+
+  if (modelFamilyMatchKeyCache.size >= MODEL_FAMILY_MATCH_KEY_CACHE_LIMIT) {
+    modelFamilyMatchKeyCache.clear();
+  }
+  modelFamilyMatchKeyCache.set(modelName, result);
+  return result;
+}
+
+function computeModelFamilyMatchKey(modelName: string): string {
   const normalized = modelName
     .toLowerCase()
     .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g, "-")

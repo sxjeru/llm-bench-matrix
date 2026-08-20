@@ -574,8 +574,24 @@ export function renderModalityBadge(modalityInput: string, key: string) {
   );
 }
 
+const MATCH_TOKEN_CACHE_LIMIT = 4096;
+const matchTokenCache = new Map<string, string>();
+
+/**
+ * 页签配色、来源匹配等热路径会在成千上万行上反复问同一批模型名，
+ * 而这里的正则替换本身会分配临时字符串。唯一输入只有几百个，缓存即可摊平。
+ */
 export function normalizeMatchToken(input: string): string {
-  return input.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const cached = matchTokenCache.get(input);
+  if (cached !== undefined) return cached;
+
+  const result = input.toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+  if (matchTokenCache.size >= MATCH_TOKEN_CACHE_LIMIT) {
+    matchTokenCache.clear();
+  }
+  matchTokenCache.set(input, result);
+  return result;
 }
 
 export function hasMeaningfulMatrixRawValue(rawValue: string): boolean {
