@@ -1,5 +1,6 @@
 import { HomeMetrics } from "@/components/home-metrics";
 
+export const dynamic = "force-static";
 export const revalidate = false;
 
 export default function HomePage() {

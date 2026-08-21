@@ -113,6 +113,8 @@ type UseMatrixColumnResizeOptions = {
   setResizingColumnKey: Dispatch<SetStateAction<string | null>>;
 };
 
+const EMPTY_AUTO_MODEL_WIDTH_MAP: Map<string, number> = new Map();
+
 type UseMatrixColumnWidthsOptions = BuildAutoModelWidthMapOptions & {
   activeSourceRef: MutableRefValue<string>;
   activeColumnWidthMap: Record<string, number>;
@@ -560,16 +562,20 @@ export function useMatrixColumnWidths({
   compareBaselineModelName
 }: UseMatrixColumnWidthsOptions) {
   const autoModelWidthMap = useMemo(
-    () => buildAutoModelWidthMap({
-      modelColumns,
-      coveragePrunedRows,
-      showDuplicateRows,
-      displaySourceValuesInCells,
-      displaySourceValueDeltasInCells,
-      activeSource,
-      sourceValueMode
-    }),
-    [modelColumns, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, displaySourceValueDeltasInCells, activeSource, sourceValueMode]
+    () => {
+      if (!isColumnWidthLoaded) return EMPTY_AUTO_MODEL_WIDTH_MAP;
+
+      return buildAutoModelWidthMap({
+        modelColumns,
+        coveragePrunedRows,
+        showDuplicateRows,
+        displaySourceValuesInCells,
+        displaySourceValueDeltasInCells,
+        activeSource,
+        sourceValueMode
+      });
+    },
+    [isColumnWidthLoaded, modelColumns, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, displaySourceValueDeltasInCells, activeSource, sourceValueMode]
   );
 
   useEffect(() => {

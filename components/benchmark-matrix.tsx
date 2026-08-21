@@ -182,6 +182,8 @@ const EMPTY_ROW_RENDER_METRICS: RowRenderMetrics = {
   compareAbsEffectiveDeltaP90: null
 };
 
+const EMPTY_MATRIX_ROWS: MatrixInputRow[] = [];
+
 /**
  * 单元格里的「A / B」两段值。
  *
@@ -205,8 +207,8 @@ function renderFrontendTableCellText(value: string, segmentStyle?: CSSProperties
 }
 
 export function BenchmarkMatrix({
-  rows,
-  allRows = rows,
+  rows: rowsProp,
+  allRows: allRowsProp = rowsProp,
   sourceOptions: allSourceOptions = EMPTY_SOURCE_OPTIONS,
   modelPrices = EMPTY_MODEL_PRICES,
   modelParams = EMPTY_MODEL_PARAMS,
@@ -254,6 +256,9 @@ export function BenchmarkMatrix({
   const [paramsRowsInOverall, setParamsRowsInOverall] = useState(false);
   const [showLowCoverageRows, setShowLowCoverageRows] = useState(false);
   const [isClientReady, setIsClientReady] = useState(false);
+  // 首帧只出 loading：空数组让后续 useMemo 走空路径，ready 后再用真实数据算一次。
+  const rows = isClientReady ? rowsProp : EMPTY_MATRIX_ROWS;
+  const allRows = isClientReady ? allRowsProp : EMPTY_MATRIX_ROWS;
   const [isModelSelectionLoaded, setIsModelSelectionLoaded] = useState(false);
   const [isModelOrderLoaded, setIsModelOrderLoaded] = useState(false);
   const [isColumnWidthLoaded, setIsColumnWidthLoaded] = useState(false);
