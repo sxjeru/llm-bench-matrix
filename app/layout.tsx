@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import { GithubStarBadge } from "@/components/github-star-badge";
 import { TopbarActions } from "@/components/topbar-actions";
 import { UmamiAnalytics } from "@/components/umami-analytics";
@@ -88,6 +89,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </>
         )}
         <Analytics />
+        <SpeedInsights />
         <UmamiAnalytics />
       </body>
     </html>
