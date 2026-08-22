@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
@@ -15,17 +15,11 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => mockSearchParams
 }));
 
-let capturedFootnoteText = "";
-
 vi.mock("html2canvas-pro", () => {
   return {
-    default: vi.fn().mockImplementation((element, options) => {
+    default: (_element: unknown, options?: { onclone?: (doc: Document) => void }) => {
       if (options && typeof options.onclone === "function") {
         options.onclone(document);
-      }
-      const footnoteEl = document.querySelector('[data-export-footnote-element="true"]');
-      if (footnoteEl) {
-        capturedFootnoteText = footnoteEl.textContent || "";
       }
       const canvas = document.createElement("canvas");
       canvas.toBlob = (callback) => {
@@ -34,7 +28,7 @@ vi.mock("html2canvas-pro", () => {
         }
       };
       return Promise.resolve(canvas);
-    })
+    }
   };
 });
 
@@ -195,6 +189,7 @@ describe("BenchmarkMatrix 搜索筛选与低覆盖率状态恢复", () => {
   });
 
   test("脚注占位符替换：当前日期 {time} 格式为 YYYY-MM-DD，source 最后更新日期 {source_time} 正确计算并替换", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-06-06T12:00:00.000Z"));
 
     const customRows = [
@@ -212,16 +207,15 @@ describe("BenchmarkMatrix 搜索筛选与低覆盖率状态恢复", () => {
       />
     );
 
+    const readExportFootnote = () => document.querySelector('[data-export-footnote-element="true"]')?.textContent ?? "";
     const exportButton = screen.getByRole("button", { name: "导出图片" });
     fireEvent.click(exportButton);
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(100);
-      vi.runAllTicks();
-    });
-
     // 默认是全部页签，因此数据源占位符是“全数据源”，原始数据源是 __ALL__
-    expect(capturedFootnoteText).toBe("制表时间：2026-06-06 | 数据更新时间：2026-01-20 | 数据源：全数据源 | 原始：__ALL__");
+    expect(readExportFootnote()).toBe("制表时间：2026-06-06 | 数据更新时间：2026-01-20 | 数据源：全数据源 | 原始：__ALL__");
+    await waitFor(() => {
+      expect(exportButton).not.toBeDisabled();
+    });
 
     // 切换到 S2 页签
     const s2Tab = screen.getByRole("tab", { name: "S2" });
@@ -229,14 +223,8 @@ describe("BenchmarkMatrix 搜索筛选与低覆盖率状态恢复", () => {
 
     // 再次点击导出
     fireEvent.click(exportButton);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(100);
-      vi.runAllTicks();
-    });
 
     // 切换后，数据更新日期应该是 S2 的最大更新日期 2026-01-15，数据源是 S2，原始数据源是 text:S2
-    expect(capturedFootnoteText).toBe("制表时间：2026-06-06 | 数据更新时间：2026-01-15 | 数据源：S2 | 原始：text:S2");
-
-    vi.useRealTimers();
+    expect(readExportFootnote()).toBe("制表时间：2026-06-06 | 数据更新时间：2026-01-15 | 数据源：S2 | 原始：text:S2");
   });
 });
