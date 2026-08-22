@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { Star } from "lucide-react";
 import { fetchGithubStarCount, formatStarCount, GITHUB_REPO_URL } from "@/lib/github-stars";
 
@@ -16,8 +19,20 @@ export function GithubStarBadgeView({ count }: { count: number }) {
   );
 }
 
-export async function GithubStarBadge() {
-  const count = await fetchGithubStarCount();
+/** Client-only so GitHub fetch never enters the `/` prerender / ISR path. */
+export function GithubStarBadge() {
+  const [count, setCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    void fetchGithubStarCount(controller.signal).then((nextCount) => {
+      if (!controller.signal.aborted) setCount(nextCount);
+    });
+
+    return () => controller.abort();
+  }, []);
+
   if (count === null) return null;
   return <GithubStarBadgeView count={count} />;
 }

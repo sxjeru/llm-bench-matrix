@@ -1,4 +1,4 @@
-import { isValidElement, Suspense, type ReactElement, type ReactNode } from "react";
+import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { describe, expect, test } from "vitest";
 
 import RootLayout from "@/app/layout";
@@ -35,10 +35,9 @@ describe("RootLayout prefetch", () => {
     const children = Array.isArray(brandGroup?.props.children)
       ? brandGroup.props.children
       : [];
-    const suspense = children.find((child) => isValidElement(child) && child.type === Suspense);
+    const badge = children.find((child) => isValidElement(child) && child.type === GithubStarBadge);
 
     expect(brandGroup).not.toBeNull();
-    expect(suspense).toBeDefined();
-    expect((suspense as ReactElement<{ children?: ReactNode }>).props.children).toEqual(<GithubStarBadge />);
+    expect(badge).toEqual(<GithubStarBadge />);
   });
 });

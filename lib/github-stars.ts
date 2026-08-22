@@ -4,7 +4,6 @@ export const GITHUB_REPO_URL = `https://github.com/${GITHUB_REPO_OWNER}/${GITHUB
 export const GITHUB_REPO_API_URL = `https://api.github.com/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}`;
 
 const STAR_FETCH_TIMEOUT_MS = 3000;
-const STAR_REVALIDATE_SECONDS = 3600;
 
 export function formatStarCount(count: number): string {
   if (!Number.isFinite(count) || count < 0) return "0";
@@ -31,23 +30,19 @@ export function parseStargazersCount(payload: unknown): number | null {
   return Math.floor(count);
 }
 
-export async function fetchGithubStarCount(): Promise<number | null> {
+export async function fetchGithubStarCount(signal?: AbortSignal): Promise<number | null> {
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
     "User-Agent": "llm-bench-matrix",
     "X-GitHub-Api-Version": "2022-11-28"
   };
 
-  const token = process.env.GITHUB_TOKEN;
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-
   try {
+    // Must not set next.revalidate / cache here: a cached fetch in the root layout
+    // becomes the `/` document ISR TTL on Vercel and triggers background regen.
     const response = await fetch(GITHUB_REPO_API_URL, {
       headers,
-      signal: AbortSignal.timeout(STAR_FETCH_TIMEOUT_MS),
-      next: { revalidate: STAR_REVALIDATE_SECONDS }
+      signal: signal ?? AbortSignal.timeout(STAR_FETCH_TIMEOUT_MS)
     });
 
     if (!response.ok) return null;

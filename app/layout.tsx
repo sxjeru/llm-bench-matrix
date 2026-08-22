@@ -1,4 +1,3 @@
-import { Suspense } from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { Analytics } from "@vercel/analytics/next";
@@ -39,9 +38,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/" prefetch={false} className="brand" suppressHydrationWarning>
                 LLM Bench Matrix
               </Link>
-              <Suspense fallback={null}>
-                <GithubStarBadge />
-              </Suspense>
+              <GithubStarBadge />
             </div>
             <TopbarActions />
           </div>

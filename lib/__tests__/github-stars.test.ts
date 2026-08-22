@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import {
   fetchGithubStarCount,
@@ -8,10 +8,6 @@ import {
 } from "@/lib/github-stars";
 
 describe("github-stars", () => {
-  afterEach(() => {
-    delete process.env.GITHUB_TOKEN;
-  });
-
   test("格式化 star 数量", () => {
     expect(formatStarCount(0)).toBe("0");
     expect(formatStarCount(12)).toBe("12");
@@ -31,7 +27,7 @@ describe("github-stars", () => {
     expect(parseStargazersCount(null)).toBeNull();
   });
 
-  test("拉取仓库 star 数量并带上缓存选项", async () => {
+  test("拉取仓库 star 数量，不走 Next Data Cache", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ stargazers_count: 42 })
@@ -42,32 +38,30 @@ describe("github-stars", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       GITHUB_REPO_API_URL,
       expect.objectContaining({
-        next: { revalidate: 3600 },
         headers: expect.objectContaining({
           Accept: "application/vnd.github+json",
           "User-Agent": "llm-bench-matrix"
         })
       })
     );
+    expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty("next");
+    expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty("cache");
   });
 
-  test("存在 token 时附加 Authorization", async () => {
-    process.env.GITHUB_TOKEN = "test-token";
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ stargazers_count: 7 })
+  test("传入的 AbortSignal 会中止请求", async () => {
+    const fetchMock = vi.fn().mockImplementation((_url, init: { signal?: AbortSignal }) => {
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => {
+          reject(init.signal?.reason ?? new Error("aborted"));
+        });
+      });
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchGithubStarCount()).resolves.toBe(7);
-    expect(fetchMock).toHaveBeenCalledWith(
-      GITHUB_REPO_API_URL,
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: "Bearer test-token"
-        })
-      })
-    );
+    const controller = new AbortController();
+    const pending = fetchGithubStarCount(controller.signal);
+    controller.abort();
+    await expect(pending).resolves.toBeNull();
   });
 
   test("接口失败时返回 null", async () => {
