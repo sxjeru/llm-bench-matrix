@@ -231,14 +231,22 @@ export function RecordsSplitDualDialog({
     }));
   }
 
+  const firstResolvedId = keepFirstInPlace ? selectedCandidate?.benchmarkId ?? null : draft.firstBenchmarkId;
+  const secondResolvedId = draft.secondBenchmarkId;
+  const firstResolvedName = keepFirstInPlace
+    ? selectedCandidate?.benchmarkName.trim().toLowerCase() ?? ""
+    : (draft.firstBenchmarkId !== null ? "" : draft.firstName.trim().toLowerCase());
+  const secondResolvedName = draft.secondBenchmarkId !== null ? "" : draft.secondName.trim().toLowerCase();
+
+  const isSameTarget =
+    (firstResolvedId !== null && secondResolvedId !== null && firstResolvedId === secondResolvedId)
+    || (firstResolvedName !== "" && secondResolvedName !== "" && firstResolvedName === secondResolvedName);
+
   const canSubmit =
     selectedCandidate !== null
     && (draft.secondBenchmarkId !== null || draft.secondName.trim().length > 0)
     && (keepFirstInPlace || draft.firstBenchmarkId !== null || draft.firstName.trim().length > 0)
-    && !(
-      (keepFirstInPlace ? selectedCandidate.benchmarkId : draft.firstBenchmarkId) !== null
-      && (keepFirstInPlace ? selectedCandidate.benchmarkId : draft.firstBenchmarkId) === draft.secondBenchmarkId
-    )
+    && !isSameTarget
     && !busy;
 
   function handleSubmit() {

@@ -1687,27 +1687,39 @@ export async function splitDualValueRecords(input: {
       )
     );
 
-    await upsertRecordSourceMeta(tx, [
-      ...metaSources.map((source) => ({
-        benchmarkId: firstBenchmark.id,
-        source,
-        benchmarkType: firstBenchmark.benchmarkType,
-        modalities: firstBenchmark.modalities?.length ? firstBenchmark.modalities : ["Text"]
-      })),
+    const hasFirstRecords = plan.updates.some((update) => update.benchmarkId === firstBenchmark.id);
+    const metaRows: Array<{
+      benchmarkId: number;
+      source: string;
+      benchmarkType: string;
+      modalities: string[];
+    }> = [];
+
+    if (hasFirstRecords) {
+      metaRows.push(
+        ...metaSources.map((source) => ({
+          benchmarkId: firstBenchmark.id,
+          source,
+          benchmarkType: firstBenchmark.benchmarkType,
+          modalities: firstBenchmark.modalities?.length ? firstBenchmark.modalities : ["Text"]
+        }))
+      );
+    }
+    metaRows.push(
       ...metaSources.map((source) => ({
         benchmarkId: secondBenchmark.id,
         source,
         benchmarkType: secondBenchmark.benchmarkType,
         modalities: secondBenchmark.modalities?.length ? secondBenchmark.modalities : ["Text"]
       }))
-    ]);
+    );
 
-    if (firstBenchmark.id !== sourceBenchmark.id) {
-      await pruneOrphanRecordSourceMeta(
-        tx,
-        metaSources.map((source) => ({ benchmarkId: sourceBenchmark.id, source }))
-      );
-    }
+    await upsertRecordSourceMeta(tx, metaRows);
+
+    await pruneOrphanRecordSourceMeta(
+      tx,
+      metaSources.map((source) => ({ benchmarkId: sourceBenchmark.id, source }))
+    );
 
     return { createdCount, firstBenchmark, secondBenchmark, plan };
   });

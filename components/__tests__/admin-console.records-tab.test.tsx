@@ -644,6 +644,41 @@ describe("AdminConsole records tab", () => {
     });
   });
 
+  test("分拆双值在两个目标相同时禁用提交按钮", async () => {
+    mockFetchSequence(
+      filledMatrix,
+      {
+        generatedAt: "2026-04-01T00:00:00.000Z",
+        candidates: [
+          {
+            benchmarkId: 11,
+            benchmarkName: "Bench-1",
+            benchmarkType: "Type-A",
+            dualValueCount: 1,
+            totalCount: 1,
+            sampleValues: ["77 / 88"],
+            valueDetails: []
+          }
+        ]
+      }
+    );
+    const user = userEvent.setup();
+    const props = buildProps();
+    props.benchmarks = [
+      ...props.benchmarks,
+      { id: 11, benchmarkName: "Bench-1", benchmarkType: "Type-A", modalities: ["Text"] }
+    ];
+
+    await renderReady(<AdminConsole {...props} />);
+    await openRecordsTabAndFilter(user);
+    await screen.findByTestId("record-cell-1-11");
+    await user.click(screen.getByRole("button", { name: "分拆双值" }));
+    await screen.findByText("双值 1/1");
+
+    await user.selectOptions(screen.getByLabelText("第二个值选择已有 benchmark"), "11");
+    expect(screen.getByRole("button", { name: "执行分拆" })).toBeDisabled();
+  });
+
   test("列头点击打开归属变更弹窗并提交", async () => {
     const fetchMock = mockFetchSequence(
       filledMatrix,
