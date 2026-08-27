@@ -107,7 +107,7 @@ export function FilterMultiCombobox({
       <div className="mb-1 text-xs uppercase tracking-wide opacity-60">{label}</div>
       <button
         type="button"
-        className="input input-bordered input-sm flex w-full items-center justify-between gap-2 text-left"
+        className="input input-bordered input-sm flex w-full cursor-pointer items-center justify-between gap-2 bg-base-100 text-left font-normal hover:border-primary/50"
         aria-expanded={open}
         aria-label={`${label}筛选`}
         disabled={disabled}
@@ -269,7 +269,7 @@ export function RecordsFiltersBar({
           <div className="mb-1 text-xs uppercase tracking-wide opacity-60">Source</div>
           <button
             type="button"
-            className="input input-bordered input-sm flex w-full items-center justify-between gap-2 text-left"
+            className="input input-bordered input-sm flex w-full cursor-pointer items-center justify-between gap-2 bg-base-100 text-left font-normal hover:border-primary/50"
             aria-expanded={sourceOpen}
             aria-label="Source 筛选"
             disabled={disabled}
@@ -296,7 +296,7 @@ export function RecordsFiltersBar({
               <div className="max-h-64 space-y-0.5 overflow-auto">
                 <button
                   type="button"
-                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-sm hover:bg-base-200/70"
+                  className="btn btn-ghost btn-sm h-auto min-h-0 w-full justify-start gap-2 px-2 py-1.5 font-normal"
                   onClick={() => pickSource("all", null)}
                 >
                   {filters.sourceMode === "all" ? <Check size={13} className="text-primary" /> : <span className="w-[13px]" />}
@@ -304,7 +304,7 @@ export function RecordsFiltersBar({
                 </button>
                 <button
                   type="button"
-                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-sm hover:bg-base-200/70"
+                  className="btn btn-ghost btn-sm h-auto min-h-0 w-full justify-start gap-2 px-2 py-1.5 font-normal"
                   onClick={() => pickSource("empty", null)}
                 >
                   {filters.sourceMode === "empty" ? <Check size={13} className="text-primary" /> : <span className="w-[13px]" />}
@@ -314,7 +314,7 @@ export function RecordsFiltersBar({
                   <button
                     key={`source-${source}`}
                     type="button"
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-sm hover:bg-base-200/70"
+                    className="btn btn-ghost btn-sm h-auto min-h-0 w-full justify-start gap-2 px-2 py-1.5 font-normal"
                     onClick={() => pickSource("specific", source)}
                   >
                     {filters.sourceMode === "specific" && filters.source === source ? (

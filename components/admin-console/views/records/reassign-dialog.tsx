@@ -206,7 +206,7 @@ export function RecordsReassignDialog({
                   {target.entityType === "benchmark" ? "目标 benchmark" : "目标 model"}
                 </span>
                 <select
-                  className="select select-bordered select-sm"
+                  className="select select-bordered select-sm w-full"
                   aria-label={target.entityType === "benchmark" ? "目标 benchmark" : "目标 model"}
                   value={existingId}
                   onChange={(event) => setExistingId(event.target.value)}

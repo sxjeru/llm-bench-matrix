@@ -136,17 +136,17 @@ export function RecordsMatrixGrid({
       <table className="table table-xs select-none border-separate border-spacing-0">
         <thead>
           <tr>
-            <th className="sticky left-0 top-0 z-30 min-w-[200px] border-b border-r border-base-300 bg-base-200 text-left">
+            <th className="sticky left-0 top-0 z-30 min-w-[200px] border-b border-r border-base-300 bg-base-200 p-2 text-left">
               模型 \ 指标
             </th>
             {benchmarks.map((benchmark) => (
               <th
                 key={`bench-head-${benchmark.benchmarkId}`}
-                className="sticky top-0 z-20 min-w-[112px] border-b border-base-300 bg-base-200 align-bottom"
+                className="sticky top-0 z-20 min-w-[112px] border-b border-base-300 bg-base-200 p-2 align-bottom"
               >
                 <button
                   type="button"
-                  className="link link-hover flex max-w-[150px] items-center gap-1 text-left text-xs font-semibold"
+                  className="link link-hover flex max-w-[150px] items-center gap-1 text-left text-xs font-semibold text-base-content hover:text-primary"
                   title={`点击变更「${benchmark.benchmarkName}」这一列的归属`}
                   onClick={() =>
                     onOpenReassign({
@@ -171,10 +171,10 @@ export function RecordsMatrixGrid({
         <tbody>
           {models.map((model, row) => (
             <tr key={`model-row-${model.modelId}`}>
-              <th className="sticky left-0 z-10 min-w-[200px] border-b border-r border-base-300 bg-base-100 text-left">
+              <th className="sticky left-0 z-10 min-w-[200px] border-b border-r border-base-300 bg-base-100 p-2 text-left font-normal">
                 <button
                   type="button"
-                  className="link link-hover flex max-w-[220px] items-center gap-1 text-left text-xs font-semibold"
+                  className="link link-hover flex max-w-[220px] items-center gap-1 text-left text-xs font-semibold text-base-content hover:text-primary"
                   title={`点击变更「${model.modelName}」这一行的归属`}
                   onClick={() =>
                     onOpenReassign({

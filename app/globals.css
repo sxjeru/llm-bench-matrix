@@ -527,10 +527,17 @@ body.column-resizing * {
   font-weight: 600;
 }
 
+/* 深色主题下原生 option 默认白底，后台 select 展开后会看不清 */
+select option,
+select optgroup {
+  background-color: #141b2d;
+  color: var(--text);
+}
+
 input:not(.input):not(.file-input):not(.checkbox):not(.toggle),
 select:not(.select),
 textarea:not(.textarea),
-button:not(.btn):not(.tab):not(.ranking-popover-button):not(.scatter-btn):not(.admin-upstream-combobox-clear) {
+button:not(.btn):not(.tab):not(.ranking-popover-button):not(.scatter-btn):not(.admin-upstream-combobox-clear):not(.link):not(.input) {
   width: 100%;
   border-radius: 10px;
   border: 1px solid #354261;
@@ -545,7 +552,7 @@ textarea:not(.textarea) {
   resize: vertical;
 }
 
-button:not(.btn):not(.tab):not(.ranking-popover-button):not(.scatter-btn):not(.admin-upstream-combobox-clear) {
+button:not(.btn):not(.tab):not(.ranking-popover-button):not(.scatter-btn):not(.admin-upstream-combobox-clear):not(.link):not(.input) {
   cursor: pointer;
   background: linear-gradient(135deg, #355dff, #4a9aff);
   border-color: transparent;
