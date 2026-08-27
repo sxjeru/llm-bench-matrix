@@ -82,25 +82,25 @@ describe("record draft selection", () => {
     expect(getSelectionCellCount(null)).toBe(0);
   });
 
-  test("选区映射到可见模型/指标，越界轴被跳过", () => {
+  test("选区映射到可见指标/模型，越界轴被跳过", () => {
     const refs = getSelectedCellRefs(
       { startRow: 0, startCol: 0, endRow: 1, endCol: 1 },
-      [matrixModel({ modelId: 1 }), matrixModel({ modelId: 2, modelName: "Model B" })],
-      [matrixBenchmark({ benchmarkId: 11 }), matrixBenchmark({ benchmarkId: 12, benchmarkName: "Bench-2" })]
+      [matrixBenchmark({ benchmarkId: 11 }), matrixBenchmark({ benchmarkId: 12, benchmarkName: "Bench-2" })],
+      [matrixModel({ modelId: 1 }), matrixModel({ modelId: 2, modelName: "Model B" })]
     );
 
     expect(refs).toEqual([
       { row: 0, col: 0, modelId: 1, benchmarkId: 11 },
-      { row: 0, col: 1, modelId: 1, benchmarkId: 12 },
-      { row: 1, col: 0, modelId: 2, benchmarkId: 11 },
+      { row: 0, col: 1, modelId: 2, benchmarkId: 11 },
+      { row: 1, col: 0, modelId: 1, benchmarkId: 12 },
       { row: 1, col: 1, modelId: 2, benchmarkId: 12 }
     ]);
 
     expect(
       getSelectedCellRefs(
         { startRow: 0, startCol: 0, endRow: 5, endCol: 5 },
-        [matrixModel()],
-        [matrixBenchmark()]
+        [matrixBenchmark()],
+        [matrixModel()]
       )
     ).toEqual([{ row: 0, col: 0, modelId: 1, benchmarkId: 11 }]);
   });
@@ -186,9 +186,9 @@ describe("selection fill / clear / payload", () => {
 
   test("清空已有格记待删除，清空空格不产生草稿", () => {
     const refs = getSelectedCellRefs(
-      { startRow: 0, startCol: 0, endRow: 1, endCol: 0 },
-      models,
-      benchmarks
+      { startRow: 0, startCol: 0, endRow: 0, endCol: 1 },
+      benchmarks,
+      models
     );
     const next = clearCellDrafts({}, refs, buildCellIndex(matrix), "text:new");
 
@@ -200,9 +200,9 @@ describe("selection fill / clear / payload", () => {
 
   test("填充会覆盖选区，保存 payload 把空值标成 isDeleted", () => {
     const refs = getSelectedCellRefs(
-      { startRow: 0, startCol: 0, endRow: 1, endCol: 0 },
-      models,
-      benchmarks
+      { startRow: 0, startCol: 0, endRow: 0, endCol: 1 },
+      benchmarks,
+      models
     );
     const filled = fillCellDrafts({}, refs, buildCellIndex(matrix), "99", "text:new");
 

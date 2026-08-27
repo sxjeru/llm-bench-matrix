@@ -148,17 +148,45 @@ export function RecordsMatrixGrid({
         <thead>
           <tr>
             <th className="sticky left-0 top-0 z-30 min-w-[200px] border-b border-r border-base-300 bg-base-200 p-2 text-left">
-              模型 \ 指标
+              指标 \ 模型
             </th>
-            {benchmarks.map((benchmark) => (
+            {models.map((model) => (
               <th
-                key={`bench-head-${benchmark.benchmarkId}`}
-                className="sticky top-0 z-20 min-w-[112px] border-b border-base-300 bg-base-200 p-2 align-bottom"
+                key={`model-head-${model.modelId}`}
+                className="sticky top-0 z-20 min-w-[120px] border-b border-base-300 bg-base-200 p-2 align-bottom"
               >
                 <button
                   type="button"
-                  className="link link-hover flex max-w-[150px] items-center gap-1 text-left text-xs font-semibold text-base-content hover:text-primary"
-                  title={`点击变更「${benchmark.benchmarkName}」这一列的归属`}
+                  className="link link-hover flex max-w-[160px] items-center gap-1 text-left text-xs font-semibold text-base-content hover:text-primary"
+                  title={`点击变更「${model.modelName}」这一列的归属`}
+                  onClick={() =>
+                    onOpenReassign({
+                      entityType: "model",
+                      modelId: model.modelId,
+                      providerName: model.providerName,
+                      label: model.modelName
+                    })
+                  }
+                >
+                  <Link2 size={11} className="shrink-0 opacity-60" aria-hidden="true" />
+                  <span className="truncate">{model.modelName}</span>
+                </button>
+                <div className="mt-0.5 flex items-center gap-1 text-[10px] font-normal opacity-60">
+                  <span className="badge badge-ghost badge-xs max-w-[90px] truncate">{model.providerDisplayName}</span>
+                  <span>{model.recordCount}</span>
+                </div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {benchmarks.map((benchmark, row) => (
+            <tr key={`bench-row-${benchmark.benchmarkId}`}>
+              <th className="sticky left-0 z-10 min-w-[200px] border-b border-r border-base-300 bg-base-100 p-2 text-left font-normal">
+                <button
+                  type="button"
+                  className="link link-hover flex max-w-[220px] items-center gap-1 text-left text-xs font-semibold text-base-content hover:text-primary"
+                  title={`点击变更「${benchmark.benchmarkName}」这一行的归属`}
                   onClick={() =>
                     onOpenReassign({
                       entityType: "benchmark",
@@ -173,38 +201,11 @@ export function RecordsMatrixGrid({
                 </button>
                 <div className="mt-0.5 flex items-center gap-1 text-[10px] font-normal opacity-60">
                   <span className="badge badge-ghost badge-xs">{benchmark.benchmarkType}</span>
-                  <span>{benchmark.recordCount}</span>
-                </div>
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {models.map((model, row) => (
-            <tr key={`model-row-${model.modelId}`}>
-              <th className="sticky left-0 z-10 min-w-[200px] border-b border-r border-base-300 bg-base-100 p-2 text-left font-normal">
-                <button
-                  type="button"
-                  className="link link-hover flex max-w-[220px] items-center gap-1 text-left text-xs font-semibold text-base-content hover:text-primary"
-                  title={`点击变更「${model.modelName}」这一行的归属`}
-                  onClick={() =>
-                    onOpenReassign({
-                      entityType: "model",
-                      modelId: model.modelId,
-                      providerName: model.providerName,
-                      label: model.modelName
-                    })
-                  }
-                >
-                  <Link2 size={11} className="shrink-0 opacity-60" aria-hidden="true" />
-                  <span className="truncate">{model.modelName}</span>
-                </button>
-                <div className="mt-0.5 text-[10px] font-normal opacity-60">
-                  {model.providerDisplayName} · {model.recordCount} 条
+                  <span>{benchmark.recordCount} 条</span>
                 </div>
               </th>
 
-              {benchmarks.map((benchmark, col) => {
+              {models.map((model, col) => {
                 const key = getCellKey(model.modelId, benchmark.benchmarkId);
                 const cell = cellIndex.get(key);
                 const draft = drafts[key];

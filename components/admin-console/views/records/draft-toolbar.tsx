@@ -112,7 +112,7 @@ export function RecordsDraftToolbar({
                 记录 {matrix.visibleRecordCount}/{matrix.totalRecordCount}
               </span>
               <span>
-                矩阵 {matrix.models.length}×{matrix.benchmarks.length}
+                矩阵 {matrix.benchmarks.length}×{matrix.models.length}
               </span>
             </>
           ) : (

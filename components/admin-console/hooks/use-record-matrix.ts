@@ -102,8 +102,8 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
   const newRecordSource = filters.sourceMode === "specific" ? filters.source : null;
 
   const selectedCellRefs = useMemo(
-    () => getSelectedCellRefs(selection, models, benchmarks),
-    [selection, models, benchmarks]
+    () => getSelectedCellRefs(selection, benchmarks, models),
+    [selection, benchmarks, models]
   );
 
   const mutationScope = useMemo<RecordMutationScope>(() => {

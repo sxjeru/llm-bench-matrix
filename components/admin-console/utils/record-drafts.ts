@@ -66,8 +66,8 @@ export type SelectedCellRef = {
 
 export function getSelectedCellRefs(
   range: MatrixSelectionRange | null,
-  models: AdminRecordMatrixModel[],
-  benchmarks: AdminRecordMatrixBenchmark[]
+  benchmarks: AdminRecordMatrixBenchmark[],
+  models: AdminRecordMatrixModel[]
 ): SelectedCellRef[] {
   if (!range) return [];
 
@@ -75,12 +75,12 @@ export function getSelectedCellRefs(
   const refs: SelectedCellRef[] = [];
 
   for (let row = normalized.rowStart; row <= normalized.rowEnd; row += 1) {
-    const model = models[row];
-    if (!model) continue;
+    const benchmark = benchmarks[row];
+    if (!benchmark) continue;
 
     for (let col = normalized.colStart; col <= normalized.colEnd; col += 1) {
-      const benchmark = benchmarks[col];
-      if (!benchmark) continue;
+      const model = models[col];
+      if (!model) continue;
 
       refs.push({
         row,

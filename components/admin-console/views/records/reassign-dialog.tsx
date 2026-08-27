@@ -82,9 +82,9 @@ export function RecordsReassignDialog({
 
   const title =
     target.entityType === "benchmark"
-      ? `变更列归属：${target.label}`
+      ? `变更行归属：${target.label}`
       : target.entityType === "model"
-        ? `变更行归属：${target.label}`
+        ? `变更列归属：${target.label}`
         : `变更 source 归属：${target.label}`;
 
   const canSubmit = (() => {

@@ -493,9 +493,9 @@ describe("AdminConsole records tab", () => {
     await openRecordsTabAndFilter(user);
 
     await screen.findByTestId("record-cell-1-11");
-    await user.click(screen.getByTitle("点击变更「Bench-1」这一列的归属"));
+    await user.click(screen.getByTitle("点击变更「Bench-1」这一行的归属"));
 
-    expect(await screen.findByText("变更列归属：Bench-1")).toBeInTheDocument();
+    expect(await screen.findByText("变更行归属：Bench-1")).toBeInTheDocument();
 
     const select = screen.getByLabelText("目标 benchmark");
     fireEvent.change(select, { target: { value: "12" } });
