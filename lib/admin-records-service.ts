@@ -15,6 +15,7 @@ import {
 import {
   formatRecordNumericValue,
   getRecordCellKey,
+  isEmptyRecordValue,
   planDualValueSplit,
   planRecordDraftMutations,
   planRecordReassign,
@@ -88,6 +89,15 @@ export type AdminRecordCell = {
   valueNote: string | null;
   source: string | null;
   benchTime: string;
+  records?: Array<{
+    id: number;
+    valueRaw: string;
+    valueNum: number | null;
+    valueNum2: number | null;
+    valueNote: string | null;
+    source: string | null;
+    benchTime: string;
+  }>;
 };
 
 export type AdminRecordMatrix = {
@@ -401,6 +411,15 @@ export async function getAdminRecordMatrix(
 
     if (existing) {
       existing.recordIds.push(row.id);
+      existing.records?.push({
+        id: row.id,
+        valueRaw: row.valueRaw,
+        valueNum: toFiniteNumber(row.valueNum),
+        valueNum2: toFiniteNumber(row.valueNum2),
+        valueNote: row.valueNote,
+        source: row.source,
+        benchTime: row.benchTime.toISOString()
+      });
       existing.recordCount += 1;
       return;
     }
@@ -416,7 +435,16 @@ export async function getAdminRecordMatrix(
       valueNum2: toFiniteNumber(row.valueNum2),
       valueNote: row.valueNote,
       source: row.source,
-      benchTime: row.benchTime.toISOString()
+      benchTime: row.benchTime.toISOString(),
+      records: [{
+        id: row.id,
+        valueRaw: row.valueRaw,
+        valueNum: toFiniteNumber(row.valueNum),
+        valueNum2: toFiniteNumber(row.valueNum2),
+        valueNote: row.valueNote,
+        source: row.source,
+        benchTime: row.benchTime.toISOString()
+      }]
     });
   });
 
@@ -707,6 +735,139 @@ export async function batchSaveRecordDrafts(input: {
     nonNumeric: plan.nonNumericCells,
     prunedSourceMeta: applied.prunedSourceMeta
   };
+}
+
+export type RecordDetailMutation = {
+  id: number;
+  modelId: number;
+  benchmarkId: number;
+  valueRaw: string;
+  benchTime: string | Date;
+  source: string | null;
+  valueNote: string | null;
+  isDeleted?: boolean;
+};
+
+export async function updateAdminRecordDetails(input: {
+  records: RecordDetailMutation[];
+}): Promise<{ ok: true; updated: number; deleted: number; nonNumeric: Array<{ id: number; valueRaw: string }> }> {
+  const records = input.records ?? [];
+  if (records.length === 0) throw new Error("没有需要保存的记录");
+  if (records.length > 500) throw new Error("单次最多保存 500 条记录");
+
+  const ids = Array.from(new Set(records.map((record) => record.id).filter((id) => Number.isInteger(id) && id > 0)));
+  if (ids.length !== records.length) throw new Error("记录 id 无效或重复");
+
+  const rows = await db
+    .select({
+      id: benchmarkValues.id,
+      modelId: benchmarkValues.modelId,
+      benchmarkId: benchmarkValues.benchmarkId,
+      source: benchmarkValues.source
+    })
+    .from(benchmarkValues)
+    .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+    .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+    .where(
+      and(
+        inArray(benchmarkValues.id, ids),
+        isNull(models.mergedIntoModelId),
+        isNull(benchmarks.mergedIntoBenchmarkId)
+      )
+    );
+  const rowById = new Map(rows.map((row) => [row.id, row]));
+  const benchmarkIds = Array.from(new Set(records.map((record) => record.benchmarkId)));
+  const benchmarkRows = await db
+    .select({
+      id: benchmarks.id,
+      benchmarkName: benchmarks.benchmarkName,
+      benchmarkType: benchmarks.benchmarkType,
+      modalities: benchmarks.modalities
+    })
+    .from(benchmarks)
+    .where(and(inArray(benchmarks.id, benchmarkIds), isNull(benchmarks.mergedIntoBenchmarkId)));
+  const benchmarkNameById = new Map(benchmarkRows.map((row) => [row.id, row.benchmarkName]));
+  const benchmarkById = new Map(benchmarkRows.map((row) => [row.id, row]));
+
+  for (const record of records) {
+    const existing = rowById.get(record.id);
+    if (!existing) throw new Error(`record not found: ${record.id}`);
+    if (existing.modelId !== record.modelId || existing.benchmarkId !== record.benchmarkId) {
+      throw new Error(`record ${record.id} 不属于指定的模型和指标`);
+    }
+    if (!benchmarkNameById.has(record.benchmarkId)) throw new Error(`benchmark not found: ${record.benchmarkId}`);
+    const date = new Date(record.benchTime);
+    if (Number.isNaN(date.getTime())) throw new Error(`记录 ${record.id} 的 benchTime 无效`);
+  }
+
+  const nonNumeric: Array<{ id: number; valueRaw: string }> = [];
+  let updated = 0;
+  let deleted = 0;
+
+  await db.transaction(async (tx: DbTransactionClient) => {
+    const orphanCandidates: Array<{ benchmarkId: number; source: string | null }> = [];
+    const sourceMetaRows = new Map<string, SourceMetaUpsertRow>();
+    for (const record of records) {
+      const existing = rowById.get(record.id)!;
+      const raw = record.valueRaw.trim();
+      if (record.isDeleted === true || isEmptyRecordValue(raw)) {
+        const deletedRows = await tx
+          .delete(benchmarkValues)
+          .where(
+            and(
+              eq(benchmarkValues.id, record.id),
+              eq(benchmarkValues.modelId, record.modelId),
+              eq(benchmarkValues.benchmarkId, record.benchmarkId)
+            )
+          )
+          .returning({ benchmarkId: benchmarkValues.benchmarkId, source: benchmarkValues.source });
+        if (deletedRows.length > 0) {
+          deleted += deletedRows.length;
+          orphanCandidates.push(...deletedRows);
+        }
+        continue;
+      }
+
+      const parsed = normalizeBenchmarkValueForStorage(benchmarkNameById.get(record.benchmarkId), raw);
+      if (parsed.valueNum === null && parsed.valueNum2 === null) nonNumeric.push({ id: record.id, valueRaw: raw });
+      const updatedRows = await tx
+        .update(benchmarkValues)
+        .set({
+          valueRaw: parsed.valueRaw,
+          valueNum: toNumericColumn(parsed.valueNum),
+          valueNum2: toNumericColumn(parsed.valueNum2),
+          valueNote: record.valueNote === undefined ? parsed.valueNote : record.valueNote?.trim() || null,
+          source: normalizeSourceValue(record.source),
+          benchTime: new Date(record.benchTime)
+        })
+        .where(
+          and(
+            eq(benchmarkValues.id, record.id),
+            eq(benchmarkValues.modelId, record.modelId),
+            eq(benchmarkValues.benchmarkId, record.benchmarkId)
+          )
+        )
+        .returning({ id: benchmarkValues.id });
+      if (updatedRows.length === 0) throw new Error(`record changed while editing: ${record.id}`);
+      updated += updatedRows.length;
+      if (existing.source) orphanCandidates.push({ benchmarkId: existing.benchmarkId, source: existing.source });
+      const nextSource = normalizeSourceValue(record.source);
+      const benchmark = benchmarkById.get(record.benchmarkId);
+      if (nextSource && benchmark) {
+        sourceMetaRows.set(`${record.benchmarkId}::${nextSource}`, {
+          benchmarkId: record.benchmarkId,
+          source: nextSource,
+          benchmarkType: benchmark.benchmarkType,
+          modalities: benchmark.modalities?.length ? benchmark.modalities : ["Text"]
+        });
+      }
+    }
+    await upsertRecordSourceMeta(tx, Array.from(sourceMetaRows.values()));
+    await pruneOrphanRecordSourceMeta(tx, orphanCandidates);
+  });
+
+  await invalidateAllCaches();
+  return { ok: true, updated, deleted, nonNumeric };
 }
 
 // --- 归属变更 ---

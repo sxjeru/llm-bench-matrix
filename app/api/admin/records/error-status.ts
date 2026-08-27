@@ -12,6 +12,8 @@ const CLIENT_ERROR_PATTERNS = [
   "未设置任何筛选条件",
   "sourceMode",
   "targetScale",
+  "无效",
+  "不属于指定",
   "相同"
 ];
 

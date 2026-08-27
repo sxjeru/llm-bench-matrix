@@ -104,6 +104,7 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
   const [drafts, setDrafts] = useState<Record<string, CellDraft>>({});
   const [selection, setSelection] = useState<MatrixSelectionRange | null>(null);
   const [editingCell, setEditingCell] = useState<RecordEditingCell | null>(null);
+  const [multiValueCell, setMultiValueCell] = useState<AdminRecordCell | null>(null);
   const [fillValue, setFillValue] = useState("");
   const [toolBusy, setToolBusy] = useState<RecordToolBusyKind>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -189,6 +190,7 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
         setHasLoaded(true);
         setSelection(null);
         setEditingCell(null);
+        setMultiValueCell(null);
       } catch (error) {
         notifyError(error instanceof Error ? error.message : "加载数据矩阵失败");
       } finally {
@@ -203,11 +205,11 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     void loadMatrix();
   }, [hasLoaded, loading, loadMatrix]);
 
-  function confirmDiscardDrafts(action: string): boolean {
+  const confirmDiscardDrafts = useCallback((action: string): boolean => {
     if (dirtyCount === 0) return true;
     if (typeof window === "undefined") return true;
     return window.confirm(`还有 ${dirtyCount} 处修改未保存，${action}会丢弃这些改动。是否继续？`);
-  }
+  }, [dirtyCount]);
 
   /**
    * 筛选条件的每次变化都立刻带着新条件重新拉矩阵。
@@ -304,11 +306,21 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
 
     setSelection((prev) => {
       if (prev && prev.startRow === prev.endRow && prev.startCol === prev.endCol) {
-        setEditingCell({ row: prev.startRow, col: prev.startCol });
+        const model = models[prev.startCol];
+        const benchmark = benchmarks[prev.startRow];
+        const cell = model && benchmark ? cellIndex.get(getCellKey(model.modelId, benchmark.benchmarkId)) : undefined;
+        if (cell && cell.recordCount > 1) {
+          if (confirmDiscardDrafts("打开多值编辑器")) {
+            setDrafts({});
+            setMultiValueCell(cell);
+          }
+        } else {
+          setEditingCell({ row: prev.startRow, col: prev.startCol });
+        }
       }
       return prev;
     });
-  }, []);
+  }, [benchmarks, cellIndex, confirmDiscardDrafts, models]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -412,6 +424,49 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     if (dirtyCount === 0) return;
     if (!confirmDiscardDrafts("放弃修改")) return;
     setDrafts({});
+  }
+
+  async function saveMultiValueRecords(records: Array<{
+    id: number;
+    valueRaw: string;
+    source: string;
+    benchTime: string;
+    valueNote: string;
+    isDeleted: boolean;
+  }>) {
+    if (saving || !multiValueCell) return;
+
+    setSaving(true);
+    try {
+      const result = (await postJson("/api/admin/records/details", {
+        records: records.map((record) => ({
+          id: record.id,
+          modelId: multiValueCell.modelId,
+          benchmarkId: multiValueCell.benchmarkId,
+          valueRaw: record.valueRaw,
+          source: record.source.trim() || null,
+          benchTime: new Date(record.benchTime).toISOString(),
+          valueNote: record.valueNote.trim() || null,
+          isDeleted: record.isDeleted
+        }))
+      })) as { updated: number; deleted: number; nonNumeric: Array<{ id: number; valueRaw: string }> };
+
+      const parts = [];
+      if (result.updated > 0) parts.push(`修改 ${result.updated}`);
+      if (result.deleted > 0) parts.push(`删除 ${result.deleted}`);
+      notifySuccess(
+        `多值记录保存完成：${parts.join(" · ") || "无实际改动"}`,
+        result.nonNumeric.length > 0
+          ? [`${result.nonNumeric.length} 条记录无法解析为数值，已按文本保存`]
+          : undefined
+      );
+      setMultiValueCell(null);
+      await loadMatrix();
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "保存多值记录失败");
+    } finally {
+      setSaving(false);
+    }
   }
 
   // --- 快速修改工具 ---
@@ -570,6 +625,9 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     selectedCellRefs,
     editingCell,
     setEditingCell,
+    multiValueCell,
+    setMultiValueCell,
+    saveMultiValueRecords,
     onCellMouseDown,
     onCellMouseEnter,
     commitCellValue,

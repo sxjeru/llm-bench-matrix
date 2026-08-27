@@ -441,7 +441,7 @@ describe("AdminConsole records tab", () => {
     await screen.findByTestId("record-cell-1-11");
     await user.click(screen.getByRole("button", { name: "分拆双值" }));
 
-    expect(await screen.findByText("分拆双值（如 77 / 88）")).toBeInTheDocument();
+    expect(await screen.findByText("分拆双值")).toBeInTheDocument();
     expect(await screen.findByText("双值 1/1")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "执行分拆" }));

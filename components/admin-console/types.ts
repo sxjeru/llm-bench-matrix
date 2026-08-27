@@ -138,6 +138,16 @@ export type AdminRecordMatrixBenchmark = {
   recordCount: number;
 };
 
+export type AdminRecordValue = {
+  id: number;
+  valueRaw: string;
+  valueNum: number | null;
+  valueNum2: number | null;
+  valueNote: string | null;
+  source: string | null;
+  benchTime: string;
+};
+
 export type AdminRecordCell = {
   modelId: number;
   benchmarkId: number;
@@ -152,6 +162,8 @@ export type AdminRecordCell = {
   valueNote: string | null;
   source: string | null;
   benchTime: string;
+  /** 当前筛选范围内该格子的全部记录，按 benchTime 从新到旧排列。 */
+  records?: AdminRecordValue[];
 };
 
 export type AdminRecordMatrix = {

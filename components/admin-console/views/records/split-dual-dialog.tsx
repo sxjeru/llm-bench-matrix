@@ -108,7 +108,7 @@ export function RecordsSplitDualDialog({
         <div className="flex items-start justify-between gap-3 pb-3 border-b border-base-300/70">
           <h3 className="flex min-w-0 items-center gap-2 text-lg font-bold text-base-content">
             <Scissors size={18} className="shrink-0 text-warning" />
-            <span className="min-w-0 break-words">分拆双值（如 77 / 88）</span>
+            <span className="min-w-0 break-words">分拆双值</span>
           </h3>
           <button
             type="button"

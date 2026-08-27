@@ -199,10 +199,11 @@ export function RecordsDraftToolbar({
           type="button"
           className="btn btn-sm btn-outline gap-1"
           disabled={busy}
+          aria-label="分拆双值"
           onClick={onOpenSplitDialog}
         >
           <Scissors size={14} />
-          分拆双值
+          打开分拆双值
         </button>
         <button
           type="button"

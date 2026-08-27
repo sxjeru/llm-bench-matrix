@@ -8,6 +8,7 @@ import { getSelectionCellCount } from "../utils/record-drafts";
 import { RecordsDraftToolbar } from "./records/draft-toolbar";
 import { RecordsFiltersBar } from "./records/filters-bar";
 import { RecordsMatrixGrid } from "./records/matrix-grid";
+import { RecordsMultiValueDialog } from "./records/multi-value-dialog";
 import { RecordsReassignDialog } from "./records/reassign-dialog";
 import { RecordsSplitDualDialog } from "./records/split-dual-dialog";
 import { sourceTabDisplayLabel } from "@/lib/source-utils";
@@ -131,6 +132,9 @@ export function RecordsTab({
     selection,
     editingCell,
     setEditingCell,
+    multiValueCell,
+    setMultiValueCell,
+    saveMultiValueRecords,
     onCellMouseDown,
     onCellMouseEnter,
     commitCellValue,
@@ -182,7 +186,7 @@ export function RecordsTab({
           矩阵编辑
         </h3>
         <p className="text-xs opacity-70">
-          单击格子改值，按住拖拽可框选多格，Backspace / Delete 批量清空，Esc 取消选区。
+          单击格子改值；格内有多条记录时会打开详情弹窗。按住拖拽可框选多格，Backspace / Delete 批量清空，Esc 取消选区。
           所有改动先高亮暂存，点「保存更改」才写库。
         </p>
       </div>
@@ -249,6 +253,23 @@ export function RecordsTab({
           onConfirm={(allowUnfiltered) => void runBatchDelete({ allowUnfiltered })}
         />
       ) : null}
+
+      {multiValueCell ? (() => {
+        const model = matrixModels.find((item) => item.modelId === multiValueCell.modelId);
+        const benchmark = matrixBenchmarks.find((item) => item.benchmarkId === multiValueCell.benchmarkId);
+        if (!model || !benchmark) return null;
+        return (
+          <RecordsMultiValueDialog
+            key={`multi-value-${multiValueCell.modelId}-${multiValueCell.benchmarkId}`}
+            cell={multiValueCell}
+            model={model}
+            benchmark={benchmark}
+            busy={saving}
+            onClose={() => setMultiValueCell(null)}
+            onSave={(records) => void saveMultiValueRecords(records)}
+          />
+        );
+      })() : null}
 
       {reassignTarget ? (
         <RecordsReassignDialog

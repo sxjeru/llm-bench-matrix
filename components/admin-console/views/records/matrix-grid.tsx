@@ -47,7 +47,7 @@ function buildCellTooltip(cell: AdminRecordCell | undefined, draft: CellDraft | 
     lines.push(`source：${cell.source ? sourceTabDisplayLabel(cell.source) : "（空）"}`);
     lines.push(`benchTime：${new Date(cell.benchTime).toLocaleString("zh-CN", { hour12: false })}`);
     if (cell.valueNote) lines.push(`note：${cell.valueNote}`);
-    if (cell.recordCount > 1) lines.push(`该单元格含 ${cell.recordCount} 条记录，清空会一并删除`);
+    if (cell.recordCount > 1) lines.push(`该单元格含 ${cell.recordCount} 条记录，单击可逐条查看和修改`);
   }
 
   return lines.join("\n");
@@ -235,7 +235,7 @@ export function RecordsMatrixGrid({
                     data-dirty={isDirty ? "true" : "false"}
                     data-pending-delete={pendingDelete ? "true" : "false"}
                     data-selected={isSelected ? "true" : "false"}
-                    className={`relative cursor-cell border-b border-base-300/60 text-center font-mono text-xs ${stateClass} ${selectionClass}`}
+                    className={`relative cursor-cell border-b border-base-300/60 text-center font-mono text-xs ${stateClass} ${selectionClass} ${cell && cell.recordCount > 1 ? "hover:bg-primary/10" : ""}`}
                     title={buildCellTooltip(cell, draft)}
                     onMouseDown={(event) => {
                       if (isEditing) return;
@@ -259,7 +259,7 @@ export function RecordsMatrixGrid({
                           {displayValue || "—"}
                         </span>
                         {cell && cell.recordCount > 1 ? (
-                          <span className="ml-1 align-super text-[9px] opacity-60">×{cell.recordCount}</span>
+                          <span className="badge badge-primary badge-outline badge-xs ml-1 align-middle font-sans">{cell.recordCount} 条</span>
                         ) : null}
                         {isDirty ? (
                           <PencilLine
