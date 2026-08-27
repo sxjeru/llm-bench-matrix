@@ -1429,6 +1429,16 @@ export type RecordDualValueCandidate = {
   dualValueCount: number;
   totalCount: number;
   sampleValues: string[];
+  valueDetails: Array<{
+    recordId: number;
+    valueRaw: string;
+    valueNum: number | null;
+    valueNum2: number | null;
+    modelName: string;
+    source: string | null;
+    valueNote: string | null;
+    benchTime: string;
+  }>;
 };
 
 export async function getRecordDualValueCandidates(
@@ -1436,23 +1446,64 @@ export async function getRecordDualValueCandidates(
 ): Promise<{ generatedAt: string; candidates: RecordDualValueCandidate[] }> {
   const conditions = buildRecordValueConditions(scope);
 
-  const rows = await db
-    .select({
-      benchmarkId: benchmarks.id,
-      benchmarkName: benchmarks.benchmarkName,
-      benchmarkType: benchmarks.benchmarkType,
-      totalCount: count(),
-      dualValueCount: sql<number>`count(*) filter (where ${benchmarkValues.valueNum2} is not null)`,
-      sampleValues: sql<
-        string[]
-      >`(array_agg(distinct ${benchmarkValues.valueRaw}) filter (where ${benchmarkValues.valueNum2} is not null))[1:3]`
-    })
-    .from(benchmarkValues)
-    .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-    .where(and(isNull(benchmarks.mergedIntoBenchmarkId), ...conditions))
-    .groupBy(benchmarks.id, benchmarks.benchmarkName, benchmarks.benchmarkType)
-    .having(sql`count(*) filter (where ${benchmarkValues.valueNum2} is not null) > 0`)
-    .orderBy(desc(sql`count(*) filter (where ${benchmarkValues.valueNum2} is not null)`));
+  const [rows, detailRows] = await Promise.all([
+    db
+      .select({
+        benchmarkId: benchmarks.id,
+        benchmarkName: benchmarks.benchmarkName,
+        benchmarkType: benchmarks.benchmarkType,
+        totalCount: count(),
+        dualValueCount: sql<number>`count(*) filter (where ${benchmarkValues.valueNum2} is not null)`,
+        sampleValues: sql<
+          string[]
+        >`(array_agg(distinct ${benchmarkValues.valueRaw}) filter (where ${benchmarkValues.valueNum2} is not null))[1:3]`
+      })
+      .from(benchmarkValues)
+      .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+      .where(and(isNull(benchmarks.mergedIntoBenchmarkId), ...conditions))
+      .groupBy(benchmarks.id, benchmarks.benchmarkName, benchmarks.benchmarkType)
+      .having(sql`count(*) filter (where ${benchmarkValues.valueNum2} is not null) > 0`)
+      .orderBy(desc(sql`count(*) filter (where ${benchmarkValues.valueNum2} is not null)`)),
+    db
+      .select({
+        benchmarkId: benchmarks.id,
+        recordId: benchmarkValues.id,
+        valueRaw: benchmarkValues.valueRaw,
+        valueNum: benchmarkValues.valueNum,
+        valueNum2: benchmarkValues.valueNum2,
+        modelName: models.modelName,
+        source: benchmarkValues.source,
+        valueNote: benchmarkValues.valueNote,
+        benchTime: benchmarkValues.benchTime
+      })
+      .from(benchmarkValues)
+      .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+      .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+      .where(
+        and(
+          isNull(benchmarks.mergedIntoBenchmarkId),
+          isNotNull(benchmarkValues.valueNum2),
+          ...conditions
+        )
+      )
+      .orderBy(asc(benchmarks.benchmarkName), asc(models.modelName), desc(benchmarkValues.benchTime), desc(benchmarkValues.id))
+  ]);
+
+  const detailsByBenchmarkId = new Map<number, RecordDualValueCandidate["valueDetails"]>();
+  detailRows.forEach((row) => {
+    const details = detailsByBenchmarkId.get(row.benchmarkId) ?? [];
+    details.push({
+      recordId: row.recordId,
+      valueRaw: row.valueRaw,
+      valueNum: toFiniteNumber(row.valueNum),
+      valueNum2: toFiniteNumber(row.valueNum2),
+      modelName: row.modelName,
+      source: normalizeSourceValue(row.source),
+      valueNote: row.valueNote,
+      benchTime: row.benchTime.toISOString()
+    });
+    detailsByBenchmarkId.set(row.benchmarkId, details);
+  });
 
   return {
     generatedAt: new Date().toISOString(),
@@ -1462,7 +1513,8 @@ export async function getRecordDualValueCandidates(
       benchmarkType: row.benchmarkType,
       dualValueCount: Number(row.dualValueCount ?? 0),
       totalCount: Number(row.totalCount ?? 0),
-      sampleValues: (row.sampleValues ?? []).filter((value): value is string => typeof value === "string")
+      sampleValues: (row.sampleValues ?? []).filter((value): value is string => typeof value === "string"),
+      valueDetails: detailsByBenchmarkId.get(row.benchmarkId) ?? []
     }))
   };
 }
@@ -1507,93 +1559,93 @@ export async function splitDualValueRecords(input: {
 
   const dedupeRule = await getModelDedupeRule();
 
-  const resolveTarget = async (
-    target: { benchmarkId?: number; benchmarkName?: string; benchmarkType?: string },
-    label: string
-  ) => {
-    if (typeof target.benchmarkId === "number") {
-      const [existing] = await db
-        .select({
-          id: benchmarks.id,
-          benchmarkName: benchmarks.benchmarkName,
-          benchmarkType: benchmarks.benchmarkType,
-          modalities: benchmarks.modalities
-        })
-        .from(benchmarks)
-        .where(and(eq(benchmarks.id, target.benchmarkId), isNull(benchmarks.mergedIntoBenchmarkId)))
-        .limit(1);
-
-      if (!existing) {
-        throw new Error(`${label} benchmark not found or merged: ${target.benchmarkId}`);
-      }
-      return existing;
-    }
-
-    const name = target.benchmarkName?.trim();
-    if (!name) {
-      throw new Error(`${label} benchmark 名称不能为空`);
-    }
-
-    return ensureBenchmark(
-      {
-        benchmarkName: name,
-        benchmarkType: target.benchmarkType?.trim() || sourceBenchmark.benchmarkType,
-        unit: sourceBenchmark.unit,
-        higherIsBetter: sourceBenchmark.higherIsBetter,
-        modalities: sourceBenchmark.modalities ?? undefined
-      },
-      { dedupeRule }
-    );
-  };
-
-  const firstBenchmark = await resolveTarget(input.first, "第一个");
-  const secondBenchmark = await resolveTarget(input.second, "第二个");
-
-  if (firstBenchmark.id === secondBenchmark.id) {
-    throw new Error("两个拆分目标不能指向同一个 benchmark");
-  }
-
-  const records = await db
-    .select({
-      id: benchmarkValues.id,
-      modelId: benchmarkValues.modelId,
-      benchTime: benchmarkValues.benchTime,
-      valueNum: benchmarkValues.valueNum,
-      valueNum2: benchmarkValues.valueNum2,
-      valueNote: benchmarkValues.valueNote,
-      source: benchmarkValues.source
-    })
-    .from(benchmarkValues)
-    .where(
-      and(
-        eq(benchmarkValues.benchmarkId, sourceBenchmark.id),
-        isNotNull(benchmarkValues.valueNum2),
-        ...buildRecordValueConditions({ ...scope, benchmarkIds: [] })
-      )
-    );
-
-  if (records.length === 0) {
-    throw new Error("当前筛选范围内没有可分拆的双值记录");
-  }
-
-  const plan = planDualValueSplit(
-    records.map((row) => ({
-      id: row.id,
-      modelId: row.modelId,
-      benchTime: row.benchTime,
-      valueNum: toFiniteNumber(row.valueNum),
-      valueNum2: toFiniteNumber(row.valueNum2),
-      valueNote: row.valueNote,
-      source: row.source
-    })),
-    { firstBenchmarkId: firstBenchmark.id, secondBenchmarkId: secondBenchmark.id }
-  );
-
-  if (plan.updates.length === 0) {
-    throw new Error("当前筛选范围内没有可分拆的双值记录");
-  }
-
   const applied = await db.transaction(async (tx: DbTransactionClient) => {
+    const resolveTarget = async (
+      target: { benchmarkId?: number; benchmarkName?: string; benchmarkType?: string },
+      label: string
+    ) => {
+      if (typeof target.benchmarkId === "number") {
+        const [existing] = await tx
+          .select({
+            id: benchmarks.id,
+            benchmarkName: benchmarks.benchmarkName,
+            benchmarkType: benchmarks.benchmarkType,
+            modalities: benchmarks.modalities
+          })
+          .from(benchmarks)
+          .where(and(eq(benchmarks.id, target.benchmarkId), isNull(benchmarks.mergedIntoBenchmarkId)))
+          .limit(1);
+
+        if (!existing) {
+          throw new Error(`${label} benchmark not found or merged: ${target.benchmarkId}`);
+        }
+        return existing;
+      }
+
+      const name = target.benchmarkName?.trim();
+      if (!name) {
+        throw new Error(`${label} benchmark 名称不能为空`);
+      }
+
+      return ensureBenchmark(
+        {
+          benchmarkName: name,
+          benchmarkType: target.benchmarkType?.trim() || sourceBenchmark.benchmarkType,
+          unit: sourceBenchmark.unit,
+          higherIsBetter: sourceBenchmark.higherIsBetter,
+          modalities: sourceBenchmark.modalities ?? undefined
+        },
+        { dedupeRule, db: tx }
+      );
+    };
+
+    const firstBenchmark = await resolveTarget(input.first, "第一个");
+    const secondBenchmark = await resolveTarget(input.second, "第二个");
+
+    if (firstBenchmark.id === secondBenchmark.id) {
+      throw new Error("两个拆分目标不能指向同一个 benchmark");
+    }
+
+    const records = await tx
+      .select({
+        id: benchmarkValues.id,
+        modelId: benchmarkValues.modelId,
+        benchTime: benchmarkValues.benchTime,
+        valueNum: benchmarkValues.valueNum,
+        valueNum2: benchmarkValues.valueNum2,
+        valueNote: benchmarkValues.valueNote,
+        source: benchmarkValues.source
+      })
+      .from(benchmarkValues)
+      .where(
+        and(
+          eq(benchmarkValues.benchmarkId, sourceBenchmark.id),
+          isNotNull(benchmarkValues.valueNum2),
+          ...buildRecordValueConditions({ ...scope, benchmarkIds: [] })
+        )
+      );
+
+    if (records.length === 0) {
+      throw new Error("当前筛选范围内没有可分拆的双值记录");
+    }
+
+    const plan = planDualValueSplit(
+      records.map((row) => ({
+        id: row.id,
+        modelId: row.modelId,
+        benchTime: row.benchTime,
+        valueNum: toFiniteNumber(row.valueNum),
+        valueNum2: toFiniteNumber(row.valueNum2),
+        valueNote: row.valueNote,
+        source: row.source
+      })),
+      { firstBenchmarkId: firstBenchmark.id, secondBenchmarkId: secondBenchmark.id }
+    );
+
+    if (plan.updates.length === 0) {
+      throw new Error("当前筛选范围内没有可分拆的双值记录");
+    }
+
     for (const update of plan.updates) {
       await tx
         .update(benchmarkValues)
@@ -1657,7 +1709,7 @@ export async function splitDualValueRecords(input: {
       );
     }
 
-    return { createdCount };
+    return { createdCount, firstBenchmark, secondBenchmark, plan };
   });
 
   await invalidateAllCaches();
@@ -1666,12 +1718,12 @@ export async function splitDualValueRecords(input: {
     ok: true,
     sourceBenchmarkId: sourceBenchmark.id,
     sourceBenchmarkLabel: `${sourceBenchmark.benchmarkName} (${sourceBenchmark.benchmarkType})`,
-    firstBenchmarkId: firstBenchmark.id,
-    firstBenchmarkLabel: `${firstBenchmark.benchmarkName} (${firstBenchmark.benchmarkType})`,
-    secondBenchmarkId: secondBenchmark.id,
-    secondBenchmarkLabel: `${secondBenchmark.benchmarkName} (${secondBenchmark.benchmarkType})`,
-    splitCount: plan.updates.length,
+    firstBenchmarkId: applied.firstBenchmark.id,
+    firstBenchmarkLabel: `${applied.firstBenchmark.benchmarkName} (${applied.firstBenchmark.benchmarkType})`,
+    secondBenchmarkId: applied.secondBenchmark.id,
+    secondBenchmarkLabel: `${applied.secondBenchmark.benchmarkName} (${applied.secondBenchmark.benchmarkType})`,
+    splitCount: applied.plan.updates.length,
     createdCount: applied.createdCount,
-    skipped: plan.skipped
+    skipped: applied.plan.skipped
   };
 }

@@ -37,7 +37,8 @@ describe("/api/admin/records/split-pair-values", () => {
           benchmarkType: "general",
           dualValueCount: 2,
           totalCount: 2,
-          sampleValues: ["77 / 88"]
+          sampleValues: ["77 / 88"],
+          valueDetails: []
         }
       ]
     });

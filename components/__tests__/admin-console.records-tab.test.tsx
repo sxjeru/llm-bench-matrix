@@ -511,7 +511,19 @@ describe("AdminConsole records tab", () => {
             benchmarkType: "Type-A",
             dualValueCount: 1,
             totalCount: 1,
-            sampleValues: ["77 / 88"]
+            sampleValues: ["77 / 88"],
+            valueDetails: [
+              {
+                recordId: 101,
+                valueRaw: "77 / 88",
+                valueNum: 77,
+                valueNum2: 88,
+                modelName: "Model A",
+                source: "text:src",
+                valueNote: "paired",
+                benchTime: "2026-04-01T00:00:00.000Z"
+              }
+            ]
           }
         ]
       },
@@ -540,6 +552,13 @@ describe("AdminConsole records tab", () => {
     expect(await screen.findByText("分拆双值")).toBeInTheDocument();
     expect(await screen.findByText("双值 1/1")).toBeInTheDocument();
 
+    await user.hover(screen.getByTitle("悬浮查看全部双值信息"));
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("77 / 88");
+    expect(tooltip).toHaveTextContent("Model A");
+    expect(tooltip).toHaveTextContent("src");
+    expect(tooltip).toHaveTextContent("paired");
+
     await user.click(screen.getByRole("button", { name: "执行分拆" }));
 
     await waitFor(() => {
@@ -562,6 +581,66 @@ describe("AdminConsole records tab", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/双值分拆完成/)).toBeInTheDocument();
+    });
+  });
+
+  test("分拆双值可从下拉列表选择已有 benchmark", async () => {
+    const fetchMock = mockFetchSequence(
+      filledMatrix,
+      {
+        generatedAt: "2026-04-01T00:00:00.000Z",
+        candidates: [
+          {
+            benchmarkId: 11,
+            benchmarkName: "Bench-1",
+            benchmarkType: "Type-A",
+            dualValueCount: 1,
+            totalCount: 1,
+            sampleValues: ["77 / 88"],
+            valueDetails: []
+          }
+        ]
+      },
+      {
+        ok: true,
+        sourceBenchmarkId: 11,
+        sourceBenchmarkLabel: "Bench-1 (Type-A)",
+        firstBenchmarkId: 11,
+        firstBenchmarkLabel: "Bench-1 (Type-A)",
+        secondBenchmarkId: 12,
+        secondBenchmarkLabel: "Bench-2 (Type-A)",
+        splitCount: 1,
+        createdCount: 1,
+        skipped: 0
+      },
+      filledMatrix
+    );
+    const user = userEvent.setup();
+    const props = buildProps();
+    props.benchmarks = [
+      ...props.benchmarks,
+      { id: 12, benchmarkName: "Bench-2", benchmarkType: "Type-A", modalities: ["Text"] }
+    ];
+
+    await renderReady(<AdminConsole {...props} />);
+    await openRecordsTabAndFilter(user);
+    await screen.findByTestId("record-cell-1-11");
+    await user.click(screen.getByRole("button", { name: "分拆双值" }));
+    await screen.findByText("双值 1/1");
+
+    await user.selectOptions(screen.getByLabelText("第二个值选择已有 benchmark"), "12");
+    await user.click(screen.getByRole("button", { name: "执行分拆" }));
+
+    await waitFor(() => {
+      const splitCall = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/admin/records/split-pair-values" && init?.method === "POST"
+      );
+      expect(splitCall).toBeTruthy();
+      expect(JSON.parse(String(splitCall?.[1]?.body))).toMatchObject({
+        benchmarkId: 11,
+        first: { benchmarkId: 11 },
+        second: { benchmarkId: 12 }
+      });
     });
   });
 

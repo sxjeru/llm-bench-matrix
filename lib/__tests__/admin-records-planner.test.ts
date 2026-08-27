@@ -333,6 +333,37 @@ describe("planDualValueSplit", () => {
       }
     ]);
   });
+
+  test("前值为空、后值存在时把原记录迁到第二个 benchmark", () => {
+    const plan = planDualValueSplit(
+      [
+        {
+          id: 3,
+          modelId: 10,
+          benchTime: "2026-04-02T00:00:00.000Z",
+          valueNum: null,
+          valueNum2: 66.1,
+          valueNote: "second only",
+          source: "text:src"
+        }
+      ],
+      { firstBenchmarkId: 11, secondBenchmarkId: 12 }
+    );
+
+    expect(plan).toEqual({
+      updates: [
+        {
+          recordId: 3,
+          benchmarkId: 12,
+          valueRaw: "66.1",
+          valueNum: 66.1,
+          valueNote: `second only; ${RECORD_SPLIT_DUAL_NOTE_SECOND}`
+        }
+      ],
+      inserts: [],
+      skipped: 0
+    });
+  });
 });
 
 describe("planRecordReassign", () => {

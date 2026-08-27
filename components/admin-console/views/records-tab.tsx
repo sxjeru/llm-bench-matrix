@@ -295,6 +295,7 @@ export function RecordsTab({
       {splitDialogOpen ? (
         <RecordsSplitDualDialog
           candidates={dualValueCandidates}
+          benchmarks={benchmarks}
           loading={loadingDualValueCandidates}
           busy={toolBusy === "split"}
           scopeDescription={scopeDescription}

@@ -1,11 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Scissors } from "lucide-react";
-import type { RecordDualValueCandidate } from "../../types";
+import type { BenchmarkOption, RecordDualValueCandidate } from "../../types";
+import { sourceTabDisplayLabel } from "@/lib/source-utils";
 
 type RecordsSplitDualDialogProps = {
   candidates: RecordDualValueCandidate[];
+  benchmarks: BenchmarkOption[];
   loading: boolean;
   busy: boolean;
   scopeDescription: string;
@@ -13,24 +16,138 @@ type RecordsSplitDualDialogProps = {
   onSubmit: (input: {
     benchmarkId: number;
     first: { benchmarkId?: number; benchmarkName?: string; benchmarkType?: string };
-    second: { benchmarkName: string; benchmarkType?: string };
+    second: { benchmarkId?: number; benchmarkName?: string; benchmarkType?: string };
   }) => void;
 };
 
 type SplitNameDraft = {
+  firstBenchmarkId: number | null;
   firstName: string;
   firstType: string;
+  secondBenchmarkId: number | null;
   secondName: string;
   secondType: string;
 };
 
 function buildDefaultDraft(candidate: RecordDualValueCandidate): SplitNameDraft {
   return {
+    firstBenchmarkId: candidate.benchmarkId,
     firstName: candidate.benchmarkName,
     firstType: candidate.benchmarkType,
+    secondBenchmarkId: null,
     secondName: `${candidate.benchmarkName} (2)`,
     secondType: candidate.benchmarkType
   };
+}
+
+function formatBenchmarkLabel(benchmark: BenchmarkOption): string {
+  return `${benchmark.benchmarkName} (${benchmark.benchmarkType})`;
+}
+
+function ExistingBenchmarkSelect({
+  ariaLabel,
+  benchmarks,
+  value,
+  disabled = false,
+  onChange
+}: {
+  ariaLabel: string;
+  benchmarks: BenchmarkOption[];
+  value: number | null;
+  disabled?: boolean;
+  onChange: (benchmark: BenchmarkOption | null) => void;
+}) {
+  return (
+    <select
+      className="select select-bordered select-sm w-full rounded-xl bg-base-200/50 focus:border-primary focus:bg-base-100 focus:outline-none"
+      aria-label={ariaLabel}
+      value={value ?? ""}
+      disabled={disabled}
+      onChange={(event) => {
+        const benchmarkId = Number.parseInt(event.target.value, 10);
+        onChange(benchmarks.find((benchmark) => benchmark.id === benchmarkId) ?? null);
+      }}
+    >
+      <option value="">手动输入 / 新建 benchmark</option>
+      {benchmarks.map((benchmark) => (
+        <option key={`${ariaLabel}-${benchmark.id}`} value={benchmark.id}>
+          {formatBenchmarkLabel(benchmark)}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function DualValueDetailsPopover({
+  candidate,
+  anchor,
+  onMouseEnter,
+  onMouseLeave
+}: {
+  candidate: RecordDualValueCandidate;
+  anchor: DOMRect;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+}) {
+  const gap = 8;
+  const viewportPadding = 8;
+  const width = Math.min(620, window.innerWidth - viewportPadding * 2);
+  const maxHeight = Math.min(480, window.innerHeight - viewportPadding * 2);
+  const canPlaceRight = anchor.right + gap + width <= window.innerWidth - viewportPadding;
+  const left = canPlaceRight
+    ? anchor.right + gap
+    : Math.max(viewportPadding, anchor.left - gap - width);
+  const top = Math.min(
+    Math.max(viewportPadding, anchor.top),
+    Math.max(viewportPadding, window.innerHeight - maxHeight - viewportPadding)
+  );
+
+  return createPortal(
+    <div
+      role="tooltip"
+      className="fixed z-[190] overflow-hidden rounded-xl border border-base-300 bg-base-100 shadow-2xl"
+      style={{ left, top, width, maxHeight }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
+      <div className="border-b border-base-300/70 bg-base-200/70 px-3 py-2">
+        <div className="text-sm font-semibold text-base-content">{candidate.benchmarkName}</div>
+        <div className="mt-0.5 text-[11px] text-base-content/60">
+          全部 {candidate.valueDetails.length} 条双值记录
+        </div>
+      </div>
+      <div className="overflow-auto" style={{ maxHeight: maxHeight - 54 }}>
+        <table className="table table-xs w-full table-fixed">
+          <thead className="sticky top-0 z-10 bg-base-200 text-[11px]">
+            <tr>
+              <th className="w-[22%]">值</th>
+              <th className="w-[24%]">模型</th>
+              <th className="w-[22%]">source</th>
+              <th>备注</th>
+            </tr>
+          </thead>
+          <tbody>
+            {candidate.valueDetails.map((detail) => (
+              <tr key={detail.recordId}>
+                <td className="align-top">
+                  <div className="break-all font-mono text-[11px] font-semibold">{detail.valueRaw}</div>
+                  <div className="mt-0.5 break-all font-mono text-[10px] text-base-content/50">
+                    {detail.valueNum ?? "—"} / {detail.valueNum2 ?? "—"}
+                  </div>
+                </td>
+                <td className="break-words align-top text-[11px]">{detail.modelName}</td>
+                <td className="break-words align-top text-[11px]">
+                  {detail.source ? sourceTabDisplayLabel(detail.source) : "—"}
+                </td>
+                <td className="break-words align-top text-[11px]">{detail.valueNote || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>,
+    document.body
+  );
 }
 
 /**
@@ -44,6 +161,7 @@ function buildDefaultDraft(candidate: RecordDualValueCandidate): SplitNameDraft 
  */
 export function RecordsSplitDualDialog({
   candidates,
+  benchmarks,
   loading,
   busy,
   scopeDescription,
@@ -53,6 +171,39 @@ export function RecordsSplitDualDialog({
   const [pickedId, setPickedId] = useState<number | null>(null);
   const [keepFirstInPlace, setKeepFirstInPlace] = useState(true);
   const [nameDrafts, setNameDrafts] = useState<Record<number, SplitNameDraft>>({});
+  const [hoveredDetails, setHoveredDetails] = useState<{
+    candidate: RecordDualValueCandidate;
+    anchor: DOMRect;
+  } | null>(null);
+  const hideDetailsTimerRef = useRef<number | null>(null);
+
+  const sortedBenchmarks = useMemo(
+    () => [...benchmarks].sort((left, right) => formatBenchmarkLabel(left).localeCompare(formatBenchmarkLabel(right))),
+    [benchmarks]
+  );
+
+  useEffect(() => () => {
+    if (hideDetailsTimerRef.current !== null) window.clearTimeout(hideDetailsTimerRef.current);
+  }, []);
+
+  function cancelHideDetails() {
+    if (hideDetailsTimerRef.current === null) return;
+    window.clearTimeout(hideDetailsTimerRef.current);
+    hideDetailsTimerRef.current = null;
+  }
+
+  function showDetails(candidate: RecordDualValueCandidate, element: HTMLElement) {
+    cancelHideDetails();
+    setHoveredDetails({ candidate, anchor: element.getBoundingClientRect() });
+  }
+
+  function scheduleHideDetails() {
+    cancelHideDetails();
+    hideDetailsTimerRef.current = window.setTimeout(() => {
+      setHoveredDetails(null);
+      hideDetailsTimerRef.current = null;
+    }, 120);
+  }
 
   const selectedId = pickedId ?? candidates[0]?.benchmarkId ?? null;
   const selectedCandidate = useMemo(
@@ -62,7 +213,14 @@ export function RecordsSplitDualDialog({
 
   const draft = selectedCandidate
     ? nameDrafts[selectedCandidate.benchmarkId] ?? buildDefaultDraft(selectedCandidate)
-    : { firstName: "", firstType: "", secondName: "", secondType: "" };
+    : {
+        firstBenchmarkId: null,
+        firstName: "",
+        firstType: "",
+        secondBenchmarkId: null,
+        secondName: "",
+        secondType: ""
+      };
 
   function updateDraft(patch: Partial<SplitNameDraft>) {
     if (!selectedCandidate) return;
@@ -75,8 +233,12 @@ export function RecordsSplitDualDialog({
 
   const canSubmit =
     selectedCandidate !== null
-    && draft.secondName.trim().length > 0
-    && (keepFirstInPlace || draft.firstName.trim().length > 0)
+    && (draft.secondBenchmarkId !== null || draft.secondName.trim().length > 0)
+    && (keepFirstInPlace || draft.firstBenchmarkId !== null || draft.firstName.trim().length > 0)
+    && !(
+      (keepFirstInPlace ? selectedCandidate.benchmarkId : draft.firstBenchmarkId) !== null
+      && (keepFirstInPlace ? selectedCandidate.benchmarkId : draft.firstBenchmarkId) === draft.secondBenchmarkId
+    )
     && !busy;
 
   function handleSubmit() {
@@ -86,14 +248,18 @@ export function RecordsSplitDualDialog({
       benchmarkId: selectedCandidate.benchmarkId,
       first: keepFirstInPlace
         ? { benchmarkId: selectedCandidate.benchmarkId }
+        : draft.firstBenchmarkId !== null
+          ? { benchmarkId: draft.firstBenchmarkId }
         : {
             benchmarkName: draft.firstName.trim(),
             benchmarkType: draft.firstType.trim() || selectedCandidate.benchmarkType
           },
-      second: {
-        benchmarkName: draft.secondName.trim(),
-        benchmarkType: draft.secondType.trim() || selectedCandidate.benchmarkType
-      }
+      second: draft.secondBenchmarkId !== null
+        ? { benchmarkId: draft.secondBenchmarkId }
+        : {
+            benchmarkName: draft.secondName.trim(),
+            benchmarkType: draft.secondType.trim() || selectedCandidate.benchmarkType
+          }
     });
   }
 
@@ -147,6 +313,9 @@ export function RecordsSplitDualDialog({
                       ? "border border-primary/30 bg-primary/15"
                       : "border border-transparent hover:bg-base-200/70"
                   }`}
+                  title="悬浮查看全部双值信息"
+                  onMouseEnter={(event) => showDetails(candidate, event.currentTarget)}
+                  onMouseLeave={scheduleHideDetails}
                 >
                   <input
                     type="radio"
@@ -183,6 +352,37 @@ export function RecordsSplitDualDialog({
 
             <div className="mt-3.5 grid gap-3 sm:grid-cols-2">
               <label className="form-control flex flex-col gap-1.5 w-full">
+                <span className="label-text text-xs font-medium text-base-content/80">第一个值选择已有 benchmark</span>
+                <ExistingBenchmarkSelect
+                  ariaLabel="第一个值选择已有 benchmark"
+                  benchmarks={sortedBenchmarks}
+                  value={draft.firstBenchmarkId}
+                  disabled={keepFirstInPlace}
+                  onChange={(benchmark) => updateDraft(benchmark
+                    ? {
+                        firstBenchmarkId: benchmark.id,
+                        firstName: benchmark.benchmarkName,
+                        firstType: benchmark.benchmarkType
+                      }
+                    : { firstBenchmarkId: null })}
+                />
+              </label>
+              <label className="form-control flex flex-col gap-1.5 w-full">
+                <span className="label-text text-xs font-medium text-base-content/80">第二个值选择已有 benchmark</span>
+                <ExistingBenchmarkSelect
+                  ariaLabel="第二个值选择已有 benchmark"
+                  benchmarks={sortedBenchmarks}
+                  value={draft.secondBenchmarkId}
+                  onChange={(benchmark) => updateDraft(benchmark
+                    ? {
+                        secondBenchmarkId: benchmark.id,
+                        secondName: benchmark.benchmarkName,
+                        secondType: benchmark.benchmarkType
+                      }
+                    : { secondBenchmarkId: null })}
+                />
+              </label>
+              <label className="form-control flex flex-col gap-1.5 w-full">
                 <span className="label-text text-xs font-medium text-base-content/80">第一个值的 benchmark 名称</span>
                 <input
                   type="text"
@@ -191,7 +391,7 @@ export function RecordsSplitDualDialog({
                   placeholder="第一个指标名称"
                   value={draft.firstName}
                   disabled={keepFirstInPlace}
-                  onChange={(event) => updateDraft({ firstName: event.target.value })}
+                  onChange={(event) => updateDraft({ firstBenchmarkId: null, firstName: event.target.value })}
                 />
               </label>
               <label className="form-control flex flex-col gap-1.5 w-full">
@@ -203,7 +403,7 @@ export function RecordsSplitDualDialog({
                   placeholder="第一个指标类别"
                   value={draft.firstType}
                   disabled={keepFirstInPlace}
-                  onChange={(event) => updateDraft({ firstType: event.target.value })}
+                  onChange={(event) => updateDraft({ firstBenchmarkId: null, firstType: event.target.value })}
                 />
               </label>
               <label className="form-control flex flex-col gap-1.5 w-full">
@@ -214,7 +414,7 @@ export function RecordsSplitDualDialog({
                   aria-label="第二个值的 benchmark 名称"
                   placeholder="第二个指标名称"
                   value={draft.secondName}
-                  onChange={(event) => updateDraft({ secondName: event.target.value })}
+                  onChange={(event) => updateDraft({ secondBenchmarkId: null, secondName: event.target.value })}
                 />
               </label>
               <label className="form-control flex flex-col gap-1.5 w-full">
@@ -225,7 +425,7 @@ export function RecordsSplitDualDialog({
                   aria-label="第二个值的 type"
                   placeholder="第二个指标类别"
                   value={draft.secondType}
-                  onChange={(event) => updateDraft({ secondType: event.target.value })}
+                  onChange={(event) => updateDraft({ secondBenchmarkId: null, secondType: event.target.value })}
                 />
               </label>
             </div>
@@ -258,6 +458,14 @@ export function RecordsSplitDualDialog({
           </button>
         </div>
       </div>
+      {hoveredDetails && typeof document !== "undefined" ? (
+        <DualValueDetailsPopover
+          candidate={hoveredDetails.candidate}
+          anchor={hoveredDetails.anchor}
+          onMouseEnter={cancelHideDetails}
+          onMouseLeave={scheduleHideDetails}
+        />
+      ) : null}
     </div>
   );
 }

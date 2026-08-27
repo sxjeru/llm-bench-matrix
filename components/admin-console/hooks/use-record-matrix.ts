@@ -124,7 +124,10 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
 
   const isDraggingRef = useRef(false);
   const selectionRef = useRef<MatrixSelectionRange | null>(null);
-  selectionRef.current = selection;
+
+  useEffect(() => {
+    selectionRef.current = selection;
+  }, [selection]);
 
   const models = useMemo(() => matrix?.models ?? [], [matrix]);
   const benchmarks = useMemo(() => matrix?.benchmarks ?? [], [matrix]);
@@ -559,7 +562,7 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
   async function runSplitDualValues(input: {
     benchmarkId: number;
     first: { benchmarkId?: number; benchmarkName?: string; benchmarkType?: string };
-    second: { benchmarkName: string; benchmarkType?: string };
+    second: { benchmarkId?: number; benchmarkName?: string; benchmarkType?: string };
   }) {
     if (toolBusy) return;
 

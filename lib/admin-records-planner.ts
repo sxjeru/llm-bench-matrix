@@ -308,8 +308,21 @@ export function planDualValueSplit(
   let skipped = 0;
 
   records.forEach((record) => {
-    if (record.valueNum === null || record.valueNum2 === null) {
+    if (record.valueNum2 === null) {
       skipped += 1;
+      return;
+    }
+
+    // `-- / 88` 这类半空双值没有可写入第一个 benchmark 的值，直接把原记录
+    // 移到第二个 benchmark，避免向第一个目标写入伪造的空记录。
+    if (record.valueNum === null) {
+      updates.push({
+        recordId: record.id,
+        benchmarkId: input.secondBenchmarkId,
+        valueRaw: formatRecordNumericValue(record.valueNum2),
+        valueNum: record.valueNum2,
+        valueNote: appendRecordNote(record.valueNote, RECORD_SPLIT_DUAL_NOTE_SECOND)
+      });
       return;
     }
 

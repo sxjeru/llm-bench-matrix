@@ -212,6 +212,16 @@ export type RecordDualValueCandidate = {
   dualValueCount: number;
   totalCount: number;
   sampleValues: string[];
+  valueDetails: Array<{
+    recordId: number;
+    valueRaw: string;
+    valueNum: number | null;
+    valueNum2: number | null;
+    modelName: string;
+    source: string | null;
+    valueNote: string | null;
+    benchTime: string;
+  }>;
 };
 
 export type RecordBatchSaveResult = {
