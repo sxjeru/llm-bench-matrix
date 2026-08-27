@@ -377,6 +377,21 @@ function normalizeStoredBenchmarkValue(benchmarkName: string, parsed: ParsedBenc
   };
 }
 
+/**
+ * 单条数值的统一入库口径：先按导入规则解析 raw，再套上 benchmark 级别的特殊归一化
+ * （目前只有 OmniDocBench 1.5 的「越低越好 → 1-x/100」）。
+ *
+ * 后台「数据管理」的单元格编辑复用它，保证手改的值和导入进来的值口径一致。
+ */
+export function normalizeBenchmarkValueForStorage(
+  benchmarkName: string | null | undefined,
+  rawValue: string
+): ParsedBenchmarkValue {
+  const parsed = parseBenchmarkValue(rawValue);
+  const cleanName = benchmarkName?.trim();
+  return cleanName ? normalizeStoredBenchmarkValue(cleanName, parsed) : parsed;
+}
+
 function normalizeImportedValueRaw(rawInput: string): string {
   return rawInput.replace(/[％%]/g, "").replace(/[∗﹡✱✳✻]/g, "*").trim();
 }
@@ -2139,7 +2154,7 @@ function shouldFallbackToDefaultModelDedupeRule(error: unknown): boolean {
   return fallbackHints.some((hint) => error.message.includes(hint));
 }
 
-async function getModelDedupeRule() {
+export async function getModelDedupeRule() {
   try {
     const [setting] = await db
       .select({ valueJson: settings.valueJson })

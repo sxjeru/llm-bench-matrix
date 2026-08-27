@@ -98,6 +98,7 @@ import {
   type ModelParamsStatusFilter
 } from "./admin-console/views/params-tab";
 import { RenameTab } from "./admin-console/views/rename-tab";
+import { RecordsTab } from "./admin-console/views/records-tab";
 import { SettingsTab } from "./admin-console/views/settings-tab";
 import { AdminConsoleTabNav } from "./admin-console/views/tab-nav";
 
@@ -3448,6 +3449,17 @@ export function AdminConsole({
             onDeleteMergedRecord={onDeleteMergedRecord}
             modelEntityOptions={modelEntityOptions}
             benchmarkEntityOptions={benchmarkEntityOptions}
+          />
+        ) : null}
+
+        {activeTab === "records" ? (
+          <RecordsTab
+            providers={providers}
+            models={models}
+            benchmarks={benchmarks}
+            sourceOptions={sourceOptions}
+            notifySuccess={notifySuccess}
+            notifyError={notifyError}
           />
         ) : null}
 

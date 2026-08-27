@@ -109,8 +109,127 @@ export type TabKey =
   | "params"
   | "rename"
   | "merge"
+  | "records"
   | "maintenance"
   | "settings";
+
+// --- 数据管理（草稿式矩阵编辑） ---
+
+export type RecordSourceMode = "all" | "specific" | "empty";
+
+export type RecordConflictStrategy = "skip" | "overwrite" | "keep-both";
+
+export type AdminRecordMatrixModel = {
+  modelId: number;
+  modelName: string;
+  providerId: number;
+  providerName: string;
+  providerDisplayName: string;
+  recordCount: number;
+};
+
+export type AdminRecordMatrixBenchmark = {
+  benchmarkId: number;
+  benchmarkName: string;
+  benchmarkType: string;
+  unit: string;
+  higherIsBetter: boolean;
+  modalities: string[];
+  recordCount: number;
+};
+
+export type AdminRecordCell = {
+  modelId: number;
+  benchmarkId: number;
+  /** 单元格主记录（benchTime 最新的一条），编辑写在这条上 */
+  recordId: number;
+  /** 该单元格在当前筛选范围内的全部记录 id，清空时一并删除 */
+  recordIds: number[];
+  recordCount: number;
+  valueRaw: string;
+  valueNum: number | null;
+  valueNum2: number | null;
+  valueNote: string | null;
+  source: string | null;
+  benchTime: string;
+};
+
+export type AdminRecordMatrix = {
+  generatedAt: string;
+  models: AdminRecordMatrixModel[];
+  benchmarks: AdminRecordMatrixBenchmark[];
+  cells: AdminRecordCell[];
+  totalRecordCount: number;
+  visibleRecordCount: number;
+  modelTotalCount: number;
+  benchmarkTotalCount: number;
+  truncated: { models: boolean; benchmarks: boolean };
+  limits: { modelLimit: number; benchmarkLimit: number };
+};
+
+/** 单元格未保存改动。`nextValueRaw` 为空串表示待清空 */
+export type CellDraft = {
+  modelId: number;
+  benchmarkId: number;
+  recordId: number | null;
+  recordIds: number[];
+  originalValueRaw: string;
+  nextValueRaw: string;
+  source: string | null;
+};
+
+export type MatrixSelectionRange = {
+  startRow: number;
+  startCol: number;
+  endRow: number;
+  endCol: number;
+};
+
+export type RecordFilterState = {
+  sourceMode: RecordSourceMode;
+  source: string | null;
+  modelIds: number[];
+  benchmarkIds: number[];
+  search: string;
+};
+
+export type RecordDualValueCandidate = {
+  benchmarkId: number;
+  benchmarkName: string;
+  benchmarkType: string;
+  dualValueCount: number;
+  totalCount: number;
+  sampleValues: string[];
+};
+
+export type RecordBatchSaveResult = {
+  ok: true;
+  inserted: number;
+  updated: number;
+  deleted: number;
+  unchanged: number;
+  ignoredEmpty: number;
+  nonNumeric: Array<{ modelId: number; benchmarkId: number; valueRaw: string }>;
+  prunedSourceMeta: number;
+};
+
+export type RecordReassignResult = {
+  ok: true;
+  entityType: "benchmark" | "model" | "source";
+  movedCount: number;
+  skippedCount: number;
+  deletedTargetCount: number;
+  conflictCount: number;
+  createdTarget: boolean;
+  fromLabel: string;
+  targetLabel: string;
+};
+
+/** 归属变更弹窗当前编辑的对象 */
+export type RecordReassignTarget =
+  | { entityType: "benchmark"; benchmarkId: number; label: string; benchmarkType: string }
+  | { entityType: "model"; modelId: number; label: string; providerName: string }
+  | { entityType: "source"; source: string | null; label: string };
 
 // --- 外部数据源导入（artificialanalysis.ai） ---
 
