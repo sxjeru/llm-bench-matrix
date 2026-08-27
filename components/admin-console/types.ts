@@ -103,17 +103,17 @@ export type ModelDedupeRule = {
 
 export type TabKey =
   | "import"
+  | "records"
   | "external"
   | "providers"
   | "pricing"
   | "params"
   | "rename"
   | "merge"
-  | "records"
   | "maintenance"
   | "settings";
 
-// --- 数据管理（草稿式矩阵编辑） ---
+// --- 矩阵编辑（草稿式矩阵编辑） ---
 
 export type RecordSourceMode = "all" | "specific" | "empty";
 

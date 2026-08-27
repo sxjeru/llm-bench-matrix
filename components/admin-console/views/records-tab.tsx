@@ -105,6 +105,7 @@ export function RecordsTab({
     pendingDeleteCount,
     canCreateCells,
     loading,
+    hasLoaded,
     saving,
     toolBusy,
     selection,
@@ -120,7 +121,6 @@ export function RecordsTab({
     saveDrafts,
     discardDrafts,
     loadMatrix,
-    loadMatrixOnce,
     mutationScope,
     deleteConfirmOpen,
     setDeleteConfirmOpen,
@@ -137,11 +137,6 @@ export function RecordsTab({
     openReassignDialog,
     runReassign
   } = controller;
-
-  useEffect(() => {
-    loadMatrixOnce();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const selectionCount = getSelectionCellCount(selection);
   const unfilteredScope =
@@ -164,7 +159,7 @@ export function RecordsTab({
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <h3 className="flex items-center gap-2 text-lg font-semibold">
           <Database size={18} />
-          数据管理
+          矩阵编辑
         </h3>
         <p className="text-xs opacity-70">
           单击格子改值，按住拖拽可框选多格，Backspace / Delete 批量清空，Esc 取消选区。
@@ -213,6 +208,7 @@ export function RecordsTab({
           selection={selection}
           editingCell={editingCell}
           loading={loading}
+          hasLoaded={hasLoaded}
           onCellMouseDown={onCellMouseDown}
           onCellMouseEnter={onCellMouseEnter}
           onCommitCellValue={commitCellValue}

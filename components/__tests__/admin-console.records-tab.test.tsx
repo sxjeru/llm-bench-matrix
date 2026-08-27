@@ -143,7 +143,13 @@ function recordsCalls(fetchMock: ReturnType<typeof vi.fn>) {
 }
 
 async function openRecordsTab(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("tab", { name: "数据管理" }));
+  await user.click(screen.getByRole("tab", { name: "矩阵编辑" }));
+}
+
+async function openRecordsTabAndFilter(user: ReturnType<typeof userEvent.setup>, sourceName = "全部 source") {
+  await openRecordsTab(user);
+  await user.click(screen.getByLabelText("Source 筛选"));
+  await user.click(screen.getByRole("button", { name: sourceName }));
 }
 
 async function enterCellEdit(cell: HTMLElement) {
@@ -158,7 +164,7 @@ function commitCellEditor(editor: HTMLElement, value: string) {
 }
 
 describe("AdminConsole records tab", () => {
-  test("切换到数据管理会加载矩阵", async () => {
+  test("切换到矩阵编辑不会自动加载，选择筛选规则后才会加载矩阵", async () => {
     const fetchMock = mockFetchSequence(emptyMatrix);
     const user = userEvent.setup();
 
@@ -166,12 +172,17 @@ describe("AdminConsole records tab", () => {
 
     await openRecordsTab(user);
 
+    expect(recordsCalls(fetchMock).length).toBe(0);
+    expect(screen.getByRole("heading", { name: "矩阵编辑" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "矩阵编辑" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("请先在上方选择筛选条件以加载数据矩阵")).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Source 筛选"));
+    await user.click(screen.getByRole("button", { name: "全部 source" }));
+
     await waitFor(() => {
       expect(recordsCalls(fetchMock).length).toBeGreaterThan(0);
     });
-
-    expect(screen.getByRole("heading", { name: "数据管理" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "数据管理" })).toHaveAttribute("aria-selected", "true");
   });
 
   test("编辑已有单元格后保存会提交草稿 payload", async () => {
@@ -179,7 +190,7 @@ describe("AdminConsole records tab", () => {
     const user = userEvent.setup();
 
     await renderReady(<AdminConsole {...buildProps()} />);
-    await openRecordsTab(user);
+    await openRecordsTabAndFilter(user);
 
     const cell = await screen.findByTestId("record-cell-1-11");
     expect(cell).toHaveTextContent("77");
@@ -223,7 +234,7 @@ describe("AdminConsole records tab", () => {
     const user = userEvent.setup();
 
     await renderReady(<AdminConsole {...buildProps()} />);
-    await openRecordsTab(user);
+    await openRecordsTabAndFilter(user, "全部 source");
 
     const cell = await screen.findByTestId("record-cell-1-11");
     expect(screen.getByText(/当前是「全部 source」视图/)).toBeInTheDocument();
@@ -258,7 +269,7 @@ describe("AdminConsole records tab", () => {
     const user = userEvent.setup();
 
     await renderReady(<AdminConsole {...buildProps()} />);
-    await openRecordsTab(user);
+    await openRecordsTabAndFilter(user);
 
     const cell = await screen.findByTestId("record-cell-1-11");
     fireEvent.mouseDown(cell);
@@ -277,7 +288,7 @@ describe("AdminConsole records tab", () => {
     const user = userEvent.setup();
 
     await renderReady(<AdminConsole {...buildProps()} />);
-    await openRecordsTab(user);
+    await openRecordsTabAndFilter(user);
 
     await screen.findByTestId("record-cell-1-11");
     await user.click(screen.getByRole("button", { name: "全部删除" }));
@@ -314,7 +325,7 @@ describe("AdminConsole records tab", () => {
     const user = userEvent.setup();
 
     await renderReady(<AdminConsole {...buildProps()} />);
-    await openRecordsTab(user);
+    await openRecordsTabAndFilter(user);
 
     const cell = await screen.findByTestId("record-cell-1-11");
     fireEvent.mouseDown(cell);
@@ -362,7 +373,7 @@ describe("AdminConsole records tab", () => {
     const user = userEvent.setup();
 
     await renderReady(<AdminConsole {...buildProps()} />);
-    await openRecordsTab(user);
+    await openRecordsTabAndFilter(user);
 
     await screen.findByTestId("record-cell-1-11");
     await user.click(screen.getByRole("button", { name: "归一化为 1" }));
@@ -421,7 +432,7 @@ describe("AdminConsole records tab", () => {
     const user = userEvent.setup();
 
     await renderReady(<AdminConsole {...buildProps()} />);
-    await openRecordsTab(user);
+    await openRecordsTabAndFilter(user);
 
     await screen.findByTestId("record-cell-1-11");
     await user.click(screen.getByRole("button", { name: "分拆双值" }));
@@ -479,7 +490,7 @@ describe("AdminConsole records tab", () => {
     ];
 
     await renderReady(<AdminConsole {...props} />);
-    await openRecordsTab(user);
+    await openRecordsTabAndFilter(user);
 
     await screen.findByTestId("record-cell-1-11");
     await user.click(screen.getByTitle("点击变更「Bench-1」这一列的归属"));

@@ -21,6 +21,7 @@ type RecordsMatrixGridProps = {
   selection: MatrixSelectionRange | null;
   editingCell: RecordEditingCell | null;
   loading: boolean;
+  hasLoaded: boolean;
   onCellMouseDown: (row: number, col: number, event: { shiftKey?: boolean }) => void;
   onCellMouseEnter: (row: number, col: number) => void;
   onCommitCellValue: (modelId: number, benchmarkId: number, valueRaw: string) => void;
@@ -109,6 +110,7 @@ export function RecordsMatrixGrid({
   selection,
   editingCell,
   loading,
+  hasLoaded,
   onCellMouseDown,
   onCellMouseEnter,
   onCommitCellValue,
@@ -119,6 +121,15 @@ export function RecordsMatrixGrid({
     return (
       <div className="rounded-2xl border border-base-300/70 bg-base-200/40 px-4 py-10 text-center text-sm opacity-70">
         正在加载数据矩阵...
+      </div>
+    );
+  }
+
+  if (!hasLoaded) {
+    return (
+      <div className="rounded-2xl border border-base-300/70 bg-base-200/40 px-4 py-12 text-center text-sm">
+        <p className="font-medium opacity-80">请先在上方选择筛选条件以加载数据矩阵</p>
+        <p className="mt-1 text-xs opacity-60">支持按 Source、模型、指标或关键字进行筛选</p>
       </div>
     );
   }

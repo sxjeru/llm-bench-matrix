@@ -32,6 +32,15 @@ export function AdminConsoleTabNav({ activeTab, onTabChange }: AdminConsoleTabNa
       <button
         type="button"
         role="tab"
+        aria-selected={activeTab === "records"}
+        className={tabClass("records")}
+        onClick={() => onTabChange("records")}
+      >
+        矩阵编辑
+      </button>
+      <button
+        type="button"
+        role="tab"
         aria-selected={activeTab === "external"}
         className={tabClass("external")}
         onClick={() => onTabChange("external")}
@@ -82,15 +91,6 @@ export function AdminConsoleTabNav({ activeTab, onTabChange }: AdminConsoleTabNa
         onClick={() => onTabChange("merge")}
       >
         实体去重
-      </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={activeTab === "records"}
-        className={tabClass("records")}
-        onClick={() => onTabChange("records")}
-      >
-        数据管理
       </button>
       <button
         type="button"

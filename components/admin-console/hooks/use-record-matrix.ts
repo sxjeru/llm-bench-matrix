@@ -168,10 +168,7 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     const next = updater(filters);
     setDrafts({});
     setFilters(next);
-
-    if (hasLoaded) {
-      void loadMatrix(next);
-    }
+    void loadMatrix(next);
   }
 
   // --- 选区与编辑 ---
