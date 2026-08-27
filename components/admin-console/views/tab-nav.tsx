@@ -32,6 +32,15 @@ export function AdminConsoleTabNav({ activeTab, onTabChange }: AdminConsoleTabNa
       <button
         type="button"
         role="tab"
+        aria-selected={activeTab === "records"}
+        className={tabClass("records")}
+        onClick={() => onTabChange("records")}
+      >
+        矩阵编辑
+      </button>
+      <button
+        type="button"
+        role="tab"
         aria-selected={activeTab === "external"}
         className={tabClass("external")}
         onClick={() => onTabChange("external")}
