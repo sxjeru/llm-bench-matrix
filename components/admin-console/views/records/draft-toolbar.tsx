@@ -11,6 +11,7 @@ import {
   Wand2
 } from "lucide-react";
 import type { AdminRecordMatrix, RecordFilterState } from "../../types";
+import { sourceTabDisplayLabel } from "@/lib/source-utils";
 
 type RecordsDraftToolbarProps = {
   matrix: AdminRecordMatrix | null;
@@ -62,7 +63,7 @@ export function RecordsDraftToolbar({
       ? "全部 source"
       : filters.sourceMode === "empty"
         ? "无 source"
-        : `source=${filters.source ?? ""}`,
+        : `source=${sourceTabDisplayLabel(filters.source ?? "")}`,
     filters.modelIds.length > 0 ? `${filters.modelIds.length} 个模型` : "全部模型",
     filters.benchmarkIds.length > 0 ? `${filters.benchmarkIds.length} 个指标` : "全部指标"
   ];

@@ -254,7 +254,7 @@ describe("AdminConsole records tab", () => {
     expect(screen.getByRole("button", { name: "保存更改" })).toBeDisabled();
 
     await user.click(screen.getByLabelText("Source 筛选"));
-    await user.click(screen.getByRole("button", { name: "text:sample" }));
+    await user.click(screen.getByRole("button", { name: "sample" }));
 
     await waitFor(() => {
       expect(recordsCalls(fetchMock).length).toBeGreaterThan(1);
@@ -501,8 +501,8 @@ describe("AdminConsole records tab", () => {
 
     expect(await screen.findByText("变更行归属：Bench-1")).toBeInTheDocument();
 
-    const select = screen.getByLabelText("目标 benchmark");
-    fireEvent.change(select, { target: { value: "12" } });
+    await user.click(screen.getByLabelText("目标 benchmark"));
+    await user.click(screen.getByRole("option", { name: "Bench-2 (Type-A)" }));
 
     await user.click(screen.getByRole("button", { name: "确认变更归属" }));
 
@@ -553,7 +553,7 @@ describe("AdminConsole records tab", () => {
     await user.click(screen.getByLabelText("模型筛选"));
 
     await user.click(screen.getByLabelText("Source 筛选"));
-    await user.click(screen.getByRole("button", { name: "text:sample" }));
+    await user.click(screen.getByRole("button", { name: "sample" }));
 
     await waitFor(() => {
       expect(recordsCalls(fetchMock).length).toBeGreaterThan(0);
@@ -594,7 +594,7 @@ describe("AdminConsole records tab", () => {
     });
 
     await user.click(screen.getByLabelText("Source 筛选"));
-    await user.click(screen.getByRole("button", { name: "text:sample" }));
+    await user.click(screen.getByRole("button", { name: "sample" }));
 
     await waitFor(() => {
       const recordGets = fetchMock.mock.calls.filter(([url, init]) =>

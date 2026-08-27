@@ -10,6 +10,7 @@ import { RecordsFiltersBar } from "./records/filters-bar";
 import { RecordsMatrixGrid } from "./records/matrix-grid";
 import { RecordsReassignDialog } from "./records/reassign-dialog";
 import { RecordsSplitDualDialog } from "./records/split-dual-dialog";
+import { sourceTabDisplayLabel } from "@/lib/source-utils";
 
 type RecordsTabProps = {
   providers: ProviderOption[];
@@ -39,40 +40,57 @@ function DeleteScopeConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 z-[170] flex items-center justify-center bg-black/45 p-4"
+      className="fixed inset-0 z-[170] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
       onClick={(event) => {
         if (event.target === event.currentTarget && !busy) onClose();
       }}
     >
-      <div className="w-full max-w-lg rounded-2xl border border-error/50 bg-base-100/95 p-6 shadow-2xl backdrop-blur">
-        <h3 className="flex items-center gap-2 text-lg font-bold text-error">
-          <Trash2 size={17} />
-          删除当前筛选范围内的全部数据
-        </h3>
-        <p className="mt-2 text-sm opacity-80">
-          将删除约 <span className="font-semibold">{recordCount}</span> 条记录，操作不可撤销。
+      <div className="flex w-full max-w-lg max-h-[90vh] flex-col overflow-hidden rounded-2xl border border-error/40 bg-base-100 p-6 shadow-2xl">
+        <div className="flex items-start justify-between gap-3 pb-3 border-b border-base-300/70">
+          <h3 className="flex min-w-0 items-center gap-2 text-lg font-bold text-error">
+            <Trash2 size={18} className="shrink-0" />
+            <span className="min-w-0 break-words">删除当前筛选范围内的全部数据</span>
+          </h3>
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs btn-circle shrink-0 text-base-content/60 hover:text-base-content"
+            onClick={onClose}
+            aria-label="关闭弹窗"
+            disabled={busy}
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
+        <p className="mt-3.5 text-sm text-base-content/90">
+          将删除约 <span className="font-semibold text-error">{recordCount}</span> 条记录，操作不可撤销。
         </p>
-        <p className="mt-1 text-xs opacity-70">作用范围：{scopeDescription}</p>
+        <div className="mt-2 rounded-xl border border-base-300/70 bg-base-200/40 px-3.5 py-2.5 text-xs text-base-content/70">
+          <span className="opacity-70">作用范围：</span>
+          <span>{scopeDescription}</span>
+        </div>
 
         {unfiltered ? (
-          <label className="mt-4 flex cursor-pointer items-start gap-2 rounded-xl border border-error/40 bg-error/10 px-3 py-2 text-sm">
+          <label className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-xl border border-error/40 bg-error/10 p-3 text-sm text-base-content/90">
             <input
               type="checkbox"
-              className="checkbox checkbox-sm mt-0.5"
+              className="checkbox checkbox-error checkbox-sm mt-0.5"
               checked={acknowledged}
               onChange={(event) => setAcknowledged(event.target.checked)}
             />
             <span>当前没有任何筛选条件，这会清空 benchmark_values 全表。我确认要这么做。</span>
           </label>
         ) : null}
+        </div>
 
-        <div className="mt-5 flex justify-end gap-2">
-          <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={onClose}>
+        <div className="mt-6 flex items-center justify-end gap-2.5 pt-3 border-t border-base-300/60">
+          <button type="button" className="btn btn-ghost btn-sm rounded-xl" disabled={busy} onClick={onClose}>
             取消
           </button>
           <button
             type="button"
-            className="btn btn-error btn-sm"
+            className="btn btn-error btn-sm rounded-xl font-semibold px-4"
             disabled={busy || (unfiltered && !acknowledged)}
             onClick={() => onConfirm(unfiltered)}
           >
@@ -151,7 +169,7 @@ export function RecordsTab({
       ? "全部 source"
       : filters.sourceMode === "empty"
         ? "无 source"
-        : `source=${filters.source ?? ""}`,
+        : `source=${sourceTabDisplayLabel(filters.source ?? "")}`,
     mutationScope.modelIds.length > 0 ? `${mutationScope.modelIds.length} 个模型` : "全部模型",
     mutationScope.benchmarkIds.length > 0 ? `${mutationScope.benchmarkIds.length} 个指标` : "全部指标"
   ].join(" · ");

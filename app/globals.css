@@ -534,7 +534,7 @@ select optgroup {
   color: var(--text);
 }
 
-input:not(.input):not(.file-input):not(.checkbox):not(.toggle),
+input:not(.input):not(.file-input):not(.checkbox):not(.toggle):not(.radio),
 select:not(.select),
 textarea:not(.textarea),
 button:not(.btn):not(.tab):not(.ranking-popover-button):not(.scatter-btn):not(.admin-upstream-combobox-clear):not(.link):not(.input) {

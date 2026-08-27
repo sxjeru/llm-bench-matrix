@@ -12,6 +12,7 @@ import type {
 } from "../../types";
 import { getCellKey, isCellInSelection, isPendingDeleteDraft } from "../../utils/record-drafts";
 import type { RecordEditingCell } from "../../hooks/use-record-matrix";
+import { sourceTabDisplayLabel } from "@/lib/source-utils";
 
 type RecordsMatrixGridProps = {
   models: AdminRecordMatrixModel[];
@@ -43,7 +44,7 @@ function buildCellTooltip(cell: AdminRecordCell | undefined, draft: CellDraft | 
   }
 
   if (cell) {
-    lines.push(`source：${cell.source ?? "（空）"}`);
+    lines.push(`source：${cell.source ? sourceTabDisplayLabel(cell.source) : "（空）"}`);
     lines.push(`benchTime：${new Date(cell.benchTime).toLocaleString("zh-CN", { hour12: false })}`);
     if (cell.valueNote) lines.push(`note：${cell.valueNote}`);
     if (cell.recordCount > 1) lines.push(`该单元格含 ${cell.recordCount} 条记录，清空会一并删除`);
@@ -73,7 +74,7 @@ function CellEditor({
     <input
       ref={inputRef}
       type="text"
-      className="input input-xs w-full min-w-[70px] bg-base-100 text-center font-mono"
+      className="input input-xs w-full min-w-[70px] bg-base-100 text-center font-mono rounded border-primary ring-1 ring-primary/60 focus:outline-none"
       aria-label="单元格数值"
       defaultValue={initialValue}
       onKeyDown={(event) => {
@@ -143,7 +144,10 @@ export function RecordsMatrixGrid({
   }
 
   return (
-    <div className="overflow-auto rounded-2xl border border-base-300" style={{ maxHeight: "68vh" }}>
+    <div
+      className="overflow-auto rounded-2xl border border-base-300 shadow-inner"
+      style={{ maxHeight: "85vh", minHeight: "560px" }}
+    >
       <table className="table table-xs select-none border-separate border-spacing-0">
         <thead>
           <tr>
@@ -157,7 +161,7 @@ export function RecordsMatrixGrid({
               >
                 <button
                   type="button"
-                  className="link link-hover flex max-w-[160px] items-center gap-1 text-left text-xs font-semibold text-base-content hover:text-primary"
+                  className="link link-hover group flex max-w-[160px] items-center gap-1 text-left text-xs font-semibold text-base-content hover:text-primary transition-colors"
                   title={`点击变更「${model.modelName}」这一列的归属`}
                   onClick={() =>
                     onOpenReassign({
@@ -168,7 +172,7 @@ export function RecordsMatrixGrid({
                     })
                   }
                 >
-                  <Link2 size={11} className="shrink-0 opacity-60" aria-hidden="true" />
+                  <Link2 size={11} className="shrink-0 opacity-60 group-hover:opacity-100 group-hover:text-primary transition-opacity" aria-hidden="true" />
                   <span className="truncate">{model.modelName}</span>
                 </button>
                 <div className="mt-0.5 flex items-center gap-1 text-[10px] font-normal opacity-60">
@@ -185,7 +189,7 @@ export function RecordsMatrixGrid({
               <th className="sticky left-0 z-10 min-w-[200px] border-b border-r border-base-300 bg-base-100 p-2 text-left font-normal">
                 <button
                   type="button"
-                  className="link link-hover flex max-w-[220px] items-center gap-1 text-left text-xs font-semibold text-base-content hover:text-primary"
+                  className="link link-hover group flex max-w-[220px] items-center gap-1 text-left text-xs font-semibold text-base-content hover:text-primary transition-colors"
                   title={`点击变更「${benchmark.benchmarkName}」这一行的归属`}
                   onClick={() =>
                     onOpenReassign({
@@ -196,7 +200,7 @@ export function RecordsMatrixGrid({
                     })
                   }
                 >
-                  <Link2 size={11} className="shrink-0 opacity-60" aria-hidden="true" />
+                  <Link2 size={11} className="shrink-0 opacity-60 group-hover:opacity-100 group-hover:text-primary transition-opacity" aria-hidden="true" />
                   <span className="truncate">{benchmark.benchmarkName}</span>
                 </button>
                 <div className="mt-0.5 flex items-center gap-1 text-[10px] font-normal opacity-60">

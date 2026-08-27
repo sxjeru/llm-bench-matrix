@@ -9,6 +9,7 @@ import type {
   RecordFilterState
 } from "../../types";
 import { getProviderDisplayNameById } from "../../utils/provider";
+import { sourceTabDisplayLabel } from "@/lib/source-utils";
 
 export type RecordFilterOption = {
   id: number;
@@ -264,16 +265,20 @@ export function RecordsFiltersBar({
   );
 
   const normalizedSourceQuery = sourceQuery.trim().toLowerCase();
-  const filteredSourceOptions = sourceOptions.filter((source) =>
-    !normalizedSourceQuery ? true : source.toLowerCase().includes(normalizedSourceQuery)
-  );
+  const filteredSourceOptions = sourceOptions.filter((source) => {
+    if (!normalizedSourceQuery) return true;
+    return (
+      source.toLowerCase().includes(normalizedSourceQuery)
+      || sourceTabDisplayLabel(source).toLowerCase().includes(normalizedSourceQuery)
+    );
+  });
 
   const sourceSummary =
     filters.sourceMode === "all"
       ? "全部 source"
       : filters.sourceMode === "empty"
         ? "无 source"
-        : filters.source ?? "全部 source";
+        : sourceTabDisplayLabel(filters.source ?? "") || "全部 source";
 
   function pickSource(mode: RecordFilterState["sourceMode"], source: string | null) {
     onFiltersChange((prev) => ({ ...prev, sourceMode: mode, source }));
@@ -328,21 +333,25 @@ export function RecordsFiltersBar({
                   {filters.sourceMode === "empty" ? <Check size={13} className="text-primary" /> : <span className="w-[13px]" />}
                   无 source
                 </button>
-                {filteredSourceOptions.map((source) => (
-                  <button
-                    key={`source-${source}`}
-                    type="button"
-                    className="btn btn-ghost btn-sm h-auto min-h-0 w-full justify-start gap-2 px-2 py-1.5 font-normal"
-                    onClick={() => pickSource("specific", source)}
-                  >
-                    {filters.sourceMode === "specific" && filters.source === source ? (
-                      <Check size={13} className="text-primary" />
-                    ) : (
-                      <span className="w-[13px]" />
-                    )}
-                    <span className="truncate">{source}</span>
-                  </button>
-                ))}
+                {filteredSourceOptions.map((source) => {
+                  const displayLabel = sourceTabDisplayLabel(source);
+                  return (
+                    <button
+                      key={`source-${source}`}
+                      type="button"
+                      className="btn btn-ghost btn-sm h-auto min-h-0 w-full justify-start gap-2 px-2 py-1.5 font-normal"
+                      title={source !== displayLabel ? `${source}` : undefined}
+                      onClick={() => pickSource("specific", source)}
+                    >
+                      {filters.sourceMode === "specific" && filters.source === source ? (
+                        <Check size={13} className="text-primary" />
+                      ) : (
+                        <span className="w-[13px]" />
+                      )}
+                      <span className="truncate">{displayLabel}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           ) : null}
