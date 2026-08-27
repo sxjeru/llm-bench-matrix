@@ -57,6 +57,7 @@ import {
   getSourceLabel,
   getSourceValueEntry,
   hasMeaningfulMatrixRawValue,
+  isAaSecondaryCategory,
   isArtificialAnalysisSource,
   normalizeMatchToken,
   normalizeModalityList,
@@ -65,13 +66,6 @@ import {
   resolveMatrixCellAggregateModeFromEntries
 } from "./utils";
 import type { SourceValueMode } from "./utils";
-
-/** AA 默认排序里沉底的分类：能力评测优先，性能与成本放后 */
-const AA_SECONDARY_CATEGORY_SET = new Set(["cost", "performance"]);
-
-function isAaSecondaryCategory(category: string): boolean {
-  return category.split(" / ").some((part) => AA_SECONDARY_CATEGORY_SET.has(part.trim().toLowerCase()));
-}
 
 export type SourceOption = { key: string; label: string };
 

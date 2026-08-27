@@ -9,12 +9,26 @@ import {
   normalizeModalityList as normalizeModalityListShared,
   normalizeModalityName
 } from "@/lib/modality";
+import {
+  getSourceKey,
+  getSourceLabel,
+  isAaSecondaryCategory,
+  isArtificialAnalysisSource,
+  sourceTabDisplayLabel
+} from "@/lib/source-utils";
 import type { CompareDirection, MatrixCellEntry, MatrixInputRow } from "./types";
-import { SOURCE_ALL, SOURCE_EMPTY } from "./constants";
+import { SOURCE_ALL } from "./constants";
 import { blendColor } from "./colors";
 import { getMatrixCellDisplayValue, hasMatrixCellPairRawValue } from "./scoring";
 
 export { normalizeModalityName };
+export {
+  getSourceKey,
+  getSourceLabel,
+  isAaSecondaryCategory,
+  isArtificialAnalysisSource,
+  sourceTabDisplayLabel
+};
 
 type SourceValueDisplayItem = {
   displayValue: string;
@@ -131,29 +145,6 @@ export type SourceValueMode = "latest" | "max";
 
 function isPairMatrixCellEntry(entry: MatrixCellEntry): boolean {
   return entry.valueNum2 !== null || hasMatrixCellPairRawValue(entry.valueRaw);
-}
-
-const ARTIFICIAL_ANALYSIS_SOURCE_CACHE_LIMIT = 4096;
-const artificialAnalysisSourceCache = new Map<string, boolean>();
-
-/** 按记录/页签的 source 识别 Artificial Analysis，不依赖当前打开的是哪个页签 */
-export function isArtificialAnalysisSource(source: string | null | undefined): boolean {
-  if (!source) return false;
-
-  const cached = artificialAnalysisSourceCache.get(source);
-  if (cached !== undefined) return cached;
-
-  const sourceKey = source.trim().toLowerCase();
-  const result =
-    sourceKey === "artificial analysis"
-    || sourceKey === "text:artificial analysis"
-    || sourceTabDisplayLabel(source).trim().toLowerCase() === "artificial analysis";
-
-  if (artificialAnalysisSourceCache.size >= ARTIFICIAL_ANALYSIS_SOURCE_CACHE_LIMIT) {
-    artificialAnalysisSourceCache.clear();
-  }
-  artificialAnalysisSourceCache.set(source, result);
-  return result;
 }
 
 export function resolveMatrixCellAggregateMode(source: string | null | undefined): MatrixCellAggregateMode {
@@ -378,26 +369,6 @@ export function parseTimestampMs(value?: string | null): number | null {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
-export function getSourceKey(source: string | null | undefined): string {
-  const cleaned = source?.trim();
-  return cleaned ? cleaned : SOURCE_EMPTY;
-}
-
-export function getSourceLabel(sourceKey: string): string {
-  if (sourceKey === SOURCE_EMPTY) {
-    return "未标注";
-  }
-  return sourceKey;
-}
-
-export function sourceTabDisplayLabel(sourceKey: string): string {
-  const rawLabel = getSourceLabel(sourceKey);
-  const colonIndex = rawLabel.indexOf(":");
-  if (colonIndex < 0) return rawLabel;
-
-  const stripped = rawLabel.slice(colonIndex + 1).trim();
-  return stripped.length > 0 ? stripped : rawLabel;
-}
 
 export function normalizeBenchmarkKeyFallback(input: string): string {
   return input

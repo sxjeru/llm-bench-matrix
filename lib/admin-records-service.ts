@@ -4,6 +4,7 @@ import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers } f
 import { buildBenchmarkCanonicalKey, buildModelCanonicalKey } from "@/lib/db/normalize";
 import { invalidateAllCaches } from "@/lib/db/queries";
 import { normalizeProviderConfig } from "@/lib/provider-config";
+import { isArtificialAnalysisSource } from "@/lib/source-utils";
 import {
   ensureBenchmark,
   ensureModelByProviderId,
@@ -224,60 +225,119 @@ export async function getAdminRecordMatrix(
 
   const whereClause = and(...buildMatrixConditions(filters));
 
+  const specificSource = filters.sourceMode === "specific" ? normalizeSourceValue(filters.source) : null;
+  const isSpecificSource = Boolean(specificSource);
+  const isAa = Boolean(specificSource && isArtificialAnalysisSource(specificSource));
+  const sourceScopedBenchmarkType = sql<string>`coalesce(${benchmarkSourceMeta.benchmarkType}, ${benchmarks.benchmarkType})`;
+
+  const totalsQuery = db
+    .select({
+      totalRecordCount: count(),
+      modelTotalCount: countDistinct(models.id),
+      benchmarkTotalCount: countDistinct(benchmarks.id)
+    })
+    .from(benchmarkValues)
+    .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+    .innerJoin(providers, eq(models.providerId, providers.id))
+    .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+    .where(whereClause);
+
+  const modelQuery = db
+    .select({
+      modelId: models.id,
+      modelName: models.modelName,
+      providerId: providers.id,
+      providerName: providers.name,
+      providerConfig: providers.config,
+      recordCount: count()
+    })
+    .from(benchmarkValues)
+    .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+    .innerJoin(providers, eq(models.providerId, providers.id))
+    .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+    .where(whereClause)
+    .groupBy(models.id, models.modelName, providers.id, providers.name, providers.config)
+    .orderBy(desc(count()), asc(models.modelName))
+    .limit(modelLimit);
+
+  const benchmarkQuery = isSpecificSource
+    ? db
+        .select({
+          benchmarkId: benchmarks.id,
+          benchmarkName: benchmarks.benchmarkName,
+          benchmarkType: sourceScopedBenchmarkType,
+          unit: benchmarks.unit,
+          higherIsBetter: benchmarks.higherIsBetter,
+          modalities: benchmarks.modalities,
+          recordCount: count()
+        })
+        .from(benchmarkValues)
+        .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+        .innerJoin(providers, eq(models.providerId, providers.id))
+        .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+        .leftJoin(
+          benchmarkSourceMeta,
+          and(
+            eq(benchmarkSourceMeta.benchmarkId, benchmarks.id),
+            eq(benchmarkSourceMeta.source, specificSource!)
+          )
+        )
+        .where(whereClause)
+        .groupBy(
+          benchmarks.id,
+          benchmarks.benchmarkName,
+          benchmarks.benchmarkType,
+          benchmarks.unit,
+          benchmarks.higherIsBetter,
+          benchmarks.modalities,
+          benchmarkSourceMeta.benchmarkType
+        )
+        .orderBy(
+          ...(isAa
+            ? [
+                // 与 isAaSecondaryCategory 一致：按 " / " 分段后整段等于 cost / performance
+                asc(
+                  sql`case when lower(${sourceScopedBenchmarkType}) ~ '(^| / )(cost|performance)($| / )' then 1 else 0 end`
+                ),
+                asc(sql`min(${benchmarkValues.id})`),
+                asc(benchmarks.benchmarkName)
+              ]
+            : [
+                asc(sql`min(${benchmarkValues.id})`),
+                asc(benchmarks.benchmarkName)
+              ])
+        )
+        .limit(benchmarkLimit)
+    : db
+        .select({
+          benchmarkId: benchmarks.id,
+          benchmarkName: benchmarks.benchmarkName,
+          benchmarkType: benchmarks.benchmarkType,
+          unit: benchmarks.unit,
+          higherIsBetter: benchmarks.higherIsBetter,
+          modalities: benchmarks.modalities,
+          recordCount: count()
+        })
+        .from(benchmarkValues)
+        .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+        .innerJoin(providers, eq(models.providerId, providers.id))
+        .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+        .where(whereClause)
+        .groupBy(
+          benchmarks.id,
+          benchmarks.benchmarkName,
+          benchmarks.benchmarkType,
+          benchmarks.unit,
+          benchmarks.higherIsBetter,
+          benchmarks.modalities
+        )
+        .orderBy(desc(count()), asc(benchmarks.benchmarkName))
+        .limit(benchmarkLimit);
+
   const [totalsRows, modelRows, benchmarkRows] = await Promise.all([
-    db
-      .select({
-        totalRecordCount: count(),
-        modelTotalCount: countDistinct(models.id),
-        benchmarkTotalCount: countDistinct(benchmarks.id)
-      })
-      .from(benchmarkValues)
-      .innerJoin(models, eq(benchmarkValues.modelId, models.id))
-      .innerJoin(providers, eq(models.providerId, providers.id))
-      .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-      .where(whereClause),
-    db
-      .select({
-        modelId: models.id,
-        modelName: models.modelName,
-        providerId: providers.id,
-        providerName: providers.name,
-        providerConfig: providers.config,
-        recordCount: count()
-      })
-      .from(benchmarkValues)
-      .innerJoin(models, eq(benchmarkValues.modelId, models.id))
-      .innerJoin(providers, eq(models.providerId, providers.id))
-      .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-      .where(whereClause)
-      .groupBy(models.id, models.modelName, providers.id, providers.name, providers.config)
-      .orderBy(desc(count()), asc(models.modelName))
-      .limit(modelLimit),
-    db
-      .select({
-        benchmarkId: benchmarks.id,
-        benchmarkName: benchmarks.benchmarkName,
-        benchmarkType: benchmarks.benchmarkType,
-        unit: benchmarks.unit,
-        higherIsBetter: benchmarks.higherIsBetter,
-        modalities: benchmarks.modalities,
-        recordCount: count()
-      })
-      .from(benchmarkValues)
-      .innerJoin(models, eq(benchmarkValues.modelId, models.id))
-      .innerJoin(providers, eq(models.providerId, providers.id))
-      .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-      .where(whereClause)
-      .groupBy(
-        benchmarks.id,
-        benchmarks.benchmarkName,
-        benchmarks.benchmarkType,
-        benchmarks.unit,
-        benchmarks.higherIsBetter,
-        benchmarks.modalities
-      )
-      .orderBy(desc(count()), asc(benchmarks.benchmarkName))
-      .limit(benchmarkLimit)
+    totalsQuery,
+    modelQuery,
+    benchmarkQuery
   ]);
 
   const totals = totalsRows[0];
