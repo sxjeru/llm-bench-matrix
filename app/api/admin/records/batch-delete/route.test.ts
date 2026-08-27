@@ -26,7 +26,7 @@ describe("POST /api/admin/records/batch-delete", () => {
     vi.mocked(requireAdmin).mockReset();
     vi.mocked(batchDeleteRecords).mockReset();
     vi.mocked(requireAdmin).mockResolvedValue(null);
-    vi.mocked(batchDeleteRecords).mockResolvedValue({ deleted: 3 });
+    vi.mocked(batchDeleteRecords).mockResolvedValue({ ok: true, deleted: 3, prunedSourceMeta: 0 });
   });
 
   test("未授权时不删除", async () => {
@@ -55,7 +55,7 @@ describe("POST /api/admin/records/batch-delete", () => {
     const response = await POST(jsonRequest(payload));
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ deleted: 3 });
+    await expect(response.json()).resolves.toEqual({ ok: true, deleted: 3, prunedSourceMeta: 0 });
     expect(batchDeleteRecords).toHaveBeenCalledWith(payload);
   });
 

@@ -29,9 +29,30 @@ describe("/api/admin/records/split-pair-values", () => {
     vi.mocked(splitDualValueRecords).mockReset();
     vi.mocked(requireAdmin).mockResolvedValue(null);
     vi.mocked(getRecordDualValueCandidates).mockResolvedValue({
-      candidates: [{ benchmarkId: 11, benchmarkName: "Bench-1", dualValueCount: 2 }]
+      generatedAt: "2026-04-01T00:00:00.000Z",
+      candidates: [
+        {
+          benchmarkId: 11,
+          benchmarkName: "Bench-1",
+          benchmarkType: "general",
+          dualValueCount: 2,
+          totalCount: 2,
+          sampleValues: ["77 / 88"]
+        }
+      ]
     });
-    vi.mocked(splitDualValueRecords).mockResolvedValue({ updated: 2, inserted: 2, skipped: 0 });
+    vi.mocked(splitDualValueRecords).mockResolvedValue({
+      ok: true,
+      sourceBenchmarkId: 11,
+      sourceBenchmarkLabel: "Bench-1 (general)",
+      firstBenchmarkId: 11,
+      firstBenchmarkLabel: "Bench-1 (general)",
+      secondBenchmarkId: 12,
+      secondBenchmarkLabel: "Bench-1 (2) (general)",
+      splitCount: 2,
+      createdCount: 2,
+      skipped: 0
+    });
   });
 
   describe("GET", () => {
@@ -114,7 +135,18 @@ describe("/api/admin/records/split-pair-values", () => {
       const response = await POST(jsonRequest(payload));
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ updated: 2, inserted: 2, skipped: 0 });
+      await expect(response.json()).resolves.toEqual({
+        ok: true,
+        sourceBenchmarkId: 11,
+        sourceBenchmarkLabel: "Bench-1 (general)",
+        firstBenchmarkId: 11,
+        firstBenchmarkLabel: "Bench-1 (general)",
+        secondBenchmarkId: 12,
+        secondBenchmarkLabel: "Bench-1 (2) (general)",
+        splitCount: 2,
+        createdCount: 2,
+        skipped: 0
+      });
       expect(splitDualValueRecords).toHaveBeenCalledWith(payload);
     });
 

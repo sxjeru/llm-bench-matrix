@@ -44,10 +44,14 @@ describe("/api/admin/records", () => {
     vi.mocked(requireAdmin).mockResolvedValue(null);
     vi.mocked(getAdminRecordMatrix).mockResolvedValue(matrix);
     vi.mocked(batchSaveRecordDrafts).mockResolvedValue({
+      ok: true,
       inserted: 0,
       updated: 1,
       deleted: 0,
-      unchanged: 0
+      unchanged: 0,
+      ignoredEmpty: 0,
+      nonNumeric: [],
+      prunedSourceMeta: 0
     });
   });
 
@@ -172,10 +176,14 @@ describe("/api/admin/records", () => {
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({
+        ok: true,
         inserted: 0,
         updated: 1,
         deleted: 0,
-        unchanged: 0
+        unchanged: 0,
+        ignoredEmpty: 0,
+        nonNumeric: [],
+        prunedSourceMeta: 0
       });
       expect(batchSaveRecordDrafts).toHaveBeenCalledWith({ drafts: [draft] });
     });

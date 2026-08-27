@@ -34,9 +34,40 @@ describe("POST /api/admin/records/reassign", () => {
     vi.mocked(reassignRecordModel).mockReset();
     vi.mocked(reassignRecordSource).mockReset();
     vi.mocked(requireAdmin).mockResolvedValue(null);
-    vi.mocked(reassignRecordBenchmark).mockResolvedValue({ moved: 1, skipped: 0, deleted: 0 });
-    vi.mocked(reassignRecordModel).mockResolvedValue({ moved: 2, skipped: 0, deleted: 0 });
-    vi.mocked(reassignRecordSource).mockResolvedValue({ moved: 4 });
+    vi.mocked(reassignRecordBenchmark).mockResolvedValue({
+      ok: true,
+      entityType: "benchmark",
+      movedCount: 1,
+      skippedCount: 0,
+      deletedTargetCount: 0,
+      conflictCount: 0,
+      createdTarget: false,
+      fromLabel: "Bench-1",
+      targetLabel: "Bench-2"
+    });
+    vi.mocked(reassignRecordModel).mockResolvedValue({
+      ok: true,
+      entityType: "model",
+      movedCount: 2,
+      skippedCount: 0,
+      deletedTargetCount: 0,
+      conflictCount: 0,
+      createdTarget: false,
+      fromLabel: "Model-1",
+      targetLabel: "Model-2"
+    });
+    vi.mocked(reassignRecordSource).mockResolvedValue({
+      ok: true,
+      entityType: "source",
+      movedCount: 4,
+      skippedCount: 0,
+      deletedTargetCount: 0,
+      conflictCount: 0,
+      createdTarget: false,
+      fromLabel: "text:old",
+      targetLabel: "text:new",
+      prunedSourceMeta: 0
+    });
   });
 
   test("未授权时不变更归属", async () => {

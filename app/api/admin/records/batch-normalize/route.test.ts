@@ -26,7 +26,12 @@ describe("POST /api/admin/records/batch-normalize", () => {
     vi.mocked(requireAdmin).mockReset();
     vi.mocked(batchNormalizeRecordScale).mockReset();
     vi.mocked(requireAdmin).mockResolvedValue(null);
-    vi.mocked(batchNormalizeRecordScale).mockResolvedValue({ updated: 2, unchanged: 1 });
+    vi.mocked(batchNormalizeRecordScale).mockResolvedValue({
+      ok: true,
+      targetScale: 1,
+      updated: 2,
+      unchanged: 1
+    });
   });
 
   test("未授权时不归一化", async () => {
@@ -58,7 +63,12 @@ describe("POST /api/admin/records/batch-normalize", () => {
     const response = await POST(jsonRequest(payload));
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ updated: 2, unchanged: 1 });
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      targetScale: 1,
+      updated: 2,
+      unchanged: 1
+    });
     expect(batchNormalizeRecordScale).toHaveBeenCalledWith(payload);
   });
 

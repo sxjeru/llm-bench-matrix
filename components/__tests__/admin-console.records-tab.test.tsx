@@ -308,4 +308,210 @@ describe("AdminConsole records tab", () => {
       });
     });
   });
+
+  test("批量填入选区并保存草稿", async () => {
+    const fetchMock = mockFetchSequence(filledMatrix, saveResult, filledMatrix);
+    const user = userEvent.setup();
+
+    await renderReady(<AdminConsole {...buildProps()} />);
+    await openRecordsTab(user);
+
+    const cell = await screen.findByTestId("record-cell-1-11");
+    fireEvent.mouseDown(cell);
+    fireEvent.mouseUp(document);
+
+    const fillInput = screen.getByLabelText("批量填值");
+    await user.type(fillInput, "95");
+
+    const fillButton = screen.getByRole("button", { name: "填入选区（1 格）" });
+    await user.click(fillButton);
+
+    expect(cell).toHaveTextContent("95");
+    expect(cell).toHaveAttribute("data-dirty", "true");
+
+    await user.click(screen.getByRole("button", { name: "保存更改（已修改 1 项）" }));
+
+    await waitFor(() => {
+      const postCall = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/admin/records" && init?.method === "POST"
+      );
+      expect(postCall).toBeTruthy();
+      expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
+        drafts: [
+          {
+            modelId: 1,
+            benchmarkId: 11,
+            recordId: 101,
+            recordIds: [101],
+            valueRaw: "95",
+            originalValueRaw: "77",
+            source: "text:src",
+            isDeleted: false
+          }
+        ]
+      });
+    });
+  });
+
+  test("批量归一化触发 API 并提示成功", async () => {
+    const fetchMock = mockFetchSequence(
+      filledMatrix,
+      { ok: true, targetScale: 1, updated: 1, unchanged: 0 },
+      filledMatrix
+    );
+    const user = userEvent.setup();
+
+    await renderReady(<AdminConsole {...buildProps()} />);
+    await openRecordsTab(user);
+
+    await screen.findByTestId("record-cell-1-11");
+    await user.click(screen.getByRole("button", { name: "归一化为 1" }));
+
+    await waitFor(() => {
+      const normalizeCall = fetchMock.mock.calls.find(([url]) =>
+        String(url).startsWith("/api/admin/records/batch-normalize")
+      );
+      expect(normalizeCall).toBeTruthy();
+      expect(JSON.parse(String(normalizeCall?.[1]?.body))).toEqual({
+        scope: {
+          sourceMode: "all",
+          source: null,
+          modelIds: [],
+          benchmarkIds: []
+        },
+        targetScale: 1
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/已归一化为 1 量纲/)).toBeInTheDocument();
+    });
+  });
+
+  test("分拆双值向导扫描候选并提交分拆", async () => {
+    const fetchMock = mockFetchSequence(
+      filledMatrix,
+      {
+        generatedAt: "2026-04-01T00:00:00.000Z",
+        candidates: [
+          {
+            benchmarkId: 11,
+            benchmarkName: "Bench-1",
+            benchmarkType: "Type-A",
+            dualValueCount: 1,
+            totalCount: 1,
+            sampleValues: ["77 / 88"]
+          }
+        ]
+      },
+      {
+        ok: true,
+        sourceBenchmarkId: 11,
+        sourceBenchmarkLabel: "Bench-1 (Type-A)",
+        firstBenchmarkId: 11,
+        firstBenchmarkLabel: "Bench-1 (Type-A)",
+        secondBenchmarkId: 12,
+        secondBenchmarkLabel: "Bench-1 (2) (Type-A)",
+        splitCount: 1,
+        createdCount: 1,
+        skipped: 0
+      },
+      filledMatrix
+    );
+    const user = userEvent.setup();
+
+    await renderReady(<AdminConsole {...buildProps()} />);
+    await openRecordsTab(user);
+
+    await screen.findByTestId("record-cell-1-11");
+    await user.click(screen.getByRole("button", { name: "分拆双值" }));
+
+    expect(await screen.findByText("分拆双值（如 77 / 88）")).toBeInTheDocument();
+    expect(await screen.findByText("双值 1/1")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "执行分拆" }));
+
+    await waitFor(() => {
+      const splitCall = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/admin/records/split-pair-values" && init?.method === "POST"
+      );
+      expect(splitCall).toBeTruthy();
+      expect(JSON.parse(String(splitCall?.[1]?.body))).toEqual({
+        benchmarkId: 11,
+        first: { benchmarkId: 11 },
+        second: { benchmarkName: "Bench-1 (2)", benchmarkType: "Type-A" },
+        scope: {
+          sourceMode: "all",
+          source: null,
+          modelIds: [],
+          benchmarkIds: []
+        }
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/双值分拆完成/)).toBeInTheDocument();
+    });
+  });
+
+  test("列头点击打开归属变更弹窗并提交", async () => {
+    const fetchMock = mockFetchSequence(
+      filledMatrix,
+      {
+        ok: true,
+        entityType: "benchmark",
+        movedCount: 1,
+        skippedCount: 0,
+        deletedTargetCount: 0,
+        conflictCount: 0,
+        createdTarget: false,
+        fromLabel: "Bench-1 (Type-A)",
+        targetLabel: "Bench-2 (Type-A)"
+      },
+      filledMatrix
+    );
+    const user = userEvent.setup();
+
+    const props = buildProps();
+    props.benchmarks = [
+      { id: 11, benchmarkName: "Bench-1", benchmarkType: "Type-A", modalities: ["Text"] },
+      { id: 12, benchmarkName: "Bench-2", benchmarkType: "Type-A", modalities: ["Text"] }
+    ];
+
+    await renderReady(<AdminConsole {...props} />);
+    await openRecordsTab(user);
+
+    await screen.findByTestId("record-cell-1-11");
+    await user.click(screen.getByTitle("点击变更「Bench-1」这一列的归属"));
+
+    expect(await screen.findByText("变更列归属：Bench-1")).toBeInTheDocument();
+
+    const select = screen.getByLabelText("目标 benchmark");
+    fireEvent.change(select, { target: { value: "12" } });
+
+    await user.click(screen.getByRole("button", { name: "确认变更归属" }));
+
+    await waitFor(() => {
+      const reassignCall = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/admin/records/reassign" && init?.method === "POST"
+      );
+      expect(reassignCall).toBeTruthy();
+      expect(JSON.parse(String(reassignCall?.[1]?.body))).toEqual({
+        entityType: "benchmark",
+        fromBenchmarkId: 11,
+        conflictStrategy: "skip",
+        target: { benchmarkId: 12 },
+        scope: {
+          sourceMode: "all",
+          source: null,
+          modelIds: [],
+          benchmarkIds: []
+        }
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/归属已变更：Bench-1 \(Type-A\) → Bench-2 \(Type-A\)/)).toBeInTheDocument();
+    });
+  });
 });
