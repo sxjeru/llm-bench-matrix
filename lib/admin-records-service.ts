@@ -809,8 +809,7 @@ export async function updateAdminRecordDetails(input: {
     const sourceMetaRows = new Map<string, SourceMetaUpsertRow>();
     for (const record of records) {
       const existing = rowById.get(record.id)!;
-      const raw = record.valueRaw.trim();
-      if (record.isDeleted === true || isEmptyRecordValue(raw)) {
+      if (record.isDeleted === true) {
         const deletedRows = await tx
           .delete(benchmarkValues)
           .where(
@@ -828,6 +827,8 @@ export async function updateAdminRecordDetails(input: {
         continue;
       }
 
+      const raw = record.valueRaw.trim();
+      if (isEmptyRecordValue(raw)) throw new Error(`记录 ${record.id} 的原始值不能为空`);
       const parsed = normalizeBenchmarkValueForStorage(benchmarkNameById.get(record.benchmarkId), raw);
       if (parsed.valueNum === null && parsed.valueNum2 === null) nonNumeric.push({ id: record.id, valueRaw: raw });
       const updatedRows = await tx

@@ -131,6 +131,52 @@ const filledMatrix = {
   limits: { modelLimit: 40, benchmarkLimit: 30 }
 };
 
+const multiValueMatrix = {
+  generatedAt: "2026-04-01T00:00:00.000Z",
+  ...matrixAxis,
+  cells: [
+    {
+      modelId: 1,
+      benchmarkId: 11,
+      recordId: 101,
+      recordIds: [101, 102],
+      recordCount: 2,
+      valueRaw: "77",
+      valueNum: 77,
+      valueNum2: null,
+      valueNote: "latest",
+      source: "text:new",
+      benchTime: "2026-04-01T00:00:00.000Z",
+      records: [
+        {
+          id: 101,
+          valueRaw: "77",
+          valueNum: 77,
+          valueNum2: null,
+          valueNote: "latest",
+          source: "text:new",
+          benchTime: "2026-04-01T00:00:00.000Z"
+        },
+        {
+          id: 102,
+          valueRaw: "66",
+          valueNum: 66,
+          valueNum2: null,
+          valueNote: null,
+          source: null,
+          benchTime: "2026-03-01T00:00:00.000Z"
+        }
+      ]
+    }
+  ],
+  totalRecordCount: 2,
+  visibleRecordCount: 2,
+  modelTotalCount: 1,
+  benchmarkTotalCount: 1,
+  truncated: { models: false, benchmarks: false },
+  limits: { modelLimit: 40, benchmarkLimit: 30 }
+};
+
 const saveResult = {
   ok: true,
   inserted: 0,
@@ -230,6 +276,56 @@ describe("AdminConsole records tab", () => {
 
     await waitFor(() => {
       expect(screen.getByText("保存完成：修改 1")).toBeInTheDocument();
+    });
+  });
+
+  test("单击多值单元格会打开详情弹窗并提交 details API", async () => {
+    const fetchMock = mockFetchSequence(
+      multiValueMatrix,
+      { ok: true, updated: 1, deleted: 0, nonNumeric: [] },
+      multiValueMatrix
+    );
+    const user = userEvent.setup();
+
+    await renderReady(<AdminConsole {...buildProps()} />);
+    await openRecordsTabAndFilter(user);
+
+    const cell = await screen.findByTestId("record-cell-1-11");
+    expect(cell).toHaveTextContent("2 条");
+
+    fireEvent.mouseDown(cell);
+    fireEvent.mouseUp(document);
+
+    expect(await screen.findByRole("dialog", { name: "编辑单元格内的 2 条记录" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("单元格数值")).not.toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText("记录 101 原始值"));
+    await user.type(screen.getByLabelText("记录 101 原始值"), "88");
+    await user.click(screen.getByRole("button", { name: "保存全部记录" }));
+
+    await waitFor(() => {
+      const postCall = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/admin/records/details" && init?.method === "POST"
+      );
+      expect(postCall).toBeTruthy();
+      expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
+        records: [
+          {
+            id: 101,
+            modelId: 1,
+            benchmarkId: 11,
+            valueRaw: "88",
+            source: "text:new",
+            benchTime: "2026-04-01T00:00:00.000Z",
+            valueNote: "latest",
+            isDeleted: false
+          }
+        ]
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("多值记录保存完成：修改 1")).toBeInTheDocument();
     });
   });
 

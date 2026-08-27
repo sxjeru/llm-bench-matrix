@@ -15,6 +15,7 @@ import type {
   RecordReassignTarget,
   RecordSourceMode
 } from "../types";
+import { localDateTimeToIso } from "../utils/datetime-local";
 import {
   buildCellIndex,
   buildDraftSavePayload,
@@ -122,6 +123,8 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
   }, [filters]);
 
   const isDraggingRef = useRef(false);
+  const selectionRef = useRef<MatrixSelectionRange | null>(null);
+  selectionRef.current = selection;
 
   const models = useMemo(() => matrix?.models ?? [], [matrix]);
   const benchmarks = useMemo(() => matrix?.benchmarks ?? [], [matrix]);
@@ -291,12 +294,18 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     }
 
     isDraggingRef.current = true;
-    setSelection({ startRow: row, startCol: col, endRow: row, endCol: col });
+    const next = { startRow: row, startCol: col, endRow: row, endCol: col };
+    selectionRef.current = next;
+    setSelection(next);
   }
 
   function onCellMouseEnter(row: number, col: number) {
     if (!isDraggingRef.current) return;
-    setSelection((prev) => (prev ? { ...prev, endRow: row, endCol: col } : prev));
+    setSelection((prev) => {
+      const next = prev ? { ...prev, endRow: row, endCol: col } : prev;
+      if (next) selectionRef.current = next;
+      return next;
+    });
   }
 
   /** 鼠标在同一个格子按下又松开 = 单击，进入编辑；拖出范围则保持框选 */
@@ -304,22 +313,20 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     if (!isDraggingRef.current) return;
     isDraggingRef.current = false;
 
-    setSelection((prev) => {
-      if (prev && prev.startRow === prev.endRow && prev.startCol === prev.endCol) {
-        const model = models[prev.startCol];
-        const benchmark = benchmarks[prev.startRow];
-        const cell = model && benchmark ? cellIndex.get(getCellKey(model.modelId, benchmark.benchmarkId)) : undefined;
-        if (cell && cell.recordCount > 1) {
-          if (confirmDiscardDrafts("打开多值编辑器")) {
-            setDrafts({});
-            setMultiValueCell(cell);
-          }
-        } else {
-          setEditingCell({ row: prev.startRow, col: prev.startCol });
-        }
+    const prev = selectionRef.current;
+    if (!prev || prev.startRow !== prev.endRow || prev.startCol !== prev.endCol) return;
+
+    const model = models[prev.startCol];
+    const benchmark = benchmarks[prev.startRow];
+    const cell = model && benchmark ? cellIndex.get(getCellKey(model.modelId, benchmark.benchmarkId)) : undefined;
+    if (cell && cell.recordCount > 1) {
+      if (confirmDiscardDrafts("打开多值编辑器")) {
+        setDrafts({});
+        setMultiValueCell(cell);
       }
-      return prev;
-    });
+      return;
+    }
+    setEditingCell({ row: prev.startRow, col: prev.startCol });
   }, [benchmarks, cellIndex, confirmDiscardDrafts, models]);
 
   useEffect(() => {
@@ -372,6 +379,14 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     if (typeof document === "undefined") return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (multiValueCell) {
+        if (event.key === "Escape" && !saving) {
+          event.preventDefault();
+          setMultiValueCell(null);
+        }
+        return;
+      }
+
       if (!selection) return;
 
       if (event.key === "Escape") {
@@ -391,7 +406,7 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [selection, editingCell, clearSelectedCells]);
+  }, [selection, editingCell, clearSelectedCells, multiValueCell, saving]);
 
   // --- 保存 / 放弃 ---
 
@@ -445,13 +460,13 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
           benchmarkId: multiValueCell.benchmarkId,
           valueRaw: record.valueRaw,
           source: record.source.trim() || null,
-          benchTime: new Date(record.benchTime).toISOString(),
+          benchTime: localDateTimeToIso(record.benchTime),
           valueNote: record.valueNote.trim() || null,
           isDeleted: record.isDeleted
         }))
       })) as { updated: number; deleted: number; nonNumeric: Array<{ id: number; valueRaw: string }> };
 
-      const parts = [];
+      const parts: string[] = [];
       if (result.updated > 0) parts.push(`修改 ${result.updated}`);
       if (result.deleted > 0) parts.push(`删除 ${result.deleted}`);
       notifySuccess(

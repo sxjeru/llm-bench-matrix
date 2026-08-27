@@ -61,24 +61,55 @@ const cell: AdminRecordCell = {
 };
 
 describe("RecordsMultiValueDialog", () => {
-  test("列出全部记录并提交修改和单条删除", async () => {
+  test("列出全部记录并只提交被修改的记录", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
 
     renderDialog(onSave);
 
-    expect(screen.getByText("编辑单元格内的 2 条记录")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "编辑单元格内的 2 条记录" })).toBeInTheDocument();
     expect(screen.getByLabelText("记录 101 原始值")).toHaveValue("77");
     expect(screen.getByLabelText("记录 102 原始值")).toHaveValue("66");
 
     await user.clear(screen.getByLabelText("记录 101 原始值"));
     await user.type(screen.getByLabelText("记录 101 原始值"), "88");
-    await user.click(screen.getAllByRole("button", { name: "删除此条" })[0]!);
     await user.click(screen.getByRole("button", { name: "保存全部记录" }));
 
     expect(onSave).toHaveBeenCalledWith([
-      expect.objectContaining({ id: 101, valueRaw: "88", isDeleted: true })
+      expect.objectContaining({ id: 101, valueRaw: "88", isDeleted: false })
     ]);
+  });
+
+  test("标记删除后只提交该条删除，并禁用其输入", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+
+    renderDialog(onSave);
+
+    await user.click(screen.getAllByRole("button", { name: "删除此条" })[1]!);
+
+    expect(screen.getByLabelText("记录 102 原始值")).toBeDisabled();
+    expect(screen.getByLabelText("记录 102 测试时间")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "撤销删除" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "保存全部记录" }));
+
+    expect(onSave).toHaveBeenCalledWith([
+      expect.objectContaining({ id: 102, valueRaw: "66", isDeleted: true })
+    ]);
+  });
+
+  test("未删除记录的空值会阻止保存", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+
+    renderDialog(onSave);
+
+    await user.clear(screen.getByLabelText("记录 101 原始值"));
+
+    expect(screen.getByText("未删除的记录必须填写原始值和测试时间。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存全部记录" })).toBeDisabled();
+    expect(onSave).not.toHaveBeenCalled();
   });
 });
 
