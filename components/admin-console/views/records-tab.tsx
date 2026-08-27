@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Database, Trash2 } from "lucide-react";
 import type { BenchmarkOption, ModelOption, ProviderOption } from "../types";
 import { useRecordMatrix } from "../hooks/use-record-matrix";
@@ -96,6 +96,8 @@ export function RecordsTab({
   const {
     filters,
     onFiltersChange,
+    availableModelIds,
+    availableBenchmarkIds,
     matrix,
     models: matrixModels,
     benchmarks: matrixBenchmarks,
@@ -175,6 +177,8 @@ export function RecordsTab({
           providers={providers}
           models={models}
           benchmarks={benchmarks}
+          availableModelIds={availableModelIds}
+          availableBenchmarkIds={availableBenchmarkIds}
           disabled={saving || toolBusy !== null}
         />
 

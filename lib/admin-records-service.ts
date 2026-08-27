@@ -377,6 +377,41 @@ export async function getAdminRecordMatrix(
   };
 }
 
+export async function getAdminRecordSourceEntities(scope: {
+  sourceMode: RecordSourceMode;
+  source?: string | null;
+}): Promise<{ modelIds: number[]; benchmarkIds: number[] }> {
+  if (scope.sourceMode === "all") {
+    throw new Error("sourceMode 只能是 specific / empty");
+  }
+
+  const whereClause = and(
+    isNull(models.mergedIntoModelId),
+    isNull(benchmarks.mergedIntoBenchmarkId),
+    ...buildRecordValueConditions({ sourceMode: scope.sourceMode, source: scope.source })
+  );
+
+  const [modelRows, benchmarkRows] = await Promise.all([
+    db
+      .selectDistinct({ modelId: benchmarkValues.modelId })
+      .from(benchmarkValues)
+      .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+      .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+      .where(whereClause),
+    db
+      .selectDistinct({ benchmarkId: benchmarkValues.benchmarkId })
+      .from(benchmarkValues)
+      .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+      .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+      .where(whereClause)
+  ]);
+
+  return {
+    modelIds: modelRows.map((row) => row.modelId),
+    benchmarkIds: benchmarkRows.map((row) => row.benchmarkId)
+  };
+}
+
 // --- benchmark_source_meta 维护 ---
 
 type SourceMetaUpsertRow = {

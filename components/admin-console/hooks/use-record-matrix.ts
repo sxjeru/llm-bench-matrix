@@ -53,6 +53,29 @@ type UseRecordMatrixOptions = {
   notifyError: (message: string, details?: string[]) => void;
 };
 
+type SourceEntities = { modelIds: number[]; benchmarkIds: number[] };
+
+function sourceEntitiesKey(sourceMode: RecordSourceMode, source: string | null): string {
+  return `${sourceMode}::${source ?? ""}`;
+}
+
+function pruneIdsToAvailable(ids: number[], availableIds: number[]): number[] {
+  const available = new Set(availableIds);
+  return ids.filter((id) => available.has(id));
+}
+
+function pruneFiltersToSourceEntities(
+  filters: RecordFilterState,
+  entities: SourceEntities | null | undefined
+): RecordFilterState {
+  if (!entities) return filters;
+  return {
+    ...filters,
+    modelIds: pruneIdsToAvailable(filters.modelIds, entities.modelIds),
+    benchmarkIds: pruneIdsToAvailable(filters.benchmarkIds, entities.benchmarkIds)
+  };
+}
+
 function buildMatrixQuery(filters: RecordFilterState): string {
   const params = new URLSearchParams();
   params.set("sourceMode", filters.sourceMode);
@@ -89,6 +112,14 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
   const [dualValueCandidates, setDualValueCandidates] = useState<RecordDualValueCandidate[]>([]);
   const [loadingDualValueCandidates, setLoadingDualValueCandidates] = useState(false);
 
+  const [sourceEntitiesCache, setSourceEntitiesCache] = useState<Record<string, SourceEntities>>({});
+  const sourceEntitiesInFlightRef = useRef<Set<string>>(new Set());
+  const filtersRef = useRef(filters);
+
+  useEffect(() => {
+    filtersRef.current = filters;
+  }, [filters]);
+
   const isDraggingRef = useRef(false);
 
   const models = useMemo(() => matrix?.models ?? [], [matrix]);
@@ -96,6 +127,27 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
   const cellIndex = useMemo(() => buildCellIndex(matrix), [matrix]);
   const dirtyCount = countDirtyDrafts(drafts);
   const pendingDeleteCount = countPendingDeleteDrafts(drafts);
+
+  const sourceKey = sourceEntitiesKey(filters.sourceMode, filters.source);
+  const currentSourceEntities = filters.sourceMode === "all" ? null : sourceEntitiesCache[sourceKey] ?? null;
+  const availableModelIds = currentSourceEntities ? currentSourceEntities.modelIds : null;
+  const availableBenchmarkIds = currentSourceEntities ? currentSourceEntities.benchmarkIds : null;
+
+  const rememberSourceEntities = useCallback((key: string, entities: SourceEntities) => {
+    setSourceEntitiesCache((prev) => {
+      const existing = prev[key];
+      if (
+        existing
+        && existing.modelIds.length === entities.modelIds.length
+        && existing.benchmarkIds.length === entities.benchmarkIds.length
+        && existing.modelIds.every((id, index) => id === entities.modelIds[index])
+        && existing.benchmarkIds.every((id, index) => id === entities.benchmarkIds[index])
+      ) {
+        return prev;
+      }
+      return { ...prev, [key]: entities };
+    });
+  }, []);
 
   /** 只有限定了具体 source（含「无 source」）才允许新增单元格，避免新数据归属不明 */
   const canCreateCells = filters.sourceMode !== "all";
@@ -130,7 +182,8 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     async (override?: RecordFilterState) => {
       setLoading(true);
       try {
-        const query = buildMatrixQuery(override ?? filters);
+        const activeFilters = override ?? filters;
+        const query = buildMatrixQuery(activeFilters);
         const result = (await getJson(`/api/admin/records?${query}`)) as AdminRecordMatrix;
         setMatrix(result);
         setHasLoaded(true);
@@ -161,14 +214,60 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
    *
    * 不用「effect 监听 filters」是因为那样会在 effect 里同步 setState；这里直接把
    * 算好的 next 传给 loadMatrix，也顺手避免了 setFilters 异步导致的旧条件请求。
+   *
+   * 切到具体 source / 无 source 时，先按该 source 已有实体裁掉不在范围内的模型/指标，
+   * 避免带着旧 id 去拉矩阵得到空结果。
    */
   function onFiltersChange(updater: (prev: RecordFilterState) => RecordFilterState) {
     if (!confirmDiscardDrafts("切换筛选条件")) return;
 
     const next = updater(filters);
+    const cacheKey = sourceEntitiesKey(next.sourceMode, next.source);
+    const cachedEntities = next.sourceMode === "all" ? null : sourceEntitiesCache[cacheKey] ?? null;
+    const pruned = pruneFiltersToSourceEntities(next, cachedEntities);
+
     setDrafts({});
-    setFilters(next);
-    void loadMatrix(next);
+    setFilters(pruned);
+    void loadMatrix(pruned);
+
+    if (next.sourceMode === "all" || cachedEntities || sourceEntitiesInFlightRef.current.has(cacheKey)) {
+      return;
+    }
+
+    sourceEntitiesInFlightRef.current.add(cacheKey);
+    const params = new URLSearchParams();
+    params.set("sourceMode", next.sourceMode);
+    if (next.source) params.set("source", next.source);
+
+    void getJson(`/api/admin/records/source-entities?${params.toString()}`)
+      .then((data) => {
+        const payload = data as Partial<SourceEntities>;
+        const entities: SourceEntities = {
+          modelIds: Array.isArray(payload.modelIds) ? payload.modelIds : [],
+          benchmarkIds: Array.isArray(payload.benchmarkIds) ? payload.benchmarkIds : []
+        };
+        rememberSourceEntities(cacheKey, entities);
+
+        const current = filtersRef.current;
+        if (sourceEntitiesKey(current.sourceMode, current.source) !== cacheKey) return;
+
+        const aligned = pruneFiltersToSourceEntities(current, entities);
+        if (
+          aligned.modelIds.length === current.modelIds.length
+          && aligned.benchmarkIds.length === current.benchmarkIds.length
+        ) {
+          return;
+        }
+
+        setFilters(aligned);
+        void loadMatrix(aligned);
+      })
+      .catch((error) => {
+        notifyError(error instanceof Error ? error.message : "加载 Source 实体范围失败");
+      })
+      .finally(() => {
+        sourceEntitiesInFlightRef.current.delete(cacheKey);
+      });
   }
 
   // --- 选区与编辑 ---
@@ -451,6 +550,8 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
   return {
     filters,
     onFiltersChange,
+    availableModelIds,
+    availableBenchmarkIds,
     matrix,
     models,
     benchmarks,

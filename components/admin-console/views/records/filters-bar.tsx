@@ -202,6 +202,8 @@ type RecordsFiltersBarProps = {
   providers: ProviderOption[];
   models: ModelOption[];
   benchmarks: BenchmarkOption[];
+  availableModelIds?: number[] | null;
+  availableBenchmarkIds?: number[] | null;
   disabled?: boolean;
 };
 
@@ -212,6 +214,8 @@ export function RecordsFiltersBar({
   providers,
   models,
   benchmarks,
+  availableModelIds,
+  availableBenchmarkIds,
   disabled = false
 }: RecordsFiltersBarProps) {
   const [sourceOpen, setSourceOpen] = useState(false);
@@ -224,25 +228,39 @@ export function RecordsFiltersBar({
     [providers]
   );
 
+  const availableModelIdSet = useMemo(
+    () => (availableModelIds ? new Set(availableModelIds) : null),
+    [availableModelIds]
+  );
+
+  const availableBenchmarkIdSet = useMemo(
+    () => (availableBenchmarkIds ? new Set(availableBenchmarkIds) : null),
+    [availableBenchmarkIds]
+  );
+
   const modelOptions = useMemo<RecordFilterOption[]>(
     () =>
-      models.map((model) => ({
-        id: model.id,
-        label: model.modelName,
-        group: getProviderDisplayNameById(model.providerId, providerById) ?? "未知厂商"
-      })),
-    [models, providerById]
+      models
+        .filter((model) => (availableModelIdSet ? availableModelIdSet.has(model.id) : true))
+        .map((model) => ({
+          id: model.id,
+          label: model.modelName,
+          group: getProviderDisplayNameById(model.providerId, providerById) ?? "未知厂商"
+        })),
+    [models, providerById, availableModelIdSet]
   );
 
   const benchmarkOptions = useMemo<RecordFilterOption[]>(
     () =>
-      benchmarks.map((benchmark) => ({
-        id: benchmark.id,
-        label: benchmark.benchmarkName,
-        secondary: benchmark.benchmarkType,
-        group: benchmark.benchmarkType
-      })),
-    [benchmarks]
+      benchmarks
+        .filter((benchmark) => (availableBenchmarkIdSet ? availableBenchmarkIdSet.has(benchmark.id) : true))
+        .map((benchmark) => ({
+          id: benchmark.id,
+          label: benchmark.benchmarkName,
+          secondary: benchmark.benchmarkType,
+          group: benchmark.benchmarkType
+        })),
+    [benchmarks, availableBenchmarkIdSet]
   );
 
   const normalizedSourceQuery = sourceQuery.trim().toLowerCase();

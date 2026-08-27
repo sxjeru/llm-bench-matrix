@@ -41,6 +41,10 @@ function mockFetchSequence(...payloads: unknown[]) {
         ? input.toString()
         : input.url;
 
+    if (url.startsWith("/api/admin/records/source-entities")) {
+      return createJsonResponse({ modelIds: [1], benchmarkIds: [11] });
+    }
+
     if (url === "/api/admin/benchmarks/preview-value-overlap") {
       return createJsonResponse({ stats: [] });
     }
@@ -523,6 +527,88 @@ describe("AdminConsole records tab", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/归属已变更：Bench-1 \(Type-A\) → Bench-2 \(Type-A\)/)).toBeInTheDocument();
+    });
+  });
+
+  test("选取 source 后，模型和指标下拉框只展示该 source 包含的实体", async () => {
+    const fetchMock = mockFetchSequence(filledMatrix);
+    const user = userEvent.setup();
+
+    const props = buildProps();
+    props.models = [
+      { id: 1, providerId: 1, modelName: "Model A", canonicalKey: "model-a" },
+      { id: 2, providerId: 1, modelName: "Model B", canonicalKey: "model-b" }
+    ];
+    props.benchmarks = [
+      { id: 11, benchmarkName: "Bench-1", benchmarkType: "Type-A", modalities: ["Text"] },
+      { id: 12, benchmarkName: "Bench-2", benchmarkType: "Type-A", modalities: ["Text"] }
+    ];
+
+    await renderReady(<AdminConsole {...props} />);
+    await openRecordsTab(user);
+
+    await user.click(screen.getByLabelText("模型筛选"));
+    expect(screen.getByText("Model A")).toBeInTheDocument();
+    expect(screen.getByText("Model B")).toBeInTheDocument();
+    await user.click(screen.getByLabelText("模型筛选"));
+
+    await user.click(screen.getByLabelText("Source 筛选"));
+    await user.click(screen.getByRole("button", { name: "text:sample" }));
+
+    await waitFor(() => {
+      expect(recordsCalls(fetchMock).length).toBeGreaterThan(0);
+    });
+
+    await user.click(screen.getByLabelText("模型筛选"));
+    await waitFor(() => {
+      expect(screen.getByRole("checkbox", { name: "Model A" })).toBeInTheDocument();
+      expect(screen.queryByRole("checkbox", { name: "Model B" })).not.toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("模型筛选"));
+
+    await user.click(screen.getByLabelText("指标筛选"));
+    await waitFor(() => {
+      expect(screen.getByRole("checkbox", { name: /Bench-1/ })).toBeInTheDocument();
+      expect(screen.queryByRole("checkbox", { name: /Bench-2/ })).not.toBeInTheDocument();
+    });
+  });
+
+  test("切换 source 后会丢掉不在范围内的已选模型，并重新加载矩阵", async () => {
+    const fetchMock = mockFetchSequence(filledMatrix, filledMatrix, filledMatrix);
+    const user = userEvent.setup();
+
+    const props = buildProps();
+    props.models = [
+      { id: 1, providerId: 1, modelName: "Model A", canonicalKey: "model-a" },
+      { id: 2, providerId: 1, modelName: "Model B", canonicalKey: "model-b" }
+    ];
+
+    await renderReady(<AdminConsole {...props} />);
+    await openRecordsTab(user);
+
+    await user.click(screen.getByLabelText("模型筛选"));
+    await user.click(screen.getByRole("checkbox", { name: "Model B" }));
+
+    await waitFor(() => {
+      expect(recordsCalls(fetchMock).some(([url]) => String(url).includes("modelIds=2"))).toBe(true);
+    });
+
+    await user.click(screen.getByLabelText("Source 筛选"));
+    await user.click(screen.getByRole("button", { name: "text:sample" }));
+
+    await waitFor(() => {
+      const recordGets = fetchMock.mock.calls.filter(([url, init]) =>
+        String(url).startsWith("/api/admin/records?") && !init?.method
+      );
+      const lastUrl = String(recordGets.at(-1)?.[0] ?? "");
+      expect(lastUrl).toContain("sourceMode=specific");
+      expect(lastUrl).not.toContain("modelIds=2");
+    });
+
+    await user.click(screen.getByLabelText("模型筛选"));
+    await waitFor(() => {
+      expect(screen.getByRole("checkbox", { name: "Model A" })).toBeInTheDocument();
+      expect(screen.queryByRole("checkbox", { name: "Model B" })).not.toBeInTheDocument();
     });
   });
 });
