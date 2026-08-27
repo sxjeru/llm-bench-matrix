@@ -104,7 +104,6 @@ export type ModelDedupeRule = {
 export type TabKey =
   | "import"
   | "external"
-  | "entry"
   | "providers"
   | "pricing"
   | "params"

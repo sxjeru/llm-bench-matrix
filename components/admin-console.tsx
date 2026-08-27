@@ -3,7 +3,6 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { type ClipboardEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { EMPTY_SOURCE_OPTIONS } from "@/components/benchmark-matrix/constants";
-import { formatDateTimeLocalInputValue } from "@/components/benchmark-matrix/formatters";
 import { getJson, postFormData, postJson } from "./admin-console/api";
 import { useEntityLookups } from "./admin-console/hooks/use-entity-lookups";
 import { useImportPreviewState } from "./admin-console/hooks/use-import-preview-state";
@@ -87,7 +86,6 @@ import {
   ProviderDeleteConfirmDialog,
   SheetPickerDialog
 } from "./admin-console/views/confirm-dialogs";
-import { EntryTab } from "./admin-console/views/entry-tab";
 import { ExternalImportTab } from "./admin-console/views/external-import-tab";
 import { ImportTab } from "./admin-console/views/import-tab";
 import { MaintenanceTab } from "./admin-console/views/maintenance-tab";
@@ -183,25 +181,6 @@ export function AdminConsole({
   } = useProviderConfig({ providers, notifySuccess, notifyError });
 
   const externalImport = useExternalImport({ notifySuccess, notifyError });
-
-  const [providerName, setProviderName] = useState("");
-  const [providerId, setProviderId] = useState<number | "">(providers[0]?.id ?? "");
-
-  const [modelName, setModelName] = useState("");
-  const [modelAlias, setModelAlias] = useState("");
-  const [sourceModelId, setSourceModelId] = useState("");
-
-  const [benchmarkName, setBenchmarkName] = useState("");
-  const [benchmarkType, setBenchmarkType] = useState("general");
-  const [benchmarkUnit, setBenchmarkUnit] = useState("score");
-  const [modalities, setModalities] = useState("Text");
-  const [higherIsBetter, setHigherIsBetter] = useState(true);
-
-  const [valueModelId, setValueModelId] = useState<number | "">(models[0]?.id ?? "");
-  const [valueBenchmarkId, setValueBenchmarkId] = useState<number | "">(benchmarks[0]?.id ?? "");
-  const [valueRaw, setValueRaw] = useState("");
-  const [valueSource, setValueSource] = useState("");
-  const [benchTime, setBenchTime] = useState(() => formatDateTimeLocalInputValue(new Date()));
 
   const [csvText, setCsvText] = useState(
     ""
@@ -1116,82 +1095,6 @@ export function AdminConsole({
       setImportStatusText(finalStatusText);
       setImportProgress(finalProgress);
       setIsImportingWorkbook(false);
-    }
-  }
-
-  async function onCreateProvider(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    try {
-      await postJson("/api/admin/providers", { name: providerName });
-      setProviderName("");
-      notifySuccess("Provider 已保存，刷新页面可看到下拉选项更新。");
-    } catch (error) {
-      notifyError(error instanceof Error ? error.message : "保存 provider 失败");
-    }
-  }
-
-  async function onCreateModel(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (providerId === "") {
-      notifyError("请先选择 provider");
-      return;
-    }
-
-    try {
-      await postJson("/api/admin/models", {
-        providerId,
-        modelName,
-        modelAlias: modelAlias || undefined,
-        sourceModelId: sourceModelId || undefined
-      });
-      setModelName("");
-      setModelAlias("");
-      setSourceModelId("");
-      notifySuccess("Model 已保存，刷新页面可看到下拉选项更新。");
-    } catch (error) {
-      notifyError(error instanceof Error ? error.message : "保存 model 失败");
-    }
-  }
-
-  async function onCreateBenchmark(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    try {
-      await postJson("/api/admin/benchmarks", {
-        benchmarkName,
-        benchmarkType,
-        unit: benchmarkUnit,
-        higherIsBetter,
-        modalities: modalities
-          .split(",")
-          .map((item: string) => item.trim())
-          .filter(Boolean)
-      });
-      setBenchmarkName("");
-      notifySuccess("Benchmark 已保存，刷新页面可看到下拉选项更新。");
-    } catch (error) {
-      notifyError(error instanceof Error ? error.message : "保存 benchmark 失败");
-    }
-  }
-
-  async function onCreateValue(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (valueModelId === "" || valueBenchmarkId === "") {
-      notifyError("请先选择 model 和 benchmark");
-      return;
-    }
-
-    try {
-      await postJson("/api/admin/values", {
-        modelId: valueModelId,
-        benchmarkId: valueBenchmarkId,
-        benchTime: new Date(benchTime).toISOString(),
-        valueRaw,
-        source: valueSource || undefined
-      });
-      setValueRaw("");
-      notifySuccess("Benchmark 值已保存。");
-    } catch (error) {
-      notifyError(error instanceof Error ? error.message : "保存 benchmark 值失败");
     }
   }
 
@@ -3386,48 +3289,6 @@ export function AdminConsole({
             onSaveConfig={externalImport.saveConfig}
             onPreviewImport={externalImport.previewImport}
             onRunImport={externalImport.runImport}
-          />
-        ) : null}
-
-        {activeTab === "entry" ? (
-          <EntryTab
-            providers={providers}
-            models={models}
-            benchmarks={benchmarks}
-            providerName={providerName}
-            setProviderName={setProviderName}
-            providerId={providerId}
-            setProviderId={setProviderId}
-            modelName={modelName}
-            setModelName={setModelName}
-            modelAlias={modelAlias}
-            setModelAlias={setModelAlias}
-            sourceModelId={sourceModelId}
-            setSourceModelId={setSourceModelId}
-            benchmarkName={benchmarkName}
-            setBenchmarkName={setBenchmarkName}
-            benchmarkType={benchmarkType}
-            setBenchmarkType={setBenchmarkType}
-            benchmarkUnit={benchmarkUnit}
-            setBenchmarkUnit={setBenchmarkUnit}
-            modalities={modalities}
-            setModalities={setModalities}
-            higherIsBetter={higherIsBetter}
-            setHigherIsBetter={setHigherIsBetter}
-            valueModelId={valueModelId}
-            setValueModelId={setValueModelId}
-            valueBenchmarkId={valueBenchmarkId}
-            setValueBenchmarkId={setValueBenchmarkId}
-            benchTime={benchTime}
-            setBenchTime={setBenchTime}
-            valueRaw={valueRaw}
-            setValueRaw={setValueRaw}
-            valueSource={valueSource}
-            setValueSource={setValueSource}
-            onCreateProvider={onCreateProvider}
-            onCreateModel={onCreateModel}
-            onCreateBenchmark={onCreateBenchmark}
-            onCreateValue={onCreateValue}
           />
         ) : null}
 
