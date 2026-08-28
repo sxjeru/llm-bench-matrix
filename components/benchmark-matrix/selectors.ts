@@ -113,6 +113,83 @@ export function buildSourceOptions(rows: MatrixInputRow[], allSourceOptions: str
   ];
 }
 
+export function buildFirstRowSourceOptions(
+  sourceOptions: SourceOption[],
+  allRows: MatrixInputRow[]
+): SourceOption[] {
+  const earliestTimestampBySource = new Map<string, number>();
+  const earliestRecordIdBySource = new Map<string, number>();
+
+  for (const row of allRows) {
+    const sourceKey = getSourceKey(row.source);
+    if (sourceKey === SOURCE_ALL) continue;
+
+    const timeStr = row.updatedAt || row.benchTime;
+    if (timeStr) {
+      const parsed = parseTimestampMs(timeStr);
+      if (parsed !== null) {
+        const prev = earliestTimestampBySource.get(sourceKey);
+        if (prev === undefined || parsed < prev) {
+          earliestTimestampBySource.set(sourceKey, parsed);
+        }
+      }
+    }
+
+    if (typeof row.recordId === "number" && Number.isFinite(row.recordId)) {
+      const prevId = earliestRecordIdBySource.get(sourceKey);
+      if (prevId === undefined || row.recordId < prevId) {
+        earliestRecordIdBySource.set(sourceKey, row.recordId);
+      }
+    }
+  }
+
+  let allOption: SourceOption | null = null;
+  const aaOptions: SourceOption[] = [];
+  const otherOptions: SourceOption[] = [];
+
+  for (const opt of sourceOptions) {
+    if (opt.key === SOURCE_ALL) {
+      allOption = opt;
+    } else if (isArtificialAnalysisSource(opt.key)) {
+      aaOptions.push(opt);
+    } else {
+      otherOptions.push(opt);
+    }
+  }
+
+  aaOptions.sort((a, b) => compareSourceTabKeysByVersion(a.key, b.key));
+
+  otherOptions.sort((a, b) => {
+    const timeA = earliestTimestampBySource.get(a.key);
+    const timeB = earliestTimestampBySource.get(b.key);
+    if (timeA !== undefined && timeB !== undefined) {
+      if (timeA !== timeB) return timeB - timeA;
+    } else if (timeA !== undefined) {
+      return -1;
+    } else if (timeB !== undefined) {
+      return 1;
+    }
+
+    const idA = earliestRecordIdBySource.get(a.key);
+    const idB = earliestRecordIdBySource.get(b.key);
+    if (idA !== undefined && idB !== undefined) {
+      if (idA !== idB) return idB - idA;
+    } else if (idA !== undefined) {
+      return -1;
+    } else if (idB !== undefined) {
+      return 1;
+    }
+
+    return compareSourceTabKeysByVersion(a.key, b.key);
+  });
+
+  return [
+    ...(allOption ? [allOption] : []),
+    ...aaOptions,
+    ...otherOptions
+  ];
+}
+
 export function buildSourceNewStateByKey(
   allRows: MatrixInputRow[],
   sourceNewReferenceTime: number | null

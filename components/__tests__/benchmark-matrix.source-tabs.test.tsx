@@ -131,6 +131,7 @@ describe("BenchmarkMatrix source tabs", () => {
   });
 
   test("同系列 source 页签按新版本优先排序（如 Qwen3.6 在 Qwen3.5 前，Claude Sonnet 5 在 Opus 4.8 前）", async () => {
+    const benchTime = "2026-04-06T00:00:00.000Z";
     await renderReady(
       <BenchmarkMatrix
         sourceOptions={[
@@ -148,11 +149,33 @@ describe("BenchmarkMatrix source tabs", () => {
             modelName: "Qwen Model",
             benchmarkName: "Bench-Q",
             benchmarkType: "General",
-            benchTime: "2026-04-06T00:00:00.000Z",
+            benchTime,
             valueRaw: "80",
             valueNum: 80,
             valueNote: null,
             source: "text:Qwen3.5"
+          },
+          {
+            providerName: "Qwen",
+            modelName: "Qwen Model 3.6",
+            benchmarkName: "Bench-Q",
+            benchmarkType: "General",
+            benchTime,
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Qwen3.6"
+          },
+          {
+            providerName: "Qwen",
+            modelName: "Qwen Model 3.4",
+            benchmarkName: "Bench-Q",
+            benchmarkType: "General",
+            benchTime,
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Qwen3.4"
           }
         ]}
       />
@@ -174,6 +197,7 @@ describe("BenchmarkMatrix source tabs", () => {
   });
 
   test("同系列 source 页签中带版本的 Muse Spark 1.1 排在无版本 Muse Spark 前面", async () => {
+    const benchTime = "2026-04-06T00:00:00.000Z";
     await renderReady(
       <BenchmarkMatrix
         sourceOptions={[
@@ -187,11 +211,33 @@ describe("BenchmarkMatrix source tabs", () => {
             modelName: "Muse Spark",
             benchmarkName: "Bench-1",
             benchmarkType: "General",
-            benchTime: "2026-04-06T00:00:00.000Z",
+            benchTime,
             valueRaw: "80",
             valueNum: 80,
             valueNote: null,
             source: "text:Muse Spark"
+          },
+          {
+            providerName: "Muse",
+            modelName: "Muse Spark 1.1",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime,
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Muse Spark 1.1"
+          },
+          {
+            providerName: "Muse",
+            modelName: "Muse Spark Thinking",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime,
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Muse Spark Thinking"
           }
         ]}
       />
@@ -206,6 +252,7 @@ describe("BenchmarkMatrix source tabs", () => {
   });
 
   test("Nemotron 组内页签按 ultra > super > nano 顺序排序", async () => {
+    const benchTime = "2026-04-06T00:00:00.000Z";
     await renderReady(
       <BenchmarkMatrix
         sourceOptions={[
@@ -219,11 +266,33 @@ describe("BenchmarkMatrix source tabs", () => {
             modelName: "Nemotron 3 Nano",
             benchmarkName: "Bench-1",
             benchmarkType: "General",
-            benchTime: "2026-04-06T00:00:00.000Z",
+            benchTime,
             valueRaw: "80",
             valueNum: 80,
             valueNote: null,
             source: "text:Nemotron 3 Nano"
+          },
+          {
+            providerName: "NVIDIA",
+            modelName: "Nemotron 3 Ultra",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime,
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Nemotron 3 Ultra"
+          },
+          {
+            providerName: "NVIDIA",
+            modelName: "Nemotron 3 Super",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime,
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Nemotron 3 Super"
           }
         ]}
       />
@@ -238,6 +307,7 @@ describe("BenchmarkMatrix source tabs", () => {
   });
 
   test("同版本 source 页签按 xxB 大小降序排序", async () => {
+    const benchTime = "2026-04-06T00:00:00.000Z";
     await renderReady(
       <BenchmarkMatrix
         sourceOptions={[
@@ -251,11 +321,33 @@ describe("BenchmarkMatrix source tabs", () => {
             modelName: "Ornith-1.0-9B",
             benchmarkName: "Bench-1",
             benchmarkType: "General",
-            benchTime: "2026-04-06T00:00:00.000Z",
+            benchTime,
             valueRaw: "80",
             valueNum: 80,
             valueNote: null,
             source: "text:Ornith-1.0-9B"
+          },
+          {
+            providerName: "Ornith",
+            modelName: "Ornith-1.0-27B",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime,
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Ornith-1.0-27B"
+          },
+          {
+            providerName: "Ornith",
+            modelName: "Ornith-1.0-3B",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime,
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Ornith-1.0-3B"
           }
         ]}
       />
@@ -1285,6 +1377,203 @@ describe("BenchmarkMatrix source tabs", () => {
 
     expect(spy.mock.calls.length).toBe(callsAfterReady);
     expect(screen.getByRole("tab", { name: "Claude Opus 4.7" })).toBeInTheDocument();
+  });
+
+  test("首页页签第一行保留 All 与 Artificial Analysis 为第一第二，后面放置最近添加的 source", async () => {
+    await renderReady(
+      <BenchmarkMatrix
+        sourceOptions={[
+          "text:Beta",
+          "text:Artificial Analysis",
+          "text:Alpha",
+          "text:Gamma"
+        ]}
+        rows={[
+          {
+            providerName: "Provider AA",
+            modelName: "Model AA",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-04-01T00:00:00.000Z",
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Artificial Analysis"
+          },
+          {
+            providerName: "Provider Alpha",
+            modelName: "Model Alpha",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-05-10T00:00:00.000Z",
+            valueRaw: "85",
+            valueNum: 85,
+            valueNote: null,
+            source: "text:Alpha"
+          },
+          {
+            providerName: "Provider Gamma",
+            modelName: "Model Gamma",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-05-05T00:00:00.000Z",
+            valueRaw: "82",
+            valueNum: 82,
+            valueNote: null,
+            source: "text:Gamma"
+          },
+          {
+            providerName: "Provider Beta",
+            modelName: "Model Beta",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-04-10T00:00:00.000Z",
+            valueRaw: "78",
+            valueNum: 78,
+            valueNote: null,
+            source: "text:Beta"
+          }
+        ]}
+      />
+    );
+
+    const tabs = screen
+      .getAllByRole("tab")
+      .map((tab) => tab.textContent?.trim() ?? "");
+
+    expect(tabs).toEqual(["All", "Artificial Analysis", "Alpha", "Gamma", "Beta"]);
+  });
+
+  test("首页页签溢出时第一行优先展示 All、Artificial Analysis 和最近添加的 source，展开的下拉框按首字母排序", async () => {
+    vi.stubGlobal("ResizeObserver", undefined);
+
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const element = this as HTMLElement;
+
+      const makeRect = (width: number, height: number) =>
+        ({
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          right: width,
+          bottom: height,
+          width,
+          height,
+          toJSON: () => ({})
+        }) as DOMRect;
+
+      if (element.dataset.sourceTabMeasure === "item") {
+        return makeRect(100, 36);
+      }
+
+      if (element.dataset.sourceTabMeasure === "more") {
+        return makeRect(28, 36);
+      }
+
+      return makeRect(350, 36);
+    });
+
+    const { container } = await renderReady(
+      <BenchmarkMatrix
+        sourceOptions={[
+          "text:Zeta_Old",
+          "text:Beta_Recent",
+          "text:Artificial Analysis",
+          "text:Alpha_Old",
+          "text:Gamma_VeryRecent"
+        ]}
+        rows={[
+          {
+            providerName: "AA",
+            modelName: "Model AA",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-03-01T00:00:00.000Z",
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Artificial Analysis"
+          },
+          {
+            providerName: "Gamma",
+            modelName: "Model Gamma",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-05-10T00:00:00.000Z",
+            valueRaw: "85",
+            valueNum: 85,
+            valueNote: null,
+            source: "text:Gamma_VeryRecent"
+          },
+          {
+            providerName: "Beta",
+            modelName: "Model Beta",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-05-08T00:00:00.000Z",
+            valueRaw: "82",
+            valueNum: 82,
+            valueNote: null,
+            source: "text:Beta_Recent"
+          },
+          {
+            providerName: "Alpha",
+            modelName: "Model Alpha",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-04-01T00:00:00.000Z",
+            valueRaw: "75",
+            valueNum: 75,
+            valueNote: null,
+            source: "text:Alpha_Old"
+          },
+          {
+            providerName: "Zeta",
+            modelName: "Model Zeta",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime: "2026-04-02T00:00:00.000Z",
+            valueRaw: "74",
+            valueNum: 74,
+            valueNote: null,
+            source: "text:Zeta_Old"
+          }
+        ]}
+      />
+    );
+
+    const viewport = container.querySelector('[data-source-tabs-viewport="1"]') as HTMLElement | null;
+    expect(viewport).not.toBeNull();
+
+    // 容纳 3 个页签（All, Artificial Analysis, Gamma_VeryRecent）+ overflow 按钮
+    Object.defineProperty(viewport!, "clientWidth", {
+      configurable: true,
+      value: 340
+    });
+
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "展开溢出页签" })).toBeInTheDocument();
+    });
+
+    // 第一行仅包含 All, Artificial Analysis, Gamma_VeryRecent
+    const firstRowTabs = container
+      .querySelectorAll('.tabs.flex.flex-1 [role="tab"]');
+    const firstRowLabels = Array.from(firstRowTabs).map((el) => el.textContent?.trim() ?? "");
+    expect(firstRowLabels).toEqual(["All", "Artificial Analysis", "Gamma_VeryRecent"]);
+
+    // 展开下拉框
+    fireEvent.click(screen.getByRole("button", { name: "展开溢出页签" }));
+
+    // 下拉框内的溢出页签按首字母/版本排序 (Alpha_Old, Beta_Recent, Zeta_Old)
+    const overflowTabs = container
+      .querySelectorAll('#benchmark-matrix-source-tabs-overflow [role="tab"]');
+    const overflowLabels = Array.from(overflowTabs).map((el) => el.textContent?.trim() ?? "");
+    expect(overflowLabels).toEqual(["Alpha_Old", "Beta_Recent", "Zeta_Old"]);
   });
 
 });
