@@ -37,8 +37,8 @@ importers:
         specifier: ^0.45.1
         version: 0.45.2(@neondatabase/serverless@1.1.0)(@types/pg@8.21.0)(pg@8.23.0)
       html2canvas-pro:
-        specifier: ^2.3.3
-        version: 2.3.3
+        specifier: ^2.4.0
+        version: 2.4.0
       lucide-react:
         specifier: ^1.33.0
         version: 1.33.0(react@19.2.8)
@@ -2278,8 +2278,8 @@ packages:
     resolution: {integrity: sha512-CV9TW3Y3f8/wT0BRFc1/KAVQ3TUHiXmaAb6VW9vtiMFf7SLoMd1PdAc4W3KFOFETBJUb90KatHqlsZMWV+R9Gg==}
     engines: {node: ^20.19.0 || ^22.12.0 || >=24.0.0}
 
-  html2canvas-pro@2.3.3:
-    resolution: {integrity: sha512-HOPWJ9GJLGEquhZjEDHiJMaUqYdWL0eI5JDZXNiy1Ge2NB5s9QI+uSwKInCy5hnurGRIOpOQvEjolF8ch2XB9Q==}
+  html2canvas-pro@2.4.0:
+    resolution: {integrity: sha512-ERxMm/ZGRatO9g0mAM2EBlWFgCXDjma7RZFLCHm71gM6q/WqQRYaqB0MIGjjYKEHF8rKvXIeshrrJ8ovImd9aw==}
     engines: {node: '>=16.0.0'}
 
   ignore@5.3.2:
@@ -5410,7 +5410,7 @@ snapshots:
     transitivePeerDependencies:
       - '@noble/hashes'
 
-  html2canvas-pro@2.3.3:
+  html2canvas-pro@2.4.0:
     dependencies:
       css-line-break: 2.1.0
       text-segmentation: 1.0.3
