@@ -724,7 +724,7 @@ describe("AdminConsole records tab", () => {
       expect(JSON.parse(String(reassignCall?.[1]?.body))).toEqual({
         entityType: "benchmark",
         fromBenchmarkId: 11,
-        conflictStrategy: "skip",
+        conflictStrategy: "keep-both",
         target: { benchmarkId: 12 },
         scope: {
           sourceMode: "all",

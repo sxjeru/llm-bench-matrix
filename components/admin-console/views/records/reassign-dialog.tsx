@@ -181,7 +181,7 @@ export function RecordsReassignDialog({
   const [newProviderName, setNewProviderName] = useState("");
   const [nextSource, setNextSource] = useState("");
   const [emptySource, setEmptySource] = useState(false);
-  const [conflictStrategy, setConflictStrategy] = useState<RecordConflictStrategy>("skip");
+  const [conflictStrategy, setConflictStrategy] = useState<RecordConflictStrategy>("keep-both");
 
   const benchmarkOptions = useMemo(
     () =>

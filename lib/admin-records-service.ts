@@ -893,7 +893,7 @@ export async function reassignRecordBenchmark(input: {
   scope?: RecordMutationScope;
   conflictStrategy?: RecordReassignConflictStrategy;
 }): Promise<ReassignRecordsResult> {
-  const conflictStrategy = input.conflictStrategy ?? "skip";
+  const conflictStrategy = input.conflictStrategy ?? "keep-both";
   const scope = input.scope ?? {};
 
   const [fromBenchmark] = await db
@@ -1070,7 +1070,7 @@ export async function reassignRecordModel(input: {
   scope?: RecordMutationScope;
   conflictStrategy?: RecordReassignConflictStrategy;
 }): Promise<ReassignRecordsResult> {
-  const conflictStrategy = input.conflictStrategy ?? "skip";
+  const conflictStrategy = input.conflictStrategy ?? "keep-both";
   const scope = input.scope ?? {};
 
   const [fromModel] = await db
