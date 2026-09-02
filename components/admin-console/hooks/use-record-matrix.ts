@@ -698,6 +698,62 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     }
   }
 
+  async function runDeleteTarget(target: RecordReassignTarget) {
+    if (toolBusy) return;
+
+    setToolBusy("delete");
+    try {
+      const targetScope: RecordMutationScope = {
+        ...mutationScope,
+        benchmarkIds:
+          target.entityType === "benchmark"
+            ? [target.benchmarkId]
+            : mutationScope.benchmarkIds,
+        modelIds:
+          target.entityType === "model"
+            ? [target.modelId]
+            : mutationScope.modelIds,
+        sourceMode:
+          target.entityType === "source"
+            ? (target.source ? "specific" : "empty")
+            : mutationScope.sourceMode,
+        source:
+          target.entityType === "source"
+            ? target.source
+            : mutationScope.source
+      };
+
+      const result = (await postJson("/api/admin/records/batch-delete", {
+        scope: targetScope
+      })) as { deleted: number; prunedSourceMeta: number };
+
+      const noun = target.entityType === "benchmark" ? "行" : target.entityType === "model" ? "列" : "数据源";
+      notifySuccess(`已删除${noun}「${target.label}」的 ${result.deleted} 条记录`);
+
+      let nextFilters = filtersRef.current;
+      if (target.entityType === "benchmark" && nextFilters.benchmarkIds.includes(target.benchmarkId)) {
+        nextFilters = {
+          ...nextFilters,
+          benchmarkIds: nextFilters.benchmarkIds.filter((id) => id !== target.benchmarkId)
+        };
+      } else if (target.entityType === "model" && nextFilters.modelIds.includes(target.modelId)) {
+        nextFilters = {
+          ...nextFilters,
+          modelIds: nextFilters.modelIds.filter((id) => id !== target.modelId)
+        };
+      }
+
+      setDrafts({});
+      applyFilters(nextFilters);
+      setReassignTarget(null);
+      await refreshMatrixAndEntities(nextFilters);
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "删除失败");
+    } finally {
+      setToolBusy(null);
+    }
+  }
+
   return {
     filters,
     onFiltersChange,
@@ -749,7 +805,8 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     reassignTarget,
     setReassignTarget,
     openReassignDialog,
-    runReassign
+    runReassign,
+    runDeleteTarget
   };
 }
 

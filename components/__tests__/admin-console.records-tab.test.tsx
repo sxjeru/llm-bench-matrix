@@ -1,11 +1,15 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { AdminConsole } from "@/components/admin-console";
 import { renderReady } from "@/tests/flush-microtasks";
 
 const refreshMock = vi.fn();
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -1037,5 +1041,127 @@ describe("AdminConsole records tab", () => {
       expect(lastUrl).toContain("sourceMode=specific");
       expect(lastUrl).not.toContain("benchmarkIds=11");
     });
+  });
+
+  test("行归属弹窗左下角点击删除该行，若筛选中已勾选该行则自动从已选 benchmarkIds 移除并刷新矩阵", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fetchMock = mockFetchSequence(
+      // 1. Matrix load after picking benchmark 11 in filter
+      filledMatrix,
+      // 2. Delete row POST response
+      { ok: true, deleted: 1, prunedSourceMeta: 0 },
+      // 3. Matrix reload after deletion (with benchmarkIds=11 removed)
+      emptyMatrix
+    );
+    const user = userEvent.setup();
+
+    const props = buildProps();
+    await renderReady(<AdminConsole {...props} />);
+    await openRecordsTab(user);
+
+    // Filter by benchmark 11
+    await user.click(screen.getByLabelText("指标筛选"));
+    await user.click(screen.getByRole("checkbox", { name: /Bench-1/ }));
+
+    await screen.findByTestId("record-cell-1-11");
+    await user.click(screen.getByTitle("点击变更「Bench-1」这一行的归属"));
+
+    expect(await screen.findByText("变更行归属：Bench-1")).toBeInTheDocument();
+    const deleteRowBtn = screen.getByRole("button", { name: "删除该行" });
+    expect(deleteRowBtn).toBeInTheDocument();
+
+    await user.click(deleteRowBtn);
+
+    await waitFor(() => {
+      const deleteCall = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/admin/records/batch-delete" && init?.method === "POST"
+      );
+      expect(deleteCall).toBeTruthy();
+      expect(JSON.parse(String(deleteCall?.[1]?.body))).toEqual({
+        scope: {
+          sourceMode: "all",
+          source: null,
+          modelIds: [],
+          benchmarkIds: [11]
+        }
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("已删除行「Bench-1」的 1 条记录")).toBeInTheDocument();
+    });
+
+    // Verify matrix reloaded without benchmarkIds=11
+    await waitFor(() => {
+      const recordGets = fetchMock.mock.calls.filter(([url, init]) =>
+        String(url).startsWith("/api/admin/records?") && !init?.method
+      );
+      const lastUrl = String(recordGets.at(-1)?.[0] ?? "");
+      expect(lastUrl).not.toContain("benchmarkIds=11");
+    });
+
+    // Verify filter combobox is reset to "全部指标"
+    expect(screen.getByRole("button", { name: "指标筛选" })).toHaveTextContent("全部指标");
+  });
+
+  test("列归属弹窗左下角点击删除该列，若筛选中已勾选该列则自动从已选 modelIds 移除并刷新矩阵", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fetchMock = mockFetchSequence(
+      // 1. Matrix load after picking model 1 in filter
+      filledMatrix,
+      // 2. Delete col POST response
+      { ok: true, deleted: 1, prunedSourceMeta: 0 },
+      // 3. Matrix reload after deletion (with modelIds=1 removed)
+      emptyMatrix
+    );
+    const user = userEvent.setup();
+
+    const props = buildProps();
+    await renderReady(<AdminConsole {...props} />);
+    await openRecordsTab(user);
+
+    // Filter by model 1
+    await user.click(screen.getByLabelText("模型筛选"));
+    await user.click(screen.getByRole("checkbox", { name: "Model A" }));
+
+    await screen.findByTestId("record-cell-1-11");
+    await user.click(screen.getByTitle("点击变更「Model A」这一列的归属"));
+
+    expect(await screen.findByText("变更列归属：Model A")).toBeInTheDocument();
+    const deleteColBtn = screen.getByRole("button", { name: "删除该列" });
+    expect(deleteColBtn).toBeInTheDocument();
+
+    await user.click(deleteColBtn);
+
+    await waitFor(() => {
+      const deleteCall = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/admin/records/batch-delete" && init?.method === "POST"
+      );
+      expect(deleteCall).toBeTruthy();
+      expect(JSON.parse(String(deleteCall?.[1]?.body))).toEqual({
+        scope: {
+          sourceMode: "all",
+          source: null,
+          modelIds: [1],
+          benchmarkIds: []
+        }
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("已删除列「Model A」的 1 条记录")).toBeInTheDocument();
+    });
+
+    // Verify matrix reloaded without modelIds=1
+    await waitFor(() => {
+      const recordGets = fetchMock.mock.calls.filter(([url, init]) =>
+        String(url).startsWith("/api/admin/records?") && !init?.method
+      );
+      const lastUrl = String(recordGets.at(-1)?.[0] ?? "");
+      expect(lastUrl).not.toContain("modelIds=1");
+    });
+
+    // Verify filter combobox is reset to "全部模型"
+    expect(screen.getByRole("button", { name: "模型筛选" })).toHaveTextContent("全部模型");
   });
 });

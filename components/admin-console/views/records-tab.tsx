@@ -159,7 +159,8 @@ export function RecordsTab({
     reassignTarget,
     setReassignTarget,
     openReassignDialog,
-    runReassign
+    runReassign,
+    runDeleteTarget
   } = controller;
 
   const selectionCount = getSelectionCellCount(selection);
@@ -324,9 +325,10 @@ export function RecordsTab({
           providers={providers}
           sourceOptions={sourceOptions}
           scopeDescription={scopeDescription}
-          busy={toolBusy === "reassign"}
+          busy={toolBusy === "reassign" || toolBusy === "delete"}
           onClose={() => setReassignTarget(null)}
           onSubmit={(payload) => void runReassign(payload)}
+          onDelete={(target) => void runDeleteTarget(target)}
         />
       ) : null}
 

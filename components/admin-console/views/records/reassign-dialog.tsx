@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { ChevronDown, Link2, Search } from "lucide-react";
+import { ChevronDown, Link2, Search, Trash2 } from "lucide-react";
 import type {
   BenchmarkOption,
   ModelOption,
@@ -22,6 +22,7 @@ type RecordsReassignDialogProps = {
   busy: boolean;
   onClose: () => void;
   onSubmit: (payload: Record<string, unknown>) => void;
+  onDelete?: (target: RecordReassignTarget) => void;
 };
 
 type TargetMode = "existing" | "new";
@@ -172,7 +173,8 @@ export function RecordsReassignDialog({
   scopeDescription,
   busy,
   onClose,
-  onSubmit
+  onSubmit,
+  onDelete
 }: RecordsReassignDialogProps) {
   const [mode, setMode] = useState<TargetMode>("existing");
   const [existingId, setExistingId] = useState<string>("");
@@ -182,6 +184,17 @@ export function RecordsReassignDialog({
   const [nextSource, setNextSource] = useState("");
   const [emptySource, setEmptySource] = useState(false);
   const [conflictStrategy, setConflictStrategy] = useState<RecordConflictStrategy>("keep-both");
+
+  function handleDelete() {
+    if (typeof window !== "undefined") {
+      const noun = target.entityType === "benchmark" ? "行" : target.entityType === "model" ? "列" : "数据源";
+      const confirmed = window.confirm(
+        `确定要删除${noun}「${target.label}」在当前作用范围内的全部数据吗？此操作不可撤销。`
+      );
+      if (!confirmed) return;
+    }
+    onDelete?.(target);
+  }
 
   const benchmarkOptions = useMemo(
     () =>
@@ -476,18 +489,38 @@ export function RecordsReassignDialog({
 
         </div>
 
-        <div className="mt-6 flex items-center justify-end gap-2.5 pt-3 border-t border-base-300/60">
-          <button type="button" className="btn btn-ghost btn-sm rounded-xl" disabled={busy} onClick={onClose}>
-            取消
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm rounded-xl font-semibold px-4"
-            disabled={!canSubmit || busy}
-            onClick={handleSubmit}
-          >
-            {busy ? "处理中..." : "确认变更归属"}
-          </button>
+        <div className="mt-6 flex items-center justify-between gap-2.5 pt-3 border-t border-base-300/60">
+          <div>
+            {onDelete ? (
+              <button
+                type="button"
+                className="btn btn-error btn-outline btn-sm rounded-xl font-semibold gap-1.5"
+                disabled={busy}
+                onClick={handleDelete}
+              >
+                <Trash2 size={14} />
+                {target.entityType === "benchmark"
+                  ? "删除该行"
+                  : target.entityType === "model"
+                    ? "删除该列"
+                    : "删除数据源"}
+              </button>
+            ) : null}
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            <button type="button" className="btn btn-ghost btn-sm rounded-xl" disabled={busy} onClick={onClose}>
+              取消
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm rounded-xl font-semibold px-4"
+              disabled={!canSubmit || busy}
+              onClick={handleSubmit}
+            >
+              {busy ? "处理中..." : "确认变更归属"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
