@@ -33,6 +33,13 @@ function mockFetchSequence(...payloads: unknown[]) {
     if (url.startsWith("/api/admin/benchmarks/value-overlap")) {
       return createJsonResponse({ conflictCount: 0, overlapCount: 0 });
     }
+    if (url.startsWith("/api/admin/records/source-entities")) {
+      const next = queuedPayloads[0];
+      if (next && typeof next === "object" && ("modelIds" in next || "benchmarkIds" in next)) {
+        return createJsonResponse(queuedPayloads.shift() ?? {});
+      }
+      return createJsonResponse({ modelIds: [1], benchmarkIds: [11] });
+    }
     return createJsonResponse(queuedPayloads.shift() ?? {});
   });
 
@@ -42,10 +49,6 @@ function mockFetchSequence(...payloads: unknown[]) {
       : input instanceof URL
         ? input.toString()
         : input.url;
-
-    if (url.startsWith("/api/admin/records/source-entities")) {
-      return createJsonResponse({ modelIds: [1], benchmarkIds: [11] });
-    }
 
     if (url === "/api/admin/benchmarks/preview-value-overlap") {
       return createJsonResponse({ stats: [] });
@@ -892,6 +895,147 @@ describe("AdminConsole records tab", () => {
     await waitFor(() => {
       expect(screen.getByRole("checkbox", { name: "Model A" })).toBeInTheDocument();
       expect(screen.queryByRole("checkbox", { name: "Model B" })).not.toBeInTheDocument();
+    });
+  });
+
+  test("在具体 source 下归属变更后，已选指标 ID 会平滑迁移为目标 ID 并用新条件加载矩阵", async () => {
+    const reassignedMatrix = {
+      ...filledMatrix,
+      benchmarks: [
+        {
+          benchmarkId: 12,
+          benchmarkName: "Bench-2",
+          benchmarkType: "Type-A",
+          unit: "%",
+          higherIsBetter: true,
+          modalities: ["Text"],
+          recordCount: 1
+        }
+      ],
+      cells: [
+        {
+          ...filledMatrix.cells[0],
+          benchmarkId: 12
+        }
+      ]
+    };
+
+    const fetchMock = mockFetchSequence(
+      // 1. Initial matrix load after selecting source
+      filledMatrix,
+      // 2. Matrix load after selecting benchmark 11
+      filledMatrix,
+      // 3. Reassign POST response
+      {
+        ok: true,
+        entityType: "benchmark",
+        fromId: 11,
+        targetId: 12,
+        movedCount: 1,
+        skippedCount: 0,
+        deletedTargetCount: 0,
+        conflictCount: 0,
+        createdTarget: false,
+        fromLabel: "Bench-1 (Type-A)",
+        targetLabel: "Bench-2 (Type-A)"
+      },
+      // 4. Source entities refresh after reassign (source now has benchmark 12)
+      { modelIds: [1], benchmarkIds: [12] },
+      // 5. Matrix reload with new benchmark 12
+      reassignedMatrix
+    );
+    const user = userEvent.setup();
+
+    const props = buildProps();
+    props.benchmarks = [
+      { id: 11, benchmarkName: "Bench-1", benchmarkType: "Type-A", modalities: ["Text"] },
+      { id: 12, benchmarkName: "Bench-2", benchmarkType: "Type-A", modalities: ["Text"] }
+    ];
+
+    await renderReady(<AdminConsole {...props} />);
+    await openRecordsTab(user);
+
+    // Select source sample
+    await user.click(screen.getByLabelText("Source 筛选"));
+    await user.click(screen.getByRole("button", { name: "sample" }));
+
+    // Select benchmark 11
+    await user.click(screen.getByLabelText("指标筛选"));
+    await user.click(screen.getByRole("checkbox", { name: /Bench-1/ }));
+
+    await screen.findByTestId("record-cell-1-11");
+    await user.click(screen.getByTitle("点击变更「Bench-1」这一行的归属"));
+
+    expect(await screen.findByText("变更行归属：Bench-1")).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("目标 benchmark"));
+    await user.click(screen.getByRole("option", { name: "Bench-2 (Type-A)" }));
+    await user.click(screen.getByRole("button", { name: "确认变更归属" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/归属已变更：Bench-1 \(Type-A\) → Bench-2 \(Type-A\)/)).toBeInTheDocument();
+    });
+
+    // Verify matrix was reloaded with benchmarkIds=12 (and not empty or 11)
+    await waitFor(() => {
+      const recordGets = fetchMock.mock.calls.filter(([url, init]) =>
+        String(url).startsWith("/api/admin/records?") && !init?.method
+      );
+      const lastUrl = String(recordGets.at(-1)?.[0] ?? "");
+      expect(lastUrl).toContain("benchmarkIds=12");
+      expect(lastUrl).not.toContain("benchmarkIds=11");
+    });
+  });
+
+  test("在具体 source 下批量删除导致已选指标脱离范围时，自动裁剪筛选 ID 并以裁剪后条件刷新矩阵", async () => {
+    const fetchMock = mockFetchSequence(
+      // 1. Initial matrix load after selecting source
+      filledMatrix,
+      // 2. Matrix load after selecting benchmark 11
+      filledMatrix,
+      // 3. Batch delete POST response
+      { ok: true, deleted: 1, prunedSourceMeta: 1 },
+      // 4. Source entities refresh after delete (benchmark 11 is now pruned/empty)
+      { modelIds: [1], benchmarkIds: [] },
+      // 5. Matrix reload with aligned/pruned filters
+      emptyMatrix
+    );
+    const user = userEvent.setup();
+
+    const props = buildProps();
+    props.benchmarks = [
+      { id: 11, benchmarkName: "Bench-1", benchmarkType: "Type-A", modalities: ["Text"] }
+    ];
+
+    await renderReady(<AdminConsole {...props} />);
+    await openRecordsTab(user);
+
+    // Select source sample
+    await user.click(screen.getByLabelText("Source 筛选"));
+    await user.click(screen.getByRole("button", { name: "sample" }));
+
+    // Select benchmark 11
+    await user.click(screen.getByLabelText("指标筛选"));
+    await user.click(screen.getByRole("checkbox", { name: /Bench-1/ }));
+
+    await screen.findByTestId("record-cell-1-11");
+    await user.click(screen.getByRole("button", { name: "全部删除" }));
+
+    expect(await screen.findByText("删除当前筛选范围内的全部数据")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /确认删除/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText("已删除 1 条记录")).toBeInTheDocument();
+    });
+
+    // Verify matrix was reloaded with the pruned filter (without benchmarkIds=11)
+    await waitFor(() => {
+      const recordGets = fetchMock.mock.calls.filter(([url, init]) =>
+        String(url).startsWith("/api/admin/records?") && !init?.method
+      );
+      const lastUrl = String(recordGets.at(-1)?.[0] ?? "");
+      expect(lastUrl).toContain("sourceMode=specific");
+      expect(lastUrl).not.toContain("benchmarkIds=11");
     });
   });
 });
