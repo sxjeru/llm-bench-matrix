@@ -1164,4 +1164,39 @@ describe("AdminConsole records tab", () => {
     // Verify filter combobox is reset to "全部模型"
     expect(screen.getByRole("button", { name: "模型筛选" })).toHaveTextContent("全部模型");
   });
+
+  test("点击筛选下拉框（Source/模型/指标）后自动对焦到其中的搜索框", async () => {
+    const user = userEvent.setup();
+    const props = buildProps();
+    await renderReady(<AdminConsole {...props} />);
+    await openRecordsTab(user);
+
+    // 1. 点击 Source 筛选下拉框
+    const sourceBtn = screen.getByRole("button", { name: "Source 筛选" });
+    await user.click(sourceBtn);
+    const sourceInput = screen.getByRole("textbox", { name: "搜索 source" });
+    expect(sourceInput).toBeInTheDocument();
+    expect(sourceInput).toHaveFocus();
+
+    // 关闭 Source 下拉框
+    await user.click(sourceBtn);
+
+    // 2. 点击 模型 筛选下拉框
+    const modelBtn = screen.getByRole("button", { name: "模型筛选" });
+    await user.click(modelBtn);
+    const modelInput = screen.getByRole("textbox", { name: "搜索模型" });
+    expect(modelInput).toBeInTheDocument();
+    expect(modelInput).toHaveFocus();
+
+    // 关闭 模型 下拉框
+    await user.click(modelBtn);
+
+    // 3. 点击 指标 筛选下拉框
+    const benchmarkBtn = screen.getByRole("button", { name: "指标筛选" });
+    await user.click(benchmarkBtn);
+    const benchmarkInput = screen.getByRole("textbox", { name: "搜索指标" });
+    expect(benchmarkInput).toBeInTheDocument();
+    expect(benchmarkInput).toHaveFocus();
+  });
 });
+

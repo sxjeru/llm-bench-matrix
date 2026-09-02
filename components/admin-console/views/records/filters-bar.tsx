@@ -58,6 +58,13 @@ export function FilterMultiCombobox({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const rootRef = useOutsideClose(() => setOpen(false), open);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      searchInputRef.current?.focus();
+    }
+  }, [open]);
 
   const normalizedQuery = query.trim().toLowerCase();
   const filteredOptions = useMemo(
@@ -134,10 +141,12 @@ export function FilterMultiCombobox({
           <label className="input input-bordered input-sm mb-2 flex items-center gap-2">
             <Search size={13} className="opacity-60" aria-hidden="true" />
             <input
+              ref={searchInputRef}
               type="text"
               className="grow"
               placeholder={`搜索${label}…`}
               aria-label={`搜索${label}`}
+              autoFocus
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
@@ -222,7 +231,14 @@ export function RecordsFiltersBar({
   const [sourceOpen, setSourceOpen] = useState(false);
   const [sourceQuery, setSourceQuery] = useState("");
   const sourceRootRef = useOutsideClose(() => setSourceOpen(false), sourceOpen);
+  const sourceSearchInputRef = useRef<HTMLInputElement | null>(null);
   const [searchDraft, setSearchDraft] = useState(filters.search);
+
+  useEffect(() => {
+    if (sourceOpen) {
+      sourceSearchInputRef.current?.focus();
+    }
+  }, [sourceOpen]);
 
   const providerById = useMemo(
     () => new Map(providers.map((provider) => [provider.id, provider])),
@@ -307,10 +323,12 @@ export function RecordsFiltersBar({
               <label className="input input-bordered input-sm mb-2 flex items-center gap-2">
                 <Search size={13} className="opacity-60" aria-hidden="true" />
                 <input
+                  ref={sourceSearchInputRef}
                   type="text"
                   className="grow"
                   placeholder="搜索 source…"
                   aria-label="搜索 source"
+                  autoFocus
                   value={sourceQuery}
                   onChange={(event) => setSourceQuery(event.target.value)}
                 />
