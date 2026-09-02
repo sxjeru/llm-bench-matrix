@@ -81,6 +81,7 @@ type ParsedTextImportFormat = "structured-csv" | "matrix-table" | "paper-table";
 type ParsedTextImportResult = {
   format: ParsedTextImportFormat;
   rows: NormalizedTextImportRow[];
+  modelColumns?: string[];
   skipped: number;
   confidence?: number;
   parseSource?: "text" | "html";
@@ -4566,6 +4567,8 @@ function parseStructuredCsvRows(inputText: string, defaultSource: string | null)
   }) as Record<string, string>[];
 
   const rows: NormalizedTextImportRow[] = [];
+  const modelColumns: string[] = [];
+  const seenModelColumns = new Set<string>();
   let skipped = 0;
 
   parsedRows.forEach((row, index) => {
@@ -4580,6 +4583,11 @@ function parseStructuredCsvRows(inputText: string, defaultSource: string | null)
     if (!modelName || !benchmarkName || isEmptyImportValue(valueRawInput)) {
       skipped += 1;
       return;
+    }
+
+    if (!seenModelColumns.has(modelName)) {
+      seenModelColumns.add(modelName);
+      modelColumns.push(modelName);
     }
 
     const { valueRaw, valueNote } = normalizeImportedValueAndExtractNote(
@@ -4633,6 +4641,7 @@ function parseStructuredCsvRows(inputText: string, defaultSource: string | null)
   return {
     format: "structured-csv",
     rows,
+    modelColumns,
     skipped
   };
 }
@@ -5113,6 +5122,7 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
   return {
     format: "matrix-table",
     rows,
+    modelColumns: modelNames,
     skipped
   };
 }
@@ -5340,6 +5350,7 @@ function parsePaperCopiedTableRows(inputText: string, defaultSource: string | nu
   return {
     format: "paper-table",
     rows,
+    modelColumns: modelNames,
     skipped,
     confidence: Number((parseConfidence * 0.72 + headerConfidence * 0.28).toFixed(3))
   };
@@ -5543,6 +5554,7 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
   return {
     format: parsed.format,
     parseSource: parsed.parseSource ?? "text",
+    modelColumns: parsed.modelColumns,
     total: parsed.rows.length,
     skipped: parsed.skipped,
     warningCount: allWarnings.length,

@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, test } from "vitest";
 type ParsedTextImportResult = {
   format: string;
   parseSource?: string;
+  modelColumns?: string[];
   rows: Array<{
     benchmarkName: string;
     benchmarkType: string;
@@ -29,6 +30,7 @@ type ParsedTextImportResult = {
 
 type PreviewTextImportResult = {
   format: string;
+  modelColumns?: string[];
   total: number;
   skipped: number;
   warningCount: number;
@@ -1023,5 +1025,29 @@ describe("paper-table 文本解析", () => {
     expect(downRows.length).toBe(2);
     expect(downRows.every((row) => row.benchmarkName === "Rank Eval")).toBe(true);
     expect(downRows.every((row) => row.higherIsBetter === false)).toBe(true);
+  });
+
+  test("矩阵表格解析返回完整的原始 modelColumns", async () => {
+    const inputText = [
+      "Benchmark\tModel A\tModel B\tModel C",
+      "Bench 1\t\t85.0\t90.0",
+      "Bench 2\t72.0\t86.0\t91.0"
+    ].join("\n");
+
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    expect(parsed.modelColumns).toEqual(["Model A", "Model B", "Model C"]);
+  });
+
+  test("结构化 CSV 解析按行顺序返回去重后的 modelColumns", async () => {
+    const inputText = [
+      "model,benchmark,value",
+      "Model X,Bench 1,80",
+      "Model Y,Bench 1,90",
+      "Model X,Bench 2,85",
+      "Model Z,Bench 2,95"
+    ].join("\n");
+
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+    expect(parsed.modelColumns).toEqual(["Model X", "Model Y", "Model Z"]);
   });
 });

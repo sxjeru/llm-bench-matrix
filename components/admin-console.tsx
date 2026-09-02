@@ -196,6 +196,7 @@ export function AdminConsole({
   const [isPreviewingTextImport, setIsPreviewingTextImport] = useState(false);
   const [textImportPreviewRows, setTextImportPreviewRows] = useState<TextImportPreviewRow[]>([]);
   const [textImportDraftRows, setTextImportDraftRows] = useState<TextImportPreviewRow[]>([]);
+  const [textImportModelColumns, setTextImportModelColumns] = useState<string[]>([]);
   const [pairNoteHistory, setPairNoteHistory] = useState<string[]>([]);
   const [starNoteHistory, setStarNoteHistory] = useState<string[]>([]);
   const [matrixBenchmarkNameDrafts, setMatrixBenchmarkNameDrafts] = useState<Record<string, string>>({});
@@ -400,6 +401,7 @@ export function AdminConsole({
     matrixModelNameDrafts,
     matrixBenchmarkNameDrafts,
     matrixBenchmarkTypeDrafts,
+    importModelColumns: textImportModelColumns,
     modelById,
     providerById,
     benchmarkById,
@@ -963,6 +965,7 @@ export function AdminConsole({
 
     setTextImportPreviewRows(resolvedPreviewRows);
     setTextImportDraftRows(resolvedPreviewRows.map((row) => ({ ...row })));
+    setTextImportModelColumns((result.modelColumns ?? []) as string[]);
     setGlobalStarSupplement("");
     setBenchmarkMergeTargets({});
     setBenchmarkMergeFilters({});
@@ -1489,6 +1492,10 @@ export function AdminConsole({
       )
     );
 
+    setTextImportModelColumns((prev) =>
+      prev.map((item) => (item === modelName ? nextModelName : item))
+    );
+
     if (nextModelName === modelName) return;
 
     setModelMergeTargets((prev) => {
@@ -1679,6 +1686,7 @@ export function AdminConsole({
       const previewRows = applyExistingEloBenchmarkToPreviewRows((result.previewRows ?? []) as TextImportPreviewRow[]);
       setTextImportPreviewRows(previewRows);
       setTextImportDraftRows(previewRows.map((row) => ({ ...row })));
+      setTextImportModelColumns((result.modelColumns ?? []) as string[]);
       setGlobalStarSupplement("");
       setBenchmarkMergeTargets({});
       setBenchmarkMergeFilters({});

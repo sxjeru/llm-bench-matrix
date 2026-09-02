@@ -52,6 +52,7 @@ type UseImportPreviewStateOptions = {
   matrixBenchmarkNameDrafts?: Record<string, string>;
   /** 预览矩阵中尚未 blur 提交的 type 编辑，导入时需一并生效 */
   matrixBenchmarkTypeDrafts?: Record<string, string>;
+  importModelColumns?: string[];
   modelById: Map<number, ModelOption>;
   providerById: Map<number, ProviderOption>;
   benchmarkById: Map<number, BenchmarkOption>;
@@ -153,6 +154,7 @@ export function useImportPreviewState({
   matrixModelNameDrafts = {},
   matrixBenchmarkNameDrafts = {},
   matrixBenchmarkTypeDrafts = {},
+  importModelColumns = [],
   modelById,
   providerById,
   benchmarkById,
@@ -495,6 +497,15 @@ export function useImportPreviewState({
   const matrixPreview = useMemo(() => {
     const modelNames: string[] = [];
     const seenModelNames = new Set<string>();
+    const draftModelSet = new Set(textImportDraftRows.map((row) => row.modelName).filter(Boolean));
+
+    (importModelColumns ?? []).forEach((modelName) => {
+      const trimmed = modelName.trim();
+      if (!trimmed || seenModelNames.has(trimmed) || !draftModelSet.has(trimmed)) return;
+      seenModelNames.add(trimmed);
+      modelNames.push(trimmed);
+    });
+
     textImportDraftRows.forEach((row) => {
       const modelName = row.modelName;
       if (!modelName || seenModelNames.has(modelName)) return;
@@ -544,7 +555,7 @@ export function useImportPreviewState({
       modelNames,
       rows
     };
-  }, [textImportDraftRows, existingBenchmarkModalitiesMap]);
+  }, [textImportDraftRows, existingBenchmarkModalitiesMap, importModelColumns]);
 
   const matrixPreviewHeaderCounts = useMemo(() => {
     const rowCount = matrixPreview.rows.length;

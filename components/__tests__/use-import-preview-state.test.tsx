@@ -543,3 +543,124 @@ describe("useImportPreviewState Hook - merged benchmark reimport", () => {
     expect(result.current.benchmarkMergeCandidateMap.get("A@@Type-A")).toEqual([12]);
   });
 });
+
+describe("useImportPreviewState Hook - matrixPreview column order", () => {
+  test("当排在前面的模型在首行缺失时，matrixPreview.modelNames 依然保持 importModelColumns 的原始列顺序", () => {
+    // 模拟原始表格:
+    // Benchmark | Model A | Model B | Model C
+    // Bench 1   | (空)    | 85.0    | 90.0
+    // Bench 2   | 72.0    | 86.0    | 91.0
+    // 扁平化后，draftRows 中 Model B, Model C 先出现，Model A 后出现
+    const draftRows: TextImportPreviewRow[] = [
+      {
+        rowNumber: 1,
+        providerName: "Provider",
+        modelName: "Model B",
+        benchmarkName: "Bench 1",
+        benchmarkType: "General",
+        rawValue: "85.0",
+        valueNum: 85.0,
+        valueNum2: null,
+        valueNote: null,
+        source: null,
+        valid: true
+      },
+      {
+        rowNumber: 1,
+        providerName: "Provider",
+        modelName: "Model C",
+        benchmarkName: "Bench 1",
+        benchmarkType: "General",
+        rawValue: "90.0",
+        valueNum: 90.0,
+        valueNum2: null,
+        valueNote: null,
+        source: null,
+        valid: true
+      },
+      {
+        rowNumber: 2,
+        providerName: "Provider",
+        modelName: "Model A",
+        benchmarkName: "Bench 2",
+        benchmarkType: "General",
+        rawValue: "72.0",
+        valueNum: 72.0,
+        valueNum2: null,
+        valueNote: null,
+        source: null,
+        valid: true
+      },
+      {
+        rowNumber: 2,
+        providerName: "Provider",
+        modelName: "Model B",
+        benchmarkName: "Bench 2",
+        benchmarkType: "General",
+        rawValue: "86.0",
+        valueNum: 86.0,
+        valueNum2: null,
+        valueNote: null,
+        source: null,
+        valid: true
+      }
+    ];
+
+    const optionsWithOriginalOrder = createMockOptions({
+      textImportDraftRows: draftRows,
+      importModelColumns: ["Model A", "Model B", "Model C"]
+    });
+
+    const { result: withOrderResult } = renderHook(() => useImportPreviewState(optionsWithOriginalOrder));
+    expect(withOrderResult.current.matrixPreview.modelNames).toEqual(["Model A", "Model B", "Model C"]);
+
+    // 未提供 importModelColumns 时回退到首次出现顺序
+    const optionsWithoutOriginalOrder = createMockOptions({
+      textImportDraftRows: draftRows
+    });
+
+    const { result: withoutOrderResult } = renderHook(() => useImportPreviewState(optionsWithoutOriginalOrder));
+    expect(withoutOrderResult.current.matrixPreview.modelNames).toEqual(["Model B", "Model C", "Model A"]);
+  });
+
+  test("当 draftRows 中存在未在 importModelColumns 中的新模型时，将其追加在末尾", () => {
+    const draftRows: TextImportPreviewRow[] = [
+      {
+        rowNumber: 1,
+        providerName: "Provider",
+        modelName: "Model A",
+        benchmarkName: "Bench 1",
+        benchmarkType: "General",
+        rawValue: "80.0",
+        valueNum: 80.0,
+        valueNum2: null,
+        valueNote: null,
+        source: null,
+        valid: true
+      },
+      {
+        rowNumber: 1,
+        providerName: "Provider",
+        modelName: "Model Extra",
+        benchmarkName: "Bench 1",
+        benchmarkType: "General",
+        rawValue: "90.0",
+        valueNum: 90.0,
+        valueNum2: null,
+        valueNote: null,
+        source: null,
+        valid: true
+      }
+    ];
+
+    const options = createMockOptions({
+      textImportDraftRows: draftRows,
+      importModelColumns: ["Model A", "Model B"]
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    // Model B 没有在 draftRows 中出现所以被过滤，Model Extra 追加在后面
+    expect(result.current.matrixPreview.modelNames).toEqual(["Model A", "Model Extra"]);
+  });
+});
+
