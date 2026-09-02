@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import { Database, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
 import type { BenchmarkOption, ModelOption, ProviderOption } from "../types";
 import { useRecordMatrix } from "../hooks/use-record-matrix";
 import { getSelectionCellCount } from "../utils/record-drafts";
@@ -178,6 +178,44 @@ export function RecordsTab({
     mutationScope.benchmarkIds.length > 0 ? `${mutationScope.benchmarkIds.length} 个指标` : "全部指标"
   ].join(" · ");
 
+  const allModels = useMemo<ModelOption[]>(() => {
+    const map = new Map<number, ModelOption>();
+    for (const m of models) {
+      map.set(m.id, m);
+    }
+    for (const m of matrixModels) {
+      if (!map.has(m.modelId)) {
+        map.set(m.modelId, {
+          id: m.modelId,
+          modelName: m.modelName,
+          providerId: m.providerId,
+          canonicalKey: m.modelName
+        });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.modelName.localeCompare(b.modelName));
+  }, [models, matrixModels]);
+
+  const allBenchmarks = useMemo<BenchmarkOption[]>(() => {
+    const map = new Map<number, BenchmarkOption>();
+    for (const b of benchmarks) {
+      map.set(b.id, b);
+    }
+    for (const b of matrixBenchmarks) {
+      if (!map.has(b.benchmarkId)) {
+        map.set(b.benchmarkId, {
+          id: b.benchmarkId,
+          benchmarkName: b.benchmarkName,
+          benchmarkType: b.benchmarkType,
+          modalities: b.modalities,
+          valueCount: b.recordCount,
+          overHundredValueCount: 0
+        });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.benchmarkName.localeCompare(b.benchmarkName));
+  }, [benchmarks, matrixBenchmarks]);
+
   return (
     <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
       <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -197,8 +235,8 @@ export function RecordsTab({
           onFiltersChange={onFiltersChange}
           sourceOptions={sourceOptions}
           providers={providers}
-          models={models}
-          benchmarks={benchmarks}
+          models={allModels}
+          benchmarks={allBenchmarks}
           availableModelIds={availableModelIds}
           availableBenchmarkIds={availableBenchmarkIds}
           disabled={saving || toolBusy !== null}
@@ -281,8 +319,8 @@ export function RecordsTab({
                 : reassignTarget.source ?? "empty"
           }`}
           target={reassignTarget}
-          models={models}
-          benchmarks={benchmarks}
+          models={allModels}
+          benchmarks={allBenchmarks}
           providers={providers}
           sourceOptions={sourceOptions}
           scopeDescription={scopeDescription}
@@ -295,7 +333,7 @@ export function RecordsTab({
       {splitDialogOpen ? (
         <RecordsSplitDualDialog
           candidates={dualValueCandidates}
-          benchmarks={benchmarks}
+          benchmarks={allBenchmarks}
           loading={loadingDualValueCandidates}
           busy={toolBusy === "split"}
           scopeDescription={scopeDescription}

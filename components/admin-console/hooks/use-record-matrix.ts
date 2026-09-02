@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { getJson, postJson } from "../api";
 import type {
   AdminRecordCell,
@@ -97,6 +98,7 @@ function buildMatrixQuery(filters: RecordFilterState): string {
 }
 
 export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixOptions) {
+  const router = useRouter();
   const [filters, setFilters] = useState<RecordFilterState>(DEFAULT_FILTERS);
   const [matrix, setMatrix] = useState<AdminRecordMatrix | null>(null);
   const [loading, setLoading] = useState(false);
@@ -217,6 +219,72 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     return window.confirm(`还有 ${dirtyCount} 处修改未保存，${action}会丢弃这些改动。是否继续？`);
   }, [dirtyCount]);
 
+  const fetchSourceEntities = useCallback(
+    async (
+      sourceMode: RecordSourceMode,
+      source: string | null,
+      force = false
+    ): Promise<SourceEntities | null> => {
+      if (sourceMode === "all") return null;
+
+      const cacheKey = sourceEntitiesKey(sourceMode, source);
+      if (!force) {
+        const cached = sourceEntitiesCache[cacheKey];
+        if (cached) return cached;
+      }
+
+      if (sourceEntitiesInFlightRef.current.has(cacheKey) && !force) {
+        return null;
+      }
+
+      sourceEntitiesInFlightRef.current.add(cacheKey);
+      const params = new URLSearchParams();
+      params.set("sourceMode", sourceMode);
+      if (source) params.set("source", source);
+
+      try {
+        const data = await getJson(`/api/admin/records/source-entities?${params.toString()}`);
+        const payload = data as Partial<SourceEntities>;
+        const entities: SourceEntities = {
+          modelIds: Array.isArray(payload.modelIds) ? payload.modelIds : [],
+          benchmarkIds: Array.isArray(payload.benchmarkIds) ? payload.benchmarkIds : []
+        };
+        rememberSourceEntities(cacheKey, entities);
+
+        const current = filtersRef.current;
+        if (sourceEntitiesKey(current.sourceMode, current.source) === cacheKey) {
+          const aligned = pruneFiltersToSourceEntities(current, entities);
+          if (
+            aligned.modelIds.length !== current.modelIds.length
+            || aligned.benchmarkIds.length !== current.benchmarkIds.length
+          ) {
+            setFilters(aligned);
+          }
+        }
+
+        return entities;
+      } catch (error) {
+        notifyError(error instanceof Error ? error.message : "加载 Source 实体范围失败");
+        return null;
+      } finally {
+        sourceEntitiesInFlightRef.current.delete(cacheKey);
+      }
+    },
+    [notifyError, rememberSourceEntities, sourceEntitiesCache]
+  );
+
+  const refreshActiveEntitiesAndSourceScope = useCallback(
+    async (overrideFilters?: RecordFilterState) => {
+      setSourceEntitiesCache({});
+      const current = overrideFilters ?? filtersRef.current;
+      if (current.sourceMode !== "all") {
+        await fetchSourceEntities(current.sourceMode, current.source, true);
+      }
+      router.refresh();
+    },
+    [fetchSourceEntities, router]
+  );
+
   /**
    * 筛选条件的每次变化都立刻带着新条件重新拉矩阵。
    *
@@ -238,44 +306,26 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     setFilters(pruned);
     void loadMatrix(pruned);
 
-    if (next.sourceMode === "all" || cachedEntities || sourceEntitiesInFlightRef.current.has(cacheKey)) {
+    if (next.sourceMode === "all" || cachedEntities) {
       return;
     }
 
-    sourceEntitiesInFlightRef.current.add(cacheKey);
-    const params = new URLSearchParams();
-    params.set("sourceMode", next.sourceMode);
-    if (next.source) params.set("source", next.source);
+    void fetchSourceEntities(next.sourceMode, next.source).then((entities) => {
+      if (!entities) return;
+      const current = filtersRef.current;
+      if (sourceEntitiesKey(current.sourceMode, current.source) !== cacheKey) return;
 
-    void getJson(`/api/admin/records/source-entities?${params.toString()}`)
-      .then((data) => {
-        const payload = data as Partial<SourceEntities>;
-        const entities: SourceEntities = {
-          modelIds: Array.isArray(payload.modelIds) ? payload.modelIds : [],
-          benchmarkIds: Array.isArray(payload.benchmarkIds) ? payload.benchmarkIds : []
-        };
-        rememberSourceEntities(cacheKey, entities);
+      const aligned = pruneFiltersToSourceEntities(current, entities);
+      if (
+        aligned.modelIds.length === current.modelIds.length
+        && aligned.benchmarkIds.length === current.benchmarkIds.length
+      ) {
+        return;
+      }
 
-        const current = filtersRef.current;
-        if (sourceEntitiesKey(current.sourceMode, current.source) !== cacheKey) return;
-
-        const aligned = pruneFiltersToSourceEntities(current, entities);
-        if (
-          aligned.modelIds.length === current.modelIds.length
-          && aligned.benchmarkIds.length === current.benchmarkIds.length
-        ) {
-          return;
-        }
-
-        setFilters(aligned);
-        void loadMatrix(aligned);
-      })
-      .catch((error) => {
-        notifyError(error instanceof Error ? error.message : "加载 Source 实体范围失败");
-      })
-      .finally(() => {
-        sourceEntitiesInFlightRef.current.delete(cacheKey);
-      });
+      setFilters(aligned);
+      void loadMatrix(aligned);
+    });
   }
 
   // --- 选区与编辑 ---
@@ -306,7 +356,7 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     if (!isDraggingRef.current) return;
     setSelection((prev) => {
       const next = prev ? { ...prev, endRow: row, endCol: col } : prev;
-      if (next) selectionRef.current = next;
+      selectionRef.current = next;
       return next;
     });
   }
@@ -430,7 +480,10 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
 
       notifySuccess(formatBatchSaveSummary(result), details);
       setDrafts({});
-      await loadMatrix();
+      await Promise.all([
+        refreshActiveEntitiesAndSourceScope(),
+        loadMatrix()
+      ]);
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "批量保存失败");
     } finally {
@@ -479,7 +532,10 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
           : undefined
       );
       setMultiValueCell(null);
-      await loadMatrix();
+      await Promise.all([
+        refreshActiveEntitiesAndSourceScope(),
+        loadMatrix()
+      ]);
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "保存多值记录失败");
     } finally {
@@ -502,7 +558,10 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
       notifySuccess(`已删除 ${result.deleted} 条记录`);
       setDrafts({});
       setDeleteConfirmOpen(false);
-      await loadMatrix();
+      await Promise.all([
+        refreshActiveEntitiesAndSourceScope(),
+        loadMatrix()
+      ]);
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "批量删除失败");
     } finally {
@@ -578,7 +637,10 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
       );
       setDrafts({});
       setSplitDialogOpen(false);
-      await loadMatrix();
+      await Promise.all([
+        refreshActiveEntitiesAndSourceScope(),
+        loadMatrix()
+      ]);
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "双值分拆失败");
     } finally {
@@ -610,9 +672,29 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
         `归属已变更：${result.fromLabel} → ${result.targetLabel}，迁移 ${result.movedCount} 条`,
         details.length > 0 ? details : undefined
       );
+
+      let nextFilters = filtersRef.current;
+      if (result.fromId && result.targetId && result.fromId !== result.targetId) {
+        if (result.entityType === "benchmark" && nextFilters.benchmarkIds.includes(result.fromId)) {
+          nextFilters = {
+            ...nextFilters,
+            benchmarkIds: nextFilters.benchmarkIds.map((id) => (id === result.fromId ? result.targetId! : id))
+          };
+        } else if (result.entityType === "model" && nextFilters.modelIds.includes(result.fromId)) {
+          nextFilters = {
+            ...nextFilters,
+            modelIds: nextFilters.modelIds.map((id) => (id === result.fromId ? result.targetId! : id))
+          };
+        }
+      }
+
       setDrafts({});
+      setFilters(nextFilters);
       setReassignTarget(null);
-      await loadMatrix();
+      await Promise.all([
+        refreshActiveEntitiesAndSourceScope(nextFilters),
+        loadMatrix(nextFilters)
+      ]);
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "变更归属失败");
     } finally {

@@ -5,11 +5,13 @@ import { describe, expect, test, vi } from "vitest";
 import { AdminConsole } from "@/components/admin-console";
 import { renderReady } from "@/tests/flush-microtasks";
 
+const refreshMock = vi.fn();
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     push: vi.fn(),
     replace: vi.fn(),
-    refresh: vi.fn()
+    refresh: refreshMock
   }),
   useSearchParams: () => new URLSearchParams()
 }));
@@ -737,6 +739,77 @@ describe("AdminConsole records tab", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/归属已变更：Bench-1 \(Type-A\) → Bench-2 \(Type-A\)/)).toBeInTheDocument();
+      expect(refreshMock).toHaveBeenCalled();
+    });
+  });
+
+  test("行归属变更后自动刷新指标下拉框内容", async () => {
+    const reassignedMatrix = {
+      ...filledMatrix,
+      benchmarks: [
+        {
+          benchmarkId: 12,
+          benchmarkName: "Bench-2",
+          benchmarkType: "Type-A",
+          unit: "%",
+          higherIsBetter: true,
+          modalities: ["Text"],
+          recordCount: 1
+        }
+      ],
+      cells: [
+        {
+          ...filledMatrix.cells[0],
+          benchmarkId: 12
+        }
+      ]
+    };
+
+    mockFetchSequence(
+      filledMatrix,
+      {
+        ok: true,
+        entityType: "benchmark",
+        fromId: 11,
+        targetId: 12,
+        movedCount: 1,
+        skippedCount: 0,
+        deletedTargetCount: 0,
+        conflictCount: 0,
+        createdTarget: false,
+        fromLabel: "Bench-1 (Type-A)",
+        targetLabel: "Bench-2 (Type-A)"
+      },
+      reassignedMatrix
+    );
+    const user = userEvent.setup();
+
+    const props = buildProps();
+    // Initially, props only have Bench-1
+    props.benchmarks = [
+      { id: 11, benchmarkName: "Bench-1", benchmarkType: "Type-A", modalities: ["Text"] }
+    ];
+
+    await renderReady(<AdminConsole {...props} />);
+    await openRecordsTabAndFilter(user);
+
+    await screen.findByTestId("record-cell-1-11");
+    await user.click(screen.getByTitle("点击变更「Bench-1」这一行的归属"));
+
+    expect(await screen.findByText("变更行归属：Bench-1")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "新建" }));
+    await user.type(screen.getByLabelText("新 benchmark 名称"), "Bench-2");
+    await user.click(screen.getByRole("button", { name: "确认变更归属" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/归属已变更：Bench-1 \(Type-A\) → Bench-2 \(Type-A\)/)).toBeInTheDocument();
+    });
+
+    // Verify that the benchmark filter dropdown now contains Bench-2 without a page reload
+    await user.click(screen.getByLabelText("指标筛选"));
+    await waitFor(() => {
+      expect(screen.getByRole("checkbox", { name: /Bench-2/ })).toBeInTheDocument();
     });
   });
 

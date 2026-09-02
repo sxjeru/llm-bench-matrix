@@ -243,7 +243,9 @@ export type RecordReassignResult = {
   deletedTargetCount: number;
   conflictCount: number;
   createdTarget: boolean;
+  fromId?: number;
   fromLabel: string;
+  targetId?: number;
   targetLabel: string;
 };
 
