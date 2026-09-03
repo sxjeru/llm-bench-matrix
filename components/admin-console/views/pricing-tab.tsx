@@ -100,7 +100,8 @@ export function PricingTab({
         || price.modelName.toLowerCase().includes(query)
         || price.providerName.toLowerCase().includes(query)
         || (price.sourceModelId ?? "").toLowerCase().includes(query)
-        || (price.sourceProviderId ?? "").toLowerCase().includes(query);
+        || (price.sourceProviderId ?? "").toLowerCase().includes(query)
+        || (price.releaseDate ?? "").toLowerCase().includes(query);
 
       if (!matchesQuery) return false;
       if (pricingStatusFilter === "all") return true;
@@ -257,6 +258,9 @@ export function PricingTab({
                         {isDirty ? <span className="badge badge-warning badge-xs whitespace-nowrap">未保存</span> : null}
                       </div>
                       <div className="text-xs opacity-60">{price.providerName}</div>
+                      {price.releaseDate ? (
+                        <div className="text-xs opacity-50 font-mono mt-0.5">{price.releaseDate}</div>
+                      ) : null}
                     </td>
                     <td className="min-w-[220px]">
                       <input

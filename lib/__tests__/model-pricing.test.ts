@@ -44,6 +44,7 @@ type PricingSelectRow = {
   sourceProviderName: string | null;
   sourceModelId: string | null;
   sourceModelName: string | null;
+  releaseDate?: string | null;
   inputCost: string | number | null;
   outputCost: string | number | null;
   reasoningCost: string | number | null;
@@ -301,6 +302,7 @@ describe("model pricing module", () => {
       inputCost: 0.1,
       outputCost: 0.2,
       reasoningCost: null,
+      releaseDate: "  2024-05-13  ",
     });
 
     expect(onConflictDoUpdate).toHaveBeenCalledTimes(1);
@@ -314,6 +316,7 @@ describe("model pricing module", () => {
         inputCost: "0.1",
         outputCost: "0.2",
         reasoningCost: null,
+        releaseDate: "2024-05-13",
         source: "manual",
         matchStatus: "manual",
         matchConfidence: 100,
@@ -333,6 +336,7 @@ describe("model pricing module", () => {
       sourceProviderId: undefined,
       sourceModelId: "gpt-4.1",
       note: null,
+      releaseDate: null,
       manualOverride: false,
     });
 
@@ -344,6 +348,7 @@ describe("model pricing module", () => {
         outputCost: null,
         sourceModelId: "gpt-4.1",
         note: null,
+        releaseDate: null,
         source: "models.dev",
         matchStatus: "matched",
         matchConfidence: 0,
@@ -629,6 +634,7 @@ describe("model pricing module", () => {
           "gpt-4": {
             id: "gpt-4",
             name: "GPT-4",
+            release_date: "2023-03-14",
             cost: {
               input: 30,
               output: 60,
@@ -649,6 +655,7 @@ describe("model pricing module", () => {
         modelId: 6,
         sourceProviderId: "openai",
         sourceModelId: "gpt-4",
+        releaseDate: "2023-03-14",
         inputCost: "30",
         outputCost: "60",
         cacheReadCost: "3",
@@ -658,6 +665,7 @@ describe("model pricing module", () => {
         modelId: 7,
         sourceProviderId: null,
         sourceModelId: null,
+        releaseDate: null,
         inputCost: null,
         outputCost: null,
         matchStatus: "unmatched",

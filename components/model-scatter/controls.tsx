@@ -130,7 +130,8 @@ function AxisSelect({
             type="button"
             className={`scatter-btn scatter-segment-btn ${scale === "log" ? "is-active" : ""}`}
             onClick={() => onChangeScale(axis, "log")}
-            title="对数刻度（仅正数参与绘制）"
+            disabled={metric?.unit === "date"}
+            title={metric?.unit === "date" ? "日期轴仅支持线性刻度" : "对数刻度（仅正数参与绘制）"}
           >
             对数
           </button>

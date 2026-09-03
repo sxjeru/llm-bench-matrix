@@ -8,16 +8,29 @@ import {
   PRICE_CATEGORY_LABEL,
   PRICE_INPUT_ROW_KEY,
   PRICE_OUTPUT_ROW_KEY,
+  RELEASE_DATE_ROW_KEY,
   SOURCE_ALL
 } from "@/components/benchmark-matrix/constants";
-import { buildParamsMatrixRows, buildPriceMatrixRows } from "@/components/benchmark-matrix/selectors";
+import {
+  buildParamsMatrixRows,
+  buildPriceMatrixRows,
+  buildReleaseDateMatrixRow,
+  parseReleaseDateToTimestamp
+} from "@/components/benchmark-matrix/selectors";
 import { getMatrixRowComparableScore } from "@/components/benchmark-matrix/scoring";
-import type { MatrixCell, MatrixRow } from "@/components/benchmark-matrix/types";
+import {
+  hasPublicModelPriceCost,
+  hasPublicModelPriceData,
+  type MatrixCell,
+  type MatrixRow
+} from "@/components/benchmark-matrix/types";
 import {
   buildScatterMetrics,
+  describeMetricDirection,
   filterMatrixRowsForScatterOverall,
   findScatterMetric,
   formatScatterAxisTick,
+  formatScatterDate,
   formatScatterValue,
   groupScatterMetrics,
   isMetricHigherBetter,
@@ -25,6 +38,7 @@ import {
   toMetricSlug,
   toScatterMetric
 } from "@/components/model-scatter/metrics";
+import { buildAxisTicks, buildDateTicks } from "@/components/model-scatter/ticks";
 import {
   buildScatterDataset,
   clampPannedDomain,
@@ -836,5 +850,218 @@ describe("投影", () => {
     // 起终点互换（Y 轴用法）时方向随之翻转
     expect(pixelToAxisRatio(342, 342, 24)).toBeCloseTo(0, 6);
     expect(pixelToAxisRatio(24, 342, 24)).toBeCloseTo(1, 6);
+  });
+});
+
+describe("Release Date metric & date ticks", () => {
+  test("parseReleaseDateToTimestamp 解析标准日期、年月、斜杠格式，并做越界检查", () => {
+    expect(parseReleaseDateToTimestamp("2024-05-13")).toBe(Date.UTC(2024, 4, 13));
+    expect(parseReleaseDateToTimestamp("2024-05")).toBe(Date.UTC(2024, 4, 1));
+    // 斜杠格式与单数月日
+    expect(parseReleaseDateToTimestamp("2024/05/13")).toBe(Date.UTC(2024, 4, 13));
+    expect(parseReleaseDateToTimestamp("2024/05")).toBe(Date.UTC(2024, 4, 1));
+    expect(parseReleaseDateToTimestamp("2024-5-1")).toBe(Date.UTC(2024, 4, 1));
+    expect(parseReleaseDateToTimestamp("2024/5/1")).toBe(Date.UTC(2024, 4, 1));
+    // 前后空格 trim
+    expect(parseReleaseDateToTimestamp("  2024-05-13  ")).toBe(Date.UTC(2024, 4, 13));
+
+    // 非法或越界日期返回 null，避免静默溢出
+    expect(parseReleaseDateToTimestamp("2024-99-99")).toBeNull();
+    expect(parseReleaseDateToTimestamp("2024-00-10")).toBeNull();
+    expect(parseReleaseDateToTimestamp("2024-13-01")).toBeNull();
+    expect(parseReleaseDateToTimestamp("2024-05-32")).toBeNull();
+    expect(parseReleaseDateToTimestamp("not-a-date")).toBeNull();
+    expect(parseReleaseDateToTimestamp("")).toBeNull();
+    expect(parseReleaseDateToTimestamp(null)).toBeNull();
+    expect(parseReleaseDateToTimestamp(undefined)).toBeNull();
+  });
+
+  test("buildReleaseDateMatrixRow 构造 Model Info 分类下的 Release Date 矩阵行", () => {
+    const prices = [
+      { modelName: "Alpha", inputCost: 1, outputCost: 2, cacheReadCost: null, releaseDate: "2024-05-13" },
+      { modelName: "Beta", inputCost: 2, outputCost: 4, cacheReadCost: null, releaseDate: "2024-08" },
+      { modelName: "Gamma", inputCost: 3, outputCost: 6, cacheReadCost: null, releaseDate: null }
+    ];
+
+    const row = buildReleaseDateMatrixRow(["Alpha", "Beta", "Gamma"], prices);
+
+    expect(row.rowKey).toBe(RELEASE_DATE_ROW_KEY);
+    expect(row.category).toBe(MODEL_INFO_CATEGORY_LABEL);
+    expect(row.benchmark).toBe("Release Date");
+    expect(row.higherIsBetter).toBe(true);
+    expect(row.isInfoRow).toBe(true);
+
+    const cellAlpha = row.cells.get("Alpha");
+    expect(cellAlpha?.valueNum).toBe(Date.UTC(2024, 4, 13));
+    expect(cellAlpha?.displayValue).toBe("2024-05-13");
+
+    const cellBeta = row.cells.get("Beta");
+    expect(cellBeta?.valueNum).toBe(Date.UTC(2024, 7, 1));
+    expect(cellBeta?.displayValue).toBe("2024-08");
+
+    const cellGamma = row.cells.get("Gamma");
+    expect(cellGamma?.valueNum).toBeNull();
+    expect(cellGamma?.displayValue).toBe("--");
+
+    expect(row.rowNumericCount).toBe(2);
+    expect(row.minComparable).toBe(Date.UTC(2024, 4, 13));
+    expect(row.maxComparable).toBe(Date.UTC(2024, 7, 1));
+  });
+
+  test("toScatterMetric 正确将 Release Date 行转化为 date 单位指标", () => {
+    const prices = [
+      { modelName: "Alpha", inputCost: 1, outputCost: 2, cacheReadCost: null, releaseDate: "2024-05-13" },
+      { modelName: "Beta", inputCost: 2, outputCost: 4, cacheReadCost: null, releaseDate: "2024-08-01" }
+    ];
+
+    const row = buildReleaseDateMatrixRow(["Alpha", "Beta"], prices);
+    const metric = toScatterMetric(row);
+
+    expect(metric.key).toBe("release-date");
+    expect(metric.rowKey).toBe(RELEASE_DATE_ROW_KEY);
+    expect(metric.label).toBe("Release Date");
+    expect(metric.category).toBe(MODEL_INFO_CATEGORY_LABEL);
+    expect(metric.unit).toBe("date");
+    expect(metric.higherIsBetter).toBe(true);
+    expect(metric.preferLogScale).toBe(false);
+    expect(metric.valueByModel.get("Alpha")).toBe(Date.UTC(2024, 4, 13));
+    expect(metric.valueByModel.get("Beta")).toBe(Date.UTC(2024, 7, 1));
+  });
+
+  test("describeMetricDirection 在 unit 为 date 时输出越新越好", () => {
+    expect(describeMetricDirection({ higherIsBetter: true, unit: "date" })).toBe("越新越好");
+    expect(describeMetricDirection({ higherIsBetter: false, unit: "date" })).toBe("越旧越好");
+    expect(describeMetricDirection({ higherIsBetter: true, unit: "score" })).toBe("越大越好");
+  });
+
+  test("formatScatterValue 与 formatScatterAxisTick 格式化日期", () => {
+    const timestamp = Date.UTC(2024, 4, 13);
+    expect(formatScatterValue({ unit: "date" }, timestamp)).toBe("2024-05-13");
+    expect(formatScatterAxisTick({ unit: "date" }, timestamp)).toBe("2024-05");
+    expect(formatScatterDate(timestamp, "full")).toBe("2024-05-13");
+    expect(formatScatterDate(timestamp, "tick")).toBe("2024-05");
+  });
+
+  test("buildDateTicks 针对各跨度生成自然日历切分刻度并严格单调递增", () => {
+    // 跨度 3 年以上：按整年（1月1号）
+    const t5y = buildDateTicks([Date.UTC(2020, 0, 1), Date.UTC(2025, 0, 1)], 6);
+    expect(t5y.length).toBeGreaterThanOrEqual(2);
+    t5y.forEach((t) => {
+      const d = new Date(t);
+      expect(d.getUTCMonth()).toBe(0);
+      expect(d.getUTCDate()).toBe(1);
+    });
+
+    // 跨度约 2 年：按半年/季度（每月1号）
+    const start2023 = Date.UTC(2023, 0, 1);
+    const end2024 = Date.UTC(2024, 11, 31);
+    const t2y = buildDateTicks([start2023, end2024], 6);
+    expect(t2y.length).toBeGreaterThanOrEqual(2);
+    t2y.forEach((t) => {
+      expect(new Date(t).getUTCDate()).toBe(1);
+    });
+
+    // 跨度 25 天 ~ 2 个月：按半月（1号与15号）
+    const t1m = buildDateTicks([Date.UTC(2024, 4, 1), Date.UTC(2024, 5, 5)], 6);
+    expect(t1m.length).toBeGreaterThanOrEqual(2);
+    t1m.forEach((t) => {
+      expect([1, 15]).toContain(new Date(t).getUTCDate());
+    });
+
+    // 跨度约 2 ~ 3 周：按周一
+    const t2w = buildDateTicks([Date.UTC(2024, 4, 5), Date.UTC(2024, 4, 25)], 6);
+    expect(t2w.length).toBeGreaterThanOrEqual(2);
+    t2w.forEach((t) => {
+      expect(new Date(t).getUTCDay()).toBe(1); // ISO 周一
+    });
+
+    // 跨度 2 ~ 6 天：按自然整天
+    const t4d = buildDateTicks([Date.UTC(2024, 4, 1), Date.UTC(2024, 4, 5)], 6);
+    expect(t4d.length).toBeGreaterThanOrEqual(2);
+    for (let i = 1; i < t4d.length; i++) {
+      expect(t4d[i] - t4d[i - 1]).toBe(86400 * 1000);
+    }
+
+    // 所有合法结果必须严格升序且无重复
+    [t5y, t2y, t1m, t2w, t4d].forEach((ticks) => {
+      for (let i = 1; i < ticks.length; i++) {
+        expect(ticks[i]).toBeGreaterThan(ticks[i - 1]);
+      }
+    });
+
+    // 异常或空区间返回空数组
+    expect(buildDateTicks([100, 50])).toEqual([]);
+    expect(buildDateTicks([100, 100])).toEqual([]);
+    expect(buildDateTicks([Number.NaN, 100])).toEqual([]);
+
+    // buildAxisTicks 传入 unit="date" 时调用 buildDateTicks
+    const axisTicks = buildAxisTicks([start2023, end2024], "linear", 6, "date");
+    expect(axisTicks).toEqual(t2y);
+  });
+
+  test("buildScatterDataset 在 Release Date 轴下识别更新更强的模型为帕累托前沿", () => {
+    const prices = [
+      { modelName: "OldWeak", inputCost: 1, outputCost: 2, cacheReadCost: null, releaseDate: "2023-01-01" },
+      { modelName: "NewStrong", inputCost: 1, outputCost: 2, cacheReadCost: null, releaseDate: "2024-06-01" },
+      { modelName: "OldStrong", inputCost: 1, outputCost: 2, cacheReadCost: null, releaseDate: "2023-01-01" }
+    ];
+
+    const releaseDateRow = buildReleaseDateMatrixRow(["OldWeak", "NewStrong", "OldStrong"], prices);
+    const scoreRow = createBenchmarkRow({ rowKey: "score", benchmark: "MMLU", higherIsBetter: true }, {
+      OldWeak: 50,
+      NewStrong: 90,
+      OldStrong: 85
+    });
+
+    const xMetric = toScatterMetric(releaseDateRow);
+    const yMetric = toScatterMetric(scoreRow);
+
+    const dataset = buildScatterDataset({
+      xMetric,
+      yMetric,
+      modelNames: ["OldWeak", "NewStrong", "OldStrong"],
+      providerNameByModel: new Map(),
+      colorByModel: new Map(),
+      xScale: "linear",
+      yScale: "linear"
+    });
+
+    // NewStrong (2024-06, 90) 同时在时间与分数上占优，必然在前沿上
+    expect(dataset.paretoKeys.has("NewStrong")).toBe(true);
+    // OldWeak (2023-01, 50) 被 OldStrong (2023-01, 85) 与 NewStrong 支配
+    expect(dataset.paretoKeys.has("OldWeak")).toBe(false);
+  });
+
+  test("hasPublicModelPriceCost 与 hasPublicModelPriceData 判定拆分", () => {
+    const onlyDate = {
+      modelName: "OnlyDate",
+      inputCost: null,
+      outputCost: null,
+      cacheReadCost: null,
+      releaseDate: "2024-05-13"
+    };
+    const onlyCost = {
+      modelName: "OnlyCost",
+      inputCost: 1.5,
+      outputCost: null,
+      cacheReadCost: null
+    };
+    const emptyRow = {
+      modelName: "Empty",
+      inputCost: null,
+      outputCost: null,
+      cacheReadCost: null,
+      releaseDate: null
+    };
+
+    // hasPublicModelPriceCost 只认有效费用，不认发布日期
+    expect(hasPublicModelPriceCost(onlyDate)).toBe(false);
+    expect(hasPublicModelPriceCost(onlyCost)).toBe(true);
+    expect(hasPublicModelPriceCost(emptyRow)).toBe(false);
+
+    // hasPublicModelPriceData 认费用或发布日期，用于快照层过滤
+    expect(hasPublicModelPriceData(onlyDate)).toBe(true);
+    expect(hasPublicModelPriceData(onlyCost)).toBe(true);
+    expect(hasPublicModelPriceData(emptyRow)).toBe(false);
   });
 });

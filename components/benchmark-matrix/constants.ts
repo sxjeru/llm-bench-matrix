@@ -57,6 +57,7 @@ export const PRICE_CACHE_INPUT_ROW_KEY = "__PRICE_CACHE_INPUT__";
 export const MODEL_INFO_CATEGORY_LABEL = "Model Info";
 export const PARAMS_ROW_KEY = "__PARAMS__";
 export const PARAMS_ACTIVE_RATIO_ROW_KEY = "__PARAMS_ACTIVE_RATIO__";
+export const RELEASE_DATE_ROW_KEY = "__RELEASE_DATE__";
 
 export const HEATMAP_PRESETS = {
   classic: {

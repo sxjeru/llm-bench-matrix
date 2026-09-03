@@ -55,8 +55,12 @@ export function getMatrixRowComparableScore(
   matrixRow: Pick<MatrixRow, "benchmark" | "category" | "higherIsBetter" | "isPriceRow" | "isInfoRow">,
   valueNum: number
 ): number {
-  if (matrixRow.isPriceRow || matrixRow.isInfoRow) {
+  if (matrixRow.isPriceRow) {
     return -valueNum;
+  }
+
+  if (matrixRow.isInfoRow) {
+    return matrixRow.higherIsBetter ? valueNum : -valueNum;
   }
 
   return getBenchmarkComparableScore(

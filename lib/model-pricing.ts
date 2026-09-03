@@ -53,6 +53,7 @@ type ModelsDevProvider = {
 type ModelsDevModel = {
   id?: string;
   name?: string;
+  release_date?: string;
   cost?: {
     input?: number;
     output?: number;
@@ -125,6 +126,7 @@ export type ModelPricingRow = {
   sourceProviderName: string | null;
   sourceModelId: string | null;
   sourceModelName: string | null;
+  releaseDate: string | null;
   inputCost: number | null;
   outputCost: number | null;
   reasoningCost: number | null;
@@ -168,6 +170,7 @@ const costSchema = z.object({
 const modelSchema = z.object({
   id: z.string().optional(),
   name: z.string().optional(),
+  release_date: z.string().optional(),
   cost: costSchema
 }).passthrough();
 
@@ -683,6 +686,7 @@ async function selectModelPricingRows() {
       sourceProviderName: modelPricing.sourceProviderName,
       sourceModelId: modelPricing.sourceModelId,
       sourceModelName: modelPricing.sourceModelName,
+      releaseDate: modelPricing.releaseDate,
       inputCost: modelPricing.inputCost,
       outputCost: modelPricing.outputCost,
       reasoningCost: modelPricing.reasoningCost,
@@ -719,6 +723,7 @@ function mapModelPricingSelectRow(row: Awaited<ReturnType<typeof selectModelPric
     sourceProviderName: row.sourceProviderName,
     sourceModelId: row.sourceModelId,
     sourceModelName: row.sourceModelName,
+    releaseDate: row.releaseDate,
     inputCost: toNullableNumber(row.inputCost),
     outputCost: toNullableNumber(row.outputCost),
     reasoningCost: toNullableNumber(row.reasoningCost),
@@ -771,6 +776,7 @@ async function loadAdminModelPricingRows(): Promise<ModelPricingRow[]> {
       sourceProviderName: null,
       sourceModelId: null,
       sourceModelName: null,
+      releaseDate: null,
       inputCost: null,
       outputCost: null,
       reasoningCost: null,
@@ -819,6 +825,7 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
       sourceProviderName: null,
       sourceModelId: null,
       sourceModelName: null,
+      releaseDate: null,
       inputCost: null,
       outputCost: null,
       reasoningCost: null,
@@ -898,6 +905,7 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
       sourceProviderName: match.provider.name,
       sourceModelId: match.model.id ?? match.modelKey,
       sourceModelName,
+      releaseDate: match.model.release_date ?? null,
       inputCost: cost.input?.toString() ?? null,
       outputCost: cost.output?.toString() ?? null,
       reasoningCost: cost.reasoning?.toString() ?? null,
@@ -930,6 +938,7 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
           sourceProviderName: sql.raw("excluded.source_provider_name"),
           sourceModelId: sql.raw("excluded.source_model_id"),
           sourceModelName: sql.raw("excluded.source_model_name"),
+          releaseDate: sql.raw("excluded.release_date"),
           inputCost: sql.raw("excluded.input_cost"),
           outputCost: sql.raw("excluded.output_cost"),
           reasoningCost: sql.raw("excluded.reasoning_cost"),
@@ -986,6 +995,7 @@ const updateSchema = z.object({
   sourceProviderName: z.string().trim().nullable().optional(),
   sourceModelId: z.string().trim().nullable().optional(),
   sourceModelName: z.string().trim().nullable().optional(),
+  releaseDate: z.string().trim().nullable().optional(),
   matchStatus: z.enum(["matched", "unmatched", "ignored", "manual"]).optional(),
   manualOverride: z.boolean().optional(),
   note: z.string().trim().nullable().optional()
@@ -1008,6 +1018,7 @@ const pricingNullableTextFields = [
   "sourceProviderName",
   "sourceModelId",
   "sourceModelName",
+  "releaseDate",
   "note"
 ] as const;
 

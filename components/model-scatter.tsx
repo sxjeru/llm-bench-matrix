@@ -28,6 +28,7 @@ import {
   buildOverallSummaryByModel,
   buildParamsMatrixRows,
   buildPriceMatrixRows,
+  buildReleaseDateMatrixRow,
   buildProviderGroups,
   buildRowsBySource,
   buildRowsWithSourceMeta,
@@ -338,6 +339,19 @@ export function ModelScatter({
     [baseModelColumns, modelParams]
   );
 
+  const releaseDateMatrixRow = useMemo(
+    () => (modelPrices.some((p) => Boolean(p.releaseDate?.trim())) ? buildReleaseDateMatrixRow(baseModelColumns, modelPrices) : null),
+    [baseModelColumns, modelPrices]
+  );
+
+  const modelInfoMatrixRows = useMemo(
+    () => [
+      ...(releaseDateMatrixRow ? [releaseDateMatrixRow] : []),
+      ...paramsMatrixRows
+    ],
+    [releaseDateMatrixRow, paramsMatrixRows]
+  );
+
   // 轴下拉可保留 alwaysKeep 的 Cost；Overall 在未勾选低覆盖时剔除 Cost
   const summaryMatrixRows = useMemo(
     () => [
@@ -374,10 +388,10 @@ export function ModelScatter({
       buildScatterMetrics({
         benchmarkRows: matrixRows,
         priceRows: priceMatrixRows,
-        paramsRows: paramsMatrixRows,
+        paramsRows: modelInfoMatrixRows,
         overallScoreByModel
       }),
-    [matrixRows, priceMatrixRows, paramsMatrixRows, overallScoreByModel]
+    [matrixRows, priceMatrixRows, modelInfoMatrixRows, overallScoreByModel]
   );
 
   const metricGroups = useMemo(() => groupScatterMetrics(metrics), [metrics]);
@@ -427,6 +441,9 @@ export function ModelScatter({
 
   const xMetric = useMemo(() => findScatterMetric(metrics, viewState.xKey), [metrics, viewState.xKey]);
   const yMetric = useMemo(() => findScatterMetric(metrics, viewState.yKey), [metrics, viewState.yKey]);
+
+  const effectiveXScale: ScatterAxisScale = xMetric?.unit === "date" ? "linear" : viewState.xScale;
+  const effectiveYScale: ScatterAxisScale = yMetric?.unit === "date" ? "linear" : viewState.yScale;
 
   const providerNameByModel = useMemo(() => {
     const nameMap = new Map<string, string>();
@@ -479,10 +496,10 @@ export function ModelScatter({
       modelNames: plottableModelNames,
       providerNameByModel,
       colorByModel,
-      xScale: viewState.xScale,
-      yScale: viewState.yScale
+      xScale: effectiveXScale,
+      yScale: effectiveYScale
     });
-  }, [xMetric, yMetric, plottableModelNames, providerNameByModel, colorByModel, viewState.xScale, viewState.yScale]);
+  }, [xMetric, yMetric, plottableModelNames, providerNameByModel, colorByModel, effectiveXScale, effectiveYScale]);
 
   const historicalPoints = useMemo<ScatterHistoricalPoint[]>(() => {
     if (!xMetric || !yMetric) return [];
@@ -496,12 +513,12 @@ export function ModelScatter({
         mode: selection.mode,
         xMetric,
         yMetric,
-        xScale: viewState.xScale,
-        yScale: viewState.yScale
+        xScale: effectiveXScale,
+        yScale: effectiveYScale
       });
       return result.status === "ok" ? [result.point] : [];
     });
-  }, [dataset.points, historySelections, xMetric, yMetric, viewState.xScale, viewState.yScale]);
+  }, [dataset.points, historySelections, xMetric, yMetric, effectiveXScale, effectiveYScale]);
 
   useEffect(() => {
     if (historySelections.length === 0) return;
@@ -519,15 +536,15 @@ export function ModelScatter({
         mode: selection.mode,
         xMetric,
         yMetric,
-        xScale: viewState.xScale,
-        yScale: viewState.yScale
+        xScale: effectiveXScale,
+        yScale: effectiveYScale
       }).status === "ok";
     });
 
     if (validSelections.length !== historySelections.length) {
       enqueueStateUpdate(() => setHistorySelections(validSelections));
     }
-  }, [dataset.points, historySelections, xMetric, yMetric, viewState.xScale, viewState.yScale]);
+  }, [dataset.points, historySelections, xMetric, yMetric, effectiveXScale, effectiveYScale]);
 
   useEffect(() => {
     if (!historyNotice) return;
@@ -640,8 +657,10 @@ export function ModelScatter({
   }, []);
 
   const handleChangeScale = useCallback((axis: "x" | "y", scale: ScatterAxisScale) => {
+    const targetMetric = axis === "x" ? xMetric : yMetric;
+    if (targetMetric?.unit === "date" && scale === "log") return;
     setViewState((prev) => ({ ...prev, [axis === "x" ? "xScale" : "yScale"]: scale }));
-  }, []);
+  }, [xMetric, yMetric]);
 
   const toggleProviderVisibility = useCallback((providerName: string) => {
     setHiddenProviders((prev) => {
@@ -700,8 +719,8 @@ export function ModelScatter({
         mode: nextMode,
         xMetric,
         yMetric,
-        xScale: viewState.xScale,
-        yScale: viewState.yScale
+        xScale: effectiveXScale,
+        yScale: effectiveYScale
       });
 
       if (result.status !== "ok") {
@@ -718,7 +737,7 @@ export function ModelScatter({
       ]);
       setHistoryNotice(null);
     },
-    [dataset.points, historySelections, xMetric, yMetric, viewState.xScale, viewState.yScale]
+    [dataset.points, historySelections, xMetric, yMetric, effectiveXScale, effectiveYScale]
   );
 
   const paretoCount = dataset.points.filter((point) => point.isPareto).length;
@@ -727,8 +746,8 @@ export function ModelScatter({
   const overlayMode: ScatterOverlayMode =
     xMetric &&
     yMetric &&
-    viewState.xScale === "linear" &&
-    viewState.yScale === "linear" &&
+    effectiveXScale === "linear" &&
+    effectiveYScale === "linear" &&
     xMetric.higherIsBetter === yMetric.higherIsBetter
       ? "trend"
       : "pareto";
@@ -747,8 +766,8 @@ export function ModelScatter({
           onChangeAxis={handleChangeAxis}
           onSwapAxes={handleSwapAxes}
           onAxisQueryChange={handleAxisQueryChange}
-          xScale={viewState.xScale}
-          yScale={viewState.yScale}
+          xScale={effectiveXScale}
+          yScale={effectiveYScale}
           onChangeScale={handleChangeScale}
           showPareto={viewState.showPareto}
           onChangeShowPareto={(value) => setViewState((prev) => ({ ...prev, showPareto: value }))}
@@ -792,8 +811,8 @@ export function ModelScatter({
                     xMetric={xMetric!}
                     yMetric={yMetric!}
                     dataset={dataset}
-                    xScale={viewState.xScale}
-                    yScale={viewState.yScale}
+                    xScale={effectiveXScale}
+                    yScale={effectiveYScale}
                     showPareto={viewState.showPareto}
                     overlayMode={overlayMode}
                     dimNonPareto={viewState.dimNonPareto}

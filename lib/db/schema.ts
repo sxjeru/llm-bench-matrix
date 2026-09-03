@@ -167,6 +167,7 @@ export const modelPricing = pgTable(
     manualOverride: boolean("manual_override").notNull().default(false),
     rawJson: jsonb("raw_json").notNull().default(sql`'{}'::jsonb`),
     note: text("note"),
+    releaseDate: text("release_date"),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
