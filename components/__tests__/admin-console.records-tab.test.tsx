@@ -1290,5 +1290,74 @@ describe("AdminConsole records tab", () => {
     expect(cell).toHaveAttribute("data-pending-delete", "true");
     expect(screen.getByText("待清空 1 格")).toBeInTheDocument();
   });
+
+  test("当选取单行某几个单元格时，点行头可修改选取的几个值的 benchmark 归属", async () => {
+    const fetchMock = mockFetchSequence(
+      filledMatrix,
+      {
+        ok: true,
+        entityType: "benchmark",
+        movedCount: 1,
+        skippedCount: 0,
+        deletedTargetCount: 0,
+        conflictCount: 0,
+        createdTarget: false,
+        fromLabel: "Bench-1 (Type-A)",
+        targetLabel: "Bench-2 (Type-A)"
+      },
+      filledMatrix
+    );
+
+    const user = userEvent.setup();
+    const props = buildProps();
+    props.benchmarks = [
+      { id: 11, benchmarkName: "Bench-1", benchmarkType: "Type-A", modalities: ["Text"] },
+      { id: 12, benchmarkName: "Bench-2", benchmarkType: "Type-A", modalities: ["Text"] }
+    ];
+
+    await renderReady(<AdminConsole {...props} />);
+    await openRecordsTabAndFilter(user);
+
+    const cell = await screen.findByTestId("record-cell-1-11");
+    // 按住 Ctrl 选取单个格子（单行单列）
+    fireEvent.mouseDown(cell, { ctrlKey: true });
+    fireEvent.mouseUp(document, { ctrlKey: true });
+    expect(cell).toHaveAttribute("data-selected", "true");
+
+    // 行头应显示「已选 1 格」
+    expect(screen.getByText("已选 1 格")).toBeInTheDocument();
+
+    // 点击行头按钮
+    await user.click(screen.getByTitle("点击变更「Bench-1」这一行的归属"));
+
+    // 弹窗标题应体现针对所选模型的变更
+    expect(await screen.findByText("变更选定数值的指标归属：Bench-1（已选 1 个模型）")).toBeInTheDocument();
+    expect(screen.getByText("限定模型:")).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("目标 benchmark"));
+    await user.click(screen.getByRole("option", { name: "Bench-2 (Type-A)" }));
+
+    await user.click(screen.getByRole("button", { name: "确认变更归属" }));
+
+    await waitFor(() => {
+      const reassignCall = fetchMock.mock.calls.find(
+        ([callUrl, init]) => callUrl === "/api/admin/records/reassign" && init?.method === "POST"
+      );
+      expect(reassignCall).toBeTruthy();
+      expect(JSON.parse(String(reassignCall?.[1]?.body))).toEqual({
+        entityType: "benchmark",
+        fromBenchmarkId: 11,
+        conflictStrategy: "keep-both",
+        modelIds: [1],
+        target: { benchmarkId: 12 },
+        scope: {
+          sourceMode: "all",
+          source: null,
+          modelIds: [1],
+          benchmarkIds: []
+        }
+      });
+    });
+  });
 });
 

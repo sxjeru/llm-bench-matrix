@@ -187,7 +187,14 @@ export function RecordsReassignDialog({
 
   function handleDelete() {
     if (typeof window !== "undefined") {
-      const noun = target.entityType === "benchmark" ? "行" : target.entityType === "model" ? "列" : "数据源";
+      const noun =
+        target.entityType === "benchmark"
+          ? target.modelIds && target.modelIds.length > 0
+            ? `所选 ${target.modelIds.length} 个模型的值`
+            : "行"
+          : target.entityType === "model"
+            ? "列"
+            : "数据源";
       const confirmed = window.confirm(
         `确定要删除${noun}「${target.label}」在当前作用范围内的全部数据吗？此操作不可撤销。`
       );
@@ -215,8 +222,12 @@ export function RecordsReassignDialog({
   // 用局部 const 承接，hoisted 的 handleSubmit 闭包才能拿到判别联合的收窄结果
   const activeTarget = target;
 
-  const title =
-    target.entityType === "benchmark"
+  const isPartialBenchmark =
+    target.entityType === "benchmark" && Boolean(target.modelLabels && target.modelLabels.length > 0);
+
+  const title = isPartialBenchmark
+    ? `变更选定数值的指标归属：${target.label}（已选 ${target.modelLabels!.length} 个模型）`
+    : target.entityType === "benchmark"
       ? `变更行归属：${target.label}`
       : target.entityType === "model"
         ? `变更列归属：${target.label}`
@@ -237,6 +248,7 @@ export function RecordsReassignDialog({
         entityType: "benchmark",
         fromBenchmarkId: activeTarget.benchmarkId,
         conflictStrategy,
+        modelIds: activeTarget.modelIds,
         target:
           mode === "existing"
             ? { benchmarkId: Number.parseInt(existingId, 10) }
@@ -313,9 +325,19 @@ export function RecordsReassignDialog({
             </div>
             <div className="text-base-content/60 text-[11px]">
               <span className="opacity-70">作用范围: </span>
-              <span>{scopeDescription}</span>
+              <span>{isPartialBenchmark ? `所选 ${target.modelLabels!.length} 个模型的值` : scopeDescription}</span>
             </div>
           </div>
+          {isPartialBenchmark ? (
+            <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-base-300/50 pt-2 text-[11px] text-base-content/80">
+              <span className="opacity-70">限定模型:</span>
+              {target.modelLabels!.map((name) => (
+                <span key={name} className="badge badge-primary badge-outline badge-xs font-mono">
+                  {name}
+                </span>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         {target.entityType === "source" ? (
@@ -499,11 +521,13 @@ export function RecordsReassignDialog({
                 onClick={handleDelete}
               >
                 <Trash2 size={14} />
-                {target.entityType === "benchmark"
-                  ? "删除该行"
-                  : target.entityType === "model"
-                    ? "删除该列"
-                    : "删除数据源"}
+                {isPartialBenchmark
+                  ? `删除所选 ${target.modelIds!.length} 格`
+                  : target.entityType === "benchmark"
+                    ? "删除该行"
+                    : target.entityType === "model"
+                      ? "删除该列"
+                      : "删除数据源"}
               </button>
             ) : null}
           </div>

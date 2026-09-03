@@ -10,7 +10,12 @@ import type {
   MatrixSelectionRange,
   RecordReassignTarget
 } from "../../types";
-import { getCellKey, isCellInSelection, isPendingDeleteDraft } from "../../utils/record-drafts";
+import {
+  getCellKey,
+  isCellInSelection,
+  isPendingDeleteDraft,
+  normalizeSelectionRange
+} from "../../utils/record-drafts";
 import type { RecordEditingCell } from "../../hooks/use-record-matrix";
 import { sourceTabDisplayLabel } from "@/lib/source-utils";
 
@@ -215,47 +220,72 @@ export function RecordsMatrixGrid({
           </tr>
         </thead>
         <tbody>
-          {benchmarks.map((benchmark, row) => (
-            <tr key={`bench-row-${benchmark.benchmarkId}`}>
-              <th
-                className="sticky left-0 z-10 min-w-[200px] border-b border-r border-base-300 bg-base-100 p-2 text-left font-normal select-none"
-                title="按住 Ctrl/Cmd 点击可选取整行"
-                onClick={(event) => {
-                  if (event.ctrlKey || event.metaKey) {
-                    event.preventDefault();
-                    onSelectRow?.(row);
+          {benchmarks.map((benchmark, row) => {
+            const normalized = selection ? normalizeSelectionRange(selection) : null;
+            const isSingleRowSelection = Boolean(
+              normalized && normalized.rowStart === row && normalized.rowEnd === row
+            );
+            const selectedModels =
+              normalized && normalized.rowStart === row && normalized.rowEnd === row
+                ? models.slice(normalized.colStart, normalized.colEnd + 1)
+                : [];
+            const selectedModelIds = selectedModels.map((m) => m.modelId);
+            const selectedModelLabels = selectedModels.map((m) => m.modelName);
+
+            return (
+              <tr key={`bench-row-${benchmark.benchmarkId}`}>
+                <th
+                  className={`sticky left-0 z-10 min-w-[200px] border-b border-r border-base-300 bg-base-100 p-2 text-left font-normal select-none transition-colors ${
+                    isSingleRowSelection ? "bg-primary/5 ring-1 ring-inset ring-primary/40" : ""
+                  }`}
+                  title={
+                    isSingleRowSelection
+                      ? `当前已选该行 ${selectedModels.length} 个单元格，点击可仅修改这几个值的 benchmark 归属（按住 Ctrl/Cmd 点击可选取整行）`
+                      : "按住 Ctrl/Cmd 点击可选取整行"
                   }
-                }}
-              >
-                <button
-                  type="button"
-                  className="link link-hover group flex max-w-[220px] items-center gap-1 text-left text-xs font-semibold text-base-content hover:text-primary transition-colors"
-                  title={`点击变更「${benchmark.benchmarkName}」这一行的归属`}
                   onClick={(event) => {
                     if (event.ctrlKey || event.metaKey) {
                       event.preventDefault();
-                      event.stopPropagation();
                       onSelectRow?.(row);
-                      return;
                     }
-                    onOpenReassign({
-                      entityType: "benchmark",
-                      benchmarkId: benchmark.benchmarkId,
-                      benchmarkType: benchmark.benchmarkType,
-                      label: benchmark.benchmarkName
-                    });
                   }}
                 >
-                  <Link2 size={11} className="shrink-0 opacity-60 group-hover:opacity-100 group-hover:text-primary transition-opacity" aria-hidden="true" />
-                  <span className="truncate">{benchmark.benchmarkName}</span>
-                </button>
-                <div className="mt-0.5 flex items-center gap-1 text-[10px] font-normal opacity-60">
-                  <span className="badge badge-ghost badge-xs">{benchmark.benchmarkType}</span>
-                  <span>{benchmark.recordCount} 条</span>
-                </div>
-              </th>
+                  <button
+                    type="button"
+                    className="link link-hover group flex max-w-[220px] items-center gap-1 text-left text-xs font-semibold text-base-content hover:text-primary transition-colors"
+                    title={`点击变更「${benchmark.benchmarkName}」这一行的归属`}
+                    onClick={(event) => {
+                      if (event.ctrlKey || event.metaKey) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onSelectRow?.(row);
+                        return;
+                      }
+                      onOpenReassign({
+                        entityType: "benchmark",
+                        benchmarkId: benchmark.benchmarkId,
+                        benchmarkType: benchmark.benchmarkType,
+                        label: benchmark.benchmarkName,
+                        modelIds: isSingleRowSelection ? selectedModelIds : undefined,
+                        modelLabels: isSingleRowSelection ? selectedModelLabels : undefined
+                      });
+                    }}
+                  >
+                    <Link2 size={11} className="shrink-0 opacity-60 group-hover:opacity-100 group-hover:text-primary transition-opacity" aria-hidden="true" />
+                    <span className="truncate">{benchmark.benchmarkName}</span>
+                  </button>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] font-normal opacity-60">
+                    <span className="badge badge-ghost badge-xs">{benchmark.benchmarkType}</span>
+                    <span>{benchmark.recordCount} 条</span>
+                    {isSingleRowSelection ? (
+                      <span className="badge badge-primary badge-outline badge-xs font-sans font-medium text-primary">
+                        已选 {selectedModels.length} 格
+                      </span>
+                    ) : null}
+                  </div>
+                </th>
 
-              {models.map((model, col) => {
+                {models.map((model, col) => {
                 const key = getCellKey(model.modelId, benchmark.benchmarkId);
                 const cell = cellIndex.get(key);
                 const draft = drafts[key];
@@ -327,7 +357,8 @@ export function RecordsMatrixGrid({
                 );
               })}
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>

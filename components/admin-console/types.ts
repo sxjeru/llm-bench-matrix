@@ -251,7 +251,14 @@ export type RecordReassignResult = {
 
 /** 归属变更弹窗当前编辑的对象 */
 export type RecordReassignTarget =
-  | { entityType: "benchmark"; benchmarkId: number; label: string; benchmarkType: string }
+  | {
+      entityType: "benchmark";
+      benchmarkId: number;
+      label: string;
+      benchmarkType: string;
+      modelIds?: number[];
+      modelLabels?: string[];
+    }
   | { entityType: "model"; modelId: number; label: string; providerName: string }
   | { entityType: "source"; source: string | null; label: string };
 

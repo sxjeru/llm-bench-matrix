@@ -793,9 +793,20 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
 
     setToolBusy("reassign");
     try {
+      const payloadModelIds =
+        Array.isArray(payload.modelIds) && payload.modelIds.length > 0
+          ? (payload.modelIds as number[])
+          : undefined;
+      const targetScope: RecordMutationScope = payloadModelIds
+        ? {
+            ...mutationScope,
+            modelIds: payloadModelIds
+          }
+        : mutationScope;
+
       const result = (await postJson("/api/admin/records/reassign", {
         ...payload,
-        scope: mutationScope
+        scope: targetScope
       })) as RecordReassignResult;
 
       const details: string[] = [];
@@ -803,20 +814,29 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
       if (result.deletedTargetCount > 0) details.push(`覆盖删除目标侧 ${result.deletedTargetCount} 条`);
       if (result.createdTarget) details.push("目标实体为本次新建");
 
-      notifySuccess(
-        `归属已变更：${result.fromLabel} → ${result.targetLabel}，迁移 ${result.movedCount} 条`,
-        details.length > 0 ? details : undefined
-      );
+      const successMsg = payloadModelIds
+        ? `所选 ${result.movedCount} 个数值归属已变更：${result.fromLabel} → ${result.targetLabel}`
+        : `归属已变更：${result.fromLabel} → ${result.targetLabel}，迁移 ${result.movedCount} 条`;
+
+      notifySuccess(successMsg, details.length > 0 ? details : undefined);
 
       let nextFilters = filtersRef.current;
       if (result.fromId && result.targetId && result.fromId !== result.targetId) {
         if (result.entityType === "benchmark" && nextFilters.benchmarkIds.includes(result.fromId)) {
-          nextFilters = {
-            ...nextFilters,
-            benchmarkIds: Array.from(
-              new Set(nextFilters.benchmarkIds.map((id) => (id === result.fromId ? result.targetId! : id)))
-            )
-          };
+          if (payloadModelIds) {
+            // 只迁移了选定的几个模型数值，原 benchmark 仍有数据，同时保留原指标并添加新目标指标
+            nextFilters = {
+              ...nextFilters,
+              benchmarkIds: Array.from(new Set([...nextFilters.benchmarkIds, result.targetId]))
+            };
+          } else {
+            nextFilters = {
+              ...nextFilters,
+              benchmarkIds: Array.from(
+                new Set(nextFilters.benchmarkIds.map((id) => (id === result.fromId ? result.targetId! : id)))
+              )
+            };
+          }
         } else if (result.entityType === "model" && nextFilters.modelIds.includes(result.fromId)) {
           nextFilters = {
             ...nextFilters,
@@ -828,6 +848,7 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
       }
 
       setDrafts({});
+      setSelection(null);
       applyFilters(nextFilters);
       setReassignTarget(null);
       await refreshMatrixAndEntities(nextFilters);
@@ -843,6 +864,8 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
 
     setToolBusy("delete");
     try {
+      const isPartialBenchmark =
+        target.entityType === "benchmark" && Boolean(target.modelIds && target.modelIds.length > 0);
       const targetScope: RecordMutationScope = {
         ...mutationScope,
         benchmarkIds:
@@ -852,7 +875,9 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
         modelIds:
           target.entityType === "model"
             ? [target.modelId]
-            : mutationScope.modelIds,
+            : isPartialBenchmark
+              ? target.modelIds!
+              : mutationScope.modelIds,
         sourceMode:
           target.entityType === "source"
             ? (target.source ? "specific" : "empty")
@@ -867,11 +892,17 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
         scope: targetScope
       })) as { deleted: number; prunedSourceMeta: number };
 
-      const noun = target.entityType === "benchmark" ? "行" : target.entityType === "model" ? "列" : "数据源";
+      const noun = isPartialBenchmark
+        ? `所选 ${target.modelIds!.length} 个模型的值`
+        : target.entityType === "benchmark"
+          ? "行"
+          : target.entityType === "model"
+            ? "列"
+            : "数据源";
       notifySuccess(`已删除${noun}「${target.label}」的 ${result.deleted} 条记录`);
 
       let nextFilters = filtersRef.current;
-      if (target.entityType === "benchmark" && nextFilters.benchmarkIds.includes(target.benchmarkId)) {
+      if (!isPartialBenchmark && target.entityType === "benchmark" && nextFilters.benchmarkIds.includes(target.benchmarkId)) {
         nextFilters = {
           ...nextFilters,
           benchmarkIds: nextFilters.benchmarkIds.filter((id) => id !== target.benchmarkId)
