@@ -1359,5 +1359,79 @@ describe("AdminConsole records tab", () => {
       });
     });
   });
+
+  test("弹窗打开时阻断矩阵键盘快捷键（Backspace/Delete、Ctrl+A、Ctrl+C），防止按键穿透", async () => {
+    mockFetchSequence(filledMatrix);
+    const user = userEvent.setup();
+
+    await renderReady(<AdminConsole {...buildProps()} />);
+    await openRecordsTabAndFilter(user);
+
+    const cell = await screen.findByTestId("record-cell-1-11");
+    fireEvent.mouseDown(cell, { ctrlKey: true });
+    fireEvent.mouseUp(document, { ctrlKey: true });
+    expect(cell).toHaveAttribute("data-selected", "true");
+
+    // 打开归属变更弹窗
+    await user.click(screen.getByTitle("点击变更「Bench-1」这一行的归属"));
+    expect(await screen.findByText("变更选定数值的指标归属：Bench-1（已选 1 个模型）")).toBeInTheDocument();
+
+    // 焦点停留在弹窗内的非输入框元素（例如取消按钮）
+    const cancelBtn = screen.getByRole("button", { name: "取消" });
+    cancelBtn.focus();
+    expect(cancelBtn).toHaveFocus();
+
+    // 按下 Backspace / Delete
+    fireEvent.keyDown(document, { key: "Backspace" });
+    fireEvent.keyDown(document, { key: "Delete" });
+
+    // 单元格不应被清空，不应变成待删除状态
+    expect(cell).toHaveAttribute("data-dirty", "false");
+    expect(cell).toHaveAttribute("data-pending-delete", "false");
+    expect(screen.queryByText("待清空 1 格")).toBeNull();
+
+    // 按下 Ctrl+A 不应触发全选
+    fireEvent.keyDown(document, { key: "a", ctrlKey: true });
+
+    // 触发复制事件，不应写入矩阵数据
+    const setData = vi.fn();
+    const clipboardData = { setData, getData: vi.fn() };
+    fireEvent.copy(document, { clipboardData });
+    expect(setData).not.toHaveBeenCalled();
+  });
+
+  test("行归属弹窗中确认删除该行后，矩阵选区 selection 立即被清理", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    mockFetchSequence(
+      filledMatrix,
+      { deleted: 1, prunedSourceMeta: 0 },
+      filledMatrix
+    );
+    const user = userEvent.setup();
+
+    const props = buildProps();
+    props.benchmarks = [
+      { id: 11, benchmarkName: "Bench-1", benchmarkType: "Type-A", modalities: ["Text"] },
+      { id: 12, benchmarkName: "Bench-2", benchmarkType: "Type-A", modalities: ["Text"] }
+    ];
+
+    await renderReady(<AdminConsole {...props} />);
+    await openRecordsTabAndFilter(user);
+
+    const cell = await screen.findByTestId("record-cell-1-11");
+    fireEvent.mouseDown(cell, { ctrlKey: true });
+    fireEvent.mouseUp(document, { ctrlKey: true });
+    expect(cell).toHaveAttribute("data-selected", "true");
+
+    await user.click(screen.getByTitle("点击变更「Bench-1」这一行的归属"));
+    expect(await screen.findByText("变更选定数值的指标归属：Bench-1（已选 1 个模型）")).toBeInTheDocument();
+    const deleteBtn = screen.getByRole("button", { name: "删除所选 1 格" });
+    await user.click(deleteBtn);
+
+    await waitFor(() => {
+      expect(cell).toHaveAttribute("data-selected", "false");
+    });
+    confirmSpy.mockRestore();
+  });
 });
 

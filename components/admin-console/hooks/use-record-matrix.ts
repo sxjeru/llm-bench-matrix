@@ -503,6 +503,7 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     if (typeof document === "undefined") return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      // 1. 如果打开了多值编辑弹窗，Esc 关闭弹窗，其余按键不穿透到底层矩阵
       if (multiValueCell) {
         if (event.key === "Escape" && !saving) {
           event.preventDefault();
@@ -511,10 +512,27 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
         return;
       }
 
+      // 2. 弹窗打开时（归属变更、分拆双值、删除确认等），不响应矩阵快捷键，防止按键穿透
+      if (reassignTarget || splitDialogOpen || deleteConfirmOpen) {
+        return;
+      }
+
+      // 3. 通用保障：如果焦点在任何对话框/模态内，阻断矩阵级快捷键
+      const activeEl = document.activeElement as HTMLElement | null;
+      if (
+        activeEl &&
+        Boolean(activeEl.closest('[role="dialog"], [aria-modal="true"], dialog, .modal, [data-modal="true"]'))
+      ) {
+        return;
+      }
+
       if (editingCell) return;
 
-      const activeEl = document.activeElement;
-      const isInputFocused = activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA");
+      const isInputFocused =
+        activeEl &&
+        (activeEl.tagName === "INPUT" ||
+          activeEl.tagName === "TEXTAREA" ||
+          activeEl.isContentEditable);
 
       if ((event.key === "a" || event.key === "A") && (event.ctrlKey || event.metaKey) && !isInputFocused) {
         if (models.length > 0 && benchmarks.length > 0) {
@@ -542,9 +560,17 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     };
 
     const handleCopy = (event: ClipboardEvent) => {
-      if (editingCell) return;
-      const activeEl = document.activeElement;
-      if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) return;
+      if (editingCell || multiValueCell || reassignTarget || splitDialogOpen || deleteConfirmOpen) return;
+      const activeEl = document.activeElement as HTMLElement | null;
+      if (
+        activeEl &&
+        (activeEl.tagName === "INPUT" ||
+          activeEl.tagName === "TEXTAREA" ||
+          activeEl.isContentEditable ||
+          Boolean(activeEl.closest('[role="dialog"], [aria-modal="true"], dialog, .modal, [data-modal="true"]')))
+      ) {
+        return;
+      }
 
       const nativeSelection = typeof window !== "undefined" ? window.getSelection()?.toString() : "";
       if (nativeSelection && nativeSelection.trim().length > 0) {
@@ -600,6 +626,9 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     editingCell,
     clearSelectedCells,
     multiValueCell,
+    reassignTarget,
+    splitDialogOpen,
+    deleteConfirmOpen,
     saving,
     models,
     benchmarks,
@@ -698,6 +727,7 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
 
       notifySuccess(`已删除 ${result.deleted} 条记录`);
       setDrafts({});
+      setSelection(null);
       setDeleteConfirmOpen(false);
       await refreshMatrixAndEntities();
     } catch (error) {
@@ -774,6 +804,7 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
         `双值分拆完成：${result.splitCount} 条拆分为 ${result.firstBenchmarkLabel} 与 ${result.secondBenchmarkLabel}`
       );
       setDrafts({});
+      setSelection(null);
       setSplitDialogOpen(false);
       await refreshMatrixAndEntities();
     } catch (error) {
@@ -915,6 +946,7 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
       }
 
       setDrafts({});
+      setSelection(null);
       applyFilters(nextFilters);
       setReassignTarget(null);
       await refreshMatrixAndEntities(nextFilters);
