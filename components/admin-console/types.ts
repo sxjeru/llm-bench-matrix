@@ -413,6 +413,7 @@ export type ModelPricingRow = {
   sourceProviderName: string | null;
   sourceModelId: string | null;
   sourceModelName: string | null;
+  releaseDate: string | null;
   inputCost: number | null;
   outputCost: number | null;
   reasoningCost: number | null;

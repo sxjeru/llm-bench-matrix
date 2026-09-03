@@ -74,6 +74,32 @@ describe("toPublicModelPrice", () => {
       updatedAt: "2026-05-02T00:00:00.000Z"
     });
   });
+
+  test("投影 releaseDate 字段并 trim 空白，忽略空字符串和纯空格", () => {
+    expect(toPublicModelPrice({
+      modelId: 8,
+      modelName: "Claude-3.5",
+      inputCost: 3,
+      outputCost: 15,
+      cacheReadCost: 0.3,
+      releaseDate: "  2024-06-20  ",
+      lastSyncedAt: null,
+      updatedAt: "2026-05-02T00:00:00.000Z"
+    })).toEqual(expect.objectContaining({
+      releaseDate: "2024-06-20"
+    }));
+
+    expect(toPublicModelPrice({
+      modelId: 9,
+      modelName: "Claude-Empty-Date",
+      inputCost: 3,
+      outputCost: 15,
+      cacheReadCost: 0.3,
+      releaseDate: "    ",
+      lastSyncedAt: null,
+      updatedAt: "2026-05-02T00:00:00.000Z"
+    })).not.toHaveProperty("releaseDate");
+  });
 });
 
 describe("loadPublicDashboardSnapshot", () => {
@@ -152,6 +178,40 @@ describe("loadPublicDashboardSnapshot", () => {
         cacheReadCost: 0.1,
         lastSyncedAt: "2026-05-01T00:00:00.000Z",
         updatedAt: "2026-05-02T00:00:00.000Z"
+      }
+    ]);
+  });
+
+  test("公开快照保留仅有 releaseDate 但费用全空的价格行，过滤纯空或纯空格记录", async () => {
+    vi.mocked(getModelPricingRows).mockResolvedValueOnce([
+      {
+        modelId: 10,
+        modelName: "Date-Only-Model",
+        inputCost: null,
+        outputCost: null,
+        cacheReadCost: null,
+        releaseDate: "2024-05-13"
+      },
+      {
+        modelId: 11,
+        modelName: "Whitespace-Date-Model",
+        inputCost: null,
+        outputCost: null,
+        cacheReadCost: null,
+        releaseDate: "   "
+      }
+    ] as never);
+
+    const snapshot = await loadPublicDashboardSnapshot();
+
+    expect(snapshot.modelPrices).toEqual([
+      {
+        modelId: 10,
+        modelName: "Date-Only-Model",
+        inputCost: null,
+        outputCost: null,
+        cacheReadCost: null,
+        releaseDate: "2024-05-13"
       }
     ]);
   });

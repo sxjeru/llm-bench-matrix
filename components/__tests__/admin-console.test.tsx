@@ -154,6 +154,7 @@ function buildPriceRow(overrides: Partial<ModelPricingRow> = {}): ModelPricingRo
     sourceProviderName: "OpenAI",
     sourceModelId: "model-a",
     sourceModelName: "Model A",
+    releaseDate: null,
     inputCost: 1,
     outputCost: 2,
     reasoningCost: null,
@@ -3945,6 +3946,29 @@ describe("AdminConsole 批量保存", () => {
     } finally {
       confirmSpy.mockRestore();
     }
+  });
+
+  test("价格管理展示发布日期并支持按发布日期搜索过滤", async () => {
+    const user = userEvent.setup();
+    mockFetchSequence({
+      prices: [
+        buildPriceRow({ modelId: 1, modelName: "Model 2024", releaseDate: "2024-05-13" }),
+        buildPriceRow({ modelId: 2, modelName: "Model 2023", releaseDate: "2023-11-01" })
+      ]
+    });
+
+    await renderReady(<AdminConsole {...buildProps()} />);
+
+    await user.click(screen.getByRole("tab", { name: "价格管理" }));
+    expect(await screen.findByText("Model 2024")).toBeInTheDocument();
+    expect(screen.getByText("2024-05-13")).toBeInTheDocument();
+    expect(screen.getByText("2023-11-01")).toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText("搜索模型、Provider 或 models.dev ID"), "2024-05");
+    await waitFor(() => {
+      expect(screen.getByText("Model 2024")).toBeInTheDocument();
+      expect(screen.queryByText("Model 2023")).not.toBeInTheDocument();
+    });
   });
 
   test("模型参数批量保存把所有改动合并成一次请求", async () => {

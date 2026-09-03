@@ -4,7 +4,7 @@ import type { MatrixInputRow, ModelParamsInfo, ModelPriceInfo } from "@/componen
 export type ScatterMetricKind = "benchmark" | "price" | "params" | "overall";
 
 /** 数值单位，只影响刻度与提示的格式化，不参与任何计算。 */
-export type ScatterMetricUnit = "score" | "usd" | "billions" | "percent";
+export type ScatterMetricUnit = "score" | "usd" | "billions" | "percent" | "date";
 
 export type ScatterAxisScale = "linear" | "log";
 export type ScatterLabelMode = "auto" | "all" | "none";

@@ -1,6 +1,7 @@
 import {
   OVERALL_ROW_KEY,
   PARAMS_ACTIVE_RATIO_ROW_KEY,
+  RELEASE_DATE_ROW_KEY,
   SOURCE_ALL
 } from "@/components/benchmark-matrix/constants";
 import {
@@ -84,6 +85,7 @@ function resolveMetricKind(row: MatrixRow): ScatterMetricKind {
 function resolveMetricUnit(row: MatrixRow): ScatterMetricUnit {
   if (row.isPriceRow) return "usd";
   if (row.isInfoRow) {
+    if (row.rowKey === RELEASE_DATE_ROW_KEY) return "date";
     return row.rowKey === PARAMS_ACTIVE_RATIO_ROW_KEY ? "percent" : "billions";
   }
   return "score";
@@ -354,6 +356,19 @@ export function resolveDefaultAxisKeys(metrics: readonly ScatterMetric[]): {
   return { xKey: xMetric?.key ?? null, yKey };
 }
 
+export function formatScatterDate(timestamp: number, format: "full" | "tick" = "full"): string {
+  if (!Number.isFinite(timestamp)) return "--";
+  const date = new Date(timestamp);
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+
+  if (format === "tick") {
+    return `${year}-${month}`;
+  }
+  return `${year}-${month}-${day}`;
+}
+
 /** 悬浮卡与图例用的完整数值文本。 */
 export function formatScatterValue(metric: Pick<ScatterMetric, "unit">, value: number): string {
   if (!Number.isFinite(value)) return "--";
@@ -365,6 +380,8 @@ export function formatScatterValue(metric: Pick<ScatterMetric, "unit">, value: n
       return formatParamsBillions(value);
     case "percent":
       return `${Number(value.toFixed(1)).toString()}%`;
+    case "date":
+      return formatScatterDate(value, "full");
     default:
       return Number(value.toFixed(2)).toString();
   }
@@ -387,13 +404,18 @@ export function formatScatterAxisTick(metric: Pick<ScatterMetric, "unit">, value
     }
     case "percent":
       return `${Number(value.toFixed(Math.abs(value) >= 10 ? 0 : 1)).toString()}%`;
+    case "date":
+      return formatScatterDate(value, "tick");
     default:
       return Number(value.toFixed(Math.abs(value) >= 10 ? 0 : 2)).toString();
   }
 }
 
 /** 轴标题上的方向提示。 */
-export function describeMetricDirection(metric: Pick<ScatterMetric, "higherIsBetter">): string {
+export function describeMetricDirection(metric: Pick<ScatterMetric, "higherIsBetter"> & { unit?: ScatterMetricUnit }): string {
+  if (metric.unit === "date") {
+    return metric.higherIsBetter ? "越新越好" : "越旧越好";
+  }
   return metric.higherIsBetter ? "越大越好" : "越小越好";
 }
 

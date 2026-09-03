@@ -1,5 +1,5 @@
 import { toMatrixInputRow } from "@/components/benchmark-matrix/map-row";
-import { hasPublicModelPriceCost, type ModelPriceInfo } from "@/components/benchmark-matrix/types";
+import { hasPublicModelPriceData, type ModelPriceInfo } from "@/components/benchmark-matrix/types";
 import { getCacheVersion } from "@/lib/cache-versions";
 import {
   getDashboardRows,
@@ -47,7 +47,9 @@ export function parseExportFootnote(rawFootnote: unknown): ParsedExportFootnote 
 export function toPublicModelPrice(row: Pick<
   ModelPricingRow,
   "modelId" | "modelName" | "inputCost" | "outputCost" | "cacheReadCost" | "lastSyncedAt" | "updatedAt"
->): PublicDashboardSnapshot["modelPrices"][number] {
+> & {
+  releaseDate?: string | null;
+}): PublicDashboardSnapshot["modelPrices"][number] {
   const mapped: ModelPriceInfo = {
     modelName: row.modelName,
     inputCost: row.inputCost,
@@ -57,6 +59,11 @@ export function toPublicModelPrice(row: Pick<
 
   if (typeof row.modelId === "number") {
     mapped.modelId = row.modelId;
+  }
+
+  const releaseDate = row.releaseDate?.trim();
+  if (releaseDate) {
+    mapped.releaseDate = releaseDate;
   }
 
   if (row.lastSyncedAt) {
@@ -98,7 +105,7 @@ export async function loadPublicDashboardSnapshot(
     rows: rows.map(toMatrixInputRow),
     sourceOptions,
     stats,
-    modelPrices: modelPrices.map(toPublicModelPrice).filter(hasPublicModelPriceCost),
+    modelPrices: modelPrices.map(toPublicModelPrice).filter(hasPublicModelPriceData),
     modelParams,
     ...parseExportFootnote(settings.export_footnote_text)
   };

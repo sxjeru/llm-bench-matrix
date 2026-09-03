@@ -172,11 +172,12 @@ export type ModelPriceInfo = {
   inputCost: number | null;
   outputCost: number | null;
   cacheReadCost: number | null;
+  releaseDate?: string | null;
   lastSyncedAt?: string | null;
   updatedAt?: string | null;
 };
 
-/** 公开矩阵/散点只认 input/output/cache 三项费用；全空的未匹配行不能当成“有价格数据”。 */
+/** 只有 input/output/cache 三项费用之一有效，才算“有费用数据”，用于价格行显示及价格排名扩列。 */
 export function hasPublicModelPriceCost(
   price: Pick<ModelPriceInfo, "inputCost" | "outputCost" | "cacheReadCost">
 ): boolean {
@@ -185,6 +186,13 @@ export function hasPublicModelPriceCost(
     || (typeof price.outputCost === "number" && Number.isFinite(price.outputCost))
     || (typeof price.cacheReadCost === "number" && Number.isFinite(price.cacheReadCost))
   );
+}
+
+/** 具备费用或发布日期等任何公开有效信息，供快照层过滤无意义的空记录。 */
+export function hasPublicModelPriceData(
+  price: Pick<ModelPriceInfo, "inputCost" | "outputCost" | "cacheReadCost" | "releaseDate">
+): boolean {
+  return hasPublicModelPriceCost(price) || Boolean(price.releaseDate?.trim());
 }
 
 export type HeatmapPresetKey = "classic" | "coolwarm" | "mintsun" | "colorblind";

@@ -4,7 +4,8 @@ import {
   PARAMS_ROW_KEY,
   PRICE_CACHE_INPUT_ROW_KEY,
   PRICE_INPUT_ROW_KEY,
-  PRICE_OUTPUT_ROW_KEY
+  PRICE_OUTPUT_ROW_KEY,
+  RELEASE_DATE_ROW_KEY
 } from "@/components/benchmark-matrix/constants";
 
 export const SCATTER_AXIS_X_STORAGE_KEY = "model-scatter:axis-x";
@@ -33,7 +34,8 @@ export const SYNTHETIC_METRIC_SLUGS: Readonly<Record<string, string>> = {
   [PRICE_OUTPUT_ROW_KEY]: "price-output",
   [PRICE_CACHE_INPUT_ROW_KEY]: "price-cache-input",
   [PARAMS_ROW_KEY]: "params",
-  [PARAMS_ACTIVE_RATIO_ROW_KEY]: "params-activated"
+  [PARAMS_ACTIVE_RATIO_ROW_KEY]: "params-activated",
+  [RELEASE_DATE_ROW_KEY]: "release-date"
 };
 
 /** 轴选择器与图例的分类排序：总评 → Cost → 模型属性 → 价格 → Performance → 其余按字母 */

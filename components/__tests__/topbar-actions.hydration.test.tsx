@@ -11,6 +11,7 @@ vi.mock("next/link", () => ({
   default: (props: Record<string, unknown>) => {
     linkPropsSpy(props);
     const { children, prefetch: _prefetch, ...rest } = props as { children?: React.ReactNode; prefetch?: boolean };
+    void _prefetch;
     return <a {...rest}>{children}</a>;
   }
 }));

@@ -1,4 +1,4 @@
-import type { ScatterAxisScale } from "./types";
+import type { ScatterAxisScale, ScatterMetricUnit } from "./types";
 
 /**
  * 坐标轴刻度生成。
@@ -124,10 +124,119 @@ export function buildLogTicks(
   return best;
 }
 
+/**
+ * 日期轴刻度生成。
+ *
+ * 依据时间跨度按年、季度、月或旬/周切分，确保刻度落在自然日历边界上，
+ * 而非 base-10 算出的任意毫秒数。
+ */
+export function buildDateTicks(
+  domain: readonly [number, number],
+  targetCount = 6
+): number[] {
+  const [low, high] = domain;
+  if (!Number.isFinite(low) || !Number.isFinite(high) || high <= low) return [];
+
+  const spanMs = high - low;
+  const dayMs = 86400 * 1000;
+  const monthMs = 30.4375 * dayMs;
+  const yearMs = 365.25 * dayMs;
+
+  const lowDate = new Date(low);
+  const highDate = new Date(high);
+
+  const lowYear = lowDate.getUTCFullYear();
+  const highYear = highDate.getUTCFullYear();
+
+  // 跨度 3 年以上：按整年生成刻度
+  if (spanMs >= 3 * yearMs) {
+    const ticks: number[] = [];
+    const yearSpan = highYear - lowYear;
+    const yearStep = Math.max(1, Math.round(yearSpan / targetCount));
+    const startYear = Math.ceil(lowYear / yearStep) * yearStep;
+    for (let y = startYear; y <= highYear + 1; y += yearStep) {
+      const t = Date.UTC(y, 0, 1);
+      if (t >= low && t <= high) ticks.push(t);
+    }
+    if (ticks.length >= 2) return ticks;
+  }
+
+  // 跨度 10 个月以上：半年或季度
+  if (spanMs >= 10 * monthMs) {
+    const ticks: number[] = [];
+    const monthStep = spanMs >= 20 * monthMs ? 6 : 3;
+    for (let y = lowYear; y <= highYear + 1; y += 1) {
+      for (let m = 0; m < 12; m += monthStep) {
+        const t = Date.UTC(y, m, 1);
+        if (t >= low && t <= high) ticks.push(t);
+      }
+    }
+    if (ticks.length >= 2) return ticks;
+  }
+
+  // 跨度 2 个月 ~ 10 个月：按月或双月
+  if (spanMs >= 2 * monthMs) {
+    const ticks: number[] = [];
+    const monthStep = spanMs >= 5 * monthMs ? 2 : 1;
+    for (let y = lowYear; y <= highYear + 1; y += 1) {
+      for (let m = 0; m < 12; m += monthStep) {
+        const t = Date.UTC(y, m, 1);
+        if (t >= low && t <= high) ticks.push(t);
+      }
+    }
+    if (ticks.length >= 2) return ticks;
+  }
+
+  // 跨度 25 天 ~ 2 个月：按半月（每月 1 号与 15 号）生成自然日历刻度
+  if (spanMs >= 25 * dayMs) {
+    const ticks: number[] = [];
+    for (let y = lowYear; y <= highYear; y += 1) {
+      for (let m = 0; m < 12; m += 1) {
+        for (const day of [1, 15]) {
+          const t = Date.UTC(y, m, day);
+          if (t >= low && t <= high) ticks.push(t);
+        }
+      }
+    }
+    if (ticks.length >= 2) return ticks;
+  }
+
+  // 跨度约 1 ~ 4 周：按周对齐（自然周一）
+  if (spanMs >= 6 * dayMs) {
+    const ticks: number[] = [];
+    const lowDayMs = Date.UTC(lowDate.getUTCFullYear(), lowDate.getUTCMonth(), lowDate.getUTCDate());
+    const dayOfWeek = lowDate.getUTCDay(); // 0 是周日，1 是周一
+    const daysSinceMonday = (dayOfWeek + 6) % 7;
+    const prevMonday = lowDayMs - daysSinceMonday * dayMs;
+    const startMonday = prevMonday >= low ? prevMonday : prevMonday + 7 * dayMs;
+    for (let t = startMonday; t <= high; t += 7 * dayMs) {
+      ticks.push(t);
+    }
+    if (ticks.length >= 2) return ticks;
+  }
+
+  // 跨度 2 ~ 6 天：按自然天
+  if (spanMs >= 2 * dayMs) {
+    const ticks: number[] = [];
+    const lowDayMs = Date.UTC(lowDate.getUTCFullYear(), lowDate.getUTCMonth(), lowDate.getUTCDate());
+    const startDay = lowDayMs >= low ? lowDayMs : lowDayMs + dayMs;
+    for (let t = startDay; t <= high; t += dayMs) {
+      ticks.push(t);
+    }
+    if (ticks.length >= 2) return ticks;
+  }
+
+  return buildLinearTicks(domain, targetCount);
+}
+
 export function buildAxisTicks(
   domain: readonly [number, number],
   scale: ScatterAxisScale,
-  targetCount = 6
+  targetCount = 6,
+  unit?: ScatterMetricUnit
 ): number[] {
+  if (unit === "date") {
+    return buildDateTicks(domain, targetCount);
+  }
   return scale === "log" ? buildLogTicks(domain) : buildLinearTicks(domain, targetCount);
 }

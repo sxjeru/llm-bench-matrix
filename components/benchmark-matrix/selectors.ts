@@ -8,6 +8,7 @@ import {
   PRICE_CATEGORY_LABEL,
   PRICE_INPUT_ROW_KEY,
   PRICE_OUTPUT_ROW_KEY,
+  RELEASE_DATE_ROW_KEY,
   SOURCE_ALL,
   SOURCE_NEW_LATEST_COUNT,
   SOURCE_NEW_WINDOW_MS
@@ -1565,6 +1566,96 @@ export function buildParamsMatrixRows(
       isInfoRow: true
     };
   });
+}
+
+export function parseReleaseDateToTimestamp(dateStr: string | null | undefined): number | null {
+  if (!dateStr) return null;
+  const trimmed = dateStr.trim();
+  if (!trimmed) return null;
+  const cleaned = trimmed.replace(/\//g, "-");
+  const normalized = /^\d{4}-\d{1,2}$/.test(cleaned) ? `${cleaned}-01` : cleaned;
+  const match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(normalized);
+  if (match) {
+    const year = Number(match[1]);
+    const month = Number(match[2]) - 1;
+    const day = Number(match[3]);
+    if (month >= 0 && month <= 11 && day >= 1 && day <= 31) {
+      const ms = Date.UTC(year, month, day);
+      return Number.isFinite(ms) ? ms : null;
+    }
+  }
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function createReleaseDateCell(price: ModelPriceInfo | undefined): MatrixCell {
+  const rawDate = price?.releaseDate?.trim() || null;
+  const timestamp = parseReleaseDateToTimestamp(rawDate);
+  const displayValue = rawDate ?? "--";
+
+  const entry: MatrixCellEntry = {
+    valueRaw: displayValue,
+    valueNum: timestamp,
+    valueNum2: null,
+    valueNote: null,
+    source: "models.dev",
+    benchTime: null
+  };
+
+  return {
+    valueRaw: displayValue,
+    valueNum: timestamp,
+    valueNum2: null,
+    valueNote: null,
+    source: "models.dev",
+    benchTime: null,
+    allEntries: [entry],
+    hasMultipleValues: false,
+    uniqueEntries: [entry],
+    noteText: "",
+    displayValue,
+    hasMeaningfulMultipleValues: false,
+    hasMultipleActiveSourceValues: false,
+    shouldShowQuestionMark: false
+  };
+}
+
+export function buildReleaseDateMatrixRow(
+  modelColumns: readonly string[],
+  modelPrices: readonly ModelPriceInfo[]
+): MatrixRow {
+  const priceByModel = new Map(modelPrices.map((price) => [price.modelName, price]));
+  const cells = new Map<string, MatrixCell>();
+
+  modelColumns.forEach((modelName) => {
+    cells.set(modelName, createReleaseDateCell(priceByModel.get(modelName)));
+  });
+
+  const numericValues = Array.from(cells.values())
+    .map((cell) => cell.valueNum)
+    .filter((value): value is number => value !== null && Number.isFinite(value));
+
+  return {
+    rowKey: RELEASE_DATE_ROW_KEY,
+    category: MODEL_INFO_CATEGORY_LABEL,
+    benchmark: "Release Date",
+    higherIsBetter: true,
+    modalities: ["Text"],
+    cells,
+    firstSeenIndex: -205,
+    sourceOrderKey: null,
+    rowDataCount: cells.size,
+    rowNumericCount: numericValues.length,
+    minComparable: numericValues.length > 0 ? Math.min(...numericValues) : null,
+    maxComparable: numericValues.length > 0 ? Math.max(...numericValues) : null,
+    minComparable2: null,
+    maxComparable2: null,
+    minNum: numericValues.length > 0 ? Math.min(...numericValues) : null,
+    maxNum: numericValues.length > 0 ? Math.max(...numericValues) : null,
+    minNum2: null,
+    maxNum2: null,
+    isInfoRow: true
+  };
 }
 
 function buildRankingDataFromMatrixRow(

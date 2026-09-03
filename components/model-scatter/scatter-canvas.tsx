@@ -417,8 +417,8 @@ export function ScatterCanvas({
   const shouldRenderGuides = Boolean(highlightedPoint) || (showGuides && (xMedian !== null || yMedian !== null));
 
   // 横向空间更宽，刻度可以多给两档；纵向密了会挤成一片
-  const xTicks = useMemo(() => buildAxisTicks(xDomain, xScale, 8), [xDomain, xScale]);
-  const yTicks = useMemo(() => buildAxisTicks(yDomain, yScale, 6), [yDomain, yScale]);
+  const xTicks = useMemo(() => buildAxisTicks(xDomain, xScale, 8, xMetric.unit), [xDomain, xScale, xMetric.unit]);
+  const yTicks = useMemo(() => buildAxisTicks(yDomain, yScale, 6, yMetric.unit), [yDomain, yScale, yMetric.unit]);
   // 滚轮缩放必须拿到非 passive 的监听才能 preventDefault，React 的 onWheel 做不到
   useEffect(() => {
     const node = containerRef.current;
