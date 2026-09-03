@@ -23,11 +23,18 @@ type RecordsMatrixGridProps = {
   editingCell: RecordEditingCell | null;
   loading: boolean;
   hasLoaded: boolean;
-  onCellMouseDown: (row: number, col: number, event: { shiftKey?: boolean }) => void;
+  onCellMouseDown: (
+    row: number,
+    col: number,
+    event: { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }
+  ) => void;
   onCellMouseEnter: (row: number, col: number) => void;
   onCommitCellValue: (modelId: number, benchmarkId: number, valueRaw: string) => void;
   onStopEditing: () => void;
   onOpenReassign: (target: RecordReassignTarget) => void;
+  onSelectRow?: (row: number) => void;
+  onSelectCol?: (col: number) => void;
+  onSelectAll?: () => void;
 };
 
 function buildCellTooltip(cell: AdminRecordCell | undefined, draft: CellDraft | undefined): string {
@@ -116,7 +123,10 @@ export function RecordsMatrixGrid({
   onCellMouseEnter,
   onCommitCellValue,
   onStopEditing,
-  onOpenReassign
+  onOpenReassign,
+  onSelectRow,
+  onSelectCol,
+  onSelectAll
 }: RecordsMatrixGridProps) {
   if (loading && models.length === 0) {
     return (
@@ -148,29 +158,50 @@ export function RecordsMatrixGrid({
       className="overflow-auto rounded-2xl border border-base-300 shadow-inner"
       style={{ maxHeight: "85vh", minHeight: "560px" }}
     >
-      <table className="table table-xs select-none border-separate border-spacing-0">
+      <table className="table table-xs border-separate border-spacing-0">
         <thead>
           <tr>
-            <th className="sticky left-0 top-0 z-30 min-w-[200px] border-b border-r border-base-300 bg-base-200 p-2 text-left">
+            <th
+              className="sticky left-0 top-0 z-30 min-w-[200px] border-b border-r border-base-300 bg-base-200 p-2 text-left select-none cursor-pointer"
+              title="按住 Ctrl/Cmd 点击可全选表格"
+              onClick={(event) => {
+                if (event.ctrlKey || event.metaKey) {
+                  onSelectAll?.();
+                }
+              }}
+            >
               指标 \ 模型
             </th>
-            {models.map((model) => (
+            {models.map((model, col) => (
               <th
                 key={`model-head-${model.modelId}`}
-                className="sticky top-0 z-20 min-w-[120px] border-b border-base-300 bg-base-200 p-2 align-bottom"
+                className="sticky top-0 z-20 min-w-[120px] border-b border-base-300 bg-base-200 p-2 align-bottom select-none"
+                title="按住 Ctrl/Cmd 点击可选取整列"
+                onClick={(event) => {
+                  if (event.ctrlKey || event.metaKey) {
+                    event.preventDefault();
+                    onSelectCol?.(col);
+                  }
+                }}
               >
                 <button
                   type="button"
                   className="link link-hover group flex max-w-[160px] items-center gap-1 text-left text-xs font-semibold text-base-content hover:text-primary transition-colors"
                   title={`点击变更「${model.modelName}」这一列的归属`}
-                  onClick={() =>
+                  onClick={(event) => {
+                    if (event.ctrlKey || event.metaKey) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onSelectCol?.(col);
+                      return;
+                    }
                     onOpenReassign({
                       entityType: "model",
                       modelId: model.modelId,
                       providerName: model.providerName,
                       label: model.modelName
-                    })
-                  }
+                    });
+                  }}
                 >
                   <Link2 size={11} className="shrink-0 opacity-60 group-hover:opacity-100 group-hover:text-primary transition-opacity" aria-hidden="true" />
                   <span className="truncate">{model.modelName}</span>
@@ -186,19 +217,34 @@ export function RecordsMatrixGrid({
         <tbody>
           {benchmarks.map((benchmark, row) => (
             <tr key={`bench-row-${benchmark.benchmarkId}`}>
-              <th className="sticky left-0 z-10 min-w-[200px] border-b border-r border-base-300 bg-base-100 p-2 text-left font-normal">
+              <th
+                className="sticky left-0 z-10 min-w-[200px] border-b border-r border-base-300 bg-base-100 p-2 text-left font-normal select-none"
+                title="按住 Ctrl/Cmd 点击可选取整行"
+                onClick={(event) => {
+                  if (event.ctrlKey || event.metaKey) {
+                    event.preventDefault();
+                    onSelectRow?.(row);
+                  }
+                }}
+              >
                 <button
                   type="button"
                   className="link link-hover group flex max-w-[220px] items-center gap-1 text-left text-xs font-semibold text-base-content hover:text-primary transition-colors"
                   title={`点击变更「${benchmark.benchmarkName}」这一行的归属`}
-                  onClick={() =>
+                  onClick={(event) => {
+                    if (event.ctrlKey || event.metaKey) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onSelectRow?.(row);
+                      return;
+                    }
                     onOpenReassign({
                       entityType: "benchmark",
                       benchmarkId: benchmark.benchmarkId,
                       benchmarkType: benchmark.benchmarkType,
                       label: benchmark.benchmarkName
-                    })
-                  }
+                    });
+                  }}
                 >
                   <Link2 size={11} className="shrink-0 opacity-60 group-hover:opacity-100 group-hover:text-primary transition-opacity" aria-hidden="true" />
                   <span className="truncate">{benchmark.benchmarkName}</span>
@@ -239,8 +285,15 @@ export function RecordsMatrixGrid({
                     title={buildCellTooltip(cell, draft)}
                     onMouseDown={(event) => {
                       if (isEditing) return;
-                      event.preventDefault();
-                      onCellMouseDown(row, col, { shiftKey: event.shiftKey });
+                      const isCtrl = event.ctrlKey || event.metaKey;
+                      if (!isCtrl) {
+                        event.preventDefault();
+                      }
+                      onCellMouseDown(row, col, {
+                        shiftKey: event.shiftKey,
+                        ctrlKey: event.ctrlKey,
+                        metaKey: event.metaKey
+                      });
                     }}
                     onMouseEnter={() => onCellMouseEnter(row, col)}
                   >

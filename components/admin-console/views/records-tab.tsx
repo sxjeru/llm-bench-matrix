@@ -138,6 +138,9 @@ export function RecordsTab({
     onCellMouseDown,
     onCellMouseEnter,
     commitCellValue,
+    onSelectRow,
+    onSelectCol,
+    onSelectAll,
     clearSelectedCells,
     fillSelectedCells,
     fillValue,
@@ -225,8 +228,7 @@ export function RecordsTab({
           矩阵编辑
         </h3>
         <p className="text-xs opacity-70">
-          单击格子改值；格内有多条记录时会打开详情弹窗。按住拖拽可框选多格，Backspace / Delete 批量清空，Esc 取消选区。
-          所有改动先高亮暂存，点「保存更改」才写库。
+          单击格子改值（按住 Ctrl/Cmd 可选取表格或单元格且不进入编辑模式）；格内有多条记录时会打开详情弹窗。按住拖拽可框选多格，Backspace / Delete 批量清空，Esc 取消选区，支持 Ctrl+C 复制选区数据。所有改动先高亮暂存，点「保存更改」才写库。
         </p>
       </div>
 
@@ -279,6 +281,9 @@ export function RecordsTab({
           onCommitCellValue={commitCellValue}
           onStopEditing={() => setEditingCell(null)}
           onOpenReassign={openReassignDialog}
+          onSelectRow={onSelectRow}
+          onSelectCol={onSelectCol}
+          onSelectAll={onSelectAll}
         />
       </div>
 

@@ -1198,5 +1198,97 @@ describe("AdminConsole records tab", () => {
     expect(benchmarkInput).toBeInTheDocument();
     expect(benchmarkInput).toHaveFocus();
   });
+
+  test("按住 Ctrl 点击单元格可选取该格子，不进入编辑模式", async () => {
+    mockFetchSequence(filledMatrix);
+    const user = userEvent.setup();
+
+    await renderReady(<AdminConsole {...buildProps()} />);
+    await openRecordsTabAndFilter(user);
+
+    const cell = await screen.findByTestId("record-cell-1-11");
+    expect(cell).toHaveAttribute("data-selected", "false");
+
+    fireEvent.mouseDown(cell, { ctrlKey: true });
+    fireEvent.mouseUp(document, { ctrlKey: true });
+
+    expect(screen.queryByLabelText("单元格数值")).toBeNull();
+    expect(cell).toHaveAttribute("data-selected", "true");
+    expect(screen.getByText("填入选区（1 格）")).toBeInTheDocument();
+  });
+
+  test("按住 Ctrl 点击多值单元格可直接选取，不打开多值编辑器弹窗", async () => {
+    mockFetchSequence(multiValueMatrix);
+    const user = userEvent.setup();
+
+    await renderReady(<AdminConsole {...buildProps()} />);
+    await openRecordsTabAndFilter(user);
+
+    const cell = await screen.findByTestId("record-cell-1-11");
+    fireEvent.mouseDown(cell, { ctrlKey: true });
+    fireEvent.mouseUp(document, { ctrlKey: true });
+
+    expect(cell).toHaveAttribute("data-selected", "true");
+    expect(screen.queryByText(/多值编辑/)).toBeNull();
+  });
+
+  test("按住 Ctrl 点击行头/列头可快速选取整行/整列", async () => {
+    mockFetchSequence(filledMatrix);
+    const user = userEvent.setup();
+
+    await renderReady(<AdminConsole {...buildProps()} />);
+    await openRecordsTabAndFilter(user);
+
+    const cell = await screen.findByTestId("record-cell-1-11");
+    expect(cell).toHaveAttribute("data-selected", "false");
+
+    const rowBtn = screen.getByTitle("点击变更「Bench-1」这一行的归属");
+    fireEvent.click(rowBtn, { ctrlKey: true });
+
+    expect(cell).toHaveAttribute("data-selected", "true");
+    expect(screen.queryByText(/变更行归属/)).toBeNull();
+  });
+
+  test("按住 Ctrl 选区后支持 Ctrl+C / copy 复制表格选区数据", async () => {
+    mockFetchSequence(filledMatrix);
+    const user = userEvent.setup();
+
+    await renderReady(<AdminConsole {...buildProps()} />);
+    await openRecordsTabAndFilter(user);
+
+    const cell = await screen.findByTestId("record-cell-1-11");
+    fireEvent.mouseDown(cell, { ctrlKey: true });
+    fireEvent.mouseUp(document, { ctrlKey: true });
+    expect(cell).toHaveAttribute("data-selected", "true");
+
+    const setData = vi.fn();
+    const clipboardData = {
+      setData,
+      getData: vi.fn()
+    };
+    fireEvent.copy(document, { clipboardData });
+
+    expect(setData).toHaveBeenCalledWith("text/plain", "77");
+    expect(setData).toHaveBeenCalledWith("text/html", "<table><tr><td>77</td></tr></table>");
+  });
+
+  test("按住 Ctrl 选取单元格后按 Backspace/Delete 可批量清空", async () => {
+    mockFetchSequence(filledMatrix);
+    const user = userEvent.setup();
+
+    await renderReady(<AdminConsole {...buildProps()} />);
+    await openRecordsTabAndFilter(user);
+
+    const cell = await screen.findByTestId("record-cell-1-11");
+    fireEvent.mouseDown(cell, { ctrlKey: true });
+    fireEvent.mouseUp(document, { ctrlKey: true });
+    expect(cell).toHaveAttribute("data-selected", "true");
+
+    fireEvent.keyDown(document, { key: "Delete" });
+
+    expect(cell).toHaveAttribute("data-dirty", "true");
+    expect(cell).toHaveAttribute("data-pending-delete", "true");
+    expect(screen.getByText("待清空 1 格")).toBeInTheDocument();
+  });
 });
 

@@ -27,6 +27,7 @@ import {
   formatBatchSaveSummary,
   getCellKey,
   getSelectedCellRefs,
+  normalizeSelectionRange,
   setCellDraftValue,
   type SelectedCellRef
 } from "../utils/record-drafts";
@@ -130,6 +131,7 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
   }, [filters]);
 
   const isDraggingRef = useRef(false);
+  const isCtrlDragRef = useRef(false);
   const selectionRef = useRef<MatrixSelectionRange | null>(null);
 
   useEffect(() => {
@@ -343,7 +345,11 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     [cellIndex]
   );
 
-  function onCellMouseDown(row: number, col: number, event?: { shiftKey?: boolean }) {
+  function onCellMouseDown(
+    row: number,
+    col: number,
+    event?: { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }
+  ) {
     if (editingCell) {
       setEditingCell(null);
     }
@@ -354,6 +360,7 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     }
 
     isDraggingRef.current = true;
+    isCtrlDragRef.current = Boolean(event?.ctrlKey || event?.metaKey);
     const next = { startRow: row, startCol: col, endRow: row, endCol: col };
     selectionRef.current = next;
     setSelection(next);
@@ -368,31 +375,88 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     });
   }
 
-  /** 鼠标在同一个格子按下又松开 = 单击，进入编辑；拖出范围则保持框选 */
-  const endDrag = useCallback(() => {
-    if (!isDraggingRef.current) return;
-    isDraggingRef.current = false;
+  /** 鼠标在同一个格子按下又松开 = 单击，进入编辑；拖出范围则保持框选；按住 Ctrl/Cmd 选取时不进入编辑 */
+  const endDrag = useCallback(
+    (event?: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      isDraggingRef.current = false;
 
-    const prev = selectionRef.current;
-    if (!prev || prev.startRow !== prev.endRow || prev.startCol !== prev.endCol) return;
+      const wasCtrl = isCtrlDragRef.current || Boolean(event?.ctrlKey || event?.metaKey);
+      isCtrlDragRef.current = false;
 
-    const model = models[prev.startCol];
-    const benchmark = benchmarks[prev.startRow];
-    const cell = model && benchmark ? cellIndex.get(getCellKey(model.modelId, benchmark.benchmarkId)) : undefined;
-    if (cell && cell.recordCount > 1) {
-      if (confirmDiscardDrafts("打开多值编辑器")) {
-        setDrafts({});
-        setMultiValueCell(cell);
+      if (wasCtrl) {
+        // 按住 Ctrl/Cmd 选取表格：保持选中状态，不进入编辑模式，也不打开多值弹窗
+        return;
       }
-      return;
-    }
-    setEditingCell({ row: prev.startRow, col: prev.startCol });
-  }, [benchmarks, cellIndex, confirmDiscardDrafts, models]);
+
+      const prev = selectionRef.current;
+      if (!prev || prev.startRow !== prev.endRow || prev.startCol !== prev.endCol) return;
+
+      const model = models[prev.startCol];
+      const benchmark = benchmarks[prev.startRow];
+      const cell = model && benchmark ? cellIndex.get(getCellKey(model.modelId, benchmark.benchmarkId)) : undefined;
+      if (cell && cell.recordCount > 1) {
+        if (confirmDiscardDrafts("打开多值编辑器")) {
+          setDrafts({});
+          setMultiValueCell(cell);
+        }
+        return;
+      }
+      setEditingCell({ row: prev.startRow, col: prev.startCol });
+    },
+    [benchmarks, cellIndex, confirmDiscardDrafts, models]
+  );
+
+  const onSelectRow = useCallback(
+    (row: number) => {
+      if (models.length === 0) return;
+      setEditingCell(null);
+      const next: MatrixSelectionRange = {
+        startRow: row,
+        startCol: 0,
+        endRow: row,
+        endCol: models.length - 1
+      };
+      selectionRef.current = next;
+      setSelection(next);
+    },
+    [models.length]
+  );
+
+  const onSelectCol = useCallback(
+    (col: number) => {
+      if (benchmarks.length === 0) return;
+      setEditingCell(null);
+      const next: MatrixSelectionRange = {
+        startRow: 0,
+        startCol: col,
+        endRow: benchmarks.length - 1,
+        endCol: col
+      };
+      selectionRef.current = next;
+      setSelection(next);
+    },
+    [benchmarks.length]
+  );
+
+  const onSelectAll = useCallback(() => {
+    if (models.length === 0 || benchmarks.length === 0) return;
+    setEditingCell(null);
+    const next: MatrixSelectionRange = {
+      startRow: 0,
+      startCol: 0,
+      endRow: benchmarks.length - 1,
+      endCol: models.length - 1
+    };
+    selectionRef.current = next;
+    setSelection(next);
+  }, [benchmarks.length, models.length]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
-    document.addEventListener("mouseup", endDrag);
-    return () => document.removeEventListener("mouseup", endDrag);
+    const handleMouseUp = (event: MouseEvent) => endDrag(event);
+    document.addEventListener("mouseup", handleMouseUp);
+    return () => document.removeEventListener("mouseup", handleMouseUp);
   }, [endDrag]);
 
   const commitCellValue = useCallback(
@@ -434,7 +498,7 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     [selectedCellRefs, cellIndex, canCreateCells, newRecordSource, notifyError]
   );
 
-  /** 有选区且不在编辑态时：Backspace/Delete 批量清空、Esc 取消选区 */
+  /** 有选区且不在编辑态时：Backspace/Delete 批量清空、Esc 取消选区、Ctrl+A 全选、Ctrl+C 复制选区数据 */
   useEffect(() => {
     if (typeof document === "undefined") return;
 
@@ -447,6 +511,19 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
         return;
       }
 
+      if (editingCell) return;
+
+      const activeEl = document.activeElement;
+      const isInputFocused = activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA");
+
+      if ((event.key === "a" || event.key === "A") && (event.ctrlKey || event.metaKey) && !isInputFocused) {
+        if (models.length > 0 && benchmarks.length > 0) {
+          event.preventDefault();
+          onSelectAll();
+          return;
+        }
+      }
+
       if (!selection) return;
 
       if (event.key === "Escape") {
@@ -456,7 +533,7 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
         return;
       }
 
-      if (editingCell) return;
+      if (isInputFocused) return;
 
       if (event.key === "Backspace" || event.key === "Delete") {
         event.preventDefault();
@@ -464,9 +541,72 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
       }
     };
 
+    const handleCopy = (event: ClipboardEvent) => {
+      if (editingCell) return;
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) return;
+
+      const nativeSelection = typeof window !== "undefined" ? window.getSelection()?.toString() : "";
+      if (nativeSelection && nativeSelection.trim().length > 0) {
+        // 浏览器原生已选中文字/表格（例如火狐 Ctrl 框选表格文本），不阻断原生复制
+        return;
+      }
+
+      if (!selection || models.length === 0 || benchmarks.length === 0) return;
+
+      const normalized = normalizeSelectionRange(selection);
+      const rows: string[] = [];
+      const htmlRows: string[] = [];
+
+      for (let r = normalized.rowStart; r <= normalized.rowEnd; r += 1) {
+        const rowValues: string[] = [];
+        const htmlCells: string[] = [];
+        for (let c = normalized.colStart; c <= normalized.colEnd; c += 1) {
+          const model = models[c];
+          const benchmark = benchmarks[r];
+          if (!model || !benchmark) {
+            rowValues.push("");
+            htmlCells.push("<td></td>");
+            continue;
+          }
+          const key = getCellKey(model.modelId, benchmark.benchmarkId);
+          const draft = drafts[key];
+          const val = draft ? (draft.nextValueRaw ?? "") : (cellIndex.get(key)?.valueRaw ?? "");
+          rowValues.push(val);
+          htmlCells.push(`<td>${val.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</td>`);
+        }
+        rows.push(rowValues.join("\t"));
+        htmlRows.push(`<tr>${htmlCells.join("")}</tr>`);
+      }
+
+      const text = rows.join("\n");
+      const html = `<table>${htmlRows.join("")}</table>`;
+
+      if (event.clipboardData) {
+        event.preventDefault();
+        event.clipboardData.setData("text/plain", text);
+        event.clipboardData.setData("text/html", html);
+      }
+    };
+
     document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [selection, editingCell, clearSelectedCells, multiValueCell, saving]);
+    document.addEventListener("copy", handleCopy);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("copy", handleCopy);
+    };
+  }, [
+    selection,
+    editingCell,
+    clearSelectedCells,
+    multiValueCell,
+    saving,
+    models,
+    benchmarks,
+    cellIndex,
+    drafts,
+    onSelectAll
+  ]);
 
   // --- 保存 / 放弃 ---
 
@@ -783,6 +923,9 @@ export function useRecordMatrix({ notifySuccess, notifyError }: UseRecordMatrixO
     onCellMouseDown,
     onCellMouseEnter,
     commitCellValue,
+    onSelectRow,
+    onSelectCol,
+    onSelectAll,
     clearSelection: () => setSelection(null),
     clearSelectedCells,
     fillSelectedCells,
