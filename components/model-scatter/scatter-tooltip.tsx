@@ -60,11 +60,25 @@ export function ScatterTooltip({
       <dl className="scatter-tooltip-rows">
         <div className="scatter-tooltip-row">
           <dt>{yMetric.label}</dt>
-          <dd style={yColor ? { color: yColor } : undefined}>{formatScatterValue(yMetric, point.y)}</dd>
+          <dd style={yColor ? { color: yColor } : undefined}>
+            {formatScatterValue(yMetric, point.y)}
+            {point.yBenchTime ? (
+              <span className="text-[10.5px] text-slate-400 block font-normal opacity-85">
+                {point.yBenchTime.slice(0, 10)}
+              </span>
+            ) : null}
+          </dd>
         </div>
         <div className="scatter-tooltip-row">
           <dt>{xMetric.label}</dt>
-          <dd style={xColor ? { color: xColor } : undefined}>{formatScatterValue(xMetric, point.x)}</dd>
+          <dd style={xColor ? { color: xColor } : undefined}>
+            {formatScatterValue(xMetric, point.x)}
+            {point.xBenchTime ? (
+              <span className="text-[10.5px] text-slate-400 block font-normal opacity-85">
+                {point.xBenchTime.slice(0, 10)}
+              </span>
+            ) : null}
+          </dd>
         </div>
       </dl>
 

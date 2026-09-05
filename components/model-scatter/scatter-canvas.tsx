@@ -34,7 +34,7 @@ import {
 } from "./dataset";
 import { isInWorstQuadrant, ScatterGuideLayer } from "./guide-layer";
 import { getPlacedLabelBox, layoutScatterLabels } from "./label-layout";
-import { formatScatterAxisTick, getMetricAxisLabel } from "./metrics";
+import { formatScatterAxisTick, formatScatterValue, getMetricAxisLabel } from "./metrics";
 import { computeParetoFrontier, orderParetoPath } from "./pareto";
 import { ScatterParetoLayer } from "./pareto-layer";
 import { ScatterTrendLineLayer } from "./trend-line-layer";
@@ -46,17 +46,20 @@ import {
 } from "./projection";
 import { ScatterTooltip } from "./scatter-tooltip";
 import { buildAxisTicks } from "./ticks";
+import { ScatterSnapshotOverlayLayer } from "./snapshot-overlay-layer";
 import type {
   ScatterAxisScale,
   ScatterLabelCandidate,
   ScatterLabelMode,
   ScatterMetric,
   ScatterOverlayMode,
+  ScatterOverlaySnapshotPoint,
   ScatterParetoLineStyle,
   ScatterPlacedLabel,
   ScatterPlotDataset,
   ScatterPoint,
-  ScatterHistoricalPoint
+  ScatterHistoricalPoint,
+  ScatterSnapshotOverlayDataset
 } from "./types";
 
 export type ScatterCanvasProps = {
@@ -65,6 +68,7 @@ export type ScatterCanvasProps = {
   xMetric: ScatterMetric;
   yMetric: ScatterMetric;
   dataset: ScatterPlotDataset;
+  snapshotOverlay?: ScatterSnapshotOverlayDataset | null;
   xScale: ScatterAxisScale;
   yScale: ScatterAxisScale;
   showPareto: boolean;
@@ -174,6 +178,7 @@ export function ScatterCanvas({
   xMetric,
   yMetric,
   dataset,
+  snapshotOverlay = null,
   xScale,
   yScale,
   showPareto,
@@ -205,6 +210,10 @@ export function ScatterCanvas({
   const [arrowStartModelName, setArrowStartModelName] = useState<string | null>(null);
   const [arrowAnnotations, setArrowAnnotations] = useState<ScatterArrowAnnotation[]>([]);
   const [hoveredHistoryModel, setHoveredHistoryModel] = useState<string | null>(null);
+  const [hoveredOverlayPoint, setHoveredOverlayPoint] = useState<{
+    point: ScatterOverlaySnapshotPoint;
+    coords: { x: number; y: number };
+  } | null>(null);
 
   const activeHiddenModelNames = useMemo(() => {
     const datasetModelNames = new Set(dataset.points.map((point) => point.modelName));
@@ -249,13 +258,26 @@ export function ScatterCanvas({
   );
   // 历史点只扩轴域，避免被裁切；中位线/参考线仍只看当前散点
   const domainXValues = useMemo(() => {
-    if (historicalPoints.length === 0) return xValues;
-    return [...xValues, ...historicalPoints.map((point) => point.x)];
-  }, [xValues, historicalPoints]);
+    let vals = xValues;
+    if (historicalPoints.length > 0) {
+      vals = [...vals, ...historicalPoints.map((point) => point.x)];
+    }
+    if (snapshotOverlay && snapshotOverlay.points.length > 0) {
+      vals = [...vals, ...snapshotOverlay.points.map((point) => point.x)];
+    }
+    return vals;
+  }, [xValues, historicalPoints, snapshotOverlay]);
+
   const domainYValues = useMemo(() => {
-    if (historicalPoints.length === 0) return yValues;
-    return [...yValues, ...historicalPoints.map((point) => point.y)];
-  }, [yValues, historicalPoints]);
+    let vals = yValues;
+    if (historicalPoints.length > 0) {
+      vals = [...vals, ...historicalPoints.map((point) => point.y)];
+    }
+    if (snapshotOverlay && snapshotOverlay.points.length > 0) {
+      vals = [...vals, ...snapshotOverlay.points.map((point) => point.y)];
+    }
+    return vals;
+  }, [yValues, historicalPoints, snapshotOverlay]);
 
   const baseXDomain = useMemo(() => computeAxisDomain(domainXValues, xScale), [domainXValues, xScale]);
   const baseYDomain = useMemo(() => computeAxisDomain(domainYValues, yScale), [domainYValues, yScale]);
@@ -917,6 +939,20 @@ export function ScatterCanvas({
           />
         ) : null}
 
+        {snapshotOverlay ? (
+          <ScatterSnapshotOverlayLayer
+            overlay={snapshotOverlay}
+            hoveredModelName={hoveredOverlayPoint?.point.modelName}
+            onHoverPoint={(point, coords) => {
+              if (point && coords) {
+                setHoveredOverlayPoint({ point, coords });
+              } else {
+                setHoveredOverlayPoint(null);
+              }
+            }}
+          />
+        ) : null}
+
         <Scatter data={orderedPoints} shape={renderDot} isAnimationActive={false} onClick={handleSelect} />
 
         {overlayMode === "pareto" && showPareto ? (
@@ -980,6 +1016,56 @@ export function ScatterCanvas({
           placement={hoveredHistoryTooltip.placement}
         />
       ) : null}
+      {hoveredOverlayPoint ? (() => {
+        const tooltipWidth = 218;
+        const tooltipHeight = 148;
+        const preferredLeft = hoveredOverlayPoint.coords.x - tooltipWidth / 2;
+        const left = Math.min(width - tooltipWidth - 8, Math.max(8, preferredLeft));
+        const fitsAbove = hoveredOverlayPoint.coords.y - tooltipHeight - 12 >= 8;
+        const top = fitsAbove
+          ? hoveredOverlayPoint.coords.y - tooltipHeight - 12
+          : hoveredOverlayPoint.coords.y + 16;
+        const placement = fitsAbove ? "top" : "bottom";
+
+        return (
+          <div
+            className="scatter-history-tooltip-anchor"
+            style={{ left, top }}
+            data-placement={placement}
+          >
+            <div className="scatter-tooltip scatter-history-tooltip" role="status">
+              <div className="scatter-tooltip-head">
+                <span
+                  className="scatter-tooltip-swatch"
+                  style={{ backgroundColor: hoveredOverlayPoint.point.color }}
+                  aria-hidden="true"
+                />
+                <span className="scatter-tooltip-model">{hoveredOverlayPoint.point.modelName}</span>
+              </div>
+              <div className="scatter-tooltip-provider">{hoveredOverlayPoint.point.providerName}</div>
+              <div
+                className="scatter-tooltip-badge"
+                style={{ background: "rgba(245, 158, 11, 0.2)", color: "#fbbf24" }}
+              >
+                {snapshotOverlay?.snapshotLabel ?? "历史快照"} 对比背景
+              </div>
+              <dl className="scatter-tooltip-rows">
+                <div className="scatter-tooltip-row">
+                  <dt>{yMetric.label}</dt>
+                  <dd>{formatScatterValue(yMetric, hoveredOverlayPoint.point.y)}</dd>
+                </div>
+                <div className="scatter-tooltip-row">
+                  <dt>{xMetric.label}</dt>
+                  <dd>{formatScatterValue(xMetric, hoveredOverlayPoint.point.x)}</dd>
+                </div>
+              </dl>
+              <div className="scatter-history-tooltip-date">
+                {hoveredOverlayPoint.point.isPareto ? "★ 当期处于帕累托前沿" : "当期非前沿"}
+              </div>
+            </div>
+          </div>
+        );
+      })() : null}
     </div>
   );
 }

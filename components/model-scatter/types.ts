@@ -33,6 +33,26 @@ export type ScatterMetric = {
   valueByModel: Map<string, number>;
   /** 仅 benchmark 行有历史；价格/参数量/总评为空 Map */
   historyByModel: Map<string, readonly ScatterHistorySample[]>;
+  /** 该指标检测到的历史快照切片（按时间倒序，含最新） */
+  snapshots: readonly ScatterMetricSnapshot[];
+  /** 是否来自 Artificial Analysis 源 */
+  isArtificialAnalysis?: boolean;
+};
+
+/** 指标的历史时间快照（公共时间片段） */
+export type ScatterMetricSnapshot = {
+  /** 唯一标识符，通常为代表时间的 ISO 串或日期 */
+  id: string;
+  /** 代表时间戳（毫秒） */
+  timestamp: number;
+  /** 友好的展示标签，如 "2026-08-01" */
+  label: string;
+  /** 该快照下覆盖的有效模型数量 */
+  modelCount: number;
+  /** 是否为最新快照 */
+  isLatest: boolean;
+  /** 是否为多模型批量导入批次 */
+  isBatchSnapshot: boolean;
 };
 
 /** 某模型在某指标下的一条真实记录，供历史点按时间对齐。 */
@@ -82,6 +102,28 @@ export type ScatterPoint = {
   x: number;
   y: number;
   isPareto: boolean;
+  xBenchTime?: string | null;
+  yBenchTime?: string | null;
+};
+
+/** 半透明历史快照背景中的点（渲染为叉号） */
+export type ScatterOverlaySnapshotPoint = {
+  modelName: string;
+  providerName: string;
+  color: string;
+  x: number;
+  y: number;
+  xBenchTime: string | null;
+  yBenchTime: string | null;
+  isPareto: boolean;
+};
+
+/** 历史快照背景叠加数据集 */
+export type ScatterSnapshotOverlayDataset = {
+  snapshotId: string;
+  snapshotLabel: string;
+  points: ScatterOverlaySnapshotPoint[];
+  paretoPath: ScatterOverlaySnapshotPoint[];
 };
 
 export type ScatterPlotDataset = {

@@ -21,6 +21,8 @@ import {
   SUMMARY_CATEGORY_LABEL,
   SYNTHETIC_METRIC_SLUGS
 } from "./constants";
+import { isArtificialAnalysisSource } from "@/lib/source-utils";
+import { extractMetricSnapshots } from "./snapshots";
 import type { MatrixCell, MatrixCellEntry } from "@/components/benchmark-matrix/types";
 import type {
   ScatterHistorySample,
@@ -165,9 +167,22 @@ function resolveScatterMetricCategory(row: Pick<MatrixRow, "benchmark" | "catego
   return row.category;
 }
 
+function checkIsArtificialAnalysis(row: MatrixRow): boolean {
+  for (const cell of row.cells.values()) {
+    if (isArtificialAnalysisSource(cell.source)) return true;
+    for (const entry of cell.allEntries) {
+      if (isArtificialAnalysisSource(entry.source)) return true;
+    }
+  }
+  return false;
+}
+
 export function toScatterMetric(row: MatrixRow): ScatterMetric {
   const unit = resolveMetricUnit(row);
   const category = resolveScatterMetricCategory(row);
+  const historyByModel = buildHistoryByModel(row);
+  const snapshots = extractMetricSnapshots(historyByModel);
+  const isArtificialAnalysis = checkIsArtificialAnalysis(row);
 
   return {
     key: toMetricSlug(row.rowKey),
@@ -181,7 +196,9 @@ export function toScatterMetric(row: MatrixRow): ScatterMetric {
     preferLogScale:
       unit === "usd" || unit === "billions" || LOG_SCALE_CATEGORIES.has(row.category),
     valueByModel: buildValueByModel(row),
-    historyByModel: buildHistoryByModel(row)
+    historyByModel,
+    snapshots,
+    isArtificialAnalysis
   };
 }
 
@@ -249,7 +266,9 @@ export function buildScatterMetrics(input: BuildScatterMetricsInput): ScatterMet
         unit: "score",
         preferLogScale: false,
         valueByModel,
-        historyByModel: new Map()
+        historyByModel: new Map(),
+        snapshots: [],
+        isArtificialAnalysis: false
       });
     }
   }
