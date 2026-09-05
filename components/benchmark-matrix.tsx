@@ -321,6 +321,56 @@ export function BenchmarkMatrix({
   const [isExportCaptureMode, setIsExportCaptureMode] = useState(false);
   const [copyNotice, setCopyNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [copyNoticeVisible, setCopyNoticeVisible] = useState(false);
+  const [copyNoticeDismissing, setCopyNoticeDismissing] = useState(false);
+  const copyNoticeHideTimerRef = useRef<number | null>(null);
+  const copyNoticeClearTimerRef = useRef<number | null>(null);
+
+  const clearCopyNoticeTimers = useCallback(() => {
+    if (copyNoticeHideTimerRef.current !== null) {
+      window.clearTimeout(copyNoticeHideTimerRef.current);
+      copyNoticeHideTimerRef.current = null;
+    }
+    if (copyNoticeClearTimerRef.current !== null) {
+      window.clearTimeout(copyNoticeClearTimerRef.current);
+      copyNoticeClearTimerRef.current = null;
+    }
+  }, []);
+
+  const dismissCopyNotice = useCallback(() => {
+    clearCopyNoticeTimers();
+    setCopyNoticeVisible(false);
+    setCopyNoticeDismissing(true);
+    copyNoticeClearTimerRef.current = window.setTimeout(() => {
+      setCopyNotice(null);
+      setCopyNoticeDismissing(false);
+      copyNoticeClearTimerRef.current = null;
+    }, 300);
+  }, [clearCopyNoticeTimers]);
+
+  const scheduleCopyNoticeDismiss = useCallback(() => {
+    clearCopyNoticeTimers();
+    copyNoticeHideTimerRef.current = window.setTimeout(() => {
+      setCopyNoticeVisible(false);
+      setCopyNoticeDismissing(true);
+      copyNoticeClearTimerRef.current = window.setTimeout(() => {
+        setCopyNotice(null);
+        setCopyNoticeDismissing(false);
+        copyNoticeClearTimerRef.current = null;
+      }, 300);
+    }, 15000);
+  }, [clearCopyNoticeTimers]);
+
+  const pauseCopyNotice = useCallback(() => {
+    if (copyNoticeDismissing) return;
+    clearCopyNoticeTimers();
+    setCopyNoticeVisible(true);
+    setCopyNoticeDismissing(false);
+  }, [clearCopyNoticeTimers, copyNoticeDismissing]);
+
+  const resumeCopyNotice = useCallback(() => {
+    if (!copyNotice || copyNoticeDismissing) return;
+    scheduleCopyNoticeDismiss();
+  }, [copyNotice, copyNoticeDismissing, scheduleCopyNoticeDismiss]);
   const [sourceNewReferenceTime, setSourceNewReferenceTime] = useState<number | null>(null);
   const cellTooltipHandleRef = useRef<CellTooltipHandle | null>(null);
   const overallTooltipHandleRef = useRef<OverallTooltipHandle | null>(null);
@@ -524,21 +574,17 @@ export function BenchmarkMatrix({
   useEffect(() => {
     if (!copyNotice) return;
 
-    enqueueStateUpdate(() => setCopyNoticeVisible(true));
+    enqueueStateUpdate(() => {
+      setCopyNoticeVisible(true);
+      setCopyNoticeDismissing(false);
+    });
 
-    const hideTimer = window.setTimeout(() => {
-      setCopyNoticeVisible(false);
-    }, 15000);
-
-    const clearTimer = window.setTimeout(() => {
-      setCopyNotice(null);
-    }, 15500);
+    scheduleCopyNoticeDismiss();
 
     return () => {
-      window.clearTimeout(hideTimer);
-      window.clearTimeout(clearTimer);
+      clearCopyNoticeTimers();
     };
-  }, [copyNotice]);
+  }, [copyNotice, clearCopyNoticeTimers, scheduleCopyNoticeDismiss]);
 
   useEffect(() => {
     if (!isExportMenuOpen) return;
@@ -1691,8 +1737,29 @@ export function BenchmarkMatrix({
       {copyNotice ? (
         <div className="pointer-events-none fixed right-6 top-20 z-[140]">
           <div
-            className={`pointer-events-auto flex min-w-[260px] max-w-[520px] items-center gap-3 rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-md transition-all duration-300 ease-out ${
-              copyNoticeVisible ? "translate-y-0 opacity-100" : "-translate-y-2 opacity-0"
+            role="alert"
+            onClick={(e) => {
+              const selection = typeof window !== "undefined" ? window.getSelection() : null;
+              const selectedText = selection?.toString()?.trim();
+              if (selectedText && selectedText.length > 0) {
+                const isOutside = Boolean(
+                  selection?.anchorNode && !e.currentTarget.contains(selection.anchorNode)
+                );
+                if (!isOutside) {
+                  return;
+                }
+              }
+              dismissCopyNotice();
+            }}
+            onMouseEnter={pauseCopyNotice}
+            onMouseLeave={resumeCopyNotice}
+            title="点击关闭"
+            className={`group pointer-events-auto flex min-w-[260px] max-w-[520px] cursor-pointer items-center gap-3 rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-md transition-all duration-300 ease-out hover:scale-[1.01] hover:brightness-105 active:scale-[0.98] ${
+              copyNoticeDismissing
+                ? "translate-x-12 opacity-0 scale-90 pointer-events-none"
+                : copyNoticeVisible
+                  ? "translate-x-0 translate-y-0 opacity-100 scale-100"
+                  : "translate-x-0 -translate-y-2 opacity-0 scale-95"
             } ${
               copyNotice.type === "success"
                 ? "border-emerald-500/45 bg-emerald-900/80 text-emerald-100"

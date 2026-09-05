@@ -529,6 +529,7 @@ export type NoticeState = {
 export type NoticeItem = NoticeState & {
   id: number;
   visible: boolean;
+  dismissing?: boolean;
 };
 
 export type MergeSubmitState = "idle" | "submitting" | "success";

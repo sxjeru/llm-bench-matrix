@@ -1,99 +1,210 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { NoticeItem, NoticeState } from "../types";
 
 export function useAdminNotices() {
   const [noticeList, setNoticeList] = useState<NoticeItem[]>([]);
   const noticeTimersRef = useRef<
-    Map<number, { hideTimer: ReturnType<typeof setTimeout>; clearTimer: ReturnType<typeof setTimeout> }>
+    Map<
+      number,
+      {
+        type: NoticeState["type"];
+        dismissing?: boolean;
+        hideTimer?: ReturnType<typeof setTimeout>;
+        clearTimer?: ReturnType<typeof setTimeout>;
+      }
+    >
   >(new Map());
   const nextNoticeIdRef = useRef(1);
+
+  const clearNoticeTimers = useCallback((noticeId: number, deleteRecord = true) => {
+    const record = noticeTimersRef.current.get(noticeId);
+    if (!record) return;
+
+    if (record.hideTimer) clearTimeout(record.hideTimer);
+    if (record.clearTimer) clearTimeout(record.clearTimer);
+
+    if (deleteRecord) {
+      noticeTimersRef.current.delete(noticeId);
+    } else {
+      record.hideTimer = undefined;
+      record.clearTimer = undefined;
+    }
+  }, []);
 
   useEffect(() => {
     const noticeTimers = noticeTimersRef.current;
 
     return () => {
-      noticeTimers.forEach(({ hideTimer, clearTimer }) => {
-        clearTimeout(hideTimer);
-        clearTimeout(clearTimer);
+      noticeTimers.forEach((record) => {
+        if (record.hideTimer) clearTimeout(record.hideTimer);
+        if (record.clearTimer) clearTimeout(record.clearTimer);
       });
       noticeTimers.clear();
     };
   }, []);
 
-  function clearNoticeTimers(noticeId: number) {
-    const timers = noticeTimersRef.current.get(noticeId);
-    if (!timers) return;
+  const scheduleNoticeDismiss = useCallback(
+    (noticeId: number, type: NoticeState["type"]) => {
+      clearNoticeTimers(noticeId, false);
 
-    clearTimeout(timers.hideTimer);
-    clearTimeout(timers.clearTimer);
-    noticeTimersRef.current.delete(noticeId);
-  }
+      const hideDelay = type === "error" ? 30000 : 15000;
 
-  function enqueueNotice(type: NoticeState["type"], message: string, details?: string[]) {
-    const noticeId = nextNoticeIdRef.current;
-    nextNoticeIdRef.current += 1;
+      const hideTimer = setTimeout(() => {
+        setNoticeList((prev) =>
+          prev.map((item) =>
+            item.id === noticeId
+              ? {
+                  ...item,
+                  visible: false,
+                  dismissing: true
+                }
+              : item
+          )
+        );
 
-    const normalizedDetails = details && details.length > 0 ? details : undefined;
+        const currentRecord = noticeTimersRef.current.get(noticeId);
+        if (currentRecord) {
+          currentRecord.dismissing = true;
+          currentRecord.clearTimer = setTimeout(() => {
+            setNoticeList((prev) => prev.filter((item) => item.id !== noticeId));
+            noticeTimersRef.current.delete(noticeId);
+          }, 300);
+        }
+      }, hideDelay);
 
-    setNoticeList((prev) => [
-      ...prev,
-      {
-        id: noticeId,
-        type,
-        message,
-        details: normalizedDetails,
-        visible: false
+      const existing = noticeTimersRef.current.get(noticeId);
+      if (existing) {
+        existing.dismissing = false;
+        existing.hideTimer = hideTimer;
+      } else {
+        noticeTimersRef.current.set(noticeId, { type, dismissing: false, hideTimer });
       }
-    ]);
+    },
+    [clearNoticeTimers]
+  );
 
-    window.requestAnimationFrame(() => {
-      setNoticeList((prev) =>
-        prev.map((item) =>
+  const dismissNotice = useCallback(
+    (noticeId: number) => {
+      const record = noticeTimersRef.current.get(noticeId);
+      if (!record || record.dismissing) return;
+
+      record.dismissing = true;
+      clearNoticeTimers(noticeId, false);
+
+      setNoticeList((prev) => {
+        const target = prev.find((item) => item.id === noticeId);
+        if (!target || target.dismissing) return prev;
+        return prev.map((item) =>
           item.id === noticeId
             ? {
                 ...item,
-                visible: true
+                visible: false,
+                dismissing: true
               }
             : item
-        )
-      );
-    });
+        );
+      });
 
-    const hideDelay = type === "error" ? 30000 : 15000;
-    const clearDelay = hideDelay + 500;
+      const clearTimer = setTimeout(() => {
+        setNoticeList((prev) => prev.filter((item) => item.id !== noticeId));
+        noticeTimersRef.current.delete(noticeId);
+      }, 300);
 
-    const hideTimer = setTimeout(() => {
-      setNoticeList((prev) =>
-        prev.map((item) =>
+      record.clearTimer = clearTimer;
+    },
+    [clearNoticeTimers]
+  );
+
+  const pauseNotice = useCallback(
+    (noticeId: number) => {
+      const record = noticeTimersRef.current.get(noticeId);
+      if (!record || record.dismissing) return;
+
+      clearNoticeTimers(noticeId, false);
+      setNoticeList((prev) => {
+        const target = prev.find((item) => item.id === noticeId);
+        if (!target || target.dismissing || target.visible) return prev;
+        return prev.map((item) =>
           item.id === noticeId
             ? {
                 ...item,
-                visible: false
+                visible: true,
+                dismissing: false
               }
             : item
-        )
-      );
-    }, hideDelay);
+        );
+      });
+    },
+    [clearNoticeTimers]
+  );
 
-    const clearTimer = setTimeout(() => {
-      setNoticeList((prev) => prev.filter((item) => item.id !== noticeId));
-      clearNoticeTimers(noticeId);
-    }, clearDelay);
+  const resumeNotice = useCallback(
+    (noticeId: number) => {
+      const record = noticeTimersRef.current.get(noticeId);
+      if (!record || record.dismissing) return;
+      scheduleNoticeDismiss(noticeId, record.type);
+    },
+    [scheduleNoticeDismiss]
+  );
 
-    noticeTimersRef.current.set(noticeId, { hideTimer, clearTimer });
-  }
+  const enqueueNotice = useCallback(
+    (type: NoticeState["type"], message: string, details?: string[]) => {
+      const noticeId = nextNoticeIdRef.current;
+      nextNoticeIdRef.current += 1;
 
-  function notifySuccess(message: string, details?: string[]) {
-    enqueueNotice("success", message, details);
-  }
+      const normalizedDetails = details && details.length > 0 ? details : undefined;
 
-  function notifyError(message: string, details?: string[]) {
-    enqueueNotice("error", message, details);
-  }
+      setNoticeList((prev) => [
+        ...prev,
+        {
+          id: noticeId,
+          type,
+          message,
+          details: normalizedDetails,
+          visible: false,
+          dismissing: false
+        }
+      ]);
+
+      window.requestAnimationFrame(() => {
+        setNoticeList((prev) =>
+          prev.map((item) =>
+            item.id === noticeId
+              ? {
+                  ...item,
+                  visible: true,
+                  dismissing: false
+                }
+              : item
+          )
+        );
+      });
+
+      scheduleNoticeDismiss(noticeId, type);
+    },
+    [scheduleNoticeDismiss]
+  );
+
+  const notifySuccess = useCallback(
+    (message: string, details?: string[]) => {
+      enqueueNotice("success", message, details);
+    },
+    [enqueueNotice]
+  );
+
+  const notifyError = useCallback(
+    (message: string, details?: string[]) => {
+      enqueueNotice("error", message, details);
+    },
+    [enqueueNotice]
+  );
 
   return {
     noticeList,
     notifySuccess,
-    notifyError
+    notifyError,
+    dismissNotice,
+    pauseNotice,
+    resumeNotice
   };
 }

@@ -153,7 +153,7 @@ export function AdminConsole({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<TabKey>(initialTab || "import");
-  const { noticeList, notifySuccess, notifyError } = useAdminNotices();
+  const { noticeList, notifySuccess, notifyError, dismissNotice, pauseNotice, resumeNotice } = useAdminNotices();
   const {
     providerConfigDrafts,
     savingProviderConfigId,
@@ -3102,7 +3102,12 @@ export function AdminConsole({
 
   return (
     <>
-      <AdminConsoleNotices noticeList={noticeList} />
+      <AdminConsoleNotices
+        noticeList={noticeList}
+        onDismiss={dismissNotice}
+        onPause={pauseNotice}
+        onResume={resumeNotice}
+      />
 
       <SheetPickerDialog
         open={sheetPickerOpen}
