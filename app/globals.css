@@ -537,7 +537,7 @@ select optgroup {
 input:not(.input):not(.file-input):not(.checkbox):not(.toggle):not(.radio),
 select:not(.select),
 textarea:not(.textarea),
-button:not(.btn):not(.tab):not(.ranking-popover-button):not(.scatter-btn):not(.admin-upstream-combobox-clear):not(.link):not(.input) {
+button:not(.btn):not(.tab):not(.ranking-popover-button):not(.cell-trend-button):not(.scatter-btn):not(.admin-upstream-combobox-clear):not(.link):not(.input) {
   width: 100%;
   border-radius: 10px;
   border: 1px solid #354261;
@@ -552,14 +552,15 @@ textarea:not(.textarea) {
   resize: vertical;
 }
 
-button:not(.btn):not(.tab):not(.ranking-popover-button):not(.scatter-btn):not(.admin-upstream-combobox-clear):not(.link):not(.input) {
+button:not(.btn):not(.tab):not(.ranking-popover-button):not(.cell-trend-button):not(.scatter-btn):not(.admin-upstream-combobox-clear):not(.link):not(.input) {
   cursor: pointer;
   background: linear-gradient(135deg, #355dff, #4a9aff);
   border-color: transparent;
   font-weight: 600;
 }
 
-.ranking-popover-button {
+.ranking-popover-button,
+.cell-trend-button {
   cursor: pointer;
 }
 
@@ -1354,11 +1355,13 @@ input.heatmap-alpha-range::-moz-range-track {
    并获得焦点，而焦点框是套在这个 <g> 的包围盒上的 —— 那个盒子罩着全部散点，
    看起来就是「整张图被框住」。所以图表区域内的焦点一律压掉默认框，
    再单独给根 svg 的键盘焦点补一个明确指示，可访问性不丢。 */
-.scatter-chart-surface :focus {
+.scatter-chart-surface :focus,
+.cell-trend-chart-surface :focus {
   outline: none;
 }
 
-.scatter-chart-surface .recharts-surface:focus-visible {
+.scatter-chart-surface .recharts-surface:focus-visible,
+.cell-trend-chart-surface .recharts-surface:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--primary) 65%, transparent);
   outline-offset: -2px;
 }

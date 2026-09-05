@@ -17,6 +17,13 @@ import {
   TriangleAlert
 } from "lucide-react";
 import { BenchmarkRankingPanel } from "./benchmark-matrix/benchmark-ranking-panel";
+import { CellTrendPanel } from "./benchmark-matrix/cell-trend-panel";
+import {
+  buildCellTrendData,
+  getCellTrendPopoverPosition,
+  isCellTrendEligible,
+  type CellTrendPopoverPosition
+} from "./benchmark-matrix/cell-trend";
 import {
   useMatrixColumnResize,
   useMatrixColumnWidths,
@@ -223,6 +230,7 @@ export function BenchmarkMatrix({
   const sourceTabsMenuRef = useRef<HTMLDivElement | null>(null);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const rankingPopoverRef = useRef<HTMLDivElement | null>(null);
+  const trendPopoverRef = useRef<HTMLDivElement | null>(null);
   const cellTooltipHideTimerRef = useRef<number | null>(null);
   const showCategoryLoadedRef = useRef(false);
   const showDuplicateLoadedRef = useRef(false);
@@ -313,6 +321,11 @@ export function BenchmarkMatrix({
     width: number;
     placement: "above" | "below";
   } | null>(null);
+  const [expandedTrendCellKey, setExpandedTrendCellKey] = useState<{
+    rowKey: string;
+    modelName: string;
+  } | null>(null);
+  const [trendPopoverPosition, setTrendPopoverPosition] = useState<CellTrendPopoverPosition | null>(null);
   const [temporarilyHiddenRowKeys, setTemporarilyHiddenRowKeys] = useState<string[]>([]);
   const [rowPresenceFilterModel, setRowPresenceFilterModel] = useState<string | null>(null);
   const [compareModelOrder, setCompareModelOrder] = useState<string[]>([]);
@@ -1315,6 +1328,66 @@ export function BenchmarkMatrix({
     setRankingPopoverPosition((prev) => prev ? { ...prev, top: nextTop } : prev);
   }, [activeRankingData, rankingPopoverPosition]);
 
+  const activeTrendData = useMemo(() => {
+    if (!expandedTrendCellKey) return null;
+    if (!modelColumns.includes(expandedTrendCellKey.modelName)) return null;
+    const row = displayMatrixRows.find((r) => r.rowKey === expandedTrendCellKey.rowKey);
+    if (!row) return null;
+    const cell = row.cells.get(expandedTrendCellKey.modelName);
+    if (!cell) return null;
+    return buildCellTrendData(row, expandedTrendCellKey.modelName, cell, activeSource);
+  }, [activeSource, displayMatrixRows, expandedTrendCellKey, modelColumns]);
+
+  useEffect(() => {
+    if (!expandedTrendCellKey) return;
+    if (activeTrendData) return;
+    enqueueStateUpdate(() => {
+      setExpandedTrendCellKey(null);
+      setTrendPopoverPosition(null);
+    });
+  }, [activeTrendData, expandedTrendCellKey]);
+
+  useEffect(() => {
+    if (!expandedTrendCellKey) return;
+    if (modelColumns.includes(expandedTrendCellKey.modelName)) return;
+    enqueueStateUpdate(() => {
+      setExpandedTrendCellKey(null);
+      setTrendPopoverPosition(null);
+    });
+  }, [expandedTrendCellKey, modelColumns]);
+
+  const previousTrendActiveSourceRef = useRef(activeSource);
+  useEffect(() => {
+    if (previousTrendActiveSourceRef.current !== activeSource) {
+      previousTrendActiveSourceRef.current = activeSource;
+      if (expandedTrendCellKey) {
+        enqueueStateUpdate(() => {
+          setExpandedTrendCellKey(null);
+          setTrendPopoverPosition(null);
+        });
+      }
+    }
+  }, [activeSource, expandedTrendCellKey]);
+
+  useLayoutEffect(() => {
+    if (!activeTrendData || !trendPopoverPosition || !trendPopoverRef.current) return;
+
+    const rect = trendPopoverRef.current.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) return;
+
+    let nextTop = trendPopoverPosition.top;
+
+    if (rect.top < RANKING_POPOVER_MARGIN) {
+      nextTop += RANKING_POPOVER_MARGIN - rect.top;
+    } else if (rect.bottom > window.innerHeight - RANKING_POPOVER_MARGIN) {
+      nextTop -= rect.bottom - (window.innerHeight - RANKING_POPOVER_MARGIN);
+    }
+
+    if (Math.abs(nextTop - trendPopoverPosition.top) < 1) return;
+
+    setTrendPopoverPosition((prev) => (prev ? { ...prev, top: nextTop } : prev));
+  }, [activeTrendData, trendPopoverPosition]);
+
   const compareModelSet = useMemo(() => new Set(compareModelOrder), [compareModelOrder]);
   const compareBaselineModelName = compareModelOrder[0] ?? null;
   const isCompareActive = compareModelOrder.length >= 2;
@@ -1586,6 +1659,8 @@ export function BenchmarkMatrix({
     setColumnSortBenchmarkKey((prev) => (prev === rowKey ? null : prev));
     setExpandedRankingRowKey((prev) => (prev === rowKey ? null : prev));
     setRankingPopoverPosition(null);
+    setExpandedTrendCellKey((prev) => (prev?.rowKey === rowKey ? null : prev));
+    setTrendPopoverPosition(null);
     hideCellTooltip(true);
     hideOverallTooltip();
     window.getSelection()?.removeAllRanges();
@@ -2321,6 +2396,8 @@ export function BenchmarkMatrix({
                         setRankingPopoverPosition(shouldClose ? null : nextPosition);
                         return shouldClose ? null : rowKey;
                       });
+                      setExpandedTrendCellKey(null);
+                      setTrendPopoverPosition(null);
                       hideCellTooltip(true);
                       hideOverallTooltip();
                       return;
@@ -2328,6 +2405,8 @@ export function BenchmarkMatrix({
 
                     setSelectedRowKey((prev) => (prev === rowKey ? null : rowKey));
                     setColumnSortBenchmarkKey((prev) => (prev === rowKey ? null : rowKey));
+                    setExpandedTrendCellKey(null);
+                    setTrendPopoverPosition(null);
                   }}
                   style={{ cursor: "pointer", ...rowFrameStyle }}
                 >
@@ -2592,6 +2671,7 @@ export function BenchmarkMatrix({
                       includeBottom: isLastMatrixRow,
                       exportMode: isExportCaptureMode
                     });
+                    const isTrendEligible = showQuestionMarkIcon && isCellTrendEligible(cell, activeSource);
                     const mergedCellBoxShadow = [
                       rowCellBoxShadow,
                       ...sourceFrameShadows,
@@ -2685,7 +2765,43 @@ export function BenchmarkMatrix({
                         ) : null}
                         {showQuestionMarkIcon ? (
                           <span
+                            data-cell-trend-trigger={isTrendEligible ? "1" : undefined}
+                            role={isTrendEligible ? "button" : undefined}
+                            tabIndex={isTrendEligible ? 0 : undefined}
                             className="absolute right-1 top-1/2 inline-flex h-4 w-4 -translate-y-1/2 cursor-help items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
+                            title={isTrendEligible ? "历史趋势折线图" : undefined}
+                            onClick={isTrendEligible ? (event) => {
+                              event.stopPropagation();
+                              event.preventDefault();
+                              const rect = event.currentTarget.getBoundingClientRect();
+                              const nextPosition = getCellTrendPopoverPosition(rect);
+                              setExpandedTrendCellKey((prev) => {
+                                const isSame = prev?.rowKey === rowKey && prev?.modelName === model.modelName;
+                                setTrendPopoverPosition(isSame ? null : nextPosition);
+                                return isSame ? null : { rowKey, modelName: model.modelName };
+                              });
+                              setExpandedRankingRowKey(null);
+                              setRankingPopoverPosition(null);
+                              hideCellTooltip(true);
+                              hideOverallTooltip();
+                            } : undefined}
+                            onKeyDown={isTrendEligible ? (event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.stopPropagation();
+                                event.preventDefault();
+                                const rect = event.currentTarget.getBoundingClientRect();
+                                const nextPosition = getCellTrendPopoverPosition(rect);
+                                setExpandedTrendCellKey((prev) => {
+                                  const isSame = prev?.rowKey === rowKey && prev?.modelName === model.modelName;
+                                  setTrendPopoverPosition(isSame ? null : nextPosition);
+                                  return isSame ? null : { rowKey, modelName: model.modelName };
+                                });
+                                setExpandedRankingRowKey(null);
+                                setRankingPopoverPosition(null);
+                                hideCellTooltip(true);
+                                hideOverallTooltip();
+                              }
+                            } : undefined}
                             onMouseEnter={(event) => {
                               const rect = event.currentTarget.getBoundingClientRect();
                               showCellTooltip({
@@ -2946,6 +3062,36 @@ export function BenchmarkMatrix({
                   note: item.noteText && item.noteText.length > 0 ? item.noteText : null,
                   targetHeight: rect.height
                 });
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {activeTrendData && trendPopoverPosition ? (
+        <div
+          className="fixed inset-0 z-[130] bg-transparent"
+          onMouseDown={() => {
+            setExpandedTrendCellKey(null);
+            setTrendPopoverPosition(null);
+          }}
+        >
+          <div
+            ref={trendPopoverRef}
+            className="fixed z-[130]"
+            style={{
+              top: trendPopoverPosition.top,
+              left: trendPopoverPosition.left,
+              width: trendPopoverPosition.width,
+              transform: trendPopoverPosition.placement === "above" ? "translateY(-100%)" : undefined
+            }}
+          >
+            <CellTrendPanel
+              trend={activeTrendData}
+              placement={trendPopoverPosition.placement}
+              onClose={() => {
+                setExpandedTrendCellKey(null);
+                setTrendPopoverPosition(null);
               }}
             />
           </div>

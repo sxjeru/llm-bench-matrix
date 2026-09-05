@@ -126,3 +126,16 @@ export {
   escapeMarkdownTableCell,
   buildMatrixMarkdownTable
 } from "./export-markdown";
+
+export {
+  isCellTrendEligible,
+  buildCellTrendData,
+  getCellTrendPopoverPosition,
+  calculateVisibleTickIndices,
+  ESTIMATED_TREND_POPOVER_HEIGHT,
+  type CellTrendPoint,
+  type CellTrendData,
+  type CellTrendPopoverPosition
+} from "./cell-trend";
+
+export { CellTrendPanel, type CellTrendPanelProps } from "./cell-trend-panel";
