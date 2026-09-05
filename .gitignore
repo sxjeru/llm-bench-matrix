@@ -10,4 +10,5 @@ dist
 codealike.json
 package-lock.json
 *.tsbuildinfo
+coverage
 .antigravitycli

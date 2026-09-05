@@ -2768,7 +2768,9 @@ export function BenchmarkMatrix({
                             data-cell-trend-trigger={isTrendEligible ? "1" : undefined}
                             role={isTrendEligible ? "button" : undefined}
                             tabIndex={isTrendEligible ? 0 : undefined}
-                            className="absolute right-1 top-1/2 inline-flex h-4 w-4 -translate-y-1/2 cursor-help items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"
+                            className={`absolute right-1 top-1/2 inline-flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85 ${
+                              isTrendEligible ? "cursor-pointer" : "cursor-help"
+                            }`}
                             title={isTrendEligible ? "历史趋势折线图" : undefined}
                             onClick={isTrendEligible ? (event) => {
                               event.stopPropagation();
