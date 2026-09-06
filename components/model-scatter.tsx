@@ -49,7 +49,7 @@ import {
   SCATTER_CHART_MIN_HEIGHT
 } from "./model-scatter/constants";
 import { ScatterControls } from "./model-scatter/controls";
-import { buildScatterDataset } from "./model-scatter/dataset";
+import { buildScatterDataset, buildScatterSnapshotOverlayDataset } from "./model-scatter/dataset";
 import { useScatterImageActions } from "./model-scatter/image-actions";
 import {
   buildScatterMetrics,
@@ -396,7 +396,7 @@ export function ModelScatter({
 
   const metricGroups = useMemo(() => groupScatterMetrics(metrics), [metrics]);
 
-  // 存档或链接里的轴失效时回落到默认，并顺带套用该指标建议的刻度
+  // 存档或链接里的轴失效时回落到默认，并顺带套用该指标建议的刻度；同时校验快照有效性
   useEffect(() => {
     if (metrics.length === 0) return;
 
@@ -404,18 +404,43 @@ export function ModelScatter({
       setViewState((prev) => {
         const hasX = Boolean(prev.xKey) && metrics.some((metric) => metric.key === prev.xKey);
         const hasY = Boolean(prev.yKey) && metrics.some((metric) => metric.key === prev.yKey);
-        if (hasX && hasY) return prev;
 
-        const defaults = resolveDefaultAxisKeys(metrics);
-        const nextXKey = hasX ? prev.xKey : defaults.xKey;
-        const nextYKey = hasY ? prev.yKey : defaults.yKey;
+        const defaults = !hasX || !hasY ? resolveDefaultAxisKeys(metrics) : null;
+        const nextXKey = hasX ? prev.xKey : defaults!.xKey;
+        const nextYKey = hasY ? prev.yKey : defaults!.yKey;
         const nextXMetric = findScatterMetric(metrics, nextXKey);
         const nextYMetric = findScatterMetric(metrics, nextYKey);
+
+        const validXSnapshot =
+          prev.xSnapshot && nextXMetric?.snapshots.some((s) => s.id === prev.xSnapshot)
+            ? prev.xSnapshot
+            : null;
+        const validYSnapshot =
+          prev.ySnapshot && nextYMetric?.snapshots.some((s) => s.id === prev.ySnapshot)
+            ? prev.ySnapshot
+            : null;
+        const validOverlay =
+          prev.overlaySnapshot &&
+          (nextXMetric?.snapshots.some((s) => s.id === prev.overlaySnapshot) ||
+            nextYMetric?.snapshots.some((s) => s.id === prev.overlaySnapshot))
+            ? prev.overlaySnapshot
+            : null;
+
+        const axisChanged = !hasX || !hasY;
+        const snapshotChanged =
+          validXSnapshot !== prev.xSnapshot ||
+          validYSnapshot !== prev.ySnapshot ||
+          validOverlay !== prev.overlaySnapshot;
+
+        if (!axisChanged && !snapshotChanged) return prev;
 
         return {
           ...prev,
           xKey: nextXKey,
           yKey: nextYKey,
+          xSnapshot: validXSnapshot,
+          ySnapshot: validYSnapshot,
+          overlaySnapshot: validOverlay,
           xScale: hasX ? prev.xScale : nextXMetric?.preferLogScale ? "log" : "linear",
           yScale: hasY ? prev.yScale : nextYMetric?.preferLogScale ? "log" : "linear"
         };
@@ -497,9 +522,44 @@ export function ModelScatter({
       providerNameByModel,
       colorByModel,
       xScale: effectiveXScale,
+      yScale: effectiveYScale,
+      xSnapshot: viewState.xSnapshot,
+      ySnapshot: viewState.ySnapshot
+    });
+  }, [
+    xMetric,
+    yMetric,
+    plottableModelNames,
+    providerNameByModel,
+    colorByModel,
+    effectiveXScale,
+    effectiveYScale,
+    viewState.xSnapshot,
+    viewState.ySnapshot
+  ]);
+
+  const snapshotOverlay = useMemo(() => {
+    if (!viewState.overlaySnapshot || !xMetric || !yMetric) return null;
+    return buildScatterSnapshotOverlayDataset({
+      snapshotId: viewState.overlaySnapshot,
+      xMetric,
+      yMetric,
+      modelNames: plottableModelNames,
+      providerNameByModel,
+      colorByModel,
+      xScale: effectiveXScale,
       yScale: effectiveYScale
     });
-  }, [xMetric, yMetric, plottableModelNames, providerNameByModel, colorByModel, effectiveXScale, effectiveYScale]);
+  }, [
+    viewState.overlaySnapshot,
+    xMetric,
+    yMetric,
+    plottableModelNames,
+    providerNameByModel,
+    colorByModel,
+    effectiveXScale,
+    effectiveYScale
+  ]);
 
   const historicalPoints = useMemo<ScatterHistoricalPoint[]>(() => {
     if (!xMetric || !yMetric) return [];
@@ -659,15 +719,27 @@ export function ModelScatter({
   }, [notice, setNotice]);
 
   const handleChangeAxis = useCallback(
-    (axis: "x" | "y", key: string) => {
+    (axis: "x" | "y", key: string, snapshotId?: string | null) => {
       const metric = findScatterMetric(metrics, key);
       setHistorySelections([]);
-      setViewState((prev) => ({
-        ...prev,
-        [axis === "x" ? "xKey" : "yKey"]: key,
-        // 换轴时按新指标的量纲重设刻度：价格/参数量自动切对数
-        [axis === "x" ? "xScale" : "yScale"]: (metric?.preferLogScale ? "log" : "linear") as ScatterAxisScale
-      }));
+      setViewState((prev) => {
+        const otherKey = axis === "x" ? prev.yKey : prev.xKey;
+        const otherMetric = otherKey ? findScatterMetric(metrics, otherKey) : null;
+        const retainsOverlay = Boolean(
+          prev.overlaySnapshot &&
+            (metric?.snapshots.some((s) => s.id === prev.overlaySnapshot) ||
+              otherMetric?.snapshots.some((s) => s.id === prev.overlaySnapshot))
+        );
+
+        return {
+          ...prev,
+          [axis === "x" ? "xKey" : "yKey"]: key,
+          [axis === "x" ? "xSnapshot" : "ySnapshot"]: snapshotId ?? null,
+          overlaySnapshot: retainsOverlay ? prev.overlaySnapshot : null,
+          // 换轴时按新指标的量纲重设刻度：价格/参数量自动切对数
+          [axis === "x" ? "xScale" : "yScale"]: (metric?.preferLogScale ? "log" : "linear") as ScatterAxisScale
+        };
+      });
     },
     [metrics]
   );
@@ -678,8 +750,31 @@ export function ModelScatter({
       ...prev,
       xKey: prev.yKey,
       yKey: prev.xKey,
+      xSnapshot: prev.ySnapshot,
+      ySnapshot: prev.xSnapshot,
       xScale: prev.yScale,
       yScale: prev.xScale
+    }));
+  }, []);
+
+  const handleToggleOverlaySnapshot = useCallback((snapshotId: string) => {
+    setViewState((prev) => ({
+      ...prev,
+      overlaySnapshot: prev.overlaySnapshot === snapshotId ? null : snapshotId
+    }));
+  }, []);
+
+  const handleClearSnapshot = useCallback((axis: "x" | "y") => {
+    setViewState((prev) => ({
+      ...prev,
+      [axis === "x" ? "xSnapshot" : "ySnapshot"]: null
+    }));
+  }, []);
+
+  const handleClearOverlaySnapshot = useCallback(() => {
+    setViewState((prev) => ({
+      ...prev,
+      overlaySnapshot: null
     }));
   }, []);
 
@@ -790,7 +885,11 @@ export function ModelScatter({
           metricGroups={metricGroups}
           xMetric={xMetric}
           yMetric={yMetric}
+          xSnapshot={viewState.xSnapshot}
+          ySnapshot={viewState.ySnapshot}
+          overlaySnapshot={viewState.overlaySnapshot}
           onChangeAxis={handleChangeAxis}
+          onToggleOverlaySnapshot={handleToggleOverlaySnapshot}
           onSwapAxes={handleSwapAxes}
           onAxisQueryChange={handleAxisQueryChange}
           xScale={effectiveXScale}
@@ -838,6 +937,7 @@ export function ModelScatter({
                     xMetric={xMetric!}
                     yMetric={yMetric!}
                     dataset={dataset}
+                    snapshotOverlay={snapshotOverlay}
                     xScale={effectiveXScale}
                     yScale={effectiveYScale}
                     showPareto={viewState.showPareto}
@@ -940,6 +1040,39 @@ export function ModelScatter({
               {formatScatterHistoryDate(historicalPoint.xBenchTime)} · 点击取消
             </button>
           ))}
+          {viewState.ySnapshot ? (
+            <button
+              type="button"
+              className="scatter-btn scatter-note scatter-note-action"
+              style={{ borderLeft: "2px solid #5da7ff" }}
+              onClick={() => handleClearSnapshot("y")}
+              title="点击恢复最新成绩"
+            >
+              Y 轴快照: {yMetric?.snapshots.find((s) => s.id === viewState.ySnapshot)?.label ?? viewState.ySnapshot.slice(0, 10)} · 点击恢复最新
+            </button>
+          ) : null}
+          {viewState.xSnapshot ? (
+            <button
+              type="button"
+              className="scatter-btn scatter-note scatter-note-action"
+              style={{ borderLeft: "2px solid #5da7ff" }}
+              onClick={() => handleClearSnapshot("x")}
+              title="点击恢复最新成绩"
+            >
+              X 轴快照: {xMetric?.snapshots.find((s) => s.id === viewState.xSnapshot)?.label ?? viewState.xSnapshot.slice(0, 10)} · 点击恢复最新
+            </button>
+          ) : null}
+          {viewState.overlaySnapshot ? (
+            <button
+              type="button"
+              className="scatter-btn scatter-note scatter-note-action"
+              style={{ borderLeft: "2px solid #f59e0b", color: "#fbbf24" }}
+              onClick={handleClearOverlaySnapshot}
+              title="点击清除半透明背景叠加"
+            >
+              对比背景: {snapshotOverlay?.snapshotLabel ?? viewState.overlaySnapshot.slice(0, 10)} · 点击取消叠加
+            </button>
+          ) : null}
           {historyNotice ? (
             <span className="scatter-note scatter-note-warn">{historyNotice}</span>
           ) : null}

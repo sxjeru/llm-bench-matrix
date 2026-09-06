@@ -4,11 +4,19 @@ import {
 } from "./constants";
 import { computeParetoFrontier, orderParetoPath } from "./pareto";
 import { computeScatterTrendLine } from "./trend-line";
+import { parseTimestampMs } from "@/components/benchmark-matrix/utils";
+import {
+  formatSnapshotDateLabel,
+  pickNearestSampleByTime,
+  resolveSampleForSnapshot
+} from "./snapshots";
 import type {
   ScatterAxisScale,
   ScatterMetric,
+  ScatterOverlaySnapshotPoint,
   ScatterPlotDataset,
-  ScatterPoint
+  ScatterPoint,
+  ScatterSnapshotOverlayDataset
 } from "./types";
 
 export type BuildScatterDatasetInput = {
@@ -19,6 +27,8 @@ export type BuildScatterDatasetInput = {
   colorByModel: ReadonlyMap<string, string>;
   xScale: ScatterAxisScale;
   yScale: ScatterAxisScale;
+  xSnapshot?: string | null;
+  ySnapshot?: string | null;
 };
 
 const EMPTY_DATASET: ScatterPlotDataset = {
@@ -32,26 +42,93 @@ const EMPTY_DATASET: ScatterPlotDataset = {
 
 /**
  * 把两个指标投影成散点集合，并标注帕累托前沿。
- *
- * 缺数与「对数轴下的非正值」分开计数：前者是数据没覆盖到，后者是刻度选择
- * 造成的取舍，提示语要能区分，用户才知道该补数据还是该切回线性轴。
+ * 支持指定快照时间（xSnapshot / ySnapshot），支持 Y 轴选历史快照而 X 轴就近对齐。
  */
 export function buildScatterDataset(input: BuildScatterDatasetInput): ScatterPlotDataset {
-  const { xMetric, yMetric, modelNames, providerNameByModel, colorByModel, xScale, yScale } = input;
+  const {
+    xMetric,
+    yMetric,
+    modelNames,
+    providerNameByModel,
+    colorByModel,
+    xScale,
+    yScale,
+    xSnapshot,
+    ySnapshot
+  } = input;
 
   if (modelNames.length === 0) {
     return { ...EMPTY_DATASET, paretoKeys: new Set<string>() };
   }
+
+  const xSnapshotTime = xSnapshot ? parseTimestampMs(xSnapshot) : null;
+  const ySnapshotTime = ySnapshot ? parseTimestampMs(ySnapshot) : null;
 
   const points: ScatterPoint[] = [];
   let missingCount = 0;
   let nonPositiveCount = 0;
 
   modelNames.forEach((modelName) => {
-    const x = xMetric.valueByModel.get(modelName);
-    const y = yMetric.valueByModel.get(modelName);
+    // 1. 解析 Y 值及时间
+    let y: number | undefined;
+    let yBenchTime: string | null = null;
 
-    if (x === undefined || y === undefined || !Number.isFinite(x) || !Number.isFinite(y)) {
+    if (ySnapshotTime !== null) {
+      const ySamples = yMetric.historyByModel.get(modelName) ?? [];
+      const sample = resolveSampleForSnapshot(ySamples, ySnapshotTime);
+      if (sample && Number.isFinite(sample.value)) {
+        y = sample.value;
+        yBenchTime = sample.benchTime;
+      }
+    } else if (xSnapshotTime !== null) {
+      // Y 轴跟随 X 轴快照时间就近吸附
+      const ySamples = yMetric.historyByModel.get(modelName) ?? [];
+      if (ySamples.length > 0) {
+        const sample = pickNearestSampleByTime(ySamples, xSnapshotTime);
+        if (sample && Number.isFinite(sample.value)) {
+          y = sample.value;
+          yBenchTime = sample.benchTime;
+        }
+      } else {
+        y = yMetric.valueByModel.get(modelName);
+      }
+    } else {
+      y = yMetric.valueByModel.get(modelName);
+    }
+
+    if (y === undefined || !Number.isFinite(y)) {
+      missingCount += 1;
+      return;
+    }
+
+    // 2. 解析 X 值及时间（X 轴取最接近 Y 快照时间的值）
+    let x: number | undefined;
+    let xBenchTime: string | null = null;
+
+    if (xSnapshotTime !== null) {
+      const xSamples = xMetric.historyByModel.get(modelName) ?? [];
+      const sample = resolveSampleForSnapshot(xSamples, xSnapshotTime);
+      if (sample && Number.isFinite(sample.value)) {
+        x = sample.value;
+        xBenchTime = sample.benchTime;
+      }
+    } else if (ySnapshotTime !== null) {
+      // X 轴按选中的 Y 轴快照时间取就近值
+      const xSamples = xMetric.historyByModel.get(modelName) ?? [];
+      if (xSamples.length > 0) {
+        const sample = pickNearestSampleByTime(xSamples, ySnapshotTime);
+        if (sample && Number.isFinite(sample.value)) {
+          x = sample.value;
+          xBenchTime = sample.benchTime;
+        }
+      } else {
+        x = xMetric.valueByModel.get(modelName);
+      }
+    } else {
+      x = xMetric.valueByModel.get(modelName);
+    }
+
+    if (x === undefined || !Number.isFinite(x)) {
       missingCount += 1;
       return;
     }
@@ -67,6 +144,8 @@ export function buildScatterDataset(input: BuildScatterDatasetInput): ScatterPlo
       color: colorByModel.get(modelName) ?? "#5da7ff",
       x,
       y,
+      xBenchTime,
+      yBenchTime,
       isPareto: false
     });
   });
@@ -90,6 +169,149 @@ export function buildScatterDataset(input: BuildScatterDatasetInput): ScatterPlo
   const trendLine = computeScatterTrendLine(points);
 
   return { points, paretoKeys, paretoPath, trendLine, missingCount, nonPositiveCount };
+}
+
+export type BuildScatterSnapshotOverlayDatasetInput = {
+  snapshotId: string;
+  xMetric: ScatterMetric;
+  yMetric: ScatterMetric;
+  modelNames: readonly string[];
+  providerNameByModel: ReadonlyMap<string, string>;
+  colorByModel: ReadonlyMap<string, string>;
+  xScale: ScatterAxisScale;
+  yScale: ScatterAxisScale;
+};
+
+/**
+ * 构建半透明历史快照背景叠加层数据集。
+ * 点集将作为背景（叉号显示），并计算出该历史时刻的帕累托前沿。
+ */
+export function buildScatterSnapshotOverlayDataset(
+  input: BuildScatterSnapshotOverlayDatasetInput
+): ScatterSnapshotOverlayDataset | null {
+  const {
+    snapshotId,
+    xMetric,
+    yMetric,
+    modelNames,
+    providerNameByModel,
+    colorByModel,
+    xScale,
+    yScale
+  } = input;
+
+  const snapshotTime = parseTimestampMs(snapshotId);
+  if (snapshotTime === null) return null;
+
+  const snapshotObj =
+    yMetric.snapshots.find((s) => s.id === snapshotId) ??
+    xMetric.snapshots.find((s) => s.id === snapshotId);
+  const snapshotLabel = snapshotObj?.label ?? formatSnapshotDateLabel(snapshotTime);
+
+  const isYSnapshot = yMetric.snapshots.some((s) => s.id === snapshotId);
+  const isXSnapshot = xMetric.snapshots.some((s) => s.id === snapshotId);
+  const isXPrimary = isXSnapshot && !isYSnapshot;
+  const isBothStrict = isXSnapshot && isYSnapshot;
+
+  const points: ScatterOverlaySnapshotPoint[] = [];
+
+  modelNames.forEach((modelName) => {
+    // 1. 解析 Y 值及时间
+    let y: number | undefined;
+    let yBenchTime: string | null = null;
+    const ySamples = yMetric.historyByModel.get(modelName) ?? [];
+
+    if (isBothStrict || !isXPrimary) {
+      // Y 为主导轴或双轴均匹配快照：严格按快照时间提取
+      const ySample = resolveSampleForSnapshot(ySamples, snapshotTime);
+      if (ySample && Number.isFinite(ySample.value)) {
+        y = ySample.value;
+        yBenchTime = ySample.benchTime;
+      } else if (yMetric.kind !== "benchmark") {
+        y = yMetric.valueByModel.get(modelName);
+      }
+    } else {
+      // X 为主导轴：Y 就近吸附
+      if (ySamples.length > 0) {
+        const ySample = pickNearestSampleByTime(ySamples, snapshotTime);
+        if (ySample && Number.isFinite(ySample.value)) {
+          y = ySample.value;
+          yBenchTime = ySample.benchTime;
+        }
+      } else {
+        y = yMetric.valueByModel.get(modelName);
+      }
+    }
+
+    if (y === undefined || !Number.isFinite(y)) return;
+
+    // 2. 解析 X 值及时间
+    let x: number | undefined;
+    let xBenchTime: string | null = null;
+    const xSamples = xMetric.historyByModel.get(modelName) ?? [];
+
+    if (isBothStrict || isXPrimary) {
+      // X 为主导轴或双轴均匹配快照：严格按快照时间提取
+      const xSample = resolveSampleForSnapshot(xSamples, snapshotTime);
+      if (xSample && Number.isFinite(xSample.value)) {
+        x = xSample.value;
+        xBenchTime = xSample.benchTime;
+      } else if (xMetric.kind !== "benchmark") {
+        x = xMetric.valueByModel.get(modelName);
+      }
+    } else {
+      // Y 为主导轴：X 就近吸附
+      if (xSamples.length > 0) {
+        const xSample = pickNearestSampleByTime(xSamples, snapshotTime);
+        if (xSample && Number.isFinite(xSample.value)) {
+          x = xSample.value;
+          xBenchTime = xSample.benchTime;
+        }
+      } else {
+        x = xMetric.valueByModel.get(modelName);
+      }
+    }
+
+    if (x === undefined || !Number.isFinite(x)) return;
+
+    if ((xScale === "log" && x <= 0) || (yScale === "log" && y <= 0)) return;
+
+    points.push({
+      modelName,
+      providerName: providerNameByModel.get(modelName) ?? "Unknown",
+      color: colorByModel.get(modelName) ?? "#5da7ff",
+      x,
+      y,
+      xBenchTime,
+      yBenchTime,
+      isPareto: false
+    });
+  });
+
+  if (points.length === 0) return null;
+
+  const paretoKeys = computeParetoFrontier(
+    points.map((p) => ({ key: p.modelName, x: p.x, y: p.y })),
+    xMetric.higherIsBetter,
+    yMetric.higherIsBetter
+  );
+
+  points.forEach((p) => {
+    p.isPareto = paretoKeys.has(p.modelName);
+  });
+
+  const paretoPath = orderParetoPath(
+    points.filter((p) => p.isPareto),
+    xMetric.higherIsBetter,
+    yMetric.higherIsBetter
+  );
+
+  return {
+    snapshotId,
+    snapshotLabel,
+    points,
+    paretoPath
+  };
 }
 
 /**

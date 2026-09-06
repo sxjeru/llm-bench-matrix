@@ -66,8 +66,16 @@ export function formatComparisonDeltaValue(value: number): string {
  * 让 `$12` 与 `$0.075` 都不出现无意义的补零。
  */
 export function formatPricePerMillion(value: number): string {
-  const fixed = value.toFixed(value >= 10 ? 2 : 3);
-  return `$${fixed.replace(/0+$/, "").replace(/\.$/, "")}`;
+  if (value === 0) return "$0";
+  const abs = Math.abs(value);
+  if (abs >= 10) {
+    return `$${value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}`;
+  }
+  if (abs >= 0.01) {
+    return `$${value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}`;
+  }
+  const decimals = Math.min(6, Math.max(3, -Math.floor(Math.log10(abs)) + 2));
+  return `$${value.toFixed(decimals).replace(/0+$/, "").replace(/\.$/, "")}`;
 }
 
 /** 参数量（单位 B），满 1000B 升为 T；最多 3 位小数且不补零。 */

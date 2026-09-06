@@ -1,4 +1,5 @@
 import { SOURCE_ALL } from "@/components/benchmark-matrix/constants";
+import { parseTimestampMs } from "@/components/benchmark-matrix/utils";
 import {
   SCATTER_AXIS_X_STORAGE_KEY,
   SCATTER_AXIS_Y_STORAGE_KEY,
@@ -16,6 +17,9 @@ import type { ScatterAxisScale, ScatterLabelMode, ScatterParetoLineStyle } from 
 export type ScatterViewState = {
   xKey: string | null;
   yKey: string | null;
+  xSnapshot: string | null;
+  ySnapshot: string | null;
+  overlaySnapshot: string | null;
   xScale: ScatterAxisScale;
   yScale: ScatterAxisScale;
   showPareto: boolean;
@@ -29,6 +33,9 @@ export type ScatterViewState = {
 export const DEFAULT_SCATTER_VIEW_STATE: ScatterViewState = {
   xKey: null,
   yKey: null,
+  xSnapshot: null,
+  ySnapshot: null,
+  overlaySnapshot: null,
   xScale: "linear",
   yScale: "linear",
   showPareto: true,
@@ -143,6 +150,15 @@ export function parseScatterSearchParams(searchParams: ReadableSearchParams): Pa
   const yKey = searchParams.get("y");
   if (yKey) parsed.yKey = yKey;
 
+  const xSnapshot = searchParams.get("xt");
+  if (xSnapshot && parseTimestampMs(xSnapshot) !== null) parsed.xSnapshot = xSnapshot;
+
+  const ySnapshot = searchParams.get("yt");
+  if (ySnapshot && parseTimestampMs(ySnapshot) !== null) parsed.ySnapshot = ySnapshot;
+
+  const overlaySnapshot = searchParams.get("oy");
+  if (overlaySnapshot && parseTimestampMs(overlaySnapshot) !== null) parsed.overlaySnapshot = overlaySnapshot;
+
   const xScale = searchParams.get("logx");
   if (xScale === "1" || xScale === "0") parsed.xScale = xScale === "1" ? "log" : "linear";
 
@@ -185,13 +201,34 @@ export function buildScatterSearchParams(
   // 保留其它页面可能带上的无关参数
   if (existing && typeof (existing as URLSearchParams).forEach === "function") {
     (existing as URLSearchParams).forEach((value, key) => {
-      if (["x", "y", "logx", "logy", "pareto", "dim", "line", "labels", "guides", "source"].includes(key)) return;
+      if (
+        [
+          "x",
+          "y",
+          "xt",
+          "yt",
+          "oy",
+          "logx",
+          "logy",
+          "pareto",
+          "dim",
+          "line",
+          "labels",
+          "guides",
+          "source"
+        ].includes(key)
+      ) {
+        return;
+      }
       params.set(key, value);
     });
   }
 
   if (state.xKey) params.set("x", state.xKey);
   if (state.yKey) params.set("y", state.yKey);
+  if (state.xSnapshot) params.set("xt", state.xSnapshot);
+  if (state.ySnapshot) params.set("yt", state.ySnapshot);
+  if (state.overlaySnapshot) params.set("oy", state.overlaySnapshot);
   if (state.xScale !== DEFAULT_SCATTER_VIEW_STATE.xScale) params.set("logx", state.xScale === "log" ? "1" : "0");
   if (state.yScale !== DEFAULT_SCATTER_VIEW_STATE.yScale) params.set("logy", state.yScale === "log" ? "1" : "0");
   if (state.showPareto !== DEFAULT_SCATTER_VIEW_STATE.showPareto) params.set("pareto", state.showPareto ? "1" : "0");

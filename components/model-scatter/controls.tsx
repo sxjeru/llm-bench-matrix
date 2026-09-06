@@ -30,7 +30,11 @@ type ScatterControlsProps = {
   metricGroups: ScatterMetricGroup[];
   xMetric: ScatterMetric | null;
   yMetric: ScatterMetric | null;
-  onChangeAxis: (axis: "x" | "y", key: string) => void;
+  xSnapshot?: string | null;
+  ySnapshot?: string | null;
+  overlaySnapshot?: string | null;
+  onChangeAxis: (axis: "x" | "y", key: string, snapshotId?: string | null) => void;
+  onToggleOverlaySnapshot?: (snapshotId: string) => void;
   onSwapAxes: () => void;
   /** 轴选择器里输入了搜索词，供上层顺带放开低覆盖指标 */
   onAxisQueryChange?: (query: string) => void;
@@ -82,7 +86,10 @@ function AxisSelect({
   metric,
   metricGroups,
   scale,
+  selectedSnapshotId,
+  overlaySnapshotId,
   onChangeAxis,
+  onToggleOverlaySnapshot,
   onChangeScale,
   onAxisQueryChange
 }: {
@@ -90,7 +97,10 @@ function AxisSelect({
   metric: ScatterMetric | null;
   metricGroups: ScatterMetricGroup[];
   scale: ScatterAxisScale;
-  onChangeAxis: (axis: "x" | "y", key: string) => void;
+  selectedSnapshotId?: string | null;
+  overlaySnapshotId?: string | null;
+  onChangeAxis: (axis: "x" | "y", key: string, snapshotId?: string | null) => void;
+  onToggleOverlaySnapshot?: (snapshotId: string) => void;
   onChangeScale: (axis: "x" | "y", scale: ScatterAxisScale) => void;
   onAxisQueryChange?: (query: string) => void;
 }) {
@@ -113,7 +123,10 @@ function AxisSelect({
           axisName={axisLabel}
           metric={metric}
           metricGroups={metricGroups}
-          onChange={(key) => onChangeAxis(axis, key)}
+          selectedSnapshotId={selectedSnapshotId}
+          overlaySnapshotId={overlaySnapshotId}
+          onChange={(key, snapshotId) => onChangeAxis(axis, key, snapshotId)}
+          onToggleOverlaySnapshot={onToggleOverlaySnapshot}
           onQueryChange={onAxisQueryChange}
         />
 
@@ -207,7 +220,10 @@ export function ScatterControls(props: ScatterControlsProps) {
           metric={yMetric}
           metricGroups={metricGroups}
           scale={yScale}
+          selectedSnapshotId={props.ySnapshot}
+          overlaySnapshotId={props.overlaySnapshot}
           onChangeAxis={onChangeAxis}
+          onToggleOverlaySnapshot={props.onToggleOverlaySnapshot}
           onChangeScale={onChangeScale}
           onAxisQueryChange={onAxisQueryChange}
         />
@@ -227,7 +243,10 @@ export function ScatterControls(props: ScatterControlsProps) {
           metric={xMetric}
           metricGroups={metricGroups}
           scale={xScale}
+          selectedSnapshotId={props.xSnapshot}
+          overlaySnapshotId={props.overlaySnapshot}
           onChangeAxis={onChangeAxis}
+          onToggleOverlaySnapshot={props.onToggleOverlaySnapshot}
           onChangeScale={onChangeScale}
           onAxisQueryChange={onAxisQueryChange}
         />

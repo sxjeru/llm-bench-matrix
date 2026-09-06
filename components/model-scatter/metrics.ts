@@ -21,6 +21,8 @@ import {
   SUMMARY_CATEGORY_LABEL,
   SYNTHETIC_METRIC_SLUGS
 } from "./constants";
+import { isArtificialAnalysisSource } from "@/lib/source-utils";
+import { extractMetricSnapshots } from "./snapshots";
 import type { MatrixCell, MatrixCellEntry } from "@/components/benchmark-matrix/types";
 import type {
   ScatterHistorySample,
@@ -165,9 +167,22 @@ function resolveScatterMetricCategory(row: Pick<MatrixRow, "benchmark" | "catego
   return row.category;
 }
 
+function checkIsArtificialAnalysis(row: MatrixRow): boolean {
+  for (const cell of row.cells.values()) {
+    if (isArtificialAnalysisSource(cell.source)) return true;
+    for (const entry of cell.allEntries) {
+      if (isArtificialAnalysisSource(entry.source)) return true;
+    }
+  }
+  return false;
+}
+
 export function toScatterMetric(row: MatrixRow): ScatterMetric {
   const unit = resolveMetricUnit(row);
   const category = resolveScatterMetricCategory(row);
+  const historyByModel = buildHistoryByModel(row);
+  const snapshots = extractMetricSnapshots(historyByModel);
+  const isArtificialAnalysis = checkIsArtificialAnalysis(row);
 
   return {
     key: toMetricSlug(row.rowKey),
@@ -181,7 +196,9 @@ export function toScatterMetric(row: MatrixRow): ScatterMetric {
     preferLogScale:
       unit === "usd" || unit === "billions" || LOG_SCALE_CATEGORIES.has(row.category),
     valueByModel: buildValueByModel(row),
-    historyByModel: buildHistoryByModel(row)
+    historyByModel,
+    snapshots,
+    isArtificialAnalysis
   };
 }
 
@@ -249,7 +266,9 @@ export function buildScatterMetrics(input: BuildScatterMetricsInput): ScatterMet
         unit: "score",
         preferLogScale: false,
         valueByModel,
-        historyByModel: new Map()
+        historyByModel: new Map(),
+        snapshots: [],
+        isArtificialAnalysis: false
       });
     }
   }
@@ -382,8 +401,13 @@ export function formatScatterValue(metric: Pick<ScatterMetric, "unit">, value: n
       return `${Number(value.toFixed(1)).toString()}%`;
     case "date":
       return formatScatterDate(value, "full");
-    default:
-      return Number(value.toFixed(2)).toString();
+    default: {
+      const abs = Math.abs(value);
+      if (value === 0) return "0";
+      if (abs >= 1) return Number(value.toFixed(2)).toString();
+      const decimals = Math.min(6, Math.max(2, -Math.floor(Math.log10(abs)) + 2));
+      return Number(value.toFixed(decimals)).toString();
+    }
   }
 }
 
@@ -394,20 +418,32 @@ export function formatScatterAxisTick(metric: Pick<ScatterMetric, "unit">, value
   switch (metric.unit) {
     case "usd": {
       const abs = Math.abs(value);
+      if (value === 0) return "$0";
       if (abs >= 1) return `$${Number(value.toFixed(abs >= 10 ? 0 : 1)).toString()}`;
-      return `$${Number(value.toFixed(3)).toString()}`;
+      const decimals = Math.min(6, Math.max(2, -Math.floor(Math.log10(abs)) + 1));
+      return `$${Number(value.toFixed(decimals)).toString()}`;
     }
     case "billions": {
       const abs = Math.abs(value);
       if (abs >= 1000) return `${Number((value / 1000).toFixed(1)).toString()}T`;
       return `${Number(value.toFixed(abs >= 10 ? 0 : 1)).toString()}B`;
     }
-    case "percent":
-      return `${Number(value.toFixed(Math.abs(value) >= 10 ? 0 : 1)).toString()}%`;
+    case "percent": {
+      const abs = Math.abs(value);
+      if (value === 0) return "0%";
+      if (abs >= 1) return `${Number(value.toFixed(abs >= 10 ? 0 : 1)).toString()}%`;
+      const decimals = Math.min(6, Math.max(1, -Math.floor(Math.log10(abs)) + 1));
+      return `${Number(value.toFixed(decimals)).toString()}%`;
+    }
     case "date":
       return formatScatterDate(value, "tick");
-    default:
-      return Number(value.toFixed(Math.abs(value) >= 10 ? 0 : 2)).toString();
+    default: {
+      const abs = Math.abs(value);
+      if (value === 0) return "0";
+      if (abs >= 10) return Number(value.toFixed(0)).toString();
+      const decimals = Math.min(6, Math.max(2, -Math.floor(Math.log10(abs)) + 1));
+      return Number(value.toFixed(decimals)).toString();
+    }
   }
 }
 
