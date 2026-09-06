@@ -1061,6 +1061,10 @@ input.heatmap-alpha-range::-moz-range-track {
   font-size: 13px;
 }
 
+.scatter-combobox.has-content .scatter-combobox-input {
+  padding-left: 11px;
+}
+
 .scatter-combobox-input::placeholder {
   color: var(--subtext);
   opacity: 0.75;

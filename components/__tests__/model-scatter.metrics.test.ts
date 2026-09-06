@@ -499,6 +499,27 @@ describe("formatScatterValue / formatScatterAxisTick", () => {
     expect(formatScatterAxisTick({ unit: "billions" }, 1200)).toBe("1.2T");
     expect(formatScatterAxisTick({ unit: "score" }, 82.456)).toBe("82");
   });
+
+  test("小于 0.01 的数值不会被错误四舍五入为 0.01 或 0", () => {
+    // 轴刻度文本测试
+    expect(formatScatterAxisTick({ unit: "score" }, 0.005)).toBe("0.005");
+    expect(formatScatterAxisTick({ unit: "score" }, 0.002)).toBe("0.002");
+    expect(formatScatterAxisTick({ unit: "score" }, 0.001)).toBe("0.001");
+    expect(formatScatterAxisTick({ unit: "score" }, 0.0005)).toBe("0.0005");
+    expect(formatScatterAxisTick({ unit: "score" }, 0.01)).toBe("0.01");
+    expect(formatScatterAxisTick({ unit: "score" }, 0.02)).toBe("0.02");
+
+    // USD 轴刻度
+    expect(formatScatterAxisTick({ unit: "usd" }, 0.005)).toBe("$0.005");
+    expect(formatScatterAxisTick({ unit: "usd" }, 0.001)).toBe("$0.001");
+    expect(formatScatterAxisTick({ unit: "usd" }, 0.0005)).toBe("$0.0005");
+
+    // 提示框完整数值
+    expect(formatScatterValue({ unit: "score" }, 0.005)).toBe("0.005");
+    expect(formatScatterValue({ unit: "score" }, 0.0025)).toBe("0.0025");
+    expect(formatScatterValue({ unit: "usd" }, 0.005)).toBe("$0.005");
+    expect(formatScatterValue({ unit: "usd" }, 0.0008)).toBe("$0.0008");
+  });
 });
 
 describe("buildScatterDataset", () => {

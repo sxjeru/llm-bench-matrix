@@ -401,8 +401,13 @@ export function formatScatterValue(metric: Pick<ScatterMetric, "unit">, value: n
       return `${Number(value.toFixed(1)).toString()}%`;
     case "date":
       return formatScatterDate(value, "full");
-    default:
-      return Number(value.toFixed(2)).toString();
+    default: {
+      const abs = Math.abs(value);
+      if (value === 0) return "0";
+      if (abs >= 1) return Number(value.toFixed(2)).toString();
+      const decimals = Math.min(6, Math.max(2, -Math.floor(Math.log10(abs)) + 2));
+      return Number(value.toFixed(decimals)).toString();
+    }
   }
 }
 
@@ -413,20 +418,32 @@ export function formatScatterAxisTick(metric: Pick<ScatterMetric, "unit">, value
   switch (metric.unit) {
     case "usd": {
       const abs = Math.abs(value);
+      if (value === 0) return "$0";
       if (abs >= 1) return `$${Number(value.toFixed(abs >= 10 ? 0 : 1)).toString()}`;
-      return `$${Number(value.toFixed(3)).toString()}`;
+      const decimals = Math.min(6, Math.max(2, -Math.floor(Math.log10(abs)) + 1));
+      return `$${Number(value.toFixed(decimals)).toString()}`;
     }
     case "billions": {
       const abs = Math.abs(value);
       if (abs >= 1000) return `${Number((value / 1000).toFixed(1)).toString()}T`;
       return `${Number(value.toFixed(abs >= 10 ? 0 : 1)).toString()}B`;
     }
-    case "percent":
-      return `${Number(value.toFixed(Math.abs(value) >= 10 ? 0 : 1)).toString()}%`;
+    case "percent": {
+      const abs = Math.abs(value);
+      if (value === 0) return "0%";
+      if (abs >= 1) return `${Number(value.toFixed(abs >= 10 ? 0 : 1)).toString()}%`;
+      const decimals = Math.min(6, Math.max(1, -Math.floor(Math.log10(abs)) + 1));
+      return `${Number(value.toFixed(decimals)).toString()}%`;
+    }
     case "date":
       return formatScatterDate(value, "tick");
-    default:
-      return Number(value.toFixed(Math.abs(value) >= 10 ? 0 : 2)).toString();
+    default: {
+      const abs = Math.abs(value);
+      if (value === 0) return "0";
+      if (abs >= 10) return Number(value.toFixed(0)).toString();
+      const decimals = Math.min(6, Math.max(2, -Math.floor(Math.log10(abs)) + 1));
+      return Number(value.toFixed(decimals)).toString();
+    }
   }
 }
 

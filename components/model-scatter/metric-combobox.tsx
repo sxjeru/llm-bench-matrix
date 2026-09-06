@@ -230,9 +230,14 @@ export function MetricCombobox({
     return snapshot ? `${metric.label} [${snapshot.label}]` : metric.label;
   }, [metric, selectedSnapshotId]);
 
+  const inputValue = isOpen ? query : displayValue;
+  const hasContent = Boolean(inputValue && inputValue.trim().length > 0);
+
   return (
-    <div className="scatter-combobox" ref={rootRef}>
-      <Search size={13} className="scatter-combobox-icon" aria-hidden="true" />
+    <div className={`scatter-combobox${hasContent ? " has-content" : ""}`} ref={rootRef}>
+      {!hasContent ? (
+        <Search size={13} className="scatter-combobox-icon" aria-hidden="true" />
+      ) : null}
 
       <input
         id={id}
@@ -247,7 +252,7 @@ export function MetricCombobox({
         aria-activedescendant={
           isOpen && flatOptions[activeOptionIndex] ? `${listId}-${activeOptionIndex}` : undefined
         }
-        value={isOpen ? query : displayValue}
+        value={inputValue}
         placeholder={isOpen ? metric?.label ?? "搜索指标…" : "选择指标…"}
         onChange={(event) => handleQueryChange(event.target.value)}
         onFocus={() => setIsOpen(true)}
