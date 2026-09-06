@@ -422,6 +422,60 @@ describe("ModelScatter", () => {
     expect(legendCount("Anthropic")).toBe("1");
   });
 
+  test("默认状态计数为 0 的厂商图例予以隐藏", async () => {
+    const rowsWithCohere: MatrixInputRow[] = [
+      ...rows,
+      {
+        recordId: 999,
+        providerName: "Cohere",
+        providerDisplayName: "Cohere",
+        providerBrandColor: null,
+        modelName: "Epsilon",
+        benchmarkName: "Bench-One",
+        benchmarkType: "Reasoning",
+        sourceBenchmarkType: null,
+        higherIsBetter: true,
+        benchmarkCanonicalKey: "bench-one",
+        modalities: ["Text"],
+        sourceModalities: null,
+        benchTime: "2026-04-06T00:00:00.000Z",
+        valueRaw: "75",
+        valueNum: 75,
+        valueNum2: null,
+        valueNote: null,
+        source: "text:demo",
+        updatedAt: "2026-04-06T00:00:00.000Z"
+      }
+    ];
+
+    const { container } = await renderReady(
+      <ModelScatter
+        rows={rowsWithCohere}
+        allRows={rowsWithCohere}
+        sourceOptions={["text:demo"]}
+        modelPrices={modelPrices}
+        modelParams={modelParams}
+      />
+    );
+
+    // 默认双轴为 Overall Score × Output Price，Epsilon 缺少价格，无法在散点图绘制
+    // Cohere 在默认状态下计数为 0，应被隐藏而不渲染其图例
+    expect(screen.queryByRole("button", { name: /Cohere/ })).toBeNull();
+    expect(legendCount("OpenAI")).toBe("2");
+    expect(legendCount("Anthropic")).toBe("2");
+
+    // 切换 X 轴为 Bench-One，Epsilon 有该指标且有总评，Cohere 在新轴下默认计数为 1，图例应恢复显示
+    pickAxisOption(container, "x", "Bench-One");
+    expect(screen.getByRole("button", { name: /Cohere/ })).toBeInTheDocument();
+    expect(legendCount("Cohere")).toBe("1");
+
+    // 点击 OpenAI 图例将其隐藏，OpenAI 散点被剔除且计数归零，但图例本身仍保留以支持再次点击取消隐藏
+    fireEvent.click(screen.getByRole("button", { name: /OpenAI/ }));
+    const openAiButton = screen.getByRole("button", { name: /OpenAI/ });
+    expect(openAiButton).toHaveClass("is-hidden");
+    expect(legendCount("OpenAI")).toBe("0");
+  });
+
   test("图例全部隐藏时给出空态引导", async () => {
     await renderScatter();
 

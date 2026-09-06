@@ -559,21 +559,38 @@ export function ModelScatter({
   }
 
   const legendEntries = useMemo(() => {
-    const countByProvider = new Map<string, { color: string; candidateCount: number }>();
+    if (!xMetric || !yMetric) return [];
+
+    const countByProvider = new Map<
+      string,
+      { color: string; candidateCount: number; defaultCount: number }
+    >();
 
     baseModelColumns.forEach((modelName) => {
       const providerName = providerNameByModel.get(modelName);
       if (!providerName) return;
 
+      const x = xMetric.valueByModel.get(modelName);
+      const y = yMetric.valueByModel.get(modelName);
+      const isPlottable =
+        x !== undefined &&
+        y !== undefined &&
+        Number.isFinite(x) &&
+        Number.isFinite(y) &&
+        (effectiveXScale !== "log" || x > 0) &&
+        (effectiveYScale !== "log" || y > 0);
+
       const existing = countByProvider.get(providerName);
       if (existing) {
         existing.candidateCount += 1;
+        if (isPlottable) existing.defaultCount += 1;
         return;
       }
 
       countByProvider.set(providerName, {
         color: colorByModel.get(modelName) ?? "#5da7ff",
-        candidateCount: 1
+        candidateCount: 1,
+        defaultCount: isPlottable ? 1 : 0
       });
     });
 
@@ -586,6 +603,7 @@ export function ModelScatter({
     });
 
     return Array.from(countByProvider.entries())
+      .filter(([, meta]) => meta.defaultCount > 0)
       .map(([providerName, meta]) => ({
         providerName,
         color: meta.color,
@@ -596,7 +614,16 @@ export function ModelScatter({
         (left, right) =>
           right.candidateCount - left.candidateCount || left.providerName.localeCompare(right.providerName)
       );
-  }, [baseModelColumns, providerNameByModel, colorByModel, visibleScatterPoints]);
+  }, [
+    baseModelColumns,
+    providerNameByModel,
+    colorByModel,
+    xMetric,
+    yMetric,
+    effectiveXScale,
+    effectiveYScale,
+    visibleScatterPoints
+  ]);
 
   const availableExportPresetKeys = useMemo<ExportPresetKey[]>(
     () =>

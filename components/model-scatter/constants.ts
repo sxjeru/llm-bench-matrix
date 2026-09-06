@@ -71,7 +71,7 @@ export const DEFAULT_Y_METRIC_PREFERENCE = [OVERALL_METRIC_SLUG] as const;
 /** 分类全匹配时默认对数轴（跨数量级的成本/性能指标） */
 export const LOG_SCALE_CATEGORIES = new Set(["Cost", "Performance"]);
 
-export const SCATTER_CHART_HEIGHT = 520;
+export const SCATTER_CHART_HEIGHT = 600;
 export const SCATTER_CHART_HEIGHT_COMPACT = 400;
 export const SCATTER_CHART_COMPACT_BREAKPOINT = 768;
 export const SCATTER_CHART_MARGIN = { top: 24, right: 32, bottom: 48, left: 16 } as const;
