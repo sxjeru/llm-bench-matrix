@@ -1456,8 +1456,16 @@ input.heatmap-alpha-range::-moz-range-track {
 }
 
 .scatter-history-tooltip {
-  width: 206px;
+  min-width: 206px;
+  max-width: 320px;
+  width: max-content;
   pointer-events: none;
+}
+
+.scatter-overlay-tooltip {
+  min-width: 218px;
+  max-width: 340px;
+  width: max-content;
 }
 
 .scatter-history-tooltip-date {

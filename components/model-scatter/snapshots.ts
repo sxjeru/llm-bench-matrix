@@ -1,4 +1,5 @@
 import { parseTimestampMs } from "@/components/benchmark-matrix/utils";
+import { SNAPSHOT_MAJOR_MODEL_COUNT_THRESHOLD } from "./constants";
 import type {
   ScatterHistorySample,
   ScatterMetricSnapshot
@@ -106,13 +107,15 @@ export function extractMetricSnapshots(
     dayCounts.set(day, (dayCounts.get(day) ?? 0) + 1);
   });
 
-  return clusters.map((cluster, index) => {
+  const maxTimestamp = Math.max(...clusters.map((c) => Math.max(...c.timestamps)));
+
+  const snapshots: ScatterMetricSnapshot[] = clusters.map((cluster) => {
     // 聚类中代表时间取最大值（最新时间）
     const repTime = Math.max(...cluster.timestamps);
     const day = formatSnapshotDateLabel(repTime);
     const hasMultipleInDay = (dayCounts.get(day) ?? 0) > 1;
     const label = hasMultipleInDay ? formatSnapshotDateTimeLabel(repTime) : day;
-    const isLatest = index === 0;
+    const isLatest = repTime === maxTimestamp;
     const modelCount = cluster.models.size;
 
     return {
@@ -121,9 +124,20 @@ export function extractMetricSnapshots(
       label,
       modelCount,
       isLatest,
-      isBatchSnapshot: modelCount >= 3 || (totalModels > 0 && modelCount / totalModels >= 0.25)
+      isBatchSnapshot: modelCount >= 3 || (totalModels > 0 && modelCount / totalModels >= 0.25),
+      isMajorRevision: modelCount > SNAPSHOT_MAJOR_MODEL_COUNT_THRESHOLD
     };
   });
+
+  // 模型数大于 15 的提升到列表最前（主要变动组），组内按时间降序排列
+  snapshots.sort((a, b) => {
+    const aMajor = a.isMajorRevision ? 1 : 0;
+    const bMajor = b.isMajorRevision ? 1 : 0;
+    if (aMajor !== bMajor) return bMajor - aMajor;
+    return b.timestamp - a.timestamp;
+  });
+
+  return snapshots;
 }
 
 /**
@@ -132,7 +146,7 @@ export function extractMetricSnapshots(
 export function resolveSampleForSnapshot(
   samples: readonly ScatterHistorySample[],
   targetTimestampMs: number,
-  toleranceMs = SNAPSHOT_CLUSTER_WINDOW_MS * 2
+  toleranceMs = SNAPSHOT_CLUSTER_WINDOW_MS
 ): ScatterHistorySample | null {
   if (samples.length === 0) return null;
 

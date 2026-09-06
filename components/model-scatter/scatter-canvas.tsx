@@ -1017,8 +1017,8 @@ export function ScatterCanvas({
         />
       ) : null}
       {hoveredOverlayPoint ? (() => {
-        const tooltipWidth = 218;
-        const tooltipHeight = 148;
+        const tooltipWidth = 260;
+        const tooltipHeight = hoveredOverlayPoint.point.isPareto ? 122 : 98;
         const preferredLeft = hoveredOverlayPoint.coords.x - tooltipWidth / 2;
         const left = Math.min(width - tooltipWidth - 8, Math.max(8, preferredLeft));
         const fitsAbove = hoveredOverlayPoint.coords.y - tooltipHeight - 12 >= 8;
@@ -1027,13 +1027,17 @@ export function ScatterCanvas({
           : hoveredOverlayPoint.coords.y + 16;
         const placement = fitsAbove ? "top" : "bottom";
 
+        const overlayDate =
+          snapshotOverlay?.snapshotLabel ??
+          (hoveredOverlayPoint.point.xBenchTime?.slice(0, 10) || "历史快照");
+
         return (
           <div
             className="scatter-history-tooltip-anchor"
             style={{ left, top }}
             data-placement={placement}
           >
-            <div className="scatter-tooltip scatter-history-tooltip" role="status">
+            <div className="scatter-tooltip scatter-history-tooltip scatter-overlay-tooltip" role="status">
               <div className="scatter-tooltip-head">
                 <span
                   className="scatter-tooltip-swatch"
@@ -1042,12 +1046,11 @@ export function ScatterCanvas({
                 />
                 <span className="scatter-tooltip-model">{hoveredOverlayPoint.point.modelName}</span>
               </div>
-              <div className="scatter-tooltip-provider">{hoveredOverlayPoint.point.providerName}</div>
-              <div
-                className="scatter-tooltip-badge"
-                style={{ background: "rgba(245, 158, 11, 0.2)", color: "#fbbf24" }}
-              >
-                {snapshotOverlay?.snapshotLabel ?? "历史快照"} 对比背景
+              <div className="scatter-tooltip-provider flex items-center justify-between gap-2">
+                <span>{hoveredOverlayPoint.point.providerName}</span>
+                <span className="text-amber-400 font-medium text-[11px]">
+                  {overlayDate}
+                </span>
               </div>
               <dl className="scatter-tooltip-rows">
                 <div className="scatter-tooltip-row">
@@ -1059,9 +1062,11 @@ export function ScatterCanvas({
                   <dd>{formatScatterValue(xMetric, hoveredOverlayPoint.point.x)}</dd>
                 </div>
               </dl>
-              <div className="scatter-history-tooltip-date">
-                {hoveredOverlayPoint.point.isPareto ? "★ 当期处于帕累托前沿" : "当期非前沿"}
-              </div>
+              {hoveredOverlayPoint.point.isPareto ? (
+                <div className="scatter-history-tooltip-date">
+                  ★ 当期处于帕累托前沿
+                </div>
+              ) : null}
             </div>
           </div>
         );

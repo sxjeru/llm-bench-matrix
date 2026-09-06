@@ -49,20 +49,32 @@ export function ScatterTooltip({
   const xColor = getScatterRankColor(point.x, xValues, xMetric.higherIsBetter, xScale);
   const yColor = getScatterRankColor(point.y, yValues, yMetric.higherIsBetter, yScale);
 
+  const xDate = point.xBenchTime ? point.xBenchTime.slice(0, 10) : null;
+  const yDate = point.yBenchTime ? point.yBenchTime.slice(0, 10) : null;
+  const isSameDate = Boolean(xDate && yDate && xDate === yDate);
+  const commonDate = isSameDate ? xDate : null;
+
   return (
     <div className="scatter-tooltip">
       <div className="scatter-tooltip-head">
         <span className="scatter-tooltip-swatch" style={{ backgroundColor: point.color }} aria-hidden="true" />
         <span className="scatter-tooltip-model">{point.modelName}</span>
       </div>
-      <div className="scatter-tooltip-provider">{point.providerName}</div>
+      <div className="scatter-tooltip-provider flex items-center justify-between gap-2">
+        <span>{point.providerName}</span>
+        {commonDate ? (
+          <span className="text-[10.5px] text-slate-400 font-normal">
+            {commonDate}
+          </span>
+        ) : null}
+      </div>
 
       <dl className="scatter-tooltip-rows">
         <div className="scatter-tooltip-row">
           <dt>{yMetric.label}</dt>
           <dd style={yColor ? { color: yColor } : undefined}>
             {formatScatterValue(yMetric, point.y)}
-            {point.yBenchTime ? (
+            {!commonDate && point.yBenchTime ? (
               <span className="text-[10.5px] text-slate-400 block font-normal opacity-85">
                 {point.yBenchTime.slice(0, 10)}
               </span>
@@ -73,7 +85,7 @@ export function ScatterTooltip({
           <dt>{xMetric.label}</dt>
           <dd style={xColor ? { color: xColor } : undefined}>
             {formatScatterValue(xMetric, point.x)}
-            {point.xBenchTime ? (
+            {!commonDate && point.xBenchTime ? (
               <span className="text-[10.5px] text-slate-400 block font-normal opacity-85">
                 {point.xBenchTime.slice(0, 10)}
               </span>

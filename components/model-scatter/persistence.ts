@@ -1,4 +1,5 @@
 import { SOURCE_ALL } from "@/components/benchmark-matrix/constants";
+import { parseTimestampMs } from "@/components/benchmark-matrix/utils";
 import {
   SCATTER_AXIS_X_STORAGE_KEY,
   SCATTER_AXIS_Y_STORAGE_KEY,
@@ -150,13 +151,13 @@ export function parseScatterSearchParams(searchParams: ReadableSearchParams): Pa
   if (yKey) parsed.yKey = yKey;
 
   const xSnapshot = searchParams.get("xt");
-  if (xSnapshot) parsed.xSnapshot = xSnapshot;
+  if (xSnapshot && parseTimestampMs(xSnapshot) !== null) parsed.xSnapshot = xSnapshot;
 
   const ySnapshot = searchParams.get("yt");
-  if (ySnapshot) parsed.ySnapshot = ySnapshot;
+  if (ySnapshot && parseTimestampMs(ySnapshot) !== null) parsed.ySnapshot = ySnapshot;
 
   const overlaySnapshot = searchParams.get("oy");
-  if (overlaySnapshot) parsed.overlaySnapshot = overlaySnapshot;
+  if (overlaySnapshot && parseTimestampMs(overlaySnapshot) !== null) parsed.overlaySnapshot = overlaySnapshot;
 
   const xScale = searchParams.get("logx");
   if (xScale === "1" || xScale === "0") parsed.xScale = xScale === "1" ? "log" : "linear";

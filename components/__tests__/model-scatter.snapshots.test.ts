@@ -121,6 +121,37 @@ describe("extractMetricSnapshots", () => {
     const snapshots = extractMetricSnapshots(history);
     expect(snapshots).toEqual([]);
   });
+
+  test("模型数大于 15 的快照提升到列表最前（主要变动组）", () => {
+    const history = new Map<string, ScatterHistorySample[]>();
+    for (let i = 1; i <= 16; i++) {
+      history.set(`Model${i}`, [
+        { value: 60 + i, benchTime: "2026-06-01T10:00:00.000Z", recordId: i }
+      ]);
+    }
+    history.set("Model1", [
+      { value: 61, benchTime: "2026-06-01T10:00:00.000Z", recordId: 1 },
+      { value: 85, benchTime: "2026-08-01T10:00:00.000Z", recordId: 101 }
+    ]);
+    history.set("Model2", [
+      { value: 62, benchTime: "2026-06-01T10:00:00.000Z", recordId: 2 },
+      { value: 88, benchTime: "2026-08-01T10:00:00.000Z", recordId: 102 }
+    ]);
+
+    const snapshots = extractMetricSnapshots(history);
+    expect(snapshots.length).toBe(2);
+
+    // 16 个模型的 2026-06-01 快照因属于主要变动组（> 15），被提升至列表第一项
+    expect(snapshots[0]?.label).toBe("2026-06-01");
+    expect(snapshots[0]?.modelCount).toBe(16);
+    expect(snapshots[0]?.isMajorRevision).toBe(true);
+
+    // 2 个模型的 2026-08-01 快照排在后面，但依然被正确标记为 isLatest: true
+    expect(snapshots[1]?.label).toBe("2026-08-01");
+    expect(snapshots[1]?.modelCount).toBe(2);
+    expect(snapshots[1]?.isLatest).toBe(true);
+    expect(snapshots[1]?.isMajorRevision).toBe(false);
+  });
 });
 
 describe("pickNearestSampleByTime & resolveSampleForSnapshot", () => {
@@ -144,9 +175,9 @@ describe("pickNearestSampleByTime & resolveSampleForSnapshot", () => {
     expect(pickNearestSampleByTime(samples, target)?.value).toBe(65);
   });
 
-  test("resolveSampleForSnapshot 超出窗口范围返回 null", () => {
-    const target = new Date("2026-07-15T00:00:00.000Z").getTime();
-    // 窗口默认 8 小时
+  test("resolveSampleForSnapshot 超出 4 小时窗口范围返回 null", () => {
+    // 相差 5 小时（在 4 小时容差外，拒绝跨批次污染）
+    const target = new Date("2026-07-01T05:00:00.000Z").getTime();
     expect(resolveSampleForSnapshot(samples, target)).toBeNull();
   });
 });
@@ -321,6 +352,16 @@ describe("URL persistence with snapshots and overlay", () => {
 
     expect(serialized).toContain("yt=2026-08-01");
     expect(serialized).toContain("oy=2026-06-01");
+  });
+
+  test("忽略格式非法的 xt, yt, oy 参数", () => {
+    const parsed = parseScatterSearchParams(
+      new URLSearchParams("x=cost&xt=garbage&yt=2026-08-01T00:00:00.000Z&oy=undefined")
+    );
+    expect(parsed.xKey).toBe("cost");
+    expect(parsed.xSnapshot).toBeUndefined();
+    expect(parsed.ySnapshot).toBe("2026-08-01T00:00:00.000Z");
+    expect(parsed.overlaySnapshot).toBeUndefined();
   });
 });
 

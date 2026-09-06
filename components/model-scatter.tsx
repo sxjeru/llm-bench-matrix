@@ -396,7 +396,7 @@ export function ModelScatter({
 
   const metricGroups = useMemo(() => groupScatterMetrics(metrics), [metrics]);
 
-  // 存档或链接里的轴失效时回落到默认，并顺带套用该指标建议的刻度
+  // 存档或链接里的轴失效时回落到默认，并顺带套用该指标建议的刻度；同时校验快照有效性
   useEffect(() => {
     if (metrics.length === 0) return;
 
@@ -404,18 +404,43 @@ export function ModelScatter({
       setViewState((prev) => {
         const hasX = Boolean(prev.xKey) && metrics.some((metric) => metric.key === prev.xKey);
         const hasY = Boolean(prev.yKey) && metrics.some((metric) => metric.key === prev.yKey);
-        if (hasX && hasY) return prev;
 
-        const defaults = resolveDefaultAxisKeys(metrics);
-        const nextXKey = hasX ? prev.xKey : defaults.xKey;
-        const nextYKey = hasY ? prev.yKey : defaults.yKey;
+        const defaults = !hasX || !hasY ? resolveDefaultAxisKeys(metrics) : null;
+        const nextXKey = hasX ? prev.xKey : defaults!.xKey;
+        const nextYKey = hasY ? prev.yKey : defaults!.yKey;
         const nextXMetric = findScatterMetric(metrics, nextXKey);
         const nextYMetric = findScatterMetric(metrics, nextYKey);
+
+        const validXSnapshot =
+          prev.xSnapshot && nextXMetric?.snapshots.some((s) => s.id === prev.xSnapshot)
+            ? prev.xSnapshot
+            : null;
+        const validYSnapshot =
+          prev.ySnapshot && nextYMetric?.snapshots.some((s) => s.id === prev.ySnapshot)
+            ? prev.ySnapshot
+            : null;
+        const validOverlay =
+          prev.overlaySnapshot &&
+          (nextXMetric?.snapshots.some((s) => s.id === prev.overlaySnapshot) ||
+            nextYMetric?.snapshots.some((s) => s.id === prev.overlaySnapshot))
+            ? prev.overlaySnapshot
+            : null;
+
+        const axisChanged = !hasX || !hasY;
+        const snapshotChanged =
+          validXSnapshot !== prev.xSnapshot ||
+          validYSnapshot !== prev.ySnapshot ||
+          validOverlay !== prev.overlaySnapshot;
+
+        if (!axisChanged && !snapshotChanged) return prev;
 
         return {
           ...prev,
           xKey: nextXKey,
           yKey: nextYKey,
+          xSnapshot: validXSnapshot,
+          ySnapshot: validYSnapshot,
+          overlaySnapshot: validOverlay,
           xScale: hasX ? prev.xScale : nextXMetric?.preferLogScale ? "log" : "linear",
           yScale: hasY ? prev.yScale : nextYMetric?.preferLogScale ? "log" : "linear"
         };
@@ -1045,7 +1070,7 @@ export function ModelScatter({
               onClick={handleClearOverlaySnapshot}
               title="点击清除半透明背景叠加"
             >
-              对比背景: {snapshotOverlay?.snapshotLabel ?? viewState.overlaySnapshot.slice(0, 10)} (叉号✕+橙线) · 点击取消叠加
+              对比背景: {snapshotOverlay?.snapshotLabel ?? viewState.overlaySnapshot.slice(0, 10)} · 点击取消叠加
             </button>
           ) : null}
           {historyNotice ? (

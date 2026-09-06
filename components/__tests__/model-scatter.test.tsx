@@ -558,6 +558,18 @@ describe("ModelScatter", () => {
     expect(axisLabel(container, "x")).toBe("Output Price");
   });
 
+  test("URL 中不存在或不属于当前指标的快照 ID 会被自动清理", async () => {
+    mockSearchParams = new URLSearchParams(
+      "x=params&y=price-output&xt=2026-01-01T00:00:00.000Z&yt=2026-01-01T00:00:00.000Z&oy=2026-01-01T00:00:00.000Z"
+    );
+
+    const { container } = await renderScatter();
+
+    // 价格与参数量不是带快照的历史 benchmark，快照 ID 不存在，不应在界面上残留快照按钮
+    expect(container.querySelector(".scatter-note-snapshot-tag")).toBeNull();
+    expect(screen.queryByText(/快照/)).toBeNull();
+  });
+
   test("没有 URL 参数时读取 localStorage 存档", async () => {
     window.localStorage.setItem("model-scatter:axis-x", "price-input");
 

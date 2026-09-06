@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, History, Search } from "lucide-react";
 import { describeMetricDirection } from "./metrics";
-import type { ScatterMetric, ScatterMetricGroup } from "./types";
+import { SNAPSHOT_MAJOR_MODEL_COUNT_THRESHOLD } from "./constants";
+import type { ScatterMetric, ScatterMetricGroup, ScatterMetricSnapshot } from "./types";
 
 type MetricComboboxProps = {
   id: string;
@@ -301,7 +302,7 @@ export function MetricCombobox({
                               title={`${item.snapshots.length} 个历史评测快照`}
                             >
                               <History size={11} className="inline mr-0.5" />
-                              {item.snapshots.length}个版本
+                              {item.snapshots.length}
                             </span>
                           ) : null}
                         </span>
@@ -358,70 +359,98 @@ export function MetricCombobox({
 
           <div className="scatter-combobox-submenu-list">
             {/* 默认最新 */}
-            <div
-              className={`scatter-combobox-submenu-item ${
-                submenuState.metric.key === metric?.key && !selectedSnapshotId ? "is-selected" : ""
-              }`}
-              onClick={() => selectOption(submenuState.metric.key, null)}
-            >
-              <div className="scatter-combobox-submenu-item-title">
-                <span>最新数据（默认）</span>
-                <span className="scatter-combobox-badge-new">当前</span>
-              </div>
-              <div className="scatter-combobox-submenu-item-sub">
-                取各模型最新导入成绩
-              </div>
-            </div>
-
-            <div className="scatter-combobox-submenu-divider">历史快照批次</div>
-
-            {submenuState.metric.snapshots.map((snapshot) => {
-              const isSelected =
-                submenuState.metric.key === metric?.key &&
-                selectedSnapshotId === snapshot.id;
-              const isOverlay = overlaySnapshotId === snapshot.id;
+            {(() => {
+              const isDefaultSelected =
+                submenuState.metric.key === metric?.key && !selectedSnapshotId;
 
               return (
                 <div
-                  key={snapshot.id}
-                  className={`scatter-combobox-submenu-item ${isSelected ? "is-selected" : ""} ${
-                    isOverlay ? "is-overlay" : ""
-                  }`}
-                  onClick={(event) => {
-                    if (event.ctrlKey || event.metaKey) {
-                      event.stopPropagation();
-                      onToggleOverlaySnapshot?.(snapshot.id);
-                      return;
-                    }
-                    selectOption(submenuState.metric.key, snapshot.id);
-                  }}
+                  className={`scatter-combobox-submenu-item ${isDefaultSelected ? "is-selected" : ""}`}
+                  onClick={() => selectOption(submenuState.metric.key, null)}
                 >
                   <div className="scatter-combobox-submenu-item-title">
-                    <span className="font-medium text-slate-100">{snapshot.label}</span>
-                    <span className="scatter-combobox-badge-count">
-                      {snapshot.modelCount} 模型
-                    </span>
+                    <span>最新数据（默认）</span>
+                    {isDefaultSelected ? (
+                      <span className="scatter-combobox-badge-new">当前</span>
+                    ) : null}
                   </div>
-                  <div className="scatter-combobox-submenu-item-sub flex items-center justify-between">
-                    <span>
-                      {snapshot.isBatchSnapshot ? "公共批量导入" : "评测记录"}
-                    </span>
-                    <div className="flex gap-1">
-                      {isOverlay ? (
-                        <span className="text-amber-400 text-[10.5px] font-semibold">
-                          [已叠加背景]
-                        </span>
-                      ) : null}
-                      {isSelected ? (
-                        <span className="text-blue-400 text-[10.5px] font-semibold">
-                          ✓ 当前主选
-                        </span>
-                      ) : null}
-                    </div>
+                  <div className="scatter-combobox-submenu-item-sub">
+                    取各模型最新导入成绩
                   </div>
                 </div>
               );
-            })}
+            })()}
+
+            {(() => {
+              const snapshots = submenuState.metric.snapshots;
+              const isMajor = (s: ScatterMetricSnapshot) =>
+                Boolean(s.isMajorRevision ?? s.modelCount > SNAPSHOT_MAJOR_MODEL_COUNT_THRESHOLD);
+              const majorSnapshots = snapshots.filter(isMajor);
+              const otherSnapshots = snapshots.filter((s) => !isMajor(s));
+
+              const renderSnapshotItem = (snapshot: ScatterMetricSnapshot) => {
+                const isSelected =
+                  submenuState.metric.key === metric?.key &&
+                  selectedSnapshotId === snapshot.id;
+                const isOverlay = overlaySnapshotId === snapshot.id;
+
+                return (
+                  <div
+                    key={snapshot.id}
+                    className={`scatter-combobox-submenu-item ${isSelected ? "is-selected" : ""} ${
+                      isOverlay ? "is-overlay" : ""
+                    }`}
+                    onClick={(event) => {
+                      if (event.ctrlKey || event.metaKey) {
+                        event.stopPropagation();
+                        onToggleOverlaySnapshot?.(snapshot.id);
+                        return;
+                      }
+                      selectOption(submenuState.metric.key, snapshot.id);
+                    }}
+                  >
+                    <div className="scatter-combobox-submenu-item-title">
+                      <span className="font-medium text-slate-100">{snapshot.label}</span>
+                      <div className="flex items-center gap-1.5">
+                        {isOverlay ? (
+                          <span className="text-amber-400 text-[10.5px] font-semibold">
+                            [已叠加背景]
+                          </span>
+                        ) : null}
+                        {isSelected ? (
+                          <span className="scatter-combobox-badge-new">当前</span>
+                        ) : null}
+                        <span className="scatter-combobox-badge-count">
+                          {snapshot.modelCount} 模型
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              };
+
+              return (
+                <>
+                  {majorSnapshots.length > 0 ? (
+                    <>
+                      <div className="scatter-combobox-submenu-divider">
+                        主要变动
+                      </div>
+                      {majorSnapshots.map(renderSnapshotItem)}
+                    </>
+                  ) : null}
+
+                  {otherSnapshots.length > 0 ? (
+                    <>
+                      <div className="scatter-combobox-submenu-divider">
+                        {majorSnapshots.length > 0 ? "其他历史快照" : "历史快照批次"}
+                      </div>
+                      {otherSnapshots.map(renderSnapshotItem)}
+                    </>
+                  ) : null}
+                </>
+              );
+            })()}
           </div>
         </div>
       ) : null}
