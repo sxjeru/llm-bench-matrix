@@ -55,7 +55,7 @@ export function ScatterTooltip({
   const commonDate = isSameDate ? xDate : null;
 
   return (
-    <div className="scatter-tooltip">
+    <div className="scatter-tooltip backdrop-blur-md">
       <div className="scatter-tooltip-head">
         <span className="scatter-tooltip-swatch" style={{ backgroundColor: point.color }} aria-hidden="true" />
         <span className="scatter-tooltip-model">{point.modelName}</span>

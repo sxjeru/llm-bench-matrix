@@ -55,7 +55,7 @@ export function ScatterHistoryTooltip({
       style={{ left, top }}
       data-placement={placement}
     >
-      <div className="scatter-tooltip scatter-history-tooltip" role="status">
+      <div className="scatter-tooltip scatter-history-tooltip backdrop-blur-md" role="status">
         <div className="scatter-tooltip-head">
           <span
             className="scatter-tooltip-swatch"

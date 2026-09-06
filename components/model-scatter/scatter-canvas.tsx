@@ -1037,7 +1037,7 @@ export function ScatterCanvas({
             style={{ left, top }}
             data-placement={placement}
           >
-            <div className="scatter-tooltip scatter-history-tooltip scatter-overlay-tooltip" role="status">
+            <div className="scatter-tooltip scatter-history-tooltip scatter-overlay-tooltip backdrop-blur-md" role="status">
               <div className="scatter-tooltip-head">
                 <span
                   className="scatter-tooltip-swatch"
