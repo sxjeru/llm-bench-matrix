@@ -123,27 +123,33 @@ export function AdminLoginForm() {
             <h2>请立即修改初始密码</h2>
             <p className="subtitle">检测到你正在使用默认密码 `change-me`，继续前必须先完成改密。</p>
             <form onSubmit={onChangePassword}>
-              <div className="form-row">
-                <div className="span-12">
+              <div className="flex flex-col gap-3">
+                <div>
                   <input
                     type="password"
+                    className="input input-bordered w-full"
                     placeholder="请输入新密码（至少8位）"
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     required
                   />
                 </div>
-                <div className="span-12">
+                <div>
                   <input
                     type="password"
+                    className="input input-bordered w-full"
                     placeholder="再次输入新密码"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     required
                   />
                 </div>
-                <div className="span-12">
-                  <button type="submit" disabled={changingPassword || loginStatus === "redirecting"}>
+                <div>
+                  <button
+                    type="submit"
+                    className="btn btn-primary w-full"
+                    disabled={changingPassword || loginStatus === "redirecting"}
+                  >
                     {changingPassword || loginStatus === "redirecting"
                       ? "正在进入后台..."
                       : "保存新密码并进入后台"}
@@ -162,18 +168,23 @@ export function AdminLoginForm() {
         {error ? <div className="notice error">{error}</div> : null}
 
         <form onSubmit={onSubmit}>
-          <div className="form-row">
-            <div className="span-12">
+          <div className="flex flex-col gap-3">
+            <div>
               <input
                 type="password"
+                className="input input-bordered w-full"
                 placeholder="请输入后台密码"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
               />
             </div>
-            <div className="span-12">
-              <button type="submit" disabled={loginStatus !== "idle"}>
+            <div>
+              <button
+                type="submit"
+                className="btn btn-primary w-full"
+                disabled={loginStatus !== "idle"}
+              >
                 {loginStatus === "redirecting"
                   ? "正在进入后台..."
                   : loginStatus === "submitting"

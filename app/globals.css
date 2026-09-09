@@ -534,75 +534,9 @@ select optgroup {
   color: var(--text);
 }
 
-input:not(.input):not(.file-input):not(.checkbox):not(.toggle):not(.radio),
-select:not(.select),
-textarea:not(.textarea),
-button:not(.btn):not(.tab):not(.ranking-popover-button):not(.cell-trend-button):not(.scatter-btn):not(.admin-upstream-combobox-clear):not(.pricing-date-btn):not(.pricing-date-clear):not(.link):not(.input) {
-  width: 100%;
-  border-radius: 10px;
-  border: 1px solid #354261;
-  background: #0f172a;
-  color: var(--text);
-  padding: 10px 12px;
-  font-size: 14px;
-}
-
-textarea:not(.textarea) {
-  min-height: 120px;
-  resize: vertical;
-}
-
-button:not(.btn):not(.tab):not(.ranking-popover-button):not(.cell-trend-button):not(.scatter-btn):not(.admin-upstream-combobox-clear):not(.pricing-date-btn):not(.pricing-date-clear):not(.link):not(.input) {
+/* 默认给所有未禁用的原生 button 提供指针光标（Tailwind v4 preflight 默认将其重置为 default） */
+button:not(:disabled) {
   cursor: pointer;
-  background: linear-gradient(135deg, #355dff, #4a9aff);
-  border-color: transparent;
-  font-weight: 600;
-}
-
-.ranking-popover-button,
-.cell-trend-button {
-  cursor: pointer;
-}
-
-button.secondary {
-  background: #1d2740;
-  border-color: #3a4b76;
-}
-
-button.danger {
-  background: linear-gradient(135deg, #ff5a70, #ff7b86);
-}
-
-.form-row {
-  display: grid;
-  grid-template-columns: repeat(12, 1fr);
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.form-row > .span-3 {
-  grid-column: span 3;
-}
-
-.form-row > .span-4 {
-  grid-column: span 4;
-}
-
-.form-row > .span-6 {
-  grid-column: span 6;
-}
-
-.form-row > .span-12 {
-  grid-column: span 12;
-}
-
-@media (max-width: 900px) {
-  .form-row > .span-3,
-  .form-row > .span-4,
-  .form-row > .span-6,
-  .form-row > .span-12 {
-    grid-column: span 12;
-  }
 }
 
 .notice {
@@ -1941,7 +1875,7 @@ input.heatmap-alpha-range::-moz-range-track {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  width: auto !important;
+  width: auto;
   max-width: fit-content;
   height: 22px;
   padding: 0 8px;
