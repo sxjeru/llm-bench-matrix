@@ -114,6 +114,7 @@ import {
   MAX_BENCHMARK_COLUMN_WIDTH,
   MIN_MODEL_COLUMN_RESIZE_WIDTH,
   MAX_MODEL_COLUMN_WIDTH,
+  FRONTEND_TABLE_PAIR_VALUE_REGEX,
   HEATMAP_PRESETS,
   DEFAULT_HEATMAP_PRESET_KEY,
   DEFAULT_HEATMAP_ALPHA,
@@ -164,8 +165,6 @@ const RANKING_POPOVER_MARGIN = 16;
 const RANKING_POPOVER_MAX_WIDTH = 860;
 const CELL_TOOLTIP_HIDE_DELAY_MS = 140;
 const BOX_PLOT_TOOLTIP_LEFT_OFFSET = 88;
-const FRONTEND_TABLE_PAIR_VALUE_REGEX =
-  /^\s*((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?[^\s/]*)\s*\/\s*((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?.*)\s*$/;
 const PAIR_VALUE_SLASH_CLASS_NAME = "mx-[2px] opacity-85";
 
 /** 单行渲染所需的名次阈值与色阶基准，由 rowRenderMetricsByKey 预先算好 */
@@ -1417,6 +1416,8 @@ export function BenchmarkMatrix({
   } = useMatrixColumnWidths({
     modelColumns,
     coveragePrunedRows,
+    matrixRows: displayMatrixRows,
+    baseSourceRows,
     showDuplicateRows,
     displaySourceValuesInCells,
     sourceValueMode,
@@ -2632,7 +2633,7 @@ export function BenchmarkMatrix({
                       : shouldShowQuestionMark) && !showAnyDeltaBadge;
 
                     const basePadding = showQuestionMarkIcon
-                      ? (isPairNumericDisplay ? 18 : 22)
+                      ? 22
                       : 6;
                     const comparePadding = showAnyDeltaBadge
                       ? Math.min(28, 9 + activeDeltaText.length * 3)

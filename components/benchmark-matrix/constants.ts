@@ -40,6 +40,9 @@ export const DEFAULT_MODEL_COLUMN_BASELINE_WIDTH = 88;
 export const MIN_MODEL_COLUMN_RESIZE_WIDTH = 24;
 export const COMPARE_BASELINE_DEFAULT_EXPANDED_WIDTH = 86;
 export const COMPARE_BADGE_DEFAULT_EXPANDED_WIDTH = 100;
+export const DUAL_VALUE_QUESTION_MARK_MIN_WIDTH = 112;
+export const FRONTEND_TABLE_PAIR_VALUE_REGEX =
+  /^\s*((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?[^\s/]*)\s*\/\s*((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?.*)\s*$/;
 export const MAX_MODEL_COLUMN_WIDTH = 320;
 export const COLUMN_WIDTH_STORAGE_DEBOUNCE_MS = 250;
 export const ALL_SOURCE_ROW_COVERAGE_THRESHOLD = 0.4;

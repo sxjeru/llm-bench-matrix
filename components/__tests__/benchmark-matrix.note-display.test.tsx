@@ -356,4 +356,35 @@ describe("BenchmarkMatrix 星号值显示", () => {
     expect(valueCell).toHaveTextContent("2x/3x");
     expect(screen.getByText("3x")).toBeInTheDocument();
   });
+
+  test("双值带备注的单元格内边距为 22px 且列宽自适应扩展", async () => {
+    const { container } = await renderReady(
+      <BenchmarkMatrix
+        rows={[
+          {
+            providerName: "OpenAI",
+            modelName: "GPT-5-mini High",
+            benchmarkName: "Terminal Bench 2.0",
+            benchmarkType: "Coding Agent",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "58.4 / 62.1",
+            valueNum: 58.4,
+            valueNum2: 62.1,
+            valueNote: "0-shot / 5-shot",
+            source: "text:demo"
+          }
+        ]}
+      />
+    );
+
+    const valueCell = screen.getByText("58.4").closest("td");
+    expect(valueCell).not.toBeNull();
+    expect(valueCell).toHaveStyle({ paddingRight: "22px" });
+    expect(valueCell).toHaveStyle({ width: "112px" });
+
+    const questionMark = Array.from(container.querySelectorAll("span")).find(
+      (node) => node.textContent === "?" && !node.hasAttribute("data-overall-tooltip-trigger")
+    );
+    expect(questionMark).toBeTruthy();
+  });
 });

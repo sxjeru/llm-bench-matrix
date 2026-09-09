@@ -16,6 +16,8 @@ import {
   DEFAULT_BENCHMARK_COLUMN_WIDTH,
   DEFAULT_CATEGORY_COLUMN_WIDTH,
   DEFAULT_MODEL_COLUMN_BASELINE_WIDTH,
+  DUAL_VALUE_QUESTION_MARK_MIN_WIDTH,
+  FRONTEND_TABLE_PAIR_VALUE_REGEX,
   MAX_BENCHMARK_COLUMN_WIDTH,
   MAX_CATEGORY_COLUMN_WIDTH,
   MAX_MODEL_COLUMN_WIDTH,
@@ -26,11 +28,14 @@ import {
 import { formatComparisonDeltaValue } from "./formatters";
 import {
   getMatrixCellDisplayValue,
+  getMatrixCellPairDisplayParts,
+  hasMatrixCellPairRawValue,
   isLowerBetterBenchmark
 } from "./scoring";
 import type {
   MatrixCellEntry,
   MatrixInputRow,
+  MatrixRow,
   ProviderIdentity
 } from "./types";
 import { saveColumnWidthBySource } from "./persistence";
@@ -81,7 +86,9 @@ type SourceMatchedGroupBoundaryByModel = {
 
 type BuildAutoModelWidthMapOptions = {
   modelColumns: readonly string[];
-  coveragePrunedRows: readonly MatrixInputRow[];
+  coveragePrunedRows?: readonly MatrixInputRow[];
+  matrixRows?: readonly MatrixRow[];
+  baseSourceRows?: readonly MatrixInputRow[];
   showDuplicateRows: boolean;
   displaySourceValuesInCells: boolean;
   displaySourceValueDeltasInCells: boolean;
@@ -148,9 +155,69 @@ function createMeasureTextWidth(): (text: string, font: string) => number {
   };
 }
 
+export function measureCellDisplayWidth(
+  displayValue: string,
+  isPair: boolean,
+  pairParts: { first: string; second: string } | null,
+  showQuestionMark: boolean,
+  sourceDeltaPadding: number,
+  measureTextWidth: (text: string, font: string) => number
+): number {
+  let textWidth = 0;
+  if (isPair) {
+    let first = "";
+    let second = "";
+    if (pairParts) {
+      first = pairParts.first;
+      second = pairParts.second;
+    } else {
+      const match = displayValue.match(FRONTEND_TABLE_PAIR_VALUE_REGEX);
+      if (match) {
+        first = match[1].trim();
+        second = match[2].trim();
+      }
+    }
+
+    if (first && second) {
+      // 真实 DOM 渲染为：first + mx-[2px] (4px margin) + "/" + second
+      // 粗体名次样式 (fontWeight: 800) 会增加字宽，额外预留 4px buffer
+      textWidth =
+        measureTextWidth(first, "600 14px Inter, ui-sans-serif, system-ui") +
+        measureTextWidth("/", "600 14px Inter, ui-sans-serif, system-ui") +
+        4 +
+        measureTextWidth(second, "600 14px Inter, ui-sans-serif, system-ui") +
+        4;
+    } else {
+      textWidth = measureTextWidth(displayValue, "600 14px Inter, ui-sans-serif, system-ui") + 4;
+    }
+  } else {
+    textWidth = measureTextWidth(displayValue, "600 14px Inter, ui-sans-serif, system-ui");
+  }
+
+  // 单元格横向装饰空间与内边距：
+  // 基础 paddingLeft 为 6px。
+  // 问号存在时：右内边距为 22px，问号宽 16px 位于距右 4px，预留 8px 安全缓冲避免截断或挤压 (6 + 22 + 8 = 36px)
+  // 无问号时：paddingLeft 6px + paddingRight 6px + buffer 6px = 18px
+  let decorationPadding = 18;
+  if (showQuestionMark) {
+    decorationPadding = 36;
+  } else if (sourceDeltaPadding > 0) {
+    decorationPadding = 18 + sourceDeltaPadding;
+  }
+
+  let measured = textWidth + decorationPadding;
+  if (isPair && showQuestionMark) {
+    measured = Math.max(measured, DUAL_VALUE_QUESTION_MARK_MIN_WIDTH);
+  }
+
+  return measured;
+}
+
 export function buildAutoModelWidthMap({
   modelColumns,
-  coveragePrunedRows,
+  coveragePrunedRows = [],
+  matrixRows,
+  baseSourceRows,
   showDuplicateRows,
   displaySourceValuesInCells,
   displaySourceValueDeltasInCells,
@@ -160,101 +227,188 @@ export function buildAutoModelWidthMap({
   const map = new Map<string, number>();
   const valueWidthByModel = new Map<string, number>();
   const measureTextWidth = createMeasureTextWidth();
-  const entriesByGroup = new Map<string, MatrixCellEntry[]>();
-  const preferredEntryByGroup = new Map<string, MatrixCellEntry>();
-  const higherIsBetterByGroup = new Map<string, boolean>();
-  const modelNameByGroup = new Map<string, string>();
 
-  coveragePrunedRows.forEach((row) => {
-    const groupKey = `${getMatrixGroupingKey(row, showDuplicateRows)}::${row.modelName}`;
+  if (matrixRows && matrixRows.length > 0) {
+    matrixRows.forEach((row) => {
+      modelColumns.forEach((modelName) => {
+        const cell = row.cells.get(modelName);
+        if (!cell) return;
 
-    const entry: MatrixCellEntry = {
-      recordId: row.recordId ?? null,
-      valueRaw: row.valueRaw,
-      valueNum: row.valueNum,
-      valueNum2: row.valueNum2 ?? null,
-      valueNote: row.valueNote ?? null,
-      source: row.source ?? null,
-      benchTime: row.benchTime
-    };
+        const noteText = (cell.noteText ?? "").trim();
+        const hasMeaningfulMultipleValues = cell.hasMeaningfulMultipleValues;
+        const hasMultipleActiveSourceValues = cell.hasMultipleActiveSourceValues;
+        const shouldShowQuestionMark = cell.shouldShowQuestionMark;
 
-    if (!entriesByGroup.has(groupKey)) {
-      entriesByGroup.set(groupKey, []);
-      const rowHigherIsBetter = typeof row.higherIsBetter === "boolean"
-        ? row.higherIsBetter
-        : !isLowerBetterBenchmark(row.benchmarkName, row.benchmarkType);
-      higherIsBetterByGroup.set(groupKey, rowHigherIsBetter);
-    }
-    entriesByGroup.get(groupKey)!.push(entry);
+        const sourceValueItem = displaySourceValuesInCells && hasMeaningfulMultipleValues
+          ? getSourceValueDisplayItem(cell.uniqueEntries, activeSource, row.higherIsBetter, sourceValueMode)
+          : null;
+        const sourceDeltaRaw = displaySourceValueDeltasInCells && hasMeaningfulMultipleValues
+          ? getSourceValueDeltaRaw(cell.allEntries, activeSource, row.higherIsBetter, sourceValueMode)
+          : null;
+        const shouldRenderSourceValues = Boolean(sourceValueItem);
+        const hasSourceValueNote = noteText.length > 0 && noteText.toLowerCase() !== "x";
+        const showQuestionMarkIcon = shouldRenderSourceValues
+          ? (hasSourceValueNote || hasMultipleActiveSourceValues)
+          : shouldShowQuestionMark;
 
-    const groupHigherIsBetter = higherIsBetterByGroup.get(groupKey) ?? true;
-    const groupEntries = entriesByGroup.get(groupKey) ?? [entry];
-    if (resolveMatrixCellAggregateModeFromEntries(groupEntries) === "latest") {
-      const latest = getLatestMatrixCellEntry(groupEntries);
-      if (latest) preferredEntryByGroup.set(groupKey, latest);
-    } else {
-      const preferred = preferredEntryByGroup.get(groupKey);
-      if (!preferred || (entry.valueNum !== null && (preferred.valueNum === null || (groupHigherIsBetter ? entry.valueNum > preferred.valueNum : entry.valueNum < preferred.valueNum)))) {
-        preferredEntryByGroup.set(groupKey, entry);
+        const rawDisplayValue = shouldRenderSourceValues && sourceValueItem
+          ? sourceValueItem.displayValue
+          : (cell.displayValue ?? "--");
+
+        const pairParts = getMatrixCellPairDisplayParts(cell.valueNum, cell.valueNum2, cell.valueRaw, cell.valueNote);
+        const isPair =
+          cell.valueNum2 !== null ||
+          hasMatrixCellPairRawValue(cell.valueRaw) ||
+          Boolean(pairParts) ||
+          FRONTEND_TABLE_PAIR_VALUE_REGEX.test(rawDisplayValue);
+
+        const sourceDeltaPadding = sourceDeltaRaw !== null
+          ? Math.min(28, 9 + formatComparisonDeltaValue(sourceDeltaRaw).length * 3)
+          : 0;
+
+        const measured = measureCellDisplayWidth(
+          rawDisplayValue,
+          isPair,
+          pairParts,
+          showQuestionMarkIcon,
+          sourceDeltaPadding,
+          measureTextWidth
+        );
+
+        const previous = valueWidthByModel.get(modelName) ?? 0;
+        if (measured > previous) {
+          valueWidthByModel.set(modelName, measured);
+        }
+      });
+    });
+  } else {
+    const entriesByGroup = new Map<string, MatrixCellEntry[]>();
+    const preferredEntryByGroup = new Map<string, MatrixCellEntry>();
+    const higherIsBetterByGroup = new Map<string, boolean>();
+    const modelNameByGroup = new Map<string, string>();
+
+    const rowsForEntries = baseSourceRows && baseSourceRows.length > 0 ? baseSourceRows : coveragePrunedRows;
+    rowsForEntries.forEach((row) => {
+      const groupKey = `${getMatrixGroupingKey(row, showDuplicateRows)}::${row.modelName}`;
+
+      const entry: MatrixCellEntry = {
+        recordId: row.recordId ?? null,
+        valueRaw: row.valueRaw,
+        valueNum: row.valueNum,
+        valueNum2: row.valueNum2 ?? null,
+        valueNote: row.valueNote ?? null,
+        source: row.source ?? null,
+        benchTime: row.benchTime
+      };
+
+      if (!entriesByGroup.has(groupKey)) {
+        entriesByGroup.set(groupKey, []);
+        const rowHigherIsBetter = typeof row.higherIsBetter === "boolean"
+          ? row.higherIsBetter
+          : !isLowerBetterBenchmark(row.benchmarkName, row.benchmarkType);
+        higherIsBetterByGroup.set(groupKey, rowHigherIsBetter);
       }
-    }
+      entriesByGroup.get(groupKey)!.push(entry);
 
-    modelNameByGroup.set(groupKey, row.modelName);
-  });
-
-  entriesByGroup.forEach((entries, groupKey) => {
-    const modelName = modelNameByGroup.get(groupKey);
-    if (!modelName || entries.length === 0) return;
-
-    const preferredEntry = resolveMatrixCellAggregateModeFromEntries(entries) === "latest"
-      ? (getLatestMatrixCellEntry(entries) ?? preferredEntryByGroup.get(groupKey) ?? entries[0]!)
-      : (preferredEntryByGroup.get(groupKey) ?? entries[0]!);
-    const displayValue = getMatrixCellDisplayValue(
-      preferredEntry.valueNum,
-      preferredEntry.valueNum2,
-      preferredEntry.valueRaw,
-      preferredEntry.valueNote
-    );
-
-    const uniqueEntriesMap = new Map<string, MatrixCellEntry>();
-    entries.forEach((entry) => {
-      const dedupKey = getMatrixCellSourceValueDedupKey(entry);
-      const existing = uniqueEntriesMap.get(dedupKey);
-      if (!existing || compareMatrixCellEntryRecency(entry, existing) > 0) {
-        uniqueEntriesMap.set(dedupKey, entry);
+      const groupHigherIsBetter = higherIsBetterByGroup.get(groupKey) ?? true;
+      const groupEntries = entriesByGroup.get(groupKey) ?? [entry];
+      if (resolveMatrixCellAggregateModeFromEntries(groupEntries) === "latest") {
+        const latest = getLatestMatrixCellEntry(groupEntries);
+        if (latest) preferredEntryByGroup.set(groupKey, latest);
+      } else {
+        const preferred = preferredEntryByGroup.get(groupKey);
+        if (!preferred || (entry.valueNum !== null && (preferred.valueNum === null || (groupHigherIsBetter ? entry.valueNum > preferred.valueNum : entry.valueNum < preferred.valueNum)))) {
+          preferredEntryByGroup.set(groupKey, entry);
+        }
       }
+
+      modelNameByGroup.set(groupKey, row.modelName);
     });
 
-    const uniqueEntries = Array.from(uniqueEntriesMap.values());
-    const valueIdentitySet = new Set(uniqueEntries.map((entry) => getMatrixCellValueIdentity(entry)));
-    const noteText = (preferredEntry.valueNote ?? "").trim();
-    const hasMeaningfulMultipleValues = uniqueEntries.length > 1 && valueIdentitySet.size > 1;
-    const questionMarkPadding = hasMeaningfulMultipleValues || noteText.length > 0 ? 16 : 0;
-    const groupHigherIsBetter = higherIsBetterByGroup.get(groupKey) ?? true;
-    const sourceValueItem = hasMeaningfulMultipleValues
-      ? getSourceValueDisplayItem(uniqueEntries, activeSource, groupHigherIsBetter, sourceValueMode)
-      : null;
-    const sourceDeltaRaw = displaySourceValueDeltasInCells && hasMeaningfulMultipleValues
-      ? getSourceValueDeltaRaw(uniqueEntries, activeSource, groupHigherIsBetter, sourceValueMode)
-      : null;
-    const sourceDeltaPadding = sourceDeltaRaw !== null
-      ? Math.min(28, 9 + formatComparisonDeltaValue(sourceDeltaRaw).length * 3)
-      : 0;
+    entriesByGroup.forEach((entries, groupKey) => {
+      const modelName = modelNameByGroup.get(groupKey);
+      if (!modelName || entries.length === 0) return;
 
-    const compactDisplayValue = displayValue.replace(/\s*\/\s*/g, "/");
-    const sourceValueWidth = displaySourceValuesInCells && sourceValueItem
-      ? measureTextWidth(sourceValueItem.displayValue, "600 14px Inter, ui-sans-serif, system-ui") + 18 + questionMarkPadding + sourceDeltaPadding
-      : 0;
-    const measured = Math.max(
-      measureTextWidth(compactDisplayValue, "600 14px Inter, ui-sans-serif, system-ui") + 18 + questionMarkPadding,
-      sourceValueWidth
-    );
-    const previous = valueWidthByModel.get(modelName) ?? 0;
+      const preferredEntry = resolveMatrixCellAggregateModeFromEntries(entries) === "latest"
+        ? (getLatestMatrixCellEntry(entries) ?? preferredEntryByGroup.get(groupKey) ?? entries[0]!)
+        : (preferredEntryByGroup.get(groupKey) ?? entries[0]!);
+      const displayValue = getMatrixCellDisplayValue(
+        preferredEntry.valueNum,
+        preferredEntry.valueNum2,
+        preferredEntry.valueRaw,
+        preferredEntry.valueNote
+      );
 
-    if (measured > previous) {
-      valueWidthByModel.set(modelName, measured);
-    }
-  });
+      const uniqueEntriesMap = new Map<string, MatrixCellEntry>();
+      entries.forEach((entry) => {
+        const dedupKey = getMatrixCellSourceValueDedupKey(entry);
+        const existing = uniqueEntriesMap.get(dedupKey);
+        if (!existing || compareMatrixCellEntryRecency(entry, existing) > 0) {
+          uniqueEntriesMap.set(dedupKey, entry);
+        }
+      });
+
+      const uniqueEntries = Array.from(uniqueEntriesMap.values());
+      const valueIdentitySet = new Set(uniqueEntries.map((entry) => getMatrixCellValueIdentity(entry)));
+      const noteText = (preferredEntry.valueNote ?? "").trim();
+      const hasMeaningfulMultipleValues = uniqueEntries.length > 1 && valueIdentitySet.size > 1;
+      const showQuestionMarkIcon = hasMeaningfulMultipleValues || (noteText.length > 0 && noteText.toLowerCase() !== "x");
+      const groupHigherIsBetter = higherIsBetterByGroup.get(groupKey) ?? true;
+      const sourceValueItem = hasMeaningfulMultipleValues
+        ? getSourceValueDisplayItem(uniqueEntries, activeSource, groupHigherIsBetter, sourceValueMode)
+        : null;
+      const sourceDeltaRaw = displaySourceValueDeltasInCells && hasMeaningfulMultipleValues
+        ? getSourceValueDeltaRaw(uniqueEntries, activeSource, groupHigherIsBetter, sourceValueMode)
+        : null;
+      const sourceDeltaPadding = sourceDeltaRaw !== null
+        ? Math.min(28, 9 + formatComparisonDeltaValue(sourceDeltaRaw).length * 3)
+        : 0;
+
+      const pairParts = getMatrixCellPairDisplayParts(
+        preferredEntry.valueNum,
+        preferredEntry.valueNum2,
+        preferredEntry.valueRaw,
+        preferredEntry.valueNote
+      );
+      const isPair =
+        preferredEntry.valueNum2 !== null ||
+        hasMatrixCellPairRawValue(preferredEntry.valueRaw) ||
+        Boolean(pairParts) ||
+        FRONTEND_TABLE_PAIR_VALUE_REGEX.test(displayValue);
+
+      let measured = measureCellDisplayWidth(
+        displayValue,
+        isPair,
+        pairParts,
+        showQuestionMarkIcon,
+        sourceDeltaPadding,
+        measureTextWidth
+      );
+
+      if (displaySourceValuesInCells && sourceValueItem) {
+        const sourcePairParts = FRONTEND_TABLE_PAIR_VALUE_REGEX.test(sourceValueItem.displayValue)
+          ? {
+              first: sourceValueItem.displayValue.match(FRONTEND_TABLE_PAIR_VALUE_REGEX)![1].trim(),
+              second: sourceValueItem.displayValue.match(FRONTEND_TABLE_PAIR_VALUE_REGEX)![2].trim()
+            }
+          : null;
+        const sourceWidth = measureCellDisplayWidth(
+          sourceValueItem.displayValue,
+          Boolean(sourcePairParts),
+          sourcePairParts,
+          showQuestionMarkIcon,
+          sourceDeltaPadding,
+          measureTextWidth
+        );
+        measured = Math.max(measured, sourceWidth);
+      }
+
+      const previous = valueWidthByModel.get(modelName) ?? 0;
+      if (measured > previous) {
+        valueWidthByModel.set(modelName, measured);
+      }
+    });
+  }
 
   modelColumns.forEach((modelName) => {
     const valueWidth = valueWidthByModel.get(modelName) ?? 0;
@@ -390,9 +544,12 @@ export function buildModelColumnMeta({
       ? COMPARE_BASELINE_DEFAULT_EXPANDED_WIDTH
       : COMPARE_BADGE_DEFAULT_EXPANDED_WIDTH;
     const shouldApplyCompareExpandedDefault = isCompareSelected && !hasManualWidthOverride;
+    const baseWidth = hasManualWidthOverride
+      ? (storedWidth ?? autoWidth)
+      : Math.max(storedWidth ?? autoWidth, autoWidth);
     const preferredWidth = shouldApplyCompareExpandedDefault
-      ? Math.max(storedWidth ?? autoWidth, compareExpandedDefaultWidth)
-      : (storedWidth ?? autoWidth);
+      ? Math.max(baseWidth, compareExpandedDefaultWidth)
+      : baseWidth;
     const columnWidth = clampColumnWidth(
       preferredWidth,
       MIN_MODEL_COLUMN_RESIZE_WIDTH,
@@ -543,6 +700,8 @@ export function useMatrixColumnResize({
 export function useMatrixColumnWidths({
   modelColumns,
   coveragePrunedRows,
+  matrixRows,
+  baseSourceRows,
   showDuplicateRows,
   displaySourceValuesInCells,
   displaySourceValueDeltasInCells,
@@ -568,6 +727,8 @@ export function useMatrixColumnWidths({
       return buildAutoModelWidthMap({
         modelColumns,
         coveragePrunedRows,
+        matrixRows,
+        baseSourceRows,
         showDuplicateRows,
         displaySourceValuesInCells,
         displaySourceValueDeltasInCells,
@@ -575,7 +736,12 @@ export function useMatrixColumnWidths({
         sourceValueMode
       });
     },
-    [isColumnWidthLoaded, modelColumns, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, displaySourceValueDeltasInCells, activeSource, sourceValueMode]
+    [isColumnWidthLoaded, modelColumns, coveragePrunedRows, matrixRows, baseSourceRows, showDuplicateRows, displaySourceValuesInCells, displaySourceValueDeltasInCells, activeSource, sourceValueMode]
+  );
+
+  const columnWidthOverrideKeySet = useMemo(
+    () => buildColumnWidthOverrideKeySet(columnWidthOverrideKeys),
+    [columnWidthOverrideKeys]
   );
 
   useEffect(() => {
@@ -640,11 +806,6 @@ export function useMatrixColumnWidths({
   const sourceMatchedGroupBoundaryByModel = useMemo(
     () => buildSourceMatchedGroupBoundaryByModel(modelColumns, sourceMatchedModelSet),
     [modelColumns, sourceMatchedModelSet]
-  );
-
-  const columnWidthOverrideKeySet = useMemo(
-    () => buildColumnWidthOverrideKeySet(columnWidthOverrideKeys),
-    [columnWidthOverrideKeys]
   );
 
   const modelColumnMeta = useMemo(
