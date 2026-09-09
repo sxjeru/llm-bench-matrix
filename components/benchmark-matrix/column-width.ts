@@ -196,11 +196,13 @@ export function measureCellDisplayWidth(
 
   // 单元格横向装饰空间与内边距：
   // 基础 paddingLeft 为 6px。
-  // 问号存在时：右内边距为 22px，问号宽 16px 位于距右 4px，预留 8px 安全缓冲避免截断或挤压 (6 + 22 + 8 = 36px)
+  // 问号存在时：
+  // - 双值场景：紧凑排布，左内边距 6px + 问号占位 20px (图标 16px + 距右 4px) + 紧凑缓冲 2px = 28px，避免双值与问号间距过大
+  // - 单值场景：左内边距 6px + 右内边距 22px + 安全缓冲 8px = 36px
   // 无问号时：paddingLeft 6px + paddingRight 6px + buffer 6px = 18px
   let decorationPadding = 18;
   if (showQuestionMark) {
-    decorationPadding = 36;
+    decorationPadding = isPair ? 28 : 36;
   } else if (sourceDeltaPadding > 0) {
     decorationPadding = 18 + sourceDeltaPadding;
   }

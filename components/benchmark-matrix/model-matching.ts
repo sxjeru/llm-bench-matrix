@@ -78,6 +78,29 @@ export function compareSourceTabKeysByVersion(leftKey: string, rightKey: string)
     return tierCompare;
   }
 
+  const leftVariantToken = extractModelVariantToken(leftLabel);
+  const rightVariantToken = extractModelVariantToken(rightLabel);
+  if (
+    leftVariantToken &&
+    rightVariantToken &&
+    leftVariantToken.familyKey.length > 0 &&
+    leftVariantToken.familyKey === rightVariantToken.familyKey
+  ) {
+    if (
+      leftVersionToken &&
+      rightVersionToken &&
+      leftVersionToken.familyKey === rightVersionToken.familyKey &&
+      rightVersionToken.version !== leftVersionToken.version
+    ) {
+      return rightVersionToken.version - leftVersionToken.version;
+    }
+
+    const variantCompare = compareModelVariantPriority(leftVariantToken.variant, rightVariantToken.variant);
+    if (variantCompare !== 0) {
+      return variantCompare;
+    }
+  }
+
   if (
     leftVersionToken &&
     rightVersionToken &&
@@ -85,20 +108,6 @@ export function compareSourceTabKeysByVersion(leftKey: string, rightKey: string)
   ) {
     if (rightVersionToken.version !== leftVersionToken.version) {
       return rightVersionToken.version - leftVersionToken.version;
-    }
-
-    const leftVariantToken = extractModelVariantToken(leftLabel);
-    const rightVariantToken = extractModelVariantToken(rightLabel);
-    if (
-      leftVariantToken &&
-      rightVariantToken &&
-      leftVariantToken.familyKey.length > 0 &&
-      leftVariantToken.familyKey === rightVariantToken.familyKey
-    ) {
-      const variantCompare = compareModelVariantPriority(leftVariantToken.variant, rightVariantToken.variant);
-      if (variantCompare !== 0) {
-        return variantCompare;
-      }
     }
 
     const scaleCompare = compareModelScaleSize(leftLabel, rightLabel);
@@ -199,6 +208,7 @@ export function extractModelVariantToken(modelName: string): ModelVariantToken |
     }
     if (/\bultra\b/.test(normalized)) return "ultra";
     if (/\bsuper\b/.test(normalized)) return "super";
+    if (/\bmax\b/.test(normalized)) return "max";
     if (/\bpro\b/.test(normalized)) return "pro";
     if (MODEL_FLASH_LITE_PATTERN.test(normalized)) return "flash-lite";
     if (/\bflash\b/.test(normalized)) return "flash";
@@ -214,11 +224,11 @@ export function extractModelVariantToken(modelName: string): ModelVariantToken |
        normalized.match(/\bluna\b/))
     : null) ??
     normalized.match(MODEL_FLASH_LITE_PATTERN) ??
-    normalized.match(/\b(?:ultra|super|pro|flash|mini|nano)\b/);
+    normalized.match(/\b(?:ultra|super|max|pro|flash|mini|nano)\b/);
 
   const familyKey = normalized
     .slice(0, variantMatch?.index ?? normalized.length)
-    .replace(/\b\d+(?:\.\d+)+\b/g, " ")
+    .replace(/(?<=\D|^)\d+(?:\.\d+)+(?=\D|$)/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -237,6 +247,7 @@ export function compareModelVariantPriority(
   const priority: Record<ModelVariantToken["variant"], number> = {
     "sol-ultra": 9,
     ultra: 8,
+    max: 7.5,
     super: 7,
     pro: 6,
     sol: 5.8,

@@ -41,8 +41,8 @@ describe("measureCellDisplayWidth", () => {
     expect(width).toBe(89);
   });
 
-  test("双值带问号至少达到 DUAL_VALUE_QUESTION_MARK_MIN_WIDTH (112px)", () => {
-    // 71 + 36 = 107px, 自动应用 DUAL_VALUE_QUESTION_MARK_MIN_WIDTH (112px) 下限
+  test("双值带问号至少达到 DUAL_VALUE_QUESTION_MARK_MIN_WIDTH (100px)", () => {
+    // 71 + 28 = 99px, 自动应用 DUAL_VALUE_QUESTION_MARK_MIN_WIDTH (100px) 下限
     const width = measureCellDisplayWidth(
       "58.4 / 62.1",
       true,
@@ -52,12 +52,12 @@ describe("measureCellDisplayWidth", () => {
       mockMeasure
     );
     expect(width).toBeGreaterThanOrEqual(DUAL_VALUE_QUESTION_MARK_MIN_WIDTH);
-    expect(width).toBe(112);
+    expect(width).toBe(100);
   });
 
-  test("较长双值带问号根据内容自适应扩宽至 120px 以上", () => {
+  test("较长双值带问号根据内容自适应扩宽至 110px 以上", () => {
     // "100.0" (35) + "/" (7) + 4 + "100.0" (35) + 4 = 85px
-    // 85 + 36 = 121px
+    // 85 + 28 = 113px
     const width = measureCellDisplayWidth(
       "100.0 / 100.0",
       true,
@@ -66,11 +66,11 @@ describe("measureCellDisplayWidth", () => {
       0,
       mockMeasure
     );
-    expect(width).toBeGreaterThanOrEqual(121);
+    expect(width).toBeGreaterThanOrEqual(113);
   });
 
   test("带货币符号的长双值带问号自适应扩宽", () => {
-    // "$0.15" (35) + "/" (7) + 4 + "$0.60" (35) + 4 = 85px -> 85 + 36 = 121px
+    // "$0.15" (35) + "/" (7) + 4 + "$0.60" (35) + 4 = 85px -> 85 + 28 = 113px
     const width = measureCellDisplayWidth(
       "$0.15 / $0.60",
       true,
@@ -79,7 +79,7 @@ describe("measureCellDisplayWidth", () => {
       0,
       mockMeasure
     );
-    expect(width).toBeGreaterThanOrEqual(121);
+    expect(width).toBeGreaterThanOrEqual(113);
   });
 });
 
@@ -111,7 +111,7 @@ describe("buildAutoModelWidthMap", () => {
     expect(map.get(getModelColumnWidthKey("GPT-4o"))).toBe(DEFAULT_MODEL_COLUMN_BASELINE_WIDTH);
   });
 
-  test("双值+问号单元格自动将列宽扩展至至少 112px", () => {
+  test("双值+问号单元格自动将列宽扩展至至少 100px", () => {
     const rows: MatrixInputRow[] = [
       {
         providerName: "OpenAI",
@@ -139,7 +139,7 @@ describe("buildAutoModelWidthMap", () => {
 
     const width = map.get(getModelColumnWidthKey("GPT-4o"))!;
     expect(width).toBeGreaterThanOrEqual(DUAL_VALUE_QUESTION_MARK_MIN_WIDTH);
-    expect(width).toBe(112);
+    expect(width).toBe(100);
   });
 
   test("当传入 matrixRows 时，基于真实单元格自适应并包含参数/价格等合成行", () => {

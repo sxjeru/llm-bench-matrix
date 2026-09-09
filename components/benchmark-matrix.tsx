@@ -2633,7 +2633,7 @@ export function BenchmarkMatrix({
                       : shouldShowQuestionMark) && !showAnyDeltaBadge;
 
                     const basePadding = showQuestionMarkIcon
-                      ? 22
+                      ? (isPairNumericDisplay ? 20 : 22)
                       : 6;
                     const comparePadding = showAnyDeltaBadge
                       ? Math.min(28, 9 + activeDeltaText.length * 3)

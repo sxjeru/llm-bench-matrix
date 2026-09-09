@@ -1205,6 +1205,69 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     ]);
   });
 
+  test("同 provider 列排序按后缀 max > pro > mini 变体分组排序", async () => {
+    const rows = [
+      {
+        providerName: "StepFun",
+        modelName: "Step 3.7 Mini",
+        benchmarkName: "Bench-Step",
+        benchmarkType: "General",
+        benchmarkCanonicalKey: "bench-step:general",
+        benchTime: "2026-04-06T00:00:00.000Z",
+        valueRaw: "70",
+        valueNum: 70,
+        valueNote: null,
+        source: "text:Step"
+      },
+      {
+        providerName: "StepFun",
+        modelName: "Step 3.7 Max",
+        benchmarkName: "Bench-Step",
+        benchmarkType: "General",
+        benchmarkCanonicalKey: "bench-step:general",
+        benchTime: "2026-04-06T00:00:00.000Z",
+        valueRaw: "90",
+        valueNum: 90,
+        valueNote: null,
+        source: "text:Step"
+      },
+      {
+        providerName: "StepFun",
+        modelName: "Step 3.7 Pro",
+        benchmarkName: "Bench-Step",
+        benchmarkType: "General",
+        benchmarkCanonicalKey: "bench-step:general",
+        benchTime: "2026-04-06T00:00:00.000Z",
+        valueRaw: "82",
+        valueNum: 82,
+        valueNote: null,
+        source: "text:Step"
+      }
+    ];
+
+    await renderReady(
+      <BenchmarkMatrix
+        sourceOptions={["text:Step"]}
+        rows={rows}
+        allRows={rows}
+      />
+    );
+
+    const headerTexts = screen
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent?.replace(/\s+/g, " ").trim() ?? "");
+
+    const benchmarkIndex = headerTexts.findIndex((text) => text.includes("Benchmark"));
+    expect(benchmarkIndex).toBeGreaterThanOrEqual(0);
+
+    const modelHeaders = headerTexts.slice(benchmarkIndex + 1).filter((text) => text.length > 0);
+    expect(modelHeaders.slice(0, 3)).toEqual([
+      "Step 3.7 Max",
+      "Step 3.7 Pro",
+      "Step 3.7 Mini"
+    ]);
+  });
+
   test("双值场景下第一名加粗、第二名下划线（前后值独立排序）", async () => {
     await renderReady(
       <BenchmarkMatrix

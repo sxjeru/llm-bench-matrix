@@ -306,6 +306,61 @@ describe("BenchmarkMatrix source tabs", () => {
     expect(nemotronTabs).toEqual(["Nemotron 3 Ultra", "Nemotron 3 Super", "Nemotron 3 Nano"]);
   });
 
+  test("模型组内页签按 max > pro > mini 顺序排序", async () => {
+    const benchTime = "2026-04-06T00:00:00.000Z";
+    await renderReady(
+      <BenchmarkMatrix
+        sourceOptions={[
+          "text:Qwen 2.5 Mini",
+          "text:Qwen 2.5 Max",
+          "text:Qwen 2.5 Pro"
+        ]}
+        rows={[
+          {
+            providerName: "Alibaba",
+            modelName: "Qwen 2.5 Mini",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime,
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Qwen 2.5 Mini"
+          },
+          {
+            providerName: "Alibaba",
+            modelName: "Qwen 2.5 Max",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime,
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Qwen 2.5 Max"
+          },
+          {
+            providerName: "Alibaba",
+            modelName: "Qwen 2.5 Pro",
+            benchmarkName: "Bench-1",
+            benchmarkType: "General",
+            benchTime,
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:Qwen 2.5 Pro"
+          }
+        ]}
+      />
+    );
+
+    const qwenTabs = screen
+      .getAllByRole("tab")
+      .map((tab) => tab.textContent?.trim() ?? "")
+      .filter((label) => label.startsWith("Qwen 2.5"));
+
+    expect(qwenTabs).toEqual(["Qwen 2.5 Max", "Qwen 2.5 Pro", "Qwen 2.5 Mini"]);
+  });
+
   test("同版本 source 页签按 xxB 大小降序排序", async () => {
     const benchTime = "2026-04-06T00:00:00.000Z";
     await renderReady(

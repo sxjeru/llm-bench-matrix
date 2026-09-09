@@ -22,6 +22,32 @@ describe("model-matching variant sorting", () => {
       familyKey: "nemotron 3",
       variant: "nano"
     });
+    expect(extractModelVariantToken("Qwen 2.5 Max")).toEqual({
+      familyKey: "qwen",
+      variant: "max"
+    });
+    expect(extractModelVariantToken("Qwen 2.5 Pro")).toEqual({
+      familyKey: "qwen",
+      variant: "pro"
+    });
+    expect(extractModelVariantToken("Qwen 2.5 Mini")).toEqual({
+      familyKey: "qwen",
+      variant: "mini"
+    });
+    expect(extractModelVariantToken("Qwen2.5-Max")).toEqual({
+      familyKey: "qwen",
+      variant: "max"
+    });
+    expect(extractModelVariantToken("DS-V4-Pro Max")).toEqual({
+      familyKey: "ds v4",
+      variant: "max"
+    });
+  });
+
+  test("compareModelVariantPriority should sort max > pro > mini", () => {
+    expect(compareModelVariantPriority("max", "pro")).toBeLessThan(0);
+    expect(compareModelVariantPriority("pro", "mini")).toBeLessThan(0);
+    expect(compareModelVariantPriority("max", "mini")).toBeLessThan(0);
   });
 
   test("compareModelVariantPriority should sort ultra > super > nano", () => {
@@ -29,6 +55,17 @@ describe("model-matching variant sorting", () => {
     expect(compareModelVariantPriority("ultra", "super")).toBeLessThan(0);
     expect(compareModelVariantPriority("super", "nano")).toBeLessThan(0);
     expect(compareModelVariantPriority("ultra", "nano")).toBeLessThan(0);
+  });
+
+  test("compareSourceTabKeysByVersion should sort max > pro > mini", () => {
+    expect(compareSourceTabKeysByVersion("text:Qwen 2.5 Max", "text:Qwen 2.5 Pro")).toBeLessThan(0);
+    expect(compareSourceTabKeysByVersion("text:Qwen 2.5 Pro", "text:Qwen 2.5 Mini")).toBeLessThan(0);
+    expect(compareSourceTabKeysByVersion("text:Qwen 2.5 Max", "text:Qwen 2.5 Mini")).toBeLessThan(0);
+
+    // Also unversioned source tabs
+    expect(compareSourceTabKeysByVersion("text:Qwen-Max", "text:Qwen-Pro")).toBeLessThan(0);
+    expect(compareSourceTabKeysByVersion("text:Qwen-Pro", "text:Qwen-Mini")).toBeLessThan(0);
+    expect(compareSourceTabKeysByVersion("text:Qwen-Max", "text:Qwen-Mini")).toBeLessThan(0);
   });
 
   test("compareSourceTabKeysByVersion should sort ultra > super > nano", () => {
@@ -44,6 +81,19 @@ describe("model-matching variant sorting", () => {
     expect(compareSourceTabKeysByVersion("text:Ornith-1.0-27B", "text:Ornith-1.0-9B")).toBeLessThan(0);
     expect(compareSourceTabKeysByVersion("text:Ornith-1.0-9B", "text:Ornith-1.0-27B")).toBeGreaterThan(0);
     expect(compareModelNameByColumnOrder("Ornith-1.0-27B", "Ornith-1.0-9B", collator)).toBeLessThan(0);
+  });
+
+  test("compareModelNameByColumnOrder should sort variants by max > pro > mini", () => {
+    const collator = new Intl.Collator("en");
+
+    expect(compareModelNameByColumnOrder("Qwen 2.5 Max", "Qwen 2.5 Pro", collator)).toBeLessThan(0);
+    expect(compareModelNameByColumnOrder("Qwen 2.5 Pro", "Qwen 2.5 Mini", collator)).toBeLessThan(0);
+    expect(compareModelNameByColumnOrder("Qwen 2.5 Max", "Qwen 2.5 Mini", collator)).toBeLessThan(0);
+
+    const sorted = ["Qwen 2.5 Mini", "Qwen 2.5 Max", "Qwen 2.5 Pro"].sort((left, right) => (
+      compareModelNameByColumnOrder(left, right, collator)
+    ));
+    expect(sorted).toEqual(["Qwen 2.5 Max", "Qwen 2.5 Pro", "Qwen 2.5 Mini"]);
   });
 
   test("compareModelNameByColumnOrder should sort ultra > super > nano", () => {

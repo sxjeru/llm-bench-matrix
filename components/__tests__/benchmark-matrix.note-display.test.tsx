@@ -357,7 +357,7 @@ describe("BenchmarkMatrix 星号值显示", () => {
     expect(screen.getByText("3x")).toBeInTheDocument();
   });
 
-  test("双值带备注的单元格内边距为 22px 且列宽自适应扩展", async () => {
+  test("双值带备注的单元格内边距为 20px 且列宽自适应紧凑扩展至 100px", async () => {
     const { container } = await renderReady(
       <BenchmarkMatrix
         rows={[
@@ -379,8 +379,8 @@ describe("BenchmarkMatrix 星号值显示", () => {
 
     const valueCell = screen.getByText("58.4").closest("td");
     expect(valueCell).not.toBeNull();
-    expect(valueCell).toHaveStyle({ paddingRight: "22px" });
-    expect(valueCell).toHaveStyle({ width: "112px" });
+    expect(valueCell).toHaveStyle({ paddingRight: "20px" });
+    expect(valueCell).toHaveStyle({ width: "100px" });
 
     const questionMark = Array.from(container.querySelectorAll("span")).find(
       (node) => node.textContent === "?" && !node.hasAttribute("data-overall-tooltip-trigger")
