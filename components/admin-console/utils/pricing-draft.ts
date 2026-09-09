@@ -1,4 +1,7 @@
 import type { ModelPricingDraft, ModelPricingRow } from "../types";
+import { formatReleaseDateInput } from "@/lib/date-utils";
+
+export { formatReleaseDateInput };
 
 /** 草稿里的价格字段与 ModelPricingRow 同名，比较与提交都按这一份顺序遍历 */
 const PRICING_COST_FIELDS = [

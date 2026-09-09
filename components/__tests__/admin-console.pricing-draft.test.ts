@@ -3,6 +3,7 @@ import type { ModelPricingRow } from "@/components/admin-console/types";
 import {
   buildPricingUpdatePayload,
   countDirtyPricingDrafts,
+  formatReleaseDateInput,
   isPricingDraftDirty,
   toPricingDraft
 } from "@/components/admin-console/utils/pricing-draft";
@@ -92,6 +93,18 @@ describe("pricing-draft utils", () => {
     const emptyDraft = { ...toPricingDraft(row), releaseDate: "   " };
     const emptyPayload = buildPricingUpdatePayload(row.modelId, emptyDraft, row);
     expect(emptyPayload.releaseDate).toBeNull();
+  });
+
+  test("formatReleaseDateInput 自动格式化常见日期格式与多余 0（如 2026-09-011 -> 2026-09-11）", () => {
+    expect(formatReleaseDateInput("2026-09-011")).toBe("2026-09-11");
+    expect(formatReleaseDateInput("2026-09-001")).toBe("2026-09-01");
+    expect(formatReleaseDateInput("2026-9-1")).toBe("2026-09-01");
+    expect(formatReleaseDateInput("2026/9/1")).toBe("2026-09-01");
+    expect(formatReleaseDateInput("2026.09.11")).toBe("2026-09-11");
+    expect(formatReleaseDateInput("20260911")).toBe("2026-09-11");
+    expect(formatReleaseDateInput("2026年9月11日")).toBe("2026-09-11");
+    expect(formatReleaseDateInput("2024-8")).toBe("2024-08");
+    expect(formatReleaseDateInput("")).toBe("");
   });
 });
 

@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, type Dispatch, type SetStateAction } from "react";
-import { Calendar, DollarSign, Pencil, RefreshCw, RotateCcw, Save, X } from "lucide-react";
+import { Calendar, Check, DollarSign, Pencil, RefreshCw, RotateCcw, Save, X } from "lucide-react";
 import type { ModelPricingDraft, ModelPricingRow, ModelPricingSyncResult } from "../types";
-import { isPricingDraftDirty } from "../utils/pricing-draft";
+import { formatReleaseDateInput, isPricingDraftDirty } from "../utils/pricing-draft";
 
 type PricingTabProps = {
   prices: ModelPricingRow[];
@@ -91,6 +91,19 @@ export function PricingTab({
 
   function updatePricingCostDraft(modelId: number, field: ModelPricingCostDraftKey, value: string) {
     updatePricingDraft(modelId, (current) => ({ ...current, [field]: value, manualOverride: true }));
+  }
+
+  function finishDateEditing(modelId: number) {
+    setEditingDateModelId(null);
+    const draft = pricingDrafts[modelId];
+    if (!draft || !draft.releaseDate.trim()) return;
+    const formatted = formatReleaseDateInput(draft.releaseDate);
+    if (formatted !== draft.releaseDate) {
+      updatePricingDraft(modelId, (current) => ({
+        ...current,
+        releaseDate: formatted
+      }));
+    }
   }
 
   const filteredPrices = prices
@@ -262,45 +275,61 @@ export function PricingTab({
                       </div>
                       <div className="text-xs opacity-60">{price.providerName}</div>
                       {editingDateModelId === price.modelId ? (
-                        <div className="relative mt-1 inline-flex items-center">
-                          <Calendar size={11} className="pointer-events-none absolute left-2 text-base-content/40" />
-                          <input
-                            type="text"
-                            autoFocus
-                            className="input input-bordered input-xs h-6 w-36 pl-6 pr-6 font-mono text-xs focus:border-primary focus:outline-none"
-                            value={draft.releaseDate}
-                            onChange={(event) =>
-                              updatePricingDraft(price.modelId, (current) => ({
-                                ...current,
-                                releaseDate: event.target.value
-                              }))
-                            }
-                            onBlur={() => setEditingDateModelId(null)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter" || event.key === "Escape") {
-                                setEditingDateModelId(null);
-                              }
-                            }}
-                            placeholder="YYYY-MM-DD"
-                            aria-label={`输入 ${price.modelName} 发布日期`}
-                          />
-                          {draft.releaseDate ? (
-                            <button
-                              type="button"
-                              onMouseDown={(event) => event.preventDefault()}
-                              onClick={() => {
+                        <div className="relative mt-1 inline-flex items-center gap-1">
+                          <div className="relative inline-flex items-center">
+                            <Calendar size={11} className="pointer-events-none absolute left-2 text-base-content/40" />
+                            <input
+                              type="text"
+                              autoFocus
+                              className="input input-bordered input-xs h-6 w-32 pl-6 pr-5 font-mono text-xs focus:border-primary focus:outline-none"
+                              value={draft.releaseDate}
+                              onChange={(event) =>
                                 updatePricingDraft(price.modelId, (current) => ({
                                   ...current,
-                                  releaseDate: ""
-                                }));
+                                  releaseDate: event.target.value
+                                }))
+                              }
+                              onBlur={() => finishDateEditing(price.modelId)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  finishDateEditing(price.modelId);
+                                } else if (event.key === "Escape") {
+                                  setEditingDateModelId(null);
+                                }
                               }}
-                              className="pricing-date-clear"
-                              title="清空日期"
-                              aria-label="清空日期"
-                            >
-                              <X size={10} />
-                            </button>
-                          ) : null}
+                              placeholder="YYYY-MM-DD"
+                              aria-label={`输入 ${price.modelName} 发布日期`}
+                            />
+                            {draft.releaseDate ? (
+                              <button
+                                type="button"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => {
+                                  updatePricingDraft(price.modelId, (current) => ({
+                                    ...current,
+                                    releaseDate: ""
+                                  }));
+                                }}
+                                className="pricing-date-clear"
+                                title="清空日期"
+                                aria-label="清空日期"
+                              >
+                                <X size={10} />
+                              </button>
+                            ) : null}
+                          </div>
+                          <button
+                            type="button"
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              finishDateEditing(price.modelId);
+                            }}
+                            className="btn btn-ghost btn-xs h-6 w-6 min-h-0 p-0 text-success hover:bg-success/20"
+                            title="完成"
+                            aria-label="完成"
+                          >
+                            <Check size={13} />
+                          </button>
                         </div>
                       ) : (
                         <button
