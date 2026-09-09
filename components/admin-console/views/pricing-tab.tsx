@@ -1,7 +1,7 @@
 "use client";
 
-import type { Dispatch, SetStateAction } from "react";
-import { DollarSign, RefreshCw, RotateCcw, Save } from "lucide-react";
+import { useState, type Dispatch, type SetStateAction } from "react";
+import { Calendar, Check, DollarSign, Pencil, RefreshCw, RotateCcw, Save, X } from "lucide-react";
 import type { ModelPricingDraft, ModelPricingRow, ModelPricingSyncResult } from "../types";
 import { isPricingDraftDirty } from "../utils/pricing-draft";
 
@@ -87,6 +87,8 @@ export function PricingTab({
   onDiscardPricingDrafts,
   syncResult
 }: PricingTabProps) {
+  const [editingDateModelId, setEditingDateModelId] = useState<number | null>(null);
+
   function updatePricingCostDraft(modelId: number, field: ModelPricingCostDraftKey, value: string) {
     updatePricingDraft(modelId, (current) => ({ ...current, [field]: value, manualOverride: true }));
   }
@@ -96,12 +98,13 @@ export function PricingTab({
       const draft = pricingDrafts[price.modelId];
       const draftAwareStatus = getDraftAwareStatus(price, draft);
       const query = pricingSearchQuery.trim().toLowerCase();
+      const releaseDateForSearch = draft ? draft.releaseDate : (price.releaseDate ?? "");
       const matchesQuery = !query
         || price.modelName.toLowerCase().includes(query)
         || price.providerName.toLowerCase().includes(query)
         || (price.sourceModelId ?? "").toLowerCase().includes(query)
         || (price.sourceProviderId ?? "").toLowerCase().includes(query)
-        || (price.releaseDate ?? "").toLowerCase().includes(query);
+        || releaseDateForSearch.toLowerCase().includes(query);
 
       if (!matchesQuery) return false;
       if (pricingStatusFilter === "all") return true;
@@ -258,9 +261,75 @@ export function PricingTab({
                         {isDirty ? <span className="badge badge-warning badge-xs whitespace-nowrap">未保存</span> : null}
                       </div>
                       <div className="text-xs opacity-60">{price.providerName}</div>
-                      {price.releaseDate ? (
-                        <div className="text-xs opacity-50 font-mono mt-0.5">{price.releaseDate}</div>
-                      ) : null}
+                      {editingDateModelId === price.modelId ? (
+                        <div className="mt-1 flex items-center gap-1">
+                          <input
+                            type="text"
+                            autoFocus
+                            className="input input-bordered input-xs w-28 font-mono text-xs"
+                            value={draft.releaseDate}
+                            onChange={(event) =>
+                              updatePricingDraft(price.modelId, (current) => ({
+                                ...current,
+                                releaseDate: event.target.value
+                              }))
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === "Escape") {
+                                setEditingDateModelId(null);
+                              }
+                            }}
+                            placeholder="YYYY-MM-DD"
+                            aria-label={`输入 ${price.modelName} 发布日期`}
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-xs px-1 text-success"
+                            onClick={() => setEditingDateModelId(null)}
+                            title="完成"
+                          >
+                            <Check size={12} />
+                          </button>
+                          {draft.releaseDate ? (
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-xs px-1 text-error"
+                              onClick={() => {
+                                updatePricingDraft(price.modelId, (current) => ({
+                                  ...current,
+                                  releaseDate: ""
+                                }));
+                              }}
+                              title="清空日期"
+                            >
+                              <X size={12} />
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : draft.releaseDate ? (
+                        <button
+                          type="button"
+                          onClick={() => setEditingDateModelId(price.modelId)}
+                          className="group flex items-center gap-1 text-xs opacity-60 hover:opacity-100 font-mono mt-0.5 hover:text-primary transition-colors text-left"
+                          title="点击修改日期"
+                          aria-label={`修改 ${price.modelName} 发布日期`}
+                        >
+                          <Calendar size={11} className="shrink-0" />
+                          <span>{draft.releaseDate}</span>
+                          <Pencil size={10} className="opacity-0 group-hover:opacity-100 transition-opacity ml-0.5" />
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setEditingDateModelId(price.modelId)}
+                          className="group flex items-center gap-1 text-xs text-base-content/40 hover:text-primary font-mono mt-0.5 transition-colors text-left"
+                          title="点击设置日期"
+                          aria-label={`设置 ${price.modelName} 发布日期`}
+                        >
+                          <Calendar size={11} className="shrink-0" />
+                          <span className="underline decoration-dashed underline-offset-2">设置日期</span>
+                        </button>
+                      )}
                     </td>
                     <td className="min-w-[220px]">
                       <input

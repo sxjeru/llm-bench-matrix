@@ -16,6 +16,7 @@ const PRICING_TEXT_FIELDS = [
   "sourceProviderName",
   "sourceModelId",
   "sourceModelName",
+  "releaseDate",
   "note"
 ] as const;
 
@@ -34,6 +35,7 @@ export function toPricingDraft(row: ModelPricingRow): ModelPricingDraft {
     sourceProviderName: row.sourceProviderName ?? "",
     sourceModelId: row.sourceModelId ?? "",
     sourceModelName: row.sourceModelName ?? "",
+    releaseDate: row.releaseDate ?? "",
     manualOverride: row.manualOverride,
     note: row.note ?? ""
   };
@@ -121,6 +123,7 @@ export function buildPricingUpdatePayload(
     sourceProviderName: normalizeText(draft.sourceProviderName),
     sourceModelId: normalizeText(draft.sourceModelId),
     sourceModelName: normalizeText(draft.sourceModelName),
+    releaseDate: normalizeText(draft.releaseDate),
     manualOverride,
     matchStatus: manualOverride ? ("manual" as const) : ("matched" as const),
     note: normalizeText(draft.note)

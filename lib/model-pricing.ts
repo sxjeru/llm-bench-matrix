@@ -856,14 +856,16 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
     }
   }
 
+  let hasAnyStatusOrDateChanged = false;
+
   for (const model of activeModels) {
     const existing = existingByModelId.get(model.id);
-    if (existing?.manualOverride) {
-      skippedManualCount += 1;
-      continue;
-    }
 
     if (model.pricingDisabled) {
+      if (existing?.manualOverride) {
+        skippedManualCount += 1;
+        continue;
+      }
       trackPricingUpsert(
         model,
         existing,
@@ -872,8 +874,123 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
       continue;
     }
 
-    const { provider: sourceProvider, confidenceBoost } = resolveProviderMatch(model, sourceProviders);
-    const match = resolveModelMatch(model, sourceProvider, sourceProviders);
+    let match: ModelMatch | null = null;
+    let confidenceBoost = 0;
+
+    if (existing?.sourceProviderId && existing?.sourceModelId) {
+      const boundProvider = sourceProviders.get(existing.sourceProviderId);
+      const boundModel = boundProvider?.models[existing.sourceModelId];
+      if (boundProvider && boundModel) {
+        match = {
+          provider: boundProvider,
+          modelKey: existing.sourceModelId,
+          model: boundModel,
+          confidence: 100,
+          reason: "bound-source-model"
+        };
+      }
+    }
+
+    if (!match) {
+      const resolved = resolveProviderMatch(model, sourceProviders);
+      confidenceBoost = resolved.confidenceBoost;
+      match = resolveModelMatch(model, resolved.provider, sourceProviders);
+    }
+
+    const confidence = match ? Math.min(100, match.confidence + confidenceBoost) : 0;
+
+    if (existing?.manualOverride) {
+      if (!match || confidence < 70) {
+        skippedManualCount += 1;
+        continue;
+      }
+
+      const cost = match.model.cost ?? {};
+      const upstreamCosts = {
+        inputCost: cost.input?.toString() ?? null,
+        outputCost: cost.output?.toString() ?? null,
+        reasoningCost: cost.reasoning?.toString() ?? null,
+        cacheReadCost: cost.cache_read?.toString() ?? null,
+        cacheWriteCost: cost.cache_write?.toString() ?? null,
+        inputAudioCost: cost.input_audio?.toString() ?? null,
+        outputAudioCost: cost.output_audio?.toString() ?? null
+      };
+
+      const isPriceEqual = PRICING_COST_DB_FIELDS.every((field) => {
+        const existingVal = normalizePricingCostForCompare(existing[field]);
+        const upstreamVal = normalizePricingCostForCompare(upstreamCosts[field]);
+        return existingVal === upstreamVal;
+      });
+
+      if (isPriceEqual) {
+        const sourceModelName = match.model.name ?? match.model.id ?? match.modelKey;
+        trackPricingUpsert(model, existing, {
+          modelId: model.id,
+          source: MODELS_DEV_SOURCE,
+          sourceProviderId: match.provider.id,
+          sourceProviderName: match.provider.name,
+          sourceModelId: match.model.id ?? match.modelKey,
+          sourceModelName,
+          releaseDate: match.model.release_date ?? existing.releaseDate ?? null,
+          inputCost: upstreamCosts.inputCost,
+          outputCost: upstreamCosts.outputCost,
+          reasoningCost: upstreamCosts.reasoningCost,
+          cacheReadCost: upstreamCosts.cacheReadCost,
+          cacheWriteCost: upstreamCosts.cacheWriteCost,
+          inputAudioCost: upstreamCosts.inputAudioCost,
+          outputAudioCost: upstreamCosts.outputAudioCost,
+          currency: "USD",
+          unit: "per_1m_tokens",
+          matchConfidence: confidence,
+          matchStatus: "matched",
+          manualOverride: false,
+          rawJson: match.model,
+          note: match.reason,
+          lastSyncedAt: syncedAt,
+          updatedAt: syncedAt
+        });
+        matchedCount += 1;
+        hasAnyStatusOrDateChanged = true;
+        continue;
+      }
+
+      const isDateEmpty = !existing.releaseDate || existing.releaseDate.trim() === "";
+      const upstreamReleaseDate = match.model.release_date?.trim();
+
+      if (isDateEmpty && upstreamReleaseDate) {
+        const sourceModelName = match.model.name ?? match.model.id ?? match.modelKey;
+        pricingUpserts.push({
+          modelId: model.id,
+          source: existing.source ?? MODELS_DEV_SOURCE,
+          sourceProviderId: existing.sourceProviderId ?? match.provider.id,
+          sourceProviderName: existing.sourceProviderName ?? match.provider.name,
+          sourceModelId: existing.sourceModelId ?? (match.model.id ?? match.modelKey),
+          sourceModelName: existing.sourceModelName ?? sourceModelName,
+          releaseDate: upstreamReleaseDate,
+          inputCost: existing.inputCost !== undefined && existing.inputCost !== null ? String(existing.inputCost) : null,
+          outputCost: existing.outputCost !== undefined && existing.outputCost !== null ? String(existing.outputCost) : null,
+          reasoningCost: existing.reasoningCost !== undefined && existing.reasoningCost !== null ? String(existing.reasoningCost) : null,
+          cacheReadCost: existing.cacheReadCost !== undefined && existing.cacheReadCost !== null ? String(existing.cacheReadCost) : null,
+          cacheWriteCost: existing.cacheWriteCost !== undefined && existing.cacheWriteCost !== null ? String(existing.cacheWriteCost) : null,
+          inputAudioCost: existing.inputAudioCost !== undefined && existing.inputAudioCost !== null ? String(existing.inputAudioCost) : null,
+          outputAudioCost: existing.outputAudioCost !== undefined && existing.outputAudioCost !== null ? String(existing.outputAudioCost) : null,
+          currency: existing.currency ?? "USD",
+          unit: existing.unit ?? "per_1m_tokens",
+          matchConfidence: existing.matchConfidence ?? confidence,
+          matchStatus: (existing.matchStatus as ModelPricingRow["matchStatus"]) ?? "manual",
+          manualOverride: true,
+          rawJson: match.model,
+          note: existing.note,
+          lastSyncedAt: syncedAt,
+          updatedAt: syncedAt
+        });
+        hasAnyStatusOrDateChanged = true;
+      }
+
+      skippedManualCount += 1;
+      continue;
+    }
+
     if (!match) {
       trackPricingUpsert(
         model,
@@ -884,7 +1001,6 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
       continue;
     }
 
-    const confidence = Math.min(100, match.confidence + confidenceBoost);
     if (confidence < 70) {
       trackPricingUpsert(
         model,
@@ -905,7 +1021,7 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
       sourceProviderName: match.provider.name,
       sourceModelId: match.model.id ?? match.modelKey,
       sourceModelName,
-      releaseDate: match.model.release_date ?? null,
+      releaseDate: match.model.release_date ?? existing?.releaseDate ?? null,
       inputCost: cost.input?.toString() ?? null,
       outputCost: cost.output?.toString() ?? null,
       reasoningCost: cost.reasoning?.toString() ?? null,
@@ -959,7 +1075,7 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
       });
   }
 
-  if (changedModels.length > 0) {
+  if (changedModels.length > 0 || hasAnyStatusOrDateChanged) {
     await invalidateChangedModelPricingCaches();
   } else {
     invalidateVersionedCacheStore(adminModelPricingRowsStore);

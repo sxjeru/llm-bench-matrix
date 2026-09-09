@@ -1606,5 +1606,184 @@ describe("model pricing module", () => {
     expect(result.matchedCount).toBe(0);
     expect(result.unmatchedCount).toBe(0);
   });
+
+  test("syncModelsDevPricing 标为手动但价格与上游一致时，应取消手动并转为跟踪上游", async () => {
+    const activeModels = [
+      {
+        id: 5,
+        modelName: "GPT-4",
+        sourceModelId: "gpt-4",
+        providerName: "OpenAI",
+        providerSlug: "openai",
+        providerConfig: {}
+      }
+    ];
+    const existingRows = [
+      {
+        modelId: 5,
+        manualOverride: true,
+        inputCost: 30,
+        outputCost: 60,
+        reasoningCost: null,
+        cacheReadCost: null,
+        cacheWriteCost: null,
+        inputAudioCost: null,
+        outputAudioCost: null,
+        releaseDate: "2023-03-14",
+        sourceProviderId: "openai",
+        sourceModelId: "gpt-4"
+      }
+    ];
+
+    const { db, values, onConflictDoUpdate } = createDbMock(activeModels, existingRows);
+
+    mockModelsDevResponse({
+      openai: {
+        id: "openai",
+        name: "OpenAI",
+        models: {
+          "gpt-4": {
+            id: "gpt-4",
+            name: "GPT-4",
+            release_date: "2023-03-14",
+            cost: {
+              input: 30,
+              output: 60
+            }
+          }
+        }
+      }
+    });
+
+    const pricingModule = await importPricingModule(db);
+    const result = await pricingModule.syncModelsDevPricing();
+
+    expect(onConflictDoUpdate).toHaveBeenCalledTimes(1);
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({
+        modelId: 5,
+        manualOverride: false,
+        matchStatus: "matched",
+        source: "models.dev",
+        inputCost: "30",
+        outputCost: "60",
+        releaseDate: "2023-03-14"
+      })
+    ]);
+    expect(result.matchedCount).toBe(1);
+    expect(result.skippedManualCount).toBe(0);
+  });
+
+  test("syncModelsDevPricing 手动覆盖条目且价格与上游不一致时，若日期为空应抓取上游 release_date 填充且保持手动覆盖和手动价格", async () => {
+    const activeModels = [
+      {
+        id: 5,
+        modelName: "GPT-4",
+        sourceModelId: "gpt-4",
+        providerName: "OpenAI",
+        providerSlug: "openai",
+        providerConfig: {}
+      }
+    ];
+    const existingRows = [
+      {
+        modelId: 5,
+        manualOverride: true,
+        inputCost: "25",
+        outputCost: "50",
+        releaseDate: null,
+        sourceProviderId: "openai",
+        sourceModelId: "gpt-4"
+      }
+    ];
+
+    const { db, values, onConflictDoUpdate } = createDbMock(activeModels, existingRows);
+
+    mockModelsDevResponse({
+      openai: {
+        id: "openai",
+        name: "OpenAI",
+        models: {
+          "gpt-4": {
+            id: "gpt-4",
+            name: "GPT-4",
+            release_date: "2023-03-14",
+            cost: {
+              input: 30,
+              output: 60
+            }
+          }
+        }
+      }
+    });
+
+    const pricingModule = await importPricingModule(db);
+    const result = await pricingModule.syncModelsDevPricing();
+
+    expect(onConflictDoUpdate).toHaveBeenCalledTimes(1);
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({
+        modelId: 5,
+        manualOverride: true,
+        matchStatus: "manual",
+        inputCost: "25",
+        outputCost: "50",
+        releaseDate: "2023-03-14"
+      })
+    ]);
+    expect(result.skippedManualCount).toBe(1);
+    expect(result.matchedCount).toBe(0);
+  });
+
+  test("syncModelsDevPricing 手动覆盖条目且价格与上游不一致时，若已有日期则保留不被上游覆盖", async () => {
+    const activeModels = [
+      {
+        id: 5,
+        modelName: "GPT-4",
+        sourceModelId: "gpt-4",
+        providerName: "OpenAI",
+        providerSlug: "openai",
+        providerConfig: {}
+      }
+    ];
+    const existingRows = [
+      {
+        modelId: 5,
+        manualOverride: true,
+        inputCost: "25",
+        outputCost: "50",
+        releaseDate: "2023-01-01",
+        sourceProviderId: "openai",
+        sourceModelId: "gpt-4"
+      }
+    ];
+
+    const { db } = createDbMock(activeModels, existingRows);
+
+    mockModelsDevResponse({
+      openai: {
+        id: "openai",
+        name: "OpenAI",
+        models: {
+          "gpt-4": {
+            id: "gpt-4",
+            name: "GPT-4",
+            release_date: "2023-03-14",
+            cost: {
+              input: 30,
+              output: 60
+            }
+          }
+        }
+      }
+    });
+
+    const pricingModule = await importPricingModule(db);
+    const result = await pricingModule.syncModelsDevPricing();
+
+    expect(db.insert).not.toHaveBeenCalled();
+    expect(result.skippedManualCount).toBe(1);
+    expect(result.matchedCount).toBe(0);
+  });
 });
 

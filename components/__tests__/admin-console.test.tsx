@@ -3971,6 +3971,63 @@ describe("AdminConsole 批量保存", () => {
     });
   });
 
+  test("价格管理允许点击修改发布日期并保存", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetchSequence({
+      prices: [
+        buildPriceRow({ modelId: 1, modelName: "Model 2024", releaseDate: "2024-05-13" }),
+        buildPriceRow({ modelId: 2, modelName: "Model Empty", releaseDate: null })
+      ]
+    });
+
+    await renderReady(<AdminConsole {...buildProps()} />);
+
+    await user.click(screen.getByRole("tab", { name: "价格管理" }));
+    expect(await screen.findByText("Model 2024")).toBeInTheDocument();
+
+    const row1 = screen.getByText("Model 2024").closest("tr")!;
+    const row2 = screen.getByText("Model Empty").closest("tr")!;
+
+    expect(within(row1).getByText("2024-05-13")).toBeInTheDocument();
+    expect(within(row2).getByText("设置日期")).toBeInTheDocument();
+
+    // 点击已存在的日期进入编辑
+    await user.click(within(row1).getByRole("button", { name: "修改 Model 2024 发布日期" }));
+    const dateInput = within(row1).getByRole("textbox", { name: "输入 Model 2024 发布日期" });
+    expect(dateInput).toHaveValue("2024-05-13");
+
+    await user.clear(dateInput);
+    await user.type(dateInput, "2024-06-01");
+    await user.click(within(row1).getByTitle("完成"));
+
+    expect(within(row1).getByText("2024-06-01")).toBeInTheDocument();
+    expect(within(row1).getByText("未保存")).toBeInTheDocument();
+
+    // 保存单条改动
+    await user.click(within(row1).getByRole("button", { name: /保存/ }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/admin/model-prices",
+        expect.objectContaining({
+          method: "PATCH",
+          body: expect.any(String)
+        })
+      );
+    });
+
+    const patchCall = fetchMock.mock.calls.find(
+      ([input, init]) => input === "/api/admin/model-prices" && init?.method === "PATCH"
+    );
+    expect(patchCall).toBeDefined();
+    expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual(
+      expect.objectContaining({
+        modelId: 1,
+        releaseDate: "2024-06-01"
+      })
+    );
+  });
+
   test("模型参数批量保存把所有改动合并成一次请求", async () => {
     const user = userEvent.setup();
     const paramsRows = [

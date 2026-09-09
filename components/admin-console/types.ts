@@ -443,6 +443,7 @@ export type ModelPricingDraft = {
   sourceProviderName: string;
   sourceModelId: string;
   sourceModelName: string;
+  releaseDate: string;
   manualOverride: boolean;
   note: string;
 };
