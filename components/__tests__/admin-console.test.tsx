@@ -3997,8 +3997,7 @@ describe("AdminConsole 批量保存", () => {
     expect(dateInput).toHaveValue("2024-05-13");
 
     await user.clear(dateInput);
-    await user.type(dateInput, "2024-06-01");
-    await user.click(within(row1).getByTitle("完成"));
+    await user.type(dateInput, "2024-06-01{Enter}");
 
     expect(within(row1).getByText("2024-06-01")).toBeInTheDocument();
     expect(within(row1).getByText("未保存")).toBeInTheDocument();

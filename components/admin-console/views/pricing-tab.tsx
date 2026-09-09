@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type Dispatch, type SetStateAction } from "react";
-import { Calendar, Check, DollarSign, Pencil, RefreshCw, RotateCcw, Save, X } from "lucide-react";
+import { Calendar, DollarSign, Pencil, RefreshCw, RotateCcw, Save, X } from "lucide-react";
 import type { ModelPricingDraft, ModelPricingRow, ModelPricingSyncResult } from "../types";
 import { isPricingDraftDirty } from "../utils/pricing-draft";
 
@@ -262,11 +262,12 @@ export function PricingTab({
                       </div>
                       <div className="text-xs opacity-60">{price.providerName}</div>
                       {editingDateModelId === price.modelId ? (
-                        <div className="mt-1 flex items-center gap-1">
+                        <div className="relative mt-1 inline-flex items-center">
+                          <Calendar size={11} className="pointer-events-none absolute left-2 text-base-content/40" />
                           <input
                             type="text"
                             autoFocus
-                            className="input input-bordered input-xs w-28 font-mono text-xs"
+                            className="input input-bordered input-xs h-6 w-36 pl-6 pr-6 font-mono text-xs focus:border-primary focus:outline-none"
                             value={draft.releaseDate}
                             onChange={(event) =>
                               updatePricingDraft(price.modelId, (current) => ({
@@ -274,6 +275,7 @@ export function PricingTab({
                                 releaseDate: event.target.value
                               }))
                             }
+                            onBlur={() => setEditingDateModelId(null)}
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === "Escape") {
                                 setEditingDateModelId(null);
@@ -282,52 +284,37 @@ export function PricingTab({
                             placeholder="YYYY-MM-DD"
                             aria-label={`输入 ${price.modelName} 发布日期`}
                           />
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-xs px-1 text-success"
-                            onClick={() => setEditingDateModelId(null)}
-                            title="完成"
-                          >
-                            <Check size={12} />
-                          </button>
                           {draft.releaseDate ? (
                             <button
                               type="button"
-                              className="btn btn-ghost btn-xs px-1 text-error"
+                              onMouseDown={(event) => event.preventDefault()}
                               onClick={() => {
                                 updatePricingDraft(price.modelId, (current) => ({
                                   ...current,
                                   releaseDate: ""
                                 }));
                               }}
+                              className="pricing-date-clear"
                               title="清空日期"
+                              aria-label="清空日期"
                             >
-                              <X size={12} />
+                              <X size={10} />
                             </button>
                           ) : null}
                         </div>
-                      ) : draft.releaseDate ? (
-                        <button
-                          type="button"
-                          onClick={() => setEditingDateModelId(price.modelId)}
-                          className="group flex items-center gap-1 text-xs opacity-60 hover:opacity-100 font-mono mt-0.5 hover:text-primary transition-colors text-left"
-                          title="点击修改日期"
-                          aria-label={`修改 ${price.modelName} 发布日期`}
-                        >
-                          <Calendar size={11} className="shrink-0" />
-                          <span>{draft.releaseDate}</span>
-                          <Pencil size={10} className="opacity-0 group-hover:opacity-100 transition-opacity ml-0.5" />
-                        </button>
                       ) : (
                         <button
                           type="button"
                           onClick={() => setEditingDateModelId(price.modelId)}
-                          className="group flex items-center gap-1 text-xs text-base-content/40 hover:text-primary font-mono mt-0.5 transition-colors text-left"
-                          title="点击设置日期"
-                          aria-label={`设置 ${price.modelName} 发布日期`}
+                          className="pricing-date-btn group"
+                          title="点击修改发布日期"
+                          aria-label={draft.releaseDate ? `修改 ${price.modelName} 发布日期` : `设置 ${price.modelName} 发布日期`}
                         >
-                          <Calendar size={11} className="shrink-0" />
-                          <span className="underline decoration-dashed underline-offset-2">设置日期</span>
+                          <Calendar size={11} className="shrink-0 text-base-content/40 transition-colors group-hover:text-primary" />
+                          <span>
+                            {draft.releaseDate ? draft.releaseDate : "设置日期"}
+                          </span>
+                          <Pencil size={10} className="ml-0.5 shrink-0 text-base-content/30 opacity-0 transition-opacity group-hover:opacity-100" />
                         </button>
                       )}
                     </td>

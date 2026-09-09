@@ -537,7 +537,7 @@ select optgroup {
 input:not(.input):not(.file-input):not(.checkbox):not(.toggle):not(.radio),
 select:not(.select),
 textarea:not(.textarea),
-button:not(.btn):not(.tab):not(.ranking-popover-button):not(.cell-trend-button):not(.scatter-btn):not(.admin-upstream-combobox-clear):not(.link):not(.input) {
+button:not(.btn):not(.tab):not(.ranking-popover-button):not(.cell-trend-button):not(.scatter-btn):not(.admin-upstream-combobox-clear):not(.pricing-date-btn):not(.pricing-date-clear):not(.link):not(.input) {
   width: 100%;
   border-radius: 10px;
   border: 1px solid #354261;
@@ -552,7 +552,7 @@ textarea:not(.textarea) {
   resize: vertical;
 }
 
-button:not(.btn):not(.tab):not(.ranking-popover-button):not(.cell-trend-button):not(.scatter-btn):not(.admin-upstream-combobox-clear):not(.link):not(.input) {
+button:not(.btn):not(.tab):not(.ranking-popover-button):not(.cell-trend-button):not(.scatter-btn):not(.admin-upstream-combobox-clear):not(.pricing-date-btn):not(.pricing-date-clear):not(.link):not(.input) {
   cursor: pointer;
   background: linear-gradient(135deg, #355dff, #4a9aff);
   border-color: transparent;
@@ -1935,3 +1935,57 @@ input.heatmap-alpha-range::-moz-range-track {
   color: var(--subtext);
   text-align: center;
 }
+
+/* 后台价格管理：发布日期修改与展示 */
+.pricing-date-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: auto !important;
+  max-width: fit-content;
+  height: 22px;
+  padding: 0 8px;
+  margin-top: 4px;
+  border-radius: 6px;
+  border: 1px solid rgba(53, 66, 97, 0.6);
+  background: rgba(18, 27, 49, 0.6);
+  color: var(--subtext);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.pricing-date-btn:hover {
+  border-color: rgba(93, 167, 255, 0.5);
+  background: rgba(29, 39, 64, 0.9);
+  color: var(--text);
+}
+
+.pricing-date-clear {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--subtext);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pricing-date-clear:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.1);
+}
+
