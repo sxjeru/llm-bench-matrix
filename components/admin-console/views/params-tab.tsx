@@ -61,11 +61,22 @@ function getParamsSortTime(row: ModelParamsRow) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-/** 闭源主流系列（gpt/claude/gemini）沉底；名称含 oss 的开源变体保持正常排序 */
-function isClosedSourceFrontierModel(modelName: string) {
+/** 闭源主流系列（gpt/claude/gemini/o1/o3/o4 等）沉底并忽略参数缺失高亮；名称含 oss 的开源变体保持正常处理 */
+export function isClosedSourceFrontierModel(modelName: string) {
   const normalized = modelName.toLowerCase();
   if (normalized.includes("oss")) return false;
-  return /gpt|claude|gemini/.test(normalized);
+  return /gpt|claude|gemini|\b(?:o1|o3|o4)(?:-|\b)/.test(normalized);
+}
+
+export function isParamsDraftFilled(row: ModelParamsRow, draft?: ModelParamsDraft) {
+  if (draft) {
+    return Boolean(draft.totalParamsB.trim() || draft.activatedParamsB.trim());
+  }
+  return isParamsFilled(row);
+}
+
+export function shouldHighlightParamsRow(row: ModelParamsRow, draft?: ModelParamsDraft) {
+  return !isParamsDraftFilled(row, draft) && !isClosedSourceFrontierModel(row.modelName);
 }
 
 function compareParamsRows(a: ModelParamsRow, b: ModelParamsRow) {
@@ -255,9 +266,18 @@ export function ParamsTab({
                 const isSaving = savingParamsModelId === row.modelId;
                 const suggestionText = formatSuggestion(row);
                 const isDirty = isParamsDraftDirty(row, draft);
+                const shouldHighlight = shouldHighlightParamsRow(row, draft);
 
                 return (
-                  <tr key={row.modelId}>
+                  <tr
+                    key={row.modelId}
+                    className={
+                      shouldHighlight
+                        ? "bg-warning/10 hover:bg-warning/15 transition-colors"
+                        : undefined
+                    }
+                    title={shouldHighlight ? "未填写模型参数量" : undefined}
+                  >
                     <td className="min-w-[220px]">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold">{row.modelName}</span>
@@ -267,7 +287,9 @@ export function ParamsTab({
                     </td>
                     <td>
                       <input
-                        className="input input-bordered input-xs w-24"
+                        className={`input input-bordered input-xs w-24 ${
+                          shouldHighlight ? "border-warning/40 focus:border-warning" : ""
+                        }`}
                         value={draft.totalParamsB}
                         onChange={(event) =>
                           updateParamsDraft(row.modelId, (current) => ({ ...current, totalParamsB: event.target.value }))
