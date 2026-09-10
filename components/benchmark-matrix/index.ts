@@ -139,3 +139,22 @@ export {
 } from "./cell-trend";
 
 export { CellTrendPanel, type CellTrendPanelProps } from "./cell-trend-panel";
+
+// Re-export selectors
+export {
+  buildMatrixRows,
+  buildModelColumns,
+  buildPriceMatrixRows,
+  buildParamsMatrixRows,
+  buildReleaseDateMatrixRow,
+  buildDisplayedCoverageMetaByModel,
+  filterMatrixRowsByModalities,
+  filterMatrixRowsByPresence,
+  hasMeaningfulMatrixCellContent,
+  hasMatrixRowContent,
+  isMatrixRowEmpty,
+  filterMatrixRowsWithContent,
+  sortMatrixRows,
+  buildHeaderUniqueCounts,
+  buildOverallSummaryByModel
+} from "./selectors";

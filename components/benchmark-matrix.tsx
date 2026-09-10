@@ -76,6 +76,7 @@ import {
   buildRowsWithSourceMeta,
   filterMatrixRowsByModalities,
   filterMatrixRowsByPresence,
+  filterMatrixRowsWithContent,
   resolveBaseSourceRows,
   sortMatrixRows
 } from "./benchmark-matrix/selectors";
@@ -1061,8 +1062,11 @@ export function BenchmarkMatrix({
   );
 
   const presenceFilteredMatrixRows = useMemo(
-    () => filterMatrixRowsByPresence(modalityFilteredMatrixRows, rowPresenceFilterModel),
-    [modalityFilteredMatrixRows, rowPresenceFilterModel]
+    () => filterMatrixRowsWithContent(
+      filterMatrixRowsByPresence(modalityFilteredMatrixRows, rowPresenceFilterModel),
+      baseModelColumns
+    ),
+    [modalityFilteredMatrixRows, rowPresenceFilterModel, baseModelColumns]
   );
 
   const temporarilyHiddenRowKeySet = useMemo(
@@ -1078,7 +1082,9 @@ export function BenchmarkMatrix({
   );
 
   const priceMatrixRows = useMemo(
-    () => effectiveShowPriceRows ? buildPriceMatrixRows(baseModelColumns, modelPrices) : [],
+    () => effectiveShowPriceRows
+      ? filterMatrixRowsWithContent(buildPriceMatrixRows(baseModelColumns, modelPrices), baseModelColumns)
+      : [],
     [effectiveShowPriceRows, baseModelColumns, modelPrices]
   );
 
@@ -1090,7 +1096,9 @@ export function BenchmarkMatrix({
   );
 
   const paramsMatrixRows = useMemo(
-    () => effectiveShowParamsRows ? buildParamsMatrixRows(baseModelColumns, modelParams) : [],
+    () => effectiveShowParamsRows
+      ? filterMatrixRowsWithContent(buildParamsMatrixRows(baseModelColumns, modelParams), baseModelColumns)
+      : [],
     [effectiveShowParamsRows, baseModelColumns, modelParams]
   );
 
@@ -1172,12 +1180,12 @@ export function BenchmarkMatrix({
   );
 
   const displayMatrixRows = useMemo(
-    () => [
+    () => filterMatrixRowsWithContent([
       ...(effectiveShowParamsRows ? visibleParamsMatrixRows : []),
       ...(effectiveShowPriceRows ? visiblePriceMatrixRows : []),
       ...sortedMatrixRows
-    ],
-    [effectiveShowParamsRows, visibleParamsMatrixRows, effectiveShowPriceRows, visiblePriceMatrixRows, sortedMatrixRows]
+    ], baseModelColumns),
+    [effectiveShowParamsRows, visibleParamsMatrixRows, effectiveShowPriceRows, visiblePriceMatrixRows, sortedMatrixRows, baseModelColumns]
   );
 
   const displayMatrixRowKeySet = useMemo(

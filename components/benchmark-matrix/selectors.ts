@@ -31,6 +31,8 @@ import {
 } from "./scoring";
 import { calculateBoxPlotStats } from "@/lib/boxplot-stats";
 import { formatParamsBillions, formatPricePerMillion } from "./formatters";
+import { isImportValueEmptyMarker } from "@/lib/import/value-patterns";
+import { isEmptyImportPairValue, isStarMarkerOnly } from "@/lib/import/pair-value";
 import type {
   IndexedMatrixInputRow,
   BenchmarkRankingData,
@@ -1304,6 +1306,53 @@ export function filterMatrixRowsByPresence(
   });
 }
 
+/**
+ * 判定单元格是否存在有意义的实际内容（排除各类空占位符与纯标记）。
+ */
+export function hasMeaningfulMatrixCellContent(cell: MatrixCell | undefined): boolean {
+  if (!cell) return false;
+  if (cell.valueNum !== null && Number.isFinite(cell.valueNum)) return true;
+  if (cell.valueNum2 !== null && Number.isFinite(cell.valueNum2)) return true;
+
+  const display = cell.displayValue?.trim() ?? "";
+  if (!display || isImportValueEmptyMarker(display) || isEmptyImportPairValue(display) || isStarMarkerOnly(display)) {
+    return false;
+  }
+
+  const raw = cell.valueRaw?.trim() ?? "";
+  if (!raw || isImportValueEmptyMarker(raw) || isEmptyImportPairValue(raw) || isStarMarkerOnly(raw)) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * 判定某矩阵行在指定的模型列中，是否存在至少一个有内容的单元格。
+ */
+export function hasMatrixRowContent(row: MatrixRow, modelColumns: readonly string[]): boolean {
+  if (modelColumns.length === 0) return false;
+  return modelColumns.some((modelName) => hasMeaningfulMatrixCellContent(row.cells.get(modelName)));
+}
+
+/**
+ * 判定某矩阵行在指定的模型列中是否为整行无内容（空行）。
+ */
+export function isMatrixRowEmpty(row: MatrixRow, modelColumns: readonly string[]): boolean {
+  return !hasMatrixRowContent(row, modelColumns);
+}
+
+/**
+ * 过滤掉在指定模型列中整行无内容（空行）的矩阵行。
+ */
+export function filterMatrixRowsWithContent(
+  matrixRows: MatrixRow[],
+  modelColumns: readonly string[]
+): MatrixRow[] {
+  if (modelColumns.length === 0) return [];
+  return matrixRows.filter((row) => hasMatrixRowContent(row, modelColumns));
+}
+
 export function buildDisplayedCoverageMetaByModel(
   allModelNames: string[],
   coveredModelsByGroupingKey: Map<string, Set<string>>,
@@ -1384,7 +1433,8 @@ function createPriceCell(value: number | null, benchTime: string | null): Matrix
 
 export function buildPriceMatrixRows(
   modelColumns: readonly string[],
-  modelPrices: readonly ModelPriceInfo[]
+  modelPrices: readonly ModelPriceInfo[],
+  options?: { filterEmpty?: boolean }
 ): MatrixRow[] {
   const priceByModel = new Map(modelPrices.map((price) => [price.modelName, price]));
   const definitions: Array<{ rowKey: string; benchmark: string; pick: (price: ModelPriceInfo) => number | null }> = [
@@ -1393,7 +1443,7 @@ export function buildPriceMatrixRows(
     { rowKey: PRICE_CACHE_INPUT_ROW_KEY, benchmark: "Cache Input Price", pick: (price) => price.cacheReadCost }
   ];
 
-  return definitions.map((definition, index) => {
+  const rows = definitions.map((definition, index) => {
     const cells = new Map<string, MatrixCell>();
     modelColumns.forEach((modelName) => {
       const price = priceByModel.get(modelName);
@@ -1428,6 +1478,8 @@ export function buildPriceMatrixRows(
       isPriceRow: true
     };
   });
+
+  return options?.filterEmpty ? filterMatrixRowsWithContent(rows, modelColumns) : rows;
 }
 
 /**
@@ -1519,7 +1571,8 @@ function createActiveRatioCell(params: ModelParamsInfo | undefined): MatrixCell 
 
 export function buildParamsMatrixRows(
   modelColumns: readonly string[],
-  modelParams: readonly ModelParamsInfo[]
+  modelParams: readonly ModelParamsInfo[],
+  options?: { filterEmpty?: boolean }
 ): MatrixRow[] {
   const paramsByModel = new Map(modelParams.map((params) => [params.modelName, params]));
   const definitions: Array<{
@@ -1531,7 +1584,7 @@ export function buildParamsMatrixRows(
     { rowKey: PARAMS_ACTIVE_RATIO_ROW_KEY, benchmark: "Activated %", build: createActiveRatioCell }
   ];
 
-  return definitions.map((definition, index) => {
+  const rows = definitions.map((definition, index) => {
     const cells = new Map<string, MatrixCell>();
     modelColumns.forEach((modelName) => {
       cells.set(modelName, definition.build(paramsByModel.get(modelName)));
@@ -1566,6 +1619,8 @@ export function buildParamsMatrixRows(
       isInfoRow: true
     };
   });
+
+  return options?.filterEmpty ? filterMatrixRowsWithContent(rows, modelColumns) : rows;
 }
 
 export function parseReleaseDateToTimestamp(dateStr: string | null | undefined): number | null {
