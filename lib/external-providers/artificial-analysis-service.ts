@@ -49,6 +49,8 @@ export type ExternalMappingRow = {
   manualOverride: boolean;
   /** 上游是否还存在这条：人工绑定的上游 id 可能在上游改名后失效 */
   externalMissing: boolean;
+  /** 是否为未匹配条目在本次拉取中首次匹配上 */
+  isNewMatch?: boolean;
 };
 
 export type UpstreamOnlyModel = {
@@ -183,12 +185,16 @@ export async function getArtificialAnalysisAdminSnapshot(options?: {
   }
 
   const { matches, conflicts } = resolveModelMatches(localModels, snapshot.models, pinnedMatches);
+  const conflictModelIds = new Set(conflicts.flatMap((c) => c.modelIds));
   const localById = new Map(localModels.map((model) => [model.id, model]));
 
   const mappings: ExternalMappingRow[] = matches.map((match) => {
     const local = localById.get(match.modelId)!;
     const stored = manualByModelId.get(match.modelId);
     const upstream = match.externalModelId ? upstreamById.get(match.externalModelId) : undefined;
+    const isNewMatch =
+      stored?.matchStatus === "unmatched" &&
+      (match.matchStatus === "matched" || match.matchStatus === "manual");
 
     return {
       modelId: match.modelId,
@@ -203,8 +209,21 @@ export async function getArtificialAnalysisAdminSnapshot(options?: {
       matchConfidence: match.matchConfidence,
       matchReason: match.matchReason,
       manualOverride: stored?.manualOverride ?? false,
-      externalMissing: match.externalModelId !== null && !upstream
+      externalMissing: match.externalModelId !== null && !upstream,
+      isNewMatch
     };
+  });
+
+  mappings.sort((a, b) => {
+    const aWarning = a.externalMissing || conflictModelIds.has(a.modelId);
+    const bWarning = b.externalMissing || conflictModelIds.has(b.modelId);
+    if (aWarning !== bWarning) return aWarning ? -1 : 1;
+
+    const aNew = Boolean(a.isNewMatch);
+    const bNew = Boolean(b.isNewMatch);
+    if (aNew !== bNew) return aNew ? -1 : 1;
+
+    return 0;
   });
 
   const boundExternalIds = new Set(
@@ -330,6 +349,13 @@ export async function saveArtificialAnalysisMappings(inputs: unknown) {
       const matchStatus =
         update.matchStatus ?? (update.externalModelId ? "manual" : "ignored");
       const manualOverride = update.manualOverride ?? true;
+      const matchConfidence = matchStatus === "unmatched" ? 0 : manualOverride ? 100 : 0;
+      const matchReason =
+        matchStatus === "unmatched"
+          ? "unbound"
+          : manualOverride
+            ? "manual"
+            : "auto";
 
       return {
         source: ARTIFICIAL_ANALYSIS_SOURCE_ID,
@@ -340,8 +366,8 @@ export async function saveArtificialAnalysisMappings(inputs: unknown) {
         externalCreator: upstream?.creatorName ?? null,
         reasoningEffort: update.reasoningEffort ?? null,
         matchStatus,
-        matchConfidence: manualOverride ? 100 : 0,
-        matchReason: manualOverride ? "manual" : "auto",
+        matchConfidence,
+        matchReason,
         manualOverride,
         rawJson: {},
         lastSyncedAt: now,

@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { renderReady } from "@/tests/flush-microtasks";
 import userEvent from "@testing-library/user-event";
 import { ExternalImportTab } from "@/components/admin-console/views/external-import-tab";
@@ -201,13 +201,13 @@ describe("ExternalImportTab", () => {
       updater({ externalModelId: "aa-xhigh", reasoningEffort: "xhigh", ignored: false, manualOverride: false })
     ).toEqual({
       externalModelId: "aa-high",
-      reasoningEffort: "xhigh",
+      reasoningEffort: "high",
       ignored: false,
       manualOverride: true
     });
   });
 
-  test("已忽略的模型仍可编辑上游条目，编辑后自动取消忽略", async () => {
+  test("已忽略的模型仍可编辑上游条目，编辑后自动取消忽略并同步推理强度", async () => {
     const user = userEvent.setup();
     const onUpdateMappingDraft = vi.fn();
     await renderTab({
@@ -246,7 +246,7 @@ describe("ExternalImportTab", () => {
       updater({ externalModelId: null, reasoningEffort: null, ignored: true, manualOverride: false })
     ).toEqual({
       externalModelId: "aa-xhigh",
-      reasoningEffort: null,
+      reasoningEffort: "xhigh",
       ignored: false,
       manualOverride: true
     });
@@ -342,5 +342,156 @@ describe("ExternalImportTab", () => {
 
     expect(screen.getByText(/点击「拉取上游」后在这里选择要导入的数据项/)).toBeInTheDocument();
     expect(screen.getByText("尚未拉取上游数据")).toBeInTheDocument();
+  });
+
+  test("将条目设为不绑定时，回调清空绑定且不自动勾选忽略，推理强度置空", async () => {
+    const user = userEvent.setup();
+    const onUpdateMappingDraft = vi.fn();
+    await renderTab({
+      onUpdateMappingDraft
+    });
+
+    const input = screen.getByLabelText("GPT 5.4 的上游条目");
+    await user.click(input);
+    await user.click(await screen.findByRole("option", { name: /（不绑定）/ }));
+
+    expect(onUpdateMappingDraft).toHaveBeenCalled();
+    const [modelId, updater] = onUpdateMappingDraft.mock.calls.at(-1)!;
+    expect(modelId).toBe(1);
+    expect(
+      updater({ externalModelId: "aa-xhigh", reasoningEffort: "xhigh", ignored: false, manualOverride: false })
+    ).toEqual({
+      externalModelId: null,
+      reasoningEffort: null,
+      ignored: false,
+      manualOverride: true
+    });
+  });
+
+  test("草稿设为不绑定后状态显示为未匹配，且忽略框未勾选", async () => {
+    await renderTab({
+      mappingDrafts: {
+        1: { externalModelId: null, reasoningEffort: null, ignored: false, manualOverride: true }
+      }
+    });
+
+    // 模型 1 的状态应显示为“未匹配”，而不是“手动”或“忽略”
+    const rows = screen.getAllByRole("row");
+    const gptRow = rows.find((r) => r.textContent?.includes("GPT 5.4"))!;
+    expect(gptRow).toHaveTextContent("未匹配");
+    expect(gptRow.querySelector("input[type='checkbox']")!).not.toBeChecked();
+  });
+
+  test("若存在已绑定的上游条目在本次拉取中不存在等警告条目，将其提升到列表开头", async () => {
+    const snapshot = makeSnapshot({
+      mappings: [
+        {
+          modelId: 1,
+          modelName: "GPT 5.4",
+          providerName: "OpenAI",
+          externalModelId: "aa-xhigh",
+          externalModelName: "GPT 5.4 (xhigh)",
+          externalCreator: "OpenAI",
+          reasoningEffort: "xhigh",
+          matchStatus: "matched",
+          matchConfidence: 88,
+          matchReason: "highest-effort-default",
+          manualOverride: false,
+          externalMissing: false
+        },
+        {
+          modelId: 2,
+          modelName: "某个警告模型",
+          providerName: "Internal",
+          externalModelId: "aa-missing-id",
+          externalModelName: "旧的已改名模型",
+          externalCreator: "Internal",
+          reasoningEffort: null,
+          matchStatus: "matched",
+          matchConfidence: 100,
+          matchReason: "manual",
+          manualOverride: true,
+          externalMissing: true
+        }
+      ]
+    });
+
+    await renderTab({ snapshot });
+
+    const mappingTable = document.querySelector(".admin-mapping-table")!;
+    const rows = within(mappingTable as HTMLElement).getAllByRole("row");
+    // 数据行从索引 1 开始（表头是索引 0）
+    expect(rows[1]).toHaveTextContent("某个警告模型");
+    expect(rows[1]).toHaveTextContent("已绑定的上游条目在本次拉取中不存在");
+    expect(rows[2]).toHaveTextContent("GPT 5.4");
+  });
+
+  test("未匹配条目首次匹配上时，展示新 tag 并提升到列表开头（在警告行之后）", async () => {
+    const snapshot = makeSnapshot({
+      mappings: [
+        {
+          modelId: 1,
+          modelName: "普通已匹配模型",
+          providerName: "OpenAI",
+          externalModelId: "aa-xhigh",
+          externalModelName: "GPT 5.4 (xhigh)",
+          externalCreator: "OpenAI",
+          reasoningEffort: "xhigh",
+          matchStatus: "matched",
+          matchConfidence: 88,
+          matchReason: "highest-effort-default",
+          manualOverride: false,
+          externalMissing: false
+        },
+        {
+          modelId: 2,
+          modelName: "警告失效模型",
+          providerName: "OpenAI",
+          externalModelId: "aa-gone",
+          externalModelName: "Missing",
+          externalCreator: "OpenAI",
+          reasoningEffort: null,
+          matchStatus: "matched",
+          matchConfidence: 100,
+          matchReason: "manual",
+          manualOverride: true,
+          externalMissing: true
+        },
+        {
+          modelId: 3,
+          modelName: "新匹配上的模型",
+          providerName: "OpenAI",
+          externalModelId: null,
+          externalModelName: null,
+          externalCreator: null,
+          reasoningEffort: null,
+          matchStatus: "unmatched",
+          matchConfidence: 0,
+          matchReason: "no-match",
+          manualOverride: false,
+          externalMissing: false
+        }
+      ]
+    });
+
+    await renderTab({
+      snapshot,
+      mappingDrafts: {
+        1: { externalModelId: "aa-xhigh", reasoningEffort: "xhigh", ignored: false, manualOverride: false },
+        2: { externalModelId: "aa-gone", reasoningEffort: null, ignored: false, manualOverride: true },
+        // 模型 3 在草稿中首次匹配上
+        3: { externalModelId: "aa-high", reasoningEffort: "high", ignored: false, manualOverride: true }
+      }
+    });
+
+    const mappingTable = document.querySelector(".admin-mapping-table")!;
+    const rows = within(mappingTable as HTMLElement).getAllByRole("row");
+    // 排序顺序：1. 警告行（模型 2） 2. 新匹配行（模型 3） 3. 普通行（模型 1）
+    expect(rows[1]).toHaveTextContent("警告失效模型");
+    expect(rows[2]).toHaveTextContent("新匹配上的模型");
+    expect(rows[3]).toHaveTextContent("普通已匹配模型");
+
+    // 模型 3 包含“新”tag
+    expect(screen.getByTestId("new-match-badge-3")).toHaveTextContent("新");
   });
 });

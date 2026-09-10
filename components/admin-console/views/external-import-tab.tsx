@@ -7,11 +7,13 @@ import type {
   ExternalImportSummary,
   ExternalMappingDraft,
   ExternalMappingRow,
+  ExternalMatchStatus,
   ExternalMetricCatalogEntry,
   ExternalMetricOverride
 } from "../types";
 import { isMappingDraftDirty } from "../hooks/use-external-import";
 import { UpstreamModelCombobox } from "./shared/upstream-model-combobox";
+import { parseModelReasoningEffort } from "@/lib/external-providers/reasoning-effort";
 
 /** 与 lib/external-providers/reasoning-effort.ts 的档位保持一致 */
 const REASONING_EFFORT_OPTIONS: Array<{ value: string; label: string }> = [
@@ -69,18 +71,51 @@ type ExternalImportTabProps = {
   onRunImport: () => void | Promise<void>;
 };
 
-function getStatusBadgeClass(status: ExternalMappingRow["matchStatus"], manualOverride: boolean) {
-  if (manualOverride || status === "manual") return "border-amber-400/70 bg-amber-500/10 text-amber-200";
+export function getEffectiveStatus(
+  row: ExternalMappingRow,
+  draft: ExternalMappingDraft | undefined
+): ExternalMatchStatus {
+  if (!draft) return row.matchStatus;
+  if (draft.ignored) return "ignored";
+  if (!draft.externalModelId) return "unmatched";
+  if (draft.manualOverride || row.matchStatus === "manual") return "manual";
+  return row.matchStatus;
+}
+
+function getStatusBadgeClass(status: ExternalMatchStatus) {
+  if (status === "manual") return "border-amber-400/70 bg-amber-500/10 text-amber-200";
   if (status === "matched") return "border-green-500/70 bg-green-500/10 text-green-300";
   if (status === "ignored") return "border-base-content/20 bg-base-200/70 text-base-content/60";
   return "border-red-500/70 bg-red-500/10 text-red-300";
 }
 
-function getStatusLabel(status: ExternalMappingRow["matchStatus"], manualOverride: boolean) {
-  if (manualOverride || status === "manual") return "手动";
+function getStatusLabel(status: ExternalMatchStatus) {
+  if (status === "manual") return "手动";
   if (status === "matched") return "已匹配";
   if (status === "ignored") return "忽略";
   return "未匹配";
+}
+
+export function isWarningRow(
+  row: ExternalMappingRow,
+  conflictModelIds: Set<number>
+): boolean {
+  return Boolean(row.externalMissing || conflictModelIds.has(row.modelId));
+}
+
+export function isNewMatchRow(
+  row: ExternalMappingRow,
+  draft: ExternalMappingDraft | undefined
+): boolean {
+  const effectiveExternalId = draft ? draft.externalModelId : row.externalModelId;
+  const isIgnored = draft ? draft.ignored : row.matchStatus === "ignored";
+  const isCurrentlyMatched = Boolean(effectiveExternalId && !isIgnored);
+  if (!isCurrentlyMatched) return false;
+
+  if (row.isNewMatch) return true;
+  if (row.matchStatus === "unmatched") return true;
+
+  return false;
 }
 
 function formatSampleValue(entry: ExternalMetricCatalogEntry) {
@@ -133,22 +168,37 @@ export function ExternalImportTab({
     if (!snapshot) return [];
     const query = searchQuery.trim().toLowerCase();
 
-    return snapshot.mappings.filter((row) => {
-      const draft = mappingDrafts[row.modelId];
-      const effectiveStatus = draft?.ignored ? "ignored" : row.matchStatus;
+    return snapshot.mappings
+      .filter((row) => {
+        const draft = mappingDrafts[row.modelId];
+        const effectiveStatus = getEffectiveStatus(row, draft);
 
-      const matchesQuery =
-        !query ||
-        row.modelName.toLowerCase().includes(query) ||
-        row.providerName.toLowerCase().includes(query) ||
-        (row.externalModelName ?? "").toLowerCase().includes(query);
-      if (!matchesQuery) return false;
+        const matchesQuery =
+          !query ||
+          row.modelName.toLowerCase().includes(query) ||
+          row.providerName.toLowerCase().includes(query) ||
+          (row.externalModelName ?? "").toLowerCase().includes(query);
+        if (!matchesQuery) return false;
 
-      if (statusFilter === "all") return true;
-      if (statusFilter === "manual") return draft?.manualOverride || row.manualOverride;
-      return effectiveStatus === statusFilter;
-    });
-  }, [snapshot, mappingDrafts, searchQuery, statusFilter]);
+        if (statusFilter === "all") return true;
+        if (statusFilter === "manual") return effectiveStatus === "manual";
+        return effectiveStatus === statusFilter;
+      })
+      .sort((a, b) => {
+        const aDraft = mappingDrafts[a.modelId];
+        const bDraft = mappingDrafts[b.modelId];
+
+        const aWarning = isWarningRow(a, conflictModelIds);
+        const bWarning = isWarningRow(b, conflictModelIds);
+        if (aWarning !== bWarning) return aWarning ? -1 : 1;
+
+        const aNew = isNewMatchRow(a, aDraft);
+        const bNew = isNewMatchRow(b, bDraft);
+        if (aNew !== bNew) return aNew ? -1 : 1;
+
+        return 0;
+      });
+  }, [snapshot, mappingDrafts, searchQuery, statusFilter, conflictModelIds]);
 
   const matchedCount = snapshot?.mappings.filter(
     (row) => row.matchStatus === "matched" || row.matchStatus === "manual"
@@ -444,7 +494,8 @@ export function ExternalImportTab({
                 const draft = mappingDrafts[row.modelId];
                 if (!draft) return null;
                 const dirty = isMappingDraftDirty(row, draft);
-                const effectiveStatus = draft.ignored ? "ignored" : row.matchStatus;
+                const effectiveStatus = getEffectiveStatus(row, draft);
+                const isNew = isNewMatchRow(row, draft);
                 const matchReasonLabel = MATCH_REASON_LABELS[row.matchReason] ?? row.matchReason;
                 const selectedUpstream = (snapshot?.upstreamOptions ?? []).find(
                   (option) => option.externalModelId === draft.externalModelId
@@ -462,8 +513,18 @@ export function ExternalImportTab({
                     <td className="align-top overflow-hidden">
                       <div className="flex min-w-0 items-center gap-2">
                         <div className="min-w-0 flex-1">
-                          <div className="truncate font-semibold" title={row.modelName}>
-                            {row.modelName}
+                          <div className="flex items-center gap-1.5 truncate">
+                            <span className="truncate font-semibold" title={row.modelName}>
+                              {row.modelName}
+                            </span>
+                            {isNew ? (
+                              <span
+                                data-testid={`new-match-badge-${row.modelId}`}
+                                className="badge badge-success badge-xs shrink-0 font-medium whitespace-nowrap"
+                              >
+                                新
+                              </span>
+                            ) : null}
                           </div>
                           <div className="truncate text-xs opacity-60" title={row.providerName}>
                             {row.providerName}
@@ -480,9 +541,20 @@ export function ExternalImportTab({
                           selectedLabel={selectedUpstreamLabel}
                           options={snapshot?.upstreamOptions ?? []}
                           onChange={(nextExternalModelId) => {
+                            const selectedOption = (snapshot?.upstreamOptions ?? []).find(
+                              (option) => option.externalModelId === nextExternalModelId
+                            );
+                            const inferredEffort = selectedOption
+                              ? parseModelReasoningEffort(selectedOption.externalModelName).effort ??
+                                (selectedOption.externalModelSlug
+                                  ? parseModelReasoningEffort(selectedOption.externalModelSlug).effort
+                                  : null)
+                              : null;
+
                             onUpdateMappingDraft(row.modelId, (current) => ({
                               ...current,
                               externalModelId: nextExternalModelId,
+                              reasoningEffort: inferredEffort,
                               ignored: false,
                               manualOverride: true
                             }));
@@ -524,11 +596,10 @@ export function ExternalImportTab({
                       <div className="flex min-w-0 flex-col items-start gap-1">
                         <div
                           className={`inline-flex h-6 items-center rounded-full border px-2.5 text-[11px] font-semibold whitespace-nowrap ${getStatusBadgeClass(
-                            effectiveStatus,
-                            draft.manualOverride
+                            effectiveStatus
                           )}`}
                         >
-                          {getStatusLabel(effectiveStatus, draft.manualOverride)}
+                          {getStatusLabel(effectiveStatus)}
                         </div>
                         <div className="text-[11px] opacity-60 whitespace-nowrap">置信 {row.matchConfidence}</div>
                       </div>

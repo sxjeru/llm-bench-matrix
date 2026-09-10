@@ -313,6 +313,8 @@ export type ExternalMappingRow = {
   matchReason: string;
   manualOverride: boolean;
   externalMissing: boolean;
+  /** 是否为未匹配条目在本次拉取中首次匹配上 */
+  isNewMatch?: boolean;
 };
 
 export type ExternalUpstreamModel = {
