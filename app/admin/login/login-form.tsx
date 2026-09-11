@@ -1,12 +1,18 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { sanitizeAdminRedirectTarget } from "@/lib/admin-redirect";
+import { TurnstileWidget, TurnstileWidgetRef } from "@/components/turnstile-widget";
+
+const HAS_TURNSTILE = Boolean(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY);
 
 export function AdminLoginForm() {
   const [password, setPassword] = useState("");
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const [turnstileError, setTurnstileError] = useState("");
   const [error, setError] = useState("");
   const [loginStatus, setLoginStatus] = useState<"idle" | "submitting" | "redirecting">("idle");
+  const turnstileRef = useRef<TurnstileWidgetRef>(null);
 
   const [showChangeDialog, setShowChangeDialog] = useState(false);
   const [newPassword, setNewPassword] = useState("");
@@ -31,6 +37,12 @@ export function AdminLoginForm() {
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+
+    if (HAS_TURNSTILE && !turnstileToken) {
+      setError(turnstileError || "请先完成人机验证");
+      return;
+    }
+
     setLoginStatus("submitting");
 
     try {
@@ -39,13 +51,19 @@ export function AdminLoginForm() {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ password })
+        body: JSON.stringify({
+          password,
+          turnstileToken: turnstileToken || undefined
+        })
       });
 
       const result = await response.json();
       if (!response.ok) {
         setError(result.error || "登录失败");
         setLoginStatus("idle");
+        // 登录失败后重置人机验证 Token，防止复用已失效的验证凭证
+        turnstileRef.current?.reset();
+        setTurnstileToken("");
         return;
       }
 
@@ -59,6 +77,8 @@ export function AdminLoginForm() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "登录失败");
       setLoginStatus("idle");
+      turnstileRef.current?.reset();
+      setTurnstileToken("");
     }
   }
 
@@ -179,11 +199,51 @@ export function AdminLoginForm() {
                 required
               />
             </div>
+
+            <TurnstileWidget
+              ref={turnstileRef}
+              onVerify={(token) => {
+                setTurnstileToken(token);
+                setTurnstileError("");
+                setError((prev) => (prev.includes("人机验证") ? "" : prev));
+              }}
+              onExpire={() => {
+                setTurnstileToken("");
+              }}
+              onError={(code) => {
+                setTurnstileToken("");
+                if (code === "SCRIPT_LOAD_FAILED") {
+                  setTurnstileError("人机验证组件加载失败，请检查网络连接或关闭广告拦截插件后重试");
+                } else {
+                  setTurnstileError("人机验证服务遇到问题，请重试或刷新页面");
+                }
+              }}
+            />
+
+            {turnstileError ? (
+              <div className="flex flex-col items-center gap-1.5 p-2 rounded bg-error/10 text-error text-xs text-center border border-error/20">
+                <span>{turnstileError}</span>
+                <button
+                  type="button"
+                  className="btn btn-xs btn-outline btn-error"
+                  onClick={() => {
+                    setTurnstileError("");
+                    turnstileRef.current?.retry();
+                  }}
+                >
+                  重试加载验证码
+                </button>
+              </div>
+            ) : null}
+
             <div>
               <button
                 type="submit"
                 className="btn btn-primary w-full"
-                disabled={loginStatus !== "idle"}
+                disabled={
+                  loginStatus !== "idle" ||
+                  (HAS_TURNSTILE && !turnstileToken)
+                }
               >
                 {loginStatus === "redirecting"
                   ? "正在进入后台..."

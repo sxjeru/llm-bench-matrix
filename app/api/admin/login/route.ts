@@ -10,13 +10,39 @@ import {
   verifyLoginPassword
 } from "../../../../lib/admin-auth";
 import { ADMIN_COOKIE_NAME, ADMIN_SESSION_MAX_AGE_SECONDS } from "../../../../lib/admin-constants";
+import { verifyTurnstileToken } from "../../../../lib/turnstile";
 
 const loginSchema = z.object({
-  password: z.string().min(1)
+  password: z.string().min(1, "请输入密码"),
+  turnstileToken: z.string().optional().nullable()
 });
 
 export async function POST(request: Request) {
   const clientKey = getLoginClientKey(request);
+
+  // 1. 安全解析请求体 JSON
+  const body = await request.json().catch(() => null);
+  const parsed = loginSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  }
+
+  // 2. 前置进行 Turnstile 人机验证（Fail-Fast 核心防线）
+  // 关键安全设计：在触碰数据库（checkLoginAllowed 事务锁）与 CPU 密集计算（PBKDF2）前率先拦截脚本
+  const turnstileResult = await verifyTurnstileToken({
+    token: parsed.data.turnstileToken,
+    remoteIp: clientKey
+  });
+
+  if (!turnstileResult.success) {
+    return NextResponse.json(
+      { error: turnstileResult.error || "人机验证未通过" },
+      { status: 400 }
+    );
+  }
+
+  // 3. 人机验证通过后，再检查 Login Guard 频控状态
   const guard = await checkLoginAllowed(clientKey);
   if (!guard.allowed) {
     const message = guard.ipBlocked ? "该 IP 已被锁定，请稍后再试" : "登录失败次数过多，请稍后再试";
@@ -30,13 +56,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const body = await request.json().catch(() => null);
-  const parsed = loginSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
-  }
-
+  // 4. 校验管理员密码（PBKDF2 100k 迭代比对）
   const result = await verifyLoginPassword(parsed.data.password);
   if (!result.ok) {
     const failure = await registerLoginFailure(clientKey);
