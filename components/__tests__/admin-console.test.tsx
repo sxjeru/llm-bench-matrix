@@ -4001,6 +4001,7 @@ describe("AdminConsole 批量保存", () => {
 
     expect(within(row1).getByText("2024-06-01")).toBeInTheDocument();
     expect(within(row1).getByText("未保存")).toBeInTheDocument();
+    expect(within(row1).getByRole("checkbox")).toBeChecked();
 
     // 保存单条改动
     await user.click(within(row1).getByRole("button", { name: /保存/ }));
@@ -4022,7 +4023,9 @@ describe("AdminConsole 批量保存", () => {
     expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual(
       expect.objectContaining({
         modelId: 1,
-        releaseDate: "2024-06-01"
+        releaseDate: "2024-06-01",
+        manualOverride: true,
+        matchStatus: "manual"
       })
     );
   });

@@ -82,17 +82,31 @@ describe("pricing-draft utils", () => {
     expect(countDirtyPricingDrafts([row1, row2], drafts)).toBe(1);
   });
 
-  test("buildPricingUpdatePayload 包含规范化后的 releaseDate", () => {
-    const row = createRow({ modelId: 1 });
+  test("buildPricingUpdatePayload 包含规范化后的 releaseDate 并自动开启手动覆盖", () => {
+    const row = createRow({ modelId: 1, manualOverride: false, releaseDate: "2024-05-13" });
     const draft = { ...toPricingDraft(row), releaseDate: "  2024-06-01  " };
 
     const payload = buildPricingUpdatePayload(row.modelId, draft, row);
     expect(payload.releaseDate).toBe("2024-06-01");
     expect(payload.modelId).toBe(1);
+    expect(payload.manualOverride).toBe(true);
+    expect(payload.matchStatus).toBe("manual");
 
     const emptyDraft = { ...toPricingDraft(row), releaseDate: "   " };
     const emptyPayload = buildPricingUpdatePayload(row.modelId, emptyDraft, row);
     expect(emptyPayload.releaseDate).toBeNull();
+    // 清空日期同样属于日期变更，自动开启手动覆盖避免被上游重新写入
+    expect(emptyPayload.manualOverride).toBe(true);
+    expect(emptyPayload.matchStatus).toBe("manual");
+  });
+
+  test("buildPricingUpdatePayload 未改动日期与价格且未勾选手动覆盖时保持 matched", () => {
+    const row = createRow({ modelId: 1, manualOverride: false, releaseDate: "2024-05-13" });
+    const draft = toPricingDraft(row);
+
+    const payload = buildPricingUpdatePayload(row.modelId, draft, row);
+    expect(payload.manualOverride).toBe(false);
+    expect(payload.matchStatus).toBe("matched");
   });
 
   test("formatReleaseDateInput 自动格式化常见日期格式与多余 0（如 2026-09-011 -> 2026-09-11）", () => {

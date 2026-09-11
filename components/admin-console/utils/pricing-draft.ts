@@ -97,7 +97,7 @@ export function countDirtyPricingDrafts(
 /**
  * 行内保存与批量保存共用的提交体。
  *
- * 改过任一价格就自动打开手动覆盖，否则下一次 models.dev 同步会把人工填的值冲掉。
+ * 改过任一价格或发布日期就自动打开手动覆盖，否则下一次 models.dev 同步会把人工填的值冲掉。
  */
 export function buildPricingUpdatePayload(
   modelId: number,
@@ -117,7 +117,11 @@ export function buildPricingUpdatePayload(
   const priceChanged = sourceRow
     ? PRICING_COST_FIELDS.some((field) => parsedCosts[field] !== sourceRow[field])
     : false;
-  const manualOverride = draft.manualOverride || priceChanged;
+  const normalizedReleaseDate = normalizeText(draft.releaseDate);
+  const dateChanged = sourceRow
+    ? normalizedReleaseDate !== normalizeText(sourceRow.releaseDate)
+    : Boolean(normalizedReleaseDate);
+  const manualOverride = draft.manualOverride || priceChanged || dateChanged;
 
   return {
     modelId,
@@ -126,7 +130,7 @@ export function buildPricingUpdatePayload(
     sourceProviderName: normalizeText(draft.sourceProviderName),
     sourceModelId: normalizeText(draft.sourceModelId),
     sourceModelName: normalizeText(draft.sourceModelName),
-    releaseDate: normalizeText(draft.releaseDate),
+    releaseDate: normalizedReleaseDate,
     manualOverride,
     matchStatus: manualOverride ? ("manual" as const) : ("matched" as const),
     note: normalizeText(draft.note)

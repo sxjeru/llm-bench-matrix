@@ -286,7 +286,8 @@ export function PricingTab({
                               onChange={(event) =>
                                 updatePricingDraft(price.modelId, (current) => ({
                                   ...current,
-                                  releaseDate: event.target.value
+                                  releaseDate: event.target.value,
+                                  manualOverride: true
                                 }))
                               }
                               onBlur={() => finishDateEditing(price.modelId)}
@@ -307,7 +308,8 @@ export function PricingTab({
                                 onClick={() => {
                                   updatePricingDraft(price.modelId, (current) => ({
                                     ...current,
-                                    releaseDate: ""
+                                    releaseDate: "",
+                                    manualOverride: true
                                   }));
                                 }}
                                 className="pricing-date-clear"

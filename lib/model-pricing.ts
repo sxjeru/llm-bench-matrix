@@ -192,6 +192,10 @@ function toNullableNumber(value: unknown): number | null {
   return null;
 }
 
+function normalizeText(value: string | null | undefined): string | null {
+  return (value ?? "").trim() || null;
+}
+
 function normalizeToken(value: string): string {
   return value
     .trim()
@@ -922,7 +926,12 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
         return existingVal === upstreamVal;
       });
 
-      if (isPriceEqual) {
+      const existingDate = normalizeText(existing.releaseDate);
+      const upstreamDate = normalizeText(match.model.release_date);
+      const isDateEqual = existingDate === upstreamDate;
+      const hasCustomDate = existingDate !== null && !isDateEqual;
+
+      if (isPriceEqual && !hasCustomDate) {
         const sourceModelName = match.model.name ?? match.model.id ?? match.modelKey;
         trackPricingUpsert(model, existing, {
           modelId: model.id,
@@ -931,7 +940,7 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
           sourceProviderName: match.provider.name,
           sourceModelId: match.model.id ?? match.modelKey,
           sourceModelName,
-          releaseDate: match.model.release_date ?? existing.releaseDate ?? null,
+          releaseDate: upstreamDate ?? existingDate ?? null,
           inputCost: upstreamCosts.inputCost,
           outputCost: upstreamCosts.outputCost,
           reasoningCost: upstreamCosts.reasoningCost,
