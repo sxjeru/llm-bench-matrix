@@ -10,6 +10,7 @@ import {
   type ReasoningEffort
 } from "./reasoning-effort";
 import { AA_VERSIONED_METRIC_KEYS } from "@/lib/benchmark-versions/aa-index-version";
+import { normalizeNameParenthesisSpacing } from "@/lib/source-utils";
 
 /**
  * artificialanalysis.ai 数据 API 适配。
@@ -1151,13 +1152,15 @@ export function buildImportRows(input: BuildImportRowsInput): ExternalImportRow[
 
       const override = input.config.metricOverrides[metricKey] ?? {};
       const valueScale = override.valueScale ?? entry.valueScale;
+      const rawBenchmarkName = override.benchmarkName ?? entry.label;
+      const rawBenchmarkType = override.benchmarkType ?? entry.benchmarkType;
 
       rows.push({
         rowNumber: rows.length + 1,
         providerName: local.providerName,
         modelName: local.modelName,
-        benchmarkName: override.benchmarkName ?? entry.label,
-        benchmarkType: override.benchmarkType ?? entry.benchmarkType,
+        benchmarkName: normalizeNameParenthesisSpacing(rawBenchmarkName),
+        benchmarkType: (rawBenchmarkType || "general").trim() || "general",
         benchmarkTypeProvided: true,
         higherIsBetter: override.higherIsBetter ?? entry.higherIsBetter,
         modalities: override.modalities ?? entry.modalities,
@@ -1197,10 +1200,12 @@ export function collectVersionTrackingBatch(
   for (const metricKey of activeTrackedKeys) {
     const entry = catalogByKey.get(metricKey)!;
     const override = input.config.metricOverrides[metricKey] ?? {};
+    const rawBenchmarkName = override.benchmarkName ?? entry.label;
+    const rawBenchmarkType = override.benchmarkType ?? entry.benchmarkType;
     batch[metricKey] = {
       metricKey,
-      benchmarkName: override.benchmarkName ?? entry.label,
-      benchmarkType: override.benchmarkType ?? entry.benchmarkType,
+      benchmarkName: normalizeNameParenthesisSpacing(rawBenchmarkName),
+      benchmarkType: (rawBenchmarkType || "general").trim() || "general",
       scores: []
     };
   }

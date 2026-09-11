@@ -1,9 +1,12 @@
 import { describe, expect, test } from "vitest";
 import {
+  buildSourceLookupCandidates,
   getSourceKey,
   getSourceLabel,
   isAaSecondaryCategory,
   isArtificialAnalysisSource,
+  normalizeNameParenthesisSpacing,
+  normalizeTextImportSource,
   sourceTabDisplayLabel,
   SOURCE_EMPTY
 } from "@/lib/source-utils";
@@ -51,4 +54,38 @@ describe("source-utils", () => {
       expect(isAaSecondaryCategory("Reasoning")).toBe(false);
     });
   });
+
+  describe("normalizeNameParenthesisSpacing", () => {
+    test("handles empty and whitespace-only strings", () => {
+      expect(normalizeNameParenthesisSpacing("")).toBe("");
+      expect(normalizeNameParenthesisSpacing("   ")).toBe("");
+    });
+
+    test("formats parenthesis spacing and normalizes hyphen variants", () => {
+      expect(normalizeNameParenthesisSpacing("Model(v2)")).toBe("Model (v2)");
+      expect(normalizeNameParenthesisSpacing("Model（v2）")).toBe("Model （v2）");
+      expect(normalizeNameParenthesisSpacing("Model  (v2) ")).toBe("Model (v2)");
+      expect(normalizeNameParenthesisSpacing("Model—A(test)")).toBe("Model-A (test)");
+    });
+  });
+
+  describe("normalizeTextImportSource & buildSourceLookupCandidates", () => {
+    test("normalizeTextImportSource prefixes plain text with text: and preserves existing text: prefix", () => {
+      expect(normalizeTextImportSource(null)).toBeNull();
+      expect(normalizeTextImportSource("")).toBeNull();
+      expect(normalizeTextImportSource("Artificial Analysis")).toBe("text:Artificial Analysis");
+      expect(normalizeTextImportSource("text:Artificial Analysis")).toBe("text:Artificial Analysis");
+    });
+
+    test("buildSourceLookupCandidates returns prefixed, raw, and unprefixed candidates", () => {
+      const candidates = buildSourceLookupCandidates("Artificial Analysis");
+      expect(candidates).toContain("Artificial Analysis");
+      expect(candidates).toContain("text:Artificial Analysis");
+
+      const candidates2 = buildSourceLookupCandidates("text:Artificial Analysis");
+      expect(candidates2).toContain("text:Artificial Analysis");
+      expect(candidates2).toContain("Artificial Analysis");
+    });
+  });
 });
+

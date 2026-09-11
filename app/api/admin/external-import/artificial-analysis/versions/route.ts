@@ -73,8 +73,19 @@ export async function POST(request: Request) {
         );
       }
 
+      const mergedActiveModels = Array.from(
+        new Set([...current.previous.activeModelNames, ...current.activeModelNames])
+      ).sort();
+
       const restored: TrackedVersionState = {
-        ...current.previous,
+        benchmarkName: current.benchmarkName,
+        benchmarkType: current.benchmarkType,
+        versionNumber: current.previous.versionNumber,
+        startedAt: current.previous.startedAt,
+        triggerReason: `管理员撤销换版判定，恢复为第 ${current.previous.versionNumber} 版同版本更新`,
+        activeModelNames: mergedActiveModels,
+        upstreamIndexVersion: current.upstreamIndexVersion ?? current.previous.upstreamIndexVersion ?? null,
+        lastStats: current.lastStats ?? current.previous.lastStats ?? null,
         previous: null
       };
 

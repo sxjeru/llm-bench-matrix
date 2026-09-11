@@ -654,20 +654,18 @@ export async function runArtificialAnalysisImport(options: {
   }
 
   // 4. 非 dryRun 且导入成功时写状态
-  if (!dryRun) {
-    if (versionStatesChanged) {
-      const remainingForceKeys = currentTrackingState.forceNewVersionMetricKeys.filter(
-        (k) => !consumedForceNewVersionKeys.includes(k)
-      );
+  if (!dryRun && (Object.keys(trackingBatch).length > 0 || consumedForceNewVersionKeys.length > 0)) {
+    const remainingForceKeys = currentTrackingState.forceNewVersionMetricKeys.filter(
+      (k) => !consumedForceNewVersionKeys.includes(k)
+    );
 
-      const nextTrackingState: AaVersionTrackingState = {
-        enabled: currentTrackingState.enabled ?? true,
-        forceNewVersionMetricKeys: remainingForceKeys,
-        benchmarks: nextBenchmarks
-      };
+    const nextTrackingState: AaVersionTrackingState = {
+      enabled: currentTrackingState.enabled,
+      forceNewVersionMetricKeys: remainingForceKeys,
+      benchmarks: nextBenchmarks
+    };
 
-      await saveAaVersionTrackingState(nextTrackingState);
-    }
+    await saveAaVersionTrackingState(nextTrackingState);
   }
 
   const publicChanged = result.publicChanged || createdModels.length > 0 || versionStatesChanged;

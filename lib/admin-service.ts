@@ -28,6 +28,12 @@ import {
   normalizeModalityList,
   PAPER_MODALITY_HINT_TOKENS
 } from "@/lib/modality";
+import {
+  buildSourceLookupCandidates,
+  normalizeNameParenthesisSpacing,
+  normalizeTextImportSource
+} from "@/lib/source-utils";
+
 
 type EnsureBenchmarkInput = {
   benchmarkName: string;
@@ -553,16 +559,6 @@ function expandMetricLabeledImportRows(rows: NormalizedTextImportRow[]): Normali
   });
 
   return expandedRows;
-}
-
-function normalizeNameParenthesisSpacing(rawName: string): string {
-  const trimmed = rawName.trim();
-  if (!trimmed) return "";
-
-  return trimmed
-    .replace(HYPHEN_VARIANT_REGEX, "-")
-    .replace(/([^\s（(])([（(])/g, "$1 $2")
-    .replace(/\s+([（(])/g, " $1");
 }
 
 function stripBenchmarkCitationRefs(rawBenchmarkName: string): string {
@@ -1466,19 +1462,6 @@ function toNullableText(value: string | undefined): string | null {
   if (!value) return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
-}
-
-function normalizeTextImportSource(value: string | undefined | null): string | null {
-  if (value === undefined || value === null) return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-
-  if (trimmed.toLowerCase().startsWith("text:")) {
-    const plain = trimmed.slice(5).trim();
-    return plain ? `text:${plain}` : "text:";
-  }
-
-  return `text:${trimmed}`;
 }
 
 function inferProviderNameFromModel(modelName: string): string {
@@ -4179,22 +4162,6 @@ function isSameExternalValue(
 
 function areSameStringArrays(left: readonly string[], right: readonly string[]) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-/** `deleteBenchmarkValuesBySource` 同款：带 `text:` 前缀与不带的都要算作同一个来源 */
-function buildSourceLookupCandidates(source: string): string[] {
-  const raw = source.trim();
-  const normalized = normalizeTextImportSource(raw);
-  const candidates = new Set<string>();
-
-  if (raw) candidates.add(raw);
-  if (normalized) {
-    candidates.add(normalized);
-    const unprefixed = normalized.slice(5).trim();
-    if (unprefixed) candidates.add(unprefixed);
-  }
-
-  return Array.from(candidates);
 }
 
 /**

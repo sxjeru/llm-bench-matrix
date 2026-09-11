@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   buildMetricCatalog,
   buildImportRows,
+  collectVersionTrackingBatch,
   fetchArtificialAnalysisModels,
   formatMetricValue,
   invalidateArtificialAnalysisSnapshotCache,
@@ -419,6 +420,65 @@ describe("buildImportRows", () => {
     expect(rows).toHaveLength(0);
   });
 });
+
+describe("collectVersionTrackingBatch", () => {
+  const upstreamModels = [
+    upstream("aa-1", "GPT-5", "OpenAI", {
+      "evaluations.artificial_analysis_intelligence_index": 85.6,
+      "evaluations.artificial_analysis_agentic_index": 78.2
+    })
+  ];
+  const catalog = buildMetricCatalog(upstreamModels);
+  const localModelsById = new Map([[1, { modelName: "GPT-5", providerName: "OpenAI" }]]);
+
+  test("收集勾选的被追踪指标，且对 benchmarkName 与 benchmarkType 严格进行括号空格清洗与 trim", () => {
+    const batch = collectVersionTrackingBatch({
+      upstreamModels,
+      catalog,
+      config: {
+        selectedMetrics: [
+          "evaluations.artificial_analysis_intelligence_index",
+          "evaluations.artificial_analysis_agentic_index"
+        ],
+        metricOverrides: {
+          "evaluations.artificial_analysis_intelligence_index": {
+            benchmarkName: "AA Intelligence(v2) ", // 缺少空格且带尾部空格
+            benchmarkType: " Overall "
+          }
+        }
+      },
+      matches: [
+        {
+          modelId: 1,
+          externalModelId: "aa-1",
+          externalModelName: "GPT-5",
+          externalModelSlug: null,
+          externalCreator: "OpenAI",
+          reasoningEffort: null,
+          matchStatus: "matched",
+          matchConfidence: 100,
+          matchReason: "manual"
+        }
+      ],
+      localModelsById
+    });
+
+    const intel = batch["evaluations.artificial_analysis_intelligence_index"];
+    expect(intel).toBeDefined();
+    // 括号前空格被自动补齐，尾部空格被 trim
+    expect(intel.benchmarkName).toBe("AA Intelligence (v2)");
+    // benchmarkType 被 trim
+    expect(intel.benchmarkType).toBe("Overall");
+    expect(intel.scores).toEqual([{ modelName: "GPT-5", score: 85.6 }]);
+
+    const agentic = batch["evaluations.artificial_analysis_agentic_index"];
+    expect(agentic).toBeDefined();
+    expect(agentic.benchmarkName).toBe("AA Agentic Index");
+    expect(agentic.benchmarkType).toBe("Agentic");
+    expect(agentic.scores).toEqual([{ modelName: "GPT-5", score: 78.2 }]);
+  });
+});
+
 
 // ---------------------------------------------------------------------------
 // 抓取：新 API 分页 + 旧 API 补 evaluations
