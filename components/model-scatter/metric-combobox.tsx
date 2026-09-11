@@ -160,7 +160,7 @@ export function MetricCombobox({
 
       hoverTimeoutRef.current = window.setTimeout(() => {
         const rect = element.getBoundingClientRect();
-        const submenuWidth = 304;
+        const submenuWidth = 268;
         const fitsRight = rect.right + submenuWidth + 8 <= window.innerWidth;
         const left = fitsRight ? rect.right + 4 : Math.max(8, rect.left - submenuWidth - 4);
         const top = Math.min(rect.top - 4, window.innerHeight - 360);
@@ -426,7 +426,7 @@ export function MetricCombobox({
                       <div className="scatter-combobox-snapshot-label">
                         {hasTime ? (
                           <>
-                            <span className="scatter-combobox-snapshot-date">{labelParts[0]}</span>{" "}
+                            <span className="scatter-combobox-snapshot-date">{labelParts[0]}</span>
                             <span className="scatter-combobox-snapshot-time">{labelParts[1]}</span>
                           </>
                         ) : (
@@ -436,7 +436,7 @@ export function MetricCombobox({
                       <div className="scatter-combobox-submenu-badges">
                         {isOverlay ? (
                           <span className="scatter-combobox-badge-overlay" title="按住 Ctrl 点击取消叠加">
-                            [已叠加背景]
+                            已叠加
                           </span>
                         ) : null}
                         {isSelected ? (
