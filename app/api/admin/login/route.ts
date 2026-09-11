@@ -14,7 +14,12 @@ import { verifyTurnstileToken } from "../../../../lib/turnstile";
 
 const loginSchema = z.object({
   password: z.string().min(1, "请输入密码"),
-  turnstileToken: z.string().optional().nullable()
+  turnstileToken: z
+    .string()
+    .trim()
+    .max(2048, "人机验证凭证长度超出限制")
+    .optional()
+    .nullable()
 });
 
 export async function POST(request: Request) {

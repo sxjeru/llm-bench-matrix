@@ -41,6 +41,13 @@ export async function verifyTurnstileToken({
     };
   }
 
+  if (trimmedToken.length > 2048) {
+    return {
+      success: false,
+      error: "人机验证凭证长度超出限制"
+    };
+  }
+
   try {
     const params = new URLSearchParams();
     params.append("secret", secretKey.trim());

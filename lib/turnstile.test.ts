@@ -98,5 +98,18 @@ describe("verifyTurnstileToken", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("超时");
   });
+
+  it("当 token 长度超过 2048 字符时直接前置拒绝，不发起网络请求", async () => {
+    process.env.TURNSTILE_SECRET_KEY = "test-secret-key";
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const oversizedToken = "a".repeat(2049);
+    const result = await verifyTurnstileToken({ token: oversizedToken });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("长度超出限制");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 

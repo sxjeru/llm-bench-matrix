@@ -30,9 +30,10 @@ declare global {
         options: {
           sitekey: string;
           callback?: (token: string) => void;
-          "error-callback"?: (errorCode?: string) => void;
+          "error-callback"?: (errorCode?: string) => boolean | void;
           "expired-callback"?: () => void;
           theme?: "light" | "dark" | "auto";
+          retry?: "auto" | "never";
           [key: string]: unknown;
         }
       ) => string;
@@ -59,9 +60,9 @@ export const TurnstileWidget = forwardRef<TurnstileWidgetRef, TurnstileWidgetPro
     const containerRef = useRef<HTMLDivElement>(null);
     const widgetIdRef = useRef<string | null>(null);
     const [scriptLoaded, setScriptLoaded] = useState(false);
-    const [loadAttempt, setLoadAttempt] = useState(0);
+    const [renderTrigger, setRenderTrigger] = useState(0);
 
-    // 使用 Ref 固化外部回调函数，避免父组件重新渲染（如输入密码）导致组件被重复销毁与重置
+    // 使用 Ref 固化外部回调函数，避免父组件 re-render 触发死循环
     const onVerifyRef = useRef(onVerify);
     const onExpireRef = useRef(onExpire);
     const onErrorRef = useRef(onError);
@@ -85,13 +86,34 @@ export const TurnstileWidget = forwardRef<TurnstileWidgetRef, TurnstileWidgetPro
         onExpireRef.current?.();
       },
       retry: () => {
-        setScriptLoaded(false);
-        setLoadAttempt((prev) => prev + 1);
+        if (typeof window === "undefined") return;
+
+        // 如果 window.turnstile 已经存在，无需重新拉取脚本，直接重新触发 render
+        if (window.turnstile) {
+          if (widgetIdRef.current) {
+            try {
+              window.turnstile.remove(widgetIdRef.current);
+            } catch {
+              // ignore
+            }
+            widgetIdRef.current = null;
+          }
+          setScriptLoaded(true);
+          setRenderTrigger((prev) => prev + 1);
+        } else {
+          // 脚本加载失败时的重试：清理原有失效标签并重新请求
+          const existingScript = document.querySelector<HTMLScriptElement>(`script[src^="${SCRIPT_URL}"]`);
+          if (existingScript) {
+            existingScript.remove();
+          }
+          setScriptLoaded(false);
+          setRenderTrigger((prev) => prev + 1);
+        }
         onExpireRef.current?.();
       }
     }));
 
-    // 加载 Turnstile 外部脚本
+    // 脚本加载 Effect（具备完整的卸载取消与定时器清理，防 StrictMode 竞态与内存泄漏）
     useEffect(() => {
       if (!siteKey || typeof window === "undefined") return;
 
@@ -100,40 +122,67 @@ export const TurnstileWidget = forwardRef<TurnstileWidgetRef, TurnstileWidgetPro
         return;
       }
 
-      // 如果已有挂载失败的同名脚本标签，先移除以便重试
-      const existingScript = document.querySelector<HTMLScriptElement>(`script[src^="${SCRIPT_URL}"]`);
-      if (existingScript) {
-        existingScript.remove();
-      }
+      let isCancelled = false;
+      let pollInterval: ReturnType<typeof setInterval> | null = null;
+      let pollTimeout: ReturnType<typeof setTimeout> | null = null;
 
-      const script = document.createElement("script");
-      script.src = SCRIPT_URL;
-      script.async = true;
-      script.defer = true;
+      const markReady = () => {
+        if (isCancelled) return;
+        setScriptLoaded(true);
+      };
 
-      script.onload = () => {
+      const handleScriptLoad = () => {
+        if (isCancelled) return;
         if (window.turnstile) {
-          setScriptLoaded(true);
+          markReady();
         } else {
-          // 部分浏览器下 script.onload 触发时全局变量稍有延迟，进行轻量轮询确认
-          const interval = window.setInterval(() => {
+          pollInterval = setInterval(() => {
+            if (isCancelled) {
+              if (pollInterval) clearInterval(pollInterval);
+              return;
+            }
             if (window.turnstile) {
-              clearInterval(interval);
-              setScriptLoaded(true);
+              if (pollInterval) clearInterval(pollInterval);
+              if (pollTimeout) clearTimeout(pollTimeout);
+              markReady();
             }
           }, 50);
-          window.setTimeout(() => clearInterval(interval), 3000);
+
+          pollTimeout = setTimeout(() => {
+            if (pollInterval) clearInterval(pollInterval);
+          }, 4000);
         }
       };
 
-      script.onerror = () => {
+      const handleScriptError = () => {
+        if (isCancelled) return;
         onErrorRef.current?.("SCRIPT_LOAD_FAILED");
       };
 
-      document.head.appendChild(script);
-    }, [siteKey, loadAttempt]);
+      let script = document.querySelector<HTMLScriptElement>(`script[src^="${SCRIPT_URL}"]`);
+      if (!script) {
+        script = document.createElement("script");
+        script.src = SCRIPT_URL;
+        script.async = true;
+        script.defer = true;
+        document.head.appendChild(script);
+      }
 
-    // 渲染 Turnstile 控件（仅依赖 scriptLoaded, siteKey, theme，与父组件 state 彻底解耦）
+      script.addEventListener("load", handleScriptLoad);
+      script.addEventListener("error", handleScriptError);
+
+      return () => {
+        isCancelled = true;
+        if (pollInterval) clearInterval(pollInterval);
+        if (pollTimeout) clearTimeout(pollTimeout);
+        if (script) {
+          script.removeEventListener("load", handleScriptLoad);
+          script.removeEventListener("error", handleScriptError);
+        }
+      };
+    }, [siteKey, renderTrigger]);
+
+    // 渲染 Turnstile 控件
     useEffect(() => {
       if (!scriptLoaded || !siteKey || !containerRef.current || !window.turnstile) {
         return;
@@ -152,6 +201,7 @@ export const TurnstileWidget = forwardRef<TurnstileWidgetRef, TurnstileWidgetPro
         const id = window.turnstile.render(containerRef.current, {
           sitekey: siteKey,
           theme,
+          retry: "never", // 关闭 SDK 内部自动重试，由页面宿主 UI 接管重试交互
           callback: (token: string) => {
             onVerifyRef.current?.(token);
           },
@@ -160,6 +210,7 @@ export const TurnstileWidget = forwardRef<TurnstileWidgetRef, TurnstileWidgetPro
           },
           "error-callback": (errorCode?: string) => {
             onErrorRef.current?.(errorCode || "CHALLENGE_FAILED");
+            return true; // 返回 true 阻止 Cloudflare 内部默认重试逻辑，防止与页面重试按钮冲突
           }
         });
         widgetIdRef.current = id;
@@ -177,7 +228,7 @@ export const TurnstileWidget = forwardRef<TurnstileWidgetRef, TurnstileWidgetPro
           widgetIdRef.current = null;
         }
       };
-    }, [scriptLoaded, siteKey, theme]);
+    }, [scriptLoaded, siteKey, theme, renderTrigger]);
 
     // 未配置 siteKey 时不渲染任何 DOM
     if (!siteKey) {

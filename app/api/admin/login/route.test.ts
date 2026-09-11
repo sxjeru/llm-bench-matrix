@@ -171,5 +171,22 @@ describe("POST /api/admin/login", () => {
     const res = await POST(req);
     expect(res.status).toBe(400);
   });
+
+  it("当 turnstileToken 长度超过 2048 字符时，应立即以 400 拦截且不发起校验", async () => {
+    const req = new Request("http://localhost/api/admin/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        password: "some-password",
+        turnstileToken: "x".repeat(2049)
+      })
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+
+    expect(mockTurnstile.verifyTurnstileToken).not.toHaveBeenCalled();
+    expect(mockAdminAuth.checkLoginAllowed).not.toHaveBeenCalled();
+  });
 });
 
