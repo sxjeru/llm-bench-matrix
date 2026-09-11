@@ -1218,7 +1218,12 @@ export function collectVersionTrackingBatch(
     const local = input.localModelsById.get(match.modelId);
     if (!upstream || !local) continue;
 
+    const legacyMetricKeySet = new Set(upstream.legacyMetricKeys ?? []);
+
     for (const metricKey of activeTrackedKeys) {
+      // 忽略来自旧 API 补充的历史/已下架模型成绩，避免将其计入当前版本的 incoming 成绩
+      if (legacyMetricKeySet.has(metricKey)) continue;
+
       const entry = catalogByKey.get(metricKey)!;
       const value = readMetricValue(upstream, metricKey);
       if (value === null) continue;

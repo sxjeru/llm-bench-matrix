@@ -477,6 +477,69 @@ describe("collectVersionTrackingBatch", () => {
     expect(agentic.benchmarkType).toBe("Agentic");
     expect(agentic.scores).toEqual([{ modelId: 1, modelName: "GPT-5", score: 78.2 }]);
   });
+
+  test("忽略来自 legacyMetricKeys 的历史/下架模型成绩，不纳入当前版本追踪批次", () => {
+    const models = [
+      // 现行有效模型：指标来自当前主 API
+      upstream("aa-active", "Active Model", "Anthropic", {
+        "evaluations.artificial_analysis_intelligence_index": 82.0
+      }),
+      // 已下架/历史模型：指标全部来源于旧 API 补充
+      upstream(
+        "aa-delisted",
+        "Delisted Model",
+        "Anthropic",
+        {
+          "evaluations.artificial_analysis_intelligence_index": 70.5
+        },
+        ["evaluations.artificial_analysis_intelligence_index"] // 标记为 legacy
+      )
+    ];
+
+    const localMap = new Map([
+      [1, { modelName: "Active Model", providerName: "Anthropic" }],
+      [2, { modelName: "Delisted Model", providerName: "Anthropic" }]
+    ]);
+
+    const batch = collectVersionTrackingBatch({
+      upstreamModels: models,
+      catalog: buildMetricCatalog(models),
+      config: {
+        selectedMetrics: ["evaluations.artificial_analysis_intelligence_index"],
+        metricOverrides: {}
+      },
+      matches: [
+        {
+          modelId: 1,
+          externalModelId: "aa-active",
+          externalModelName: "Active Model",
+          externalModelSlug: null,
+          externalCreator: "Anthropic",
+          reasoningEffort: null,
+          matchStatus: "matched",
+          matchConfidence: 100,
+          matchReason: "manual"
+        },
+        {
+          modelId: 2,
+          externalModelId: "aa-delisted",
+          externalModelName: "Delisted Model",
+          externalModelSlug: null,
+          externalCreator: "Anthropic",
+          reasoningEffort: null,
+          matchStatus: "matched",
+          matchConfidence: 100,
+          matchReason: "manual"
+        }
+      ],
+      localModelsById: localMap
+    });
+
+    const intel = batch["evaluations.artificial_analysis_intelligence_index"];
+    expect(intel).toBeDefined();
+    // 只有现行活跃模型进入当前版本批次，来自旧 API 的已下架模型被完全过滤
+    expect(intel.scores).toEqual([{ modelId: 1, modelName: "Active Model", score: 82.0 }]);
+  });
 });
 
 

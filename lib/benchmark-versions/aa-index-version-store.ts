@@ -173,8 +173,11 @@ export async function loadAaBaselineScores(
 
   const result = new Map<string, number>();
   for (const row of rows) {
-    if (row.valueNum !== null && Number.isFinite(row.valueNum) && !result.has(row.modelName)) {
-      result.set(row.modelName, Number(row.valueNum));
+    if (row.valueNum !== null && !result.has(row.modelName)) {
+      const num = typeof row.valueNum === "number" ? row.valueNum : Number(row.valueNum);
+      if (Number.isFinite(num)) {
+        result.set(row.modelName, num);
+      }
     }
   }
 
