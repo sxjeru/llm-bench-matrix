@@ -63,6 +63,8 @@ export function buildScatterDataset(input: BuildScatterDatasetInput): ScatterPlo
 
   const xSnapshotTime = xSnapshot ? parseTimestampMs(xSnapshot) : null;
   const ySnapshotTime = ySnapshot ? parseTimestampMs(ySnapshot) : null;
+  const xSnapshotObj = xSnapshot ? xMetric.snapshots.find((s) => s.id === xSnapshot) : undefined;
+  const ySnapshotObj = ySnapshot ? yMetric.snapshots.find((s) => s.id === ySnapshot) : undefined;
 
   const points: ScatterPoint[] = [];
   let missingCount = 0;
@@ -75,7 +77,7 @@ export function buildScatterDataset(input: BuildScatterDatasetInput): ScatterPlo
 
     if (ySnapshotTime !== null) {
       const ySamples = yMetric.historyByModel.get(modelName) ?? [];
-      const sample = resolveSampleForSnapshot(ySamples, ySnapshotTime);
+      const sample = ySnapshotObj?.sampleByModel?.get(modelName) ?? resolveSampleForSnapshot(ySamples, ySnapshotTime);
       if (sample && Number.isFinite(sample.value)) {
         y = sample.value;
         yBenchTime = sample.benchTime;
@@ -107,7 +109,7 @@ export function buildScatterDataset(input: BuildScatterDatasetInput): ScatterPlo
 
     if (xSnapshotTime !== null) {
       const xSamples = xMetric.historyByModel.get(modelName) ?? [];
-      const sample = resolveSampleForSnapshot(xSamples, xSnapshotTime);
+      const sample = xSnapshotObj?.sampleByModel?.get(modelName) ?? resolveSampleForSnapshot(xSamples, xSnapshotTime);
       if (sample && Number.isFinite(sample.value)) {
         x = sample.value;
         xBenchTime = sample.benchTime;
@@ -223,7 +225,8 @@ export function buildScatterSnapshotOverlayDataset(
 
     if (isBothStrict || !isXPrimary) {
       // Y 为主导轴或双轴均匹配快照：严格按快照时间提取
-      const ySample = resolveSampleForSnapshot(ySamples, snapshotTime);
+      const ySnapshotObj = yMetric.snapshots.find((s) => s.id === snapshotId);
+      const ySample = ySnapshotObj?.sampleByModel?.get(modelName) ?? resolveSampleForSnapshot(ySamples, snapshotTime);
       if (ySample && Number.isFinite(ySample.value)) {
         y = ySample.value;
         yBenchTime = ySample.benchTime;
@@ -252,7 +255,8 @@ export function buildScatterSnapshotOverlayDataset(
 
     if (isBothStrict || isXPrimary) {
       // X 为主导轴或双轴均匹配快照：严格按快照时间提取
-      const xSample = resolveSampleForSnapshot(xSamples, snapshotTime);
+      const xSnapshotObj = xMetric.snapshots.find((s) => s.id === snapshotId);
+      const xSample = xSnapshotObj?.sampleByModel?.get(modelName) ?? resolveSampleForSnapshot(xSamples, snapshotTime);
       if (xSample && Number.isFinite(xSample.value)) {
         x = xSample.value;
         xBenchTime = xSample.benchTime;

@@ -71,7 +71,8 @@ import {
 import type { SourceValueMode } from "./utils";
 import {
   isAaMajorIndexBenchmark,
-  resolveLatestAaRevisionValues
+  resolveLatestAaRevisionValues,
+  type LatestAaRevisionResolution
 } from "@/lib/aa-index-revisions";
 
 export type SourceOption = { key: string; label: string };
@@ -749,13 +750,46 @@ export function buildCoveragePrunedRows(
   );
 }
 
+/** 按完整数据划分 AA 版本；模型筛选和覆盖率裁剪只能发生在此之后。 */
+export function buildAaIndexRevisionsByRow(
+  rows: readonly MatrixInputRow[],
+  showDuplicateRows: boolean
+): Map<string, LatestAaRevisionResolution> {
+  const entriesByRow = new Map<string, (MatrixCellEntry & { modelName: string })[]>();
+  rows.forEach((row) => {
+    if (isAaMajorIndexBenchmark(row.benchmarkName)) {
+      entriesByRow.set(getMatrixGroupingKey(row, showDuplicateRows), []);
+    }
+  });
+  if (entriesByRow.size === 0) return new Map();
+
+  // 同一分组可能还包含规范名不同的记录，统一纳入该指标的完整历史。
+  rows.forEach((row) => {
+    const entries = entriesByRow.get(getMatrixGroupingKey(row, showDuplicateRows));
+    if (!entries) return;
+    entries.push({
+      modelName: row.modelName,
+      recordId: row.recordId ?? null,
+      valueRaw: row.valueRaw,
+      valueNum: row.valueNum,
+      valueNum2: row.valueNum2 ?? null,
+      valueNote: row.valueNote ?? null,
+      source: row.source ?? null,
+      benchTime: row.benchTime
+    });
+  });
+
+  return new Map(Array.from(entriesByRow, ([key, entries]) => [key, resolveLatestAaRevisionValues(entries)]));
+}
+
 export function buildModelColumns(
   coveragePrunedRows: MatrixInputRow[],
   sourceModelHint: string,
   columnSortBenchmarkKey: string | null,
   showDuplicateRows: boolean,
   modelOrderBySource: Record<string, string[]>,
-  activeSource: string
+  activeSource: string,
+  aaRevisionsByRow?: ReadonlyMap<string, LatestAaRevisionResolution>
 ): string[] {
   const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 
@@ -937,6 +971,8 @@ export function buildModelColumns(
     return orderedByManual;
   }
 
+  const aaRevision = (aaRevisionsByRow ?? buildAaIndexRevisionsByRow(coveragePrunedRows, showDuplicateRows))
+    .get(columnSortBenchmarkKey);
   const benchmarkScoreMap = new Map<string, number>();
   const benchmarkRowsByModel = new Map<string, MatrixInputRow[]>();
   coveragePrunedRows.forEach((row) => {
@@ -952,6 +988,20 @@ export function buildModelColumns(
   benchmarkRowsByModel.forEach((matchingRows, modelName) => {
     const representativeRow = matchingRows[0];
     if (!representativeRow) return;
+
+    if (aaRevision) {
+      const entry = aaRevision.latestEntriesByModel.get(modelName);
+      if (!entry) return;
+      const score = getBenchmarkBestComparableScore(
+        representativeRow.benchmarkName,
+        entry.valueNum,
+        entry.valueNum2,
+        representativeRow.benchmarkType,
+        representativeRow.higherIsBetter
+      );
+      if (score !== null) benchmarkScoreMap.set(modelName, score);
+      return;
+    }
 
     const numericMatchingRows = matchingRows.filter(
       (row) => row.valueNum !== null && Number.isFinite(row.valueNum)
@@ -1042,7 +1092,8 @@ export function buildMatrixRows(
   showDuplicateRows: boolean,
   displaySourceValuesInCells: boolean,
   activeSource: string,
-  sourceValueMode: SourceValueMode = "latest"
+  sourceValueMode: SourceValueMode = "latest",
+  aaRevisionsByRow: ReadonlyMap<string, LatestAaRevisionResolution> = buildAaIndexRevisionsByRow(baseSourceRows, showDuplicateRows)
 ): MatrixRow[] {
   const matrixMap = new Map<
     string,
@@ -1191,17 +1242,8 @@ export function buildMatrixRows(
 
   return Array.from(matrixMap.values())
     .map((matrixRow) => {
-      const isAaMajorIndex = isAaMajorIndexBenchmark(matrixRow.benchmark);
-      let aaLatestEntriesByModel: Map<string, MatrixCellEntry> | null = null;
-      if (isAaMajorIndex) {
-        const rowEntries: (MatrixCellEntry & { modelName: string })[] = [];
-        matrixRow.cells.forEach((cell, modelName) => {
-          cell.allEntries.forEach((entry) => {
-            rowEntries.push({ ...entry, modelName });
-          });
-        });
-        aaLatestEntriesByModel = resolveLatestAaRevisionValues(rowEntries).latestEntriesByModel;
-      }
+      const aaRevision = aaRevisionsByRow.get(matrixRow.rowKey);
+      const aaLatestEntriesByModel = aaRevision?.latestEntriesByModel;
 
       const finalizedCells = new Map<string, MatrixCell>();
 
@@ -1222,7 +1264,7 @@ export function buildMatrixRows(
         const hasMultipleActiveSourceValues = activeSource !== SOURCE_ALL
           && uniqueEntries.filter((entry) => getSourceKey(entry.source) === activeSource).length > 1;
 
-        if (isAaMajorIndex && aaLatestEntriesByModel) {
+        if (aaLatestEntriesByModel) {
           const latestEntry = aaLatestEntriesByModel.get(modelName);
           if (latestEntry) {
             const effectiveValueRaw = latestEntry.valueRaw;
@@ -1336,6 +1378,7 @@ export function buildMatrixRows(
       return {
         ...matrixRow,
         cells: finalizedCells,
+        ...(aaRevision ? { aaRevision } : {}),
         rowDataCount,
         rowNumericCount,
         minComparable: comparableValues.length > 0 ? Math.min(...comparableValues) : null,
@@ -1950,6 +1993,7 @@ export function buildBenchmarkRankingData(
     const rowValueNum2 = row.valueNum2 ?? null;
     const rowValueNote = row.valueNote ?? null;
     const entry = {
+      recordId: row.recordId ?? null,
       valueRaw: row.valueRaw,
       valueNum: rowValueNum,
       valueNum2: rowValueNum2,
@@ -2009,15 +2053,10 @@ export function buildBenchmarkRankingData(
   });
 
   if (isAaMajorIndexBenchmark(matrixRow.benchmark)) {
-    const rowEntries: (MatrixCellEntry & { modelName: string })[] = [];
+    const aaRevision = matrixRow.aaRevision ?? buildAaIndexRevisionsByRow(matchingRows, showDuplicateRows).get(matrixRow.rowKey);
+    const latestEntriesByModel = aaRevision?.latestEntriesByModel;
     cellsByModel.forEach((cell, modelName) => {
-      cell.allEntries.forEach((entry) => {
-        rowEntries.push({ ...entry, modelName });
-      });
-    });
-    const { latestEntriesByModel } = resolveLatestAaRevisionValues(rowEntries);
-    cellsByModel.forEach((cell, modelName) => {
-      const target = latestEntriesByModel.get(modelName);
+      const target = latestEntriesByModel?.get(modelName);
       if (target) {
         cell.valueRaw = target.valueRaw;
         cell.valueNote = target.valueNote;

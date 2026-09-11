@@ -2,9 +2,15 @@ import { describe, expect, test, vi } from "vitest";
 import { fireEvent } from "@testing-library/react";
 import { renderReady } from "@/tests/flush-microtasks";
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
-import { buildMatrixRows } from "@/components/benchmark-matrix/selectors";
+import {
+  buildAaIndexRevisionsByRow,
+  buildMatrixRows,
+  buildModelColumns
+} from "@/components/benchmark-matrix/selectors";
+import { getMatrixGroupingKey } from "@/components/benchmark-matrix/utils";
 import { isCellTrendEligible } from "@/components/benchmark-matrix/cell-trend";
 import { buildScatterMetrics } from "@/components/model-scatter/metrics";
+import { buildScatterDataset } from "@/components/model-scatter/dataset";
 import { extractMetricSnapshots } from "@/components/model-scatter/snapshots";
 import type { MatrixInputRow } from "@/components/benchmark-matrix/types";
 
@@ -300,5 +306,155 @@ describe("AA 三大指数主要变动自适应与版本合并", () => {
     fireEvent.mouseEnter(oldQuestionMark!);
     const oldTooltip = document.querySelector('[data-cell-tooltip="1"]');
     expect(oldTooltip?.textContent).toContain("65");
+  });
+
+  test("问题 1: 模型筛选只选两个模型时，不会误把单模型补丁当成主要变动，保留完整版本判定", () => {
+    const allRows: MatrixInputRow[] = [];
+    let id = 1;
+
+    // 主要批次：100 个模型 (包含 ModelA)
+    for (let i = 0; i < 99; i += 1) {
+      allRows.push(makeRow(`bg_model_${i}`, benchmark, "70", 70, "2026-04-01T00:00:00.000Z", id++));
+    }
+    allRows.push(makeRow("ModelA", benchmark, "80", 80, "2026-04-01T00:00:00.000Z", id++));
+
+    // 后续补丁：更新 ModelB (1 个模型)
+    allRows.push(makeRow("ModelB", benchmark, "95", 95, "2026-04-10T00:00:00.000Z", id++));
+
+    // 基于全量数据划分版本
+    const aaRevisionsByRow = buildAaIndexRevisionsByRow(allRows, false);
+
+    // 模拟筛选后只剩下 ModelA 和 ModelB 两行
+    const filteredRows = allRows.filter((r) => r.modelName === "ModelA" || r.modelName === "ModelB");
+
+    // 传入外部预计算的 aaRevisionsByRow
+    const matrixRows = buildMatrixRows(
+      allRows,
+      filteredRows,
+      false,
+      false,
+      "__ALL__",
+      "latest",
+      aaRevisionsByRow
+    );
+
+    const matrixRow = matrixRows.find((r) => r.benchmark === benchmark)!;
+    expect(matrixRow).toBeDefined();
+
+    // ModelA 在主要批次中，补丁为小变动并入主要批次，因此 ModelA 的有效值 80 仍然保留，不能消失为 --
+    const cellA = matrixRow.cells.get("ModelA");
+    expect(cellA?.displayValue).toBe("80");
+    expect(cellA?.valueNum).toBe(80);
+
+    // ModelB 作为小补丁新增，其值 95 也正常展示
+    const cellB = matrixRow.cells.get("ModelB");
+    expect(cellB?.displayValue).toBe("95");
+    expect(cellB?.valueNum).toBe(95);
+  });
+
+  test("问题 2: 散点图手动选择主要历史版本时，真正合并后续小补丁更新 (80 -> 95) 及补丁新增模型", () => {
+    const rows: MatrixInputRow[] = [];
+    let id = 1;
+
+    // V3: 100 个模型 (含 ModelA = 60)
+    for (let i = 0; i < 99; i += 1) {
+      rows.push(makeRow(`old_m_${i}`, benchmark, "60", 60, "2026-01-01T00:00:00.000Z", id++));
+    }
+    rows.push(makeRow("ModelA", benchmark, "60", 60, "2026-01-01T00:00:00.000Z", id++));
+
+    // V4 主要变动：100 个模型 (ModelA = 80)
+    for (let i = 0; i < 99; i += 1) {
+      rows.push(makeRow(`v4_m_${i}`, benchmark, "75", 75, "2026-04-01T00:00:00.000Z", id++));
+    }
+    rows.push(makeRow("ModelA", benchmark, "80", 80, "2026-04-01T00:00:00.000Z", id++));
+
+    // V4 小补丁：更新 ModelA 为 95，并新增 PatchModel = 88
+    rows.push(makeRow("ModelA", benchmark, "95", 95, "2026-04-10T00:00:00.000Z", id++));
+    rows.push(makeRow("PatchModel", benchmark, "88", 88, "2026-04-10T00:00:00.000Z", id++));
+
+    const aaRevisionsByRow = buildAaIndexRevisionsByRow(rows, false);
+    const matrixRows = buildMatrixRows(rows, rows, false, false, "__ALL__", "latest", aaRevisionsByRow);
+
+    const metrics = buildScatterMetrics({
+      benchmarkRows: matrixRows,
+      priceRows: [],
+      paramsRows: []
+    });
+
+    const aaMetric = metrics.find((m) => m.label === benchmark)!;
+    expect(aaMetric).toBeDefined();
+
+    // 找到 2026-04-01 主要变动快照
+    const v4Snapshot = aaMetric.snapshots.find((s) => s.isMajorRevision && s.label.startsWith("2026-04-01"))!;
+    expect(v4Snapshot).toBeDefined();
+
+    // 验证快照的 sampleByModel 真正包含了补丁合并后的值
+    expect(v4Snapshot.sampleByModel?.get("ModelA")?.value).toBe(95);
+    expect(v4Snapshot.sampleByModel?.get("PatchModel")?.value).toBe(88);
+
+    // 构建散点图数据集，指定 Y 轴选中该主要版本快照
+    const dummyXMetric = {
+      ...aaMetric,
+      key: "dummy-x",
+      snapshots: []
+    };
+
+    const dataset = buildScatterDataset({
+      xMetric: dummyXMetric,
+      yMetric: aaMetric,
+      modelNames: ["ModelA", "PatchModel", "v4_m_0"],
+      providerNameByModel: new Map(),
+      colorByModel: new Map(),
+      xScale: "linear",
+      yScale: "linear",
+      ySnapshot: v4Snapshot.id
+    });
+
+    const pointA = dataset.points.find((p) => p.modelName === "ModelA");
+    expect(pointA).toBeDefined();
+    // 补丁将 80 更新为 95，选择该主要版本应展示合并后的 95，而非旧值 80
+    expect(pointA?.y).toBe(95);
+
+    const pointPatch = dataset.points.find((p) => p.modelName === "PatchModel");
+    expect(pointPatch).toBeDefined();
+    // 补丁新增模型在选择该主要版本时不会缺失
+    expect(pointPatch?.y).toBe(88);
+  });
+
+  test("问题 5: 表格排序使用当前版本有效分数，老版本独有模型 (-- ) 排在当前有分模型之后", () => {
+    const rows: MatrixInputRow[] = [];
+    let id = 1;
+
+    // V3 (老版本独有模型，分数 95)
+    rows.push(makeRow("OldTopModel", benchmark, "95", 95, "2026-01-01T00:00:00.000Z", id++));
+
+    // V4 (当前主要版本：包含 100 个模型，分数均为 80)
+    for (let i = 0; i < 99; i += 1) {
+      rows.push(makeRow(`current_m_${i}`, benchmark, "80", 80, "2026-04-01T00:00:00.000Z", id++));
+    }
+    rows.push(makeRow("CurrentModel", benchmark, "80", 80, "2026-04-01T00:00:00.000Z", id++));
+
+    const aaRevisionsByRow = buildAaIndexRevisionsByRow(rows, false);
+
+    // 按当前指标排序
+    const columnSortKey = getMatrixGroupingKey(rows[0]!, false);
+    const orderedColumns = buildModelColumns(
+      rows,
+      "",
+      columnSortKey,
+      false,
+      {},
+      "__ALL__",
+      aaRevisionsByRow
+    );
+
+    // CurrentModel 有当前版本分数 80，OldTopModel 在当前版本中无分数（主表显示 --）
+    // OldTopModel 绝不能因老分数 95 排在 CurrentModel 之前
+    const currentModelIndex = orderedColumns.indexOf("CurrentModel");
+    const oldTopModelIndex = orderedColumns.indexOf("OldTopModel");
+
+    expect(currentModelIndex).toBeGreaterThanOrEqual(0);
+    expect(oldTopModelIndex).toBeGreaterThanOrEqual(0);
+    expect(currentModelIndex).toBeLessThan(oldTopModelIndex);
   });
 });

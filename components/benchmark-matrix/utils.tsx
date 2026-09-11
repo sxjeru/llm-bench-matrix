@@ -267,7 +267,10 @@ function aggregateMedianMatrixCellEntries(
   };
 }
 
-export function compareMatrixCellEntryRecency(left: MatrixCellEntry, right: MatrixCellEntry): number {
+export function compareMatrixCellEntryRecency(
+  left: { benchTime?: string | null; recordId?: number | null },
+  right: { benchTime?: string | null; recordId?: number | null }
+): number {
   const leftTime = parseTimestampMs(left.benchTime);
   const rightTime = parseTimestampMs(right.benchTime);
 

@@ -156,6 +156,38 @@ describe("lib/aa-index-revisions", () => {
       // modelC 包含进合并 85
       expect(latestMap.get("modelC")?.value).toBe(85);
     });
+
+    test("相同时间多条记录根据 recordId 确定最新值，不依赖遍历顺序", () => {
+      // 模拟数据库按 DESC 顺序返回：较大 recordId（较新）在前面，较小 recordId 在后面
+      const bDesc = {
+        timestamp: new Date("2026-04-01T00:00:00.000Z").getTime(),
+        modelNames: new Set(["modelA"]),
+        entries: [
+          { modelName: "modelA", benchTime: "2026-04-01T00:00:00.000Z", value: 95, recordId: 100 },
+          { modelName: "modelA", benchTime: "2026-04-01T00:00:00.000Z", value: 80, recordId: 10 }
+        ],
+        modelCount: 1
+      };
+
+      const groupsDesc = groupBatchesIntoMajorRevisions([bDesc], 1);
+      expect(groupsDesc[0]!.entryByModel.get("modelA")?.value).toBe(95);
+      expect(groupsDesc[0]!.entryByModel.get("modelA")?.recordId).toBe(100);
+
+      // 逆序输入：较小 recordId 在前面，较大在后面
+      const bAsc = {
+        timestamp: new Date("2026-04-01T00:00:00.000Z").getTime(),
+        modelNames: new Set(["modelA"]),
+        entries: [
+          { modelName: "modelA", benchTime: "2026-04-01T00:00:00.000Z", value: 80, recordId: 10 },
+          { modelName: "modelA", benchTime: "2026-04-01T00:00:00.000Z", value: 95, recordId: 100 }
+        ],
+        modelCount: 1
+      };
+
+      const groupsAsc = groupBatchesIntoMajorRevisions([bAsc], 1);
+      expect(groupsAsc[0]!.entryByModel.get("modelA")?.value).toBe(95);
+      expect(groupsAsc[0]!.entryByModel.get("modelA")?.recordId).toBe(100);
+    });
   });
 
   describe("resolveLatestAaRevisionValues", () => {

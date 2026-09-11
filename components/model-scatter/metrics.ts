@@ -100,6 +100,15 @@ function resolveMetricUnit(row: MatrixRow): ScatterMetricUnit {
 function buildValueByModel(row: MatrixRow): Map<string, number> {
   const valueByModel = new Map<string, number>();
 
+  if (row.aaRevision) {
+    row.aaRevision.latestEntriesByModel.forEach((entry, modelName) => {
+      if (row.cells.has(modelName) && entry.valueNum !== null && Number.isFinite(entry.valueNum)) {
+        valueByModel.set(modelName, entry.valueNum);
+      }
+    });
+    return valueByModel;
+  }
+
   if (isAaMajorIndexBenchmark(row.benchmark)) {
     const rowEntries: (MatrixCellEntry & { modelName: string })[] = [];
     row.cells.forEach((cell, modelName) => {
@@ -203,7 +212,7 @@ export function toScatterMetric(row: MatrixRow): ScatterMetric {
   const unit = resolveMetricUnit(row);
   const category = resolveScatterMetricCategory(row);
   const historyByModel = buildHistoryByModel(row);
-  const snapshots = extractMetricSnapshots(historyByModel);
+  const snapshots = extractMetricSnapshots(historyByModel, row.aaRevision);
   const isArtificialAnalysis = checkIsArtificialAnalysis(row);
 
   return {

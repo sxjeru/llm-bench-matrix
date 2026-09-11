@@ -14,6 +14,7 @@ import {
 } from "@/components/benchmark-matrix/constants";
 import { canEncodeCanvasMimeType } from "@/components/benchmark-matrix/export-image";
 import {
+  buildAaIndexRevisionsByRow,
   buildAllModelNames,
   buildAllRowsIndex,
   buildBaseBenchmarkKeySet,
@@ -256,6 +257,11 @@ export function ModelScatter({
     [allRows, rows, scopedRowsBySource, allRowsBySource, activeSource]
   );
 
+  const aaRevisionsByRow = useMemo(
+    () => buildAaIndexRevisionsByRow(indexedSourceRows, SHOW_DUPLICATE_ROWS),
+    [indexedSourceRows]
+  );
+
   const baseBenchmarkKeySet = useMemo(
     () => buildBaseBenchmarkKeySet(baseSourceRows, SHOW_DUPLICATE_ROWS),
     [baseSourceRows]
@@ -320,13 +326,13 @@ export function ModelScatter({
   );
 
   const baseModelColumns = useMemo(
-    () => buildModelColumns(coveragePrunedRows, sourceModelHint, null, SHOW_DUPLICATE_ROWS, {}, activeSource),
-    [coveragePrunedRows, sourceModelHint, activeSource]
+    () => buildModelColumns(coveragePrunedRows, sourceModelHint, null, SHOW_DUPLICATE_ROWS, {}, activeSource, aaRevisionsByRow),
+    [coveragePrunedRows, sourceModelHint, activeSource, aaRevisionsByRow]
   );
 
   const matrixRows = useMemo(
-    () => buildMatrixRows(baseSourceRows, coveragePrunedRows, SHOW_DUPLICATE_ROWS, false, activeSource),
-    [baseSourceRows, coveragePrunedRows, activeSource]
+    () => buildMatrixRows(baseSourceRows, coveragePrunedRows, SHOW_DUPLICATE_ROWS, false, activeSource, "latest", aaRevisionsByRow),
+    [baseSourceRows, coveragePrunedRows, activeSource, aaRevisionsByRow]
   );
 
   const priceMatrixRows = useMemo(

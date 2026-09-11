@@ -1,4 +1,4 @@
-import { parseTimestampMs } from "@/components/benchmark-matrix/utils";
+import { compareMatrixCellEntryRecency, parseTimestampMs } from "@/components/benchmark-matrix/utils";
 import { isArtificialAnalysisSource } from "@/lib/source-utils";
 import { AA_SUMMARY_INDEX_LABEL_REGEX } from "@/components/model-scatter/constants";
 import type { MatrixCellEntry } from "@/components/benchmark-matrix/types";
@@ -111,7 +111,7 @@ export function clusterEntriesByTime<
  *    说明各批次规模相近，不存在局部小补丁，所有批次均视为主要变动（返回 minCount）；
  * 3. 一维方差极小化聚类（Otsu / 1D 2-means）：
  *    遍历有序唯一计数的所有分割点，找到使组内平方差和（WSS）极小化的割点 T；
- * 4. 判定割点是否具备显著区分度（较大组均值 >= 较小组均值 1.5 倍 或 方差解释比 >= 0.45）；
+ * 4. 判定割点是否具备显著区分度（较大组均值 >= 较小组均值 1.5 倍）；
  *    满足则返回割点 (u_k + u_{k+1}) / 2，否则回落到齐次判定。
  *
  * 示例：[111, 130, 120, 20, 110] -> 割点位于 20 与 110 之间，返回 65。20 < 65 被视为小变动。
@@ -201,7 +201,7 @@ export type MajorRevisionGroup<T> = {
  * 4. 若小变动与主要变动（或之前批次）存在相同模型，后发生的覆盖先发生的（显示最新值）。
  */
 export function groupBatchesIntoMajorRevisions<
-  T extends { benchTime?: string | null; modelName?: string }
+  T extends { benchTime?: string | null; modelName?: string; recordId?: number | null }
 >(
   batches: readonly RevisionBatch<T>[],
   adaptiveThreshold?: number
@@ -214,21 +214,15 @@ export function groupBatchesIntoMajorRevisions<
 
   const groups: MajorRevisionGroup<T>[] = [];
 
-  batches.forEach((batch) => {
+  [...batches].sort((a, b) => a.timestamp - b.timestamp).forEach((batch) => {
     const isMajor = batch.modelCount >= threshold;
 
     if (isMajor || groups.length === 0) {
-      const entryByModel = new Map<string, T>();
-      batch.entries.forEach((entry) => {
-        const model = entry.modelName;
-        if (model) entryByModel.set(model, entry);
-      });
-
       groups.push({
         timestamp: batch.timestamp,
         isMajorRevision: isMajor,
         batches: [batch],
-        entryByModel
+        entryByModel: new Map<string, T>()
       });
     } else {
       // 小变动合并进前一次主要变动桶
@@ -236,20 +230,27 @@ export function groupBatchesIntoMajorRevisions<
       lastGroup.batches.push(batch);
       lastGroup.timestamp = Math.max(lastGroup.timestamp, batch.timestamp);
 
-      // 小变动中的模型覆盖前一次主要变动中的同名模型（显示最新值）
-      batch.entries.forEach((entry) => {
-        const model = entry.modelName;
-        if (model) lastGroup.entryByModel.set(model, entry);
-      });
     }
+
+    const latestGroup = groups[groups.length - 1]!;
+    batch.entries.forEach((entry) => {
+      const model = entry.modelName;
+      if (!model) return;
+      const previous = latestGroup.entryByModel.get(model);
+      // 同一时间的记录按 ID 取新值，不依赖接口返回顺序或批次内的遍历顺序。
+      if (!previous || compareMatrixCellEntryRecency(entry, previous) > 0) {
+        latestGroup.entryByModel.set(model, entry);
+      }
+    });
   });
 
   return groups;
 }
-
 export type LatestAaRevisionResolution = {
   /** 最新主要变动（及合并其后续小变动后）的模型与最新记录映射 */
   latestEntriesByModel: Map<string, MatrixCellEntry>;
+  /** 识别出的所有批次（升序） */
+  batches: RevisionBatch<MatrixCellEntry & { modelName: string }>[];
   /** 该指标检测到的所有主要变动组（按时间升序） */
   groups: MajorRevisionGroup<MatrixCellEntry & { modelName: string }>[];
   /** 自适应主要变动阈值 */
@@ -270,6 +271,7 @@ export function resolveLatestAaRevisionValues(
   if (groups.length === 0) {
     return {
       latestEntriesByModel: new Map(),
+      batches: [],
       groups: [],
       adaptiveThreshold
     };
@@ -280,8 +282,8 @@ export function resolveLatestAaRevisionValues(
 
   return {
     latestEntriesByModel: latestGroup.entryByModel,
+    batches,
     groups,
     adaptiveThreshold
   };
 }
-
