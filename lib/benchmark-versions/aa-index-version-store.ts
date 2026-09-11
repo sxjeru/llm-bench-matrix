@@ -7,19 +7,41 @@ import { ARTIFICIAL_ANALYSIS_SOURCE_LABEL } from "@/lib/external-providers/artif
 import {
   BENCHMARK_VERSIONS_SETTINGS_KEY,
   parseVersionTrackingState,
-  type AaVersionTrackingState
+  syncVersionTrackingEntityChange,
+  type AaVersionTrackingState,
+  type VersionTrackingEntityChangeEvent
 } from "./aa-index-version";
-
 export { BENCHMARK_VERSIONS_SETTINGS_KEY };
 
-export async function getAaVersionTrackingState(): Promise<AaVersionTrackingState> {
-  const [row] = await db
-    .select({ valueJson: settings.valueJson })
-    .from(settings)
-    .where(eq(settings.key, BENCHMARK_VERSIONS_SETTINGS_KEY))
-    .limit(1);
+function shouldFallbackToDefaultVersionTracking(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
 
-  return parseVersionTrackingState(row?.valueJson);
+  const fallbackHints = [
+    "ECONNREFUSED",
+    "connect ECONNREFUSED",
+    "Failed query: select \"value_json\" from \"settings\""
+  ];
+
+  return fallbackHints.some((hint) => error.message.includes(hint));
+}
+
+export async function getAaVersionTrackingState(): Promise<AaVersionTrackingState> {
+  try {
+    const [row] = await db
+      .select({ valueJson: settings.valueJson })
+      .from(settings)
+      .where(eq(settings.key, BENCHMARK_VERSIONS_SETTINGS_KEY))
+      .limit(1);
+
+    return parseVersionTrackingState(row?.valueJson);
+  } catch (error) {
+    if (shouldFallbackToDefaultVersionTracking(error)) {
+      return { enabled: false, forceNewVersionMetricKeys: [], benchmarks: {} };
+    }
+    throw error;
+  }
 }
 
 export async function saveAaVersionTrackingState(state: AaVersionTrackingState): Promise<void> {
@@ -29,6 +51,84 @@ export async function saveAaVersionTrackingState(state: AaVersionTrackingState):
     updatedBy: "admin",
     note: "AA Index Version Tracking State"
   });
+}
+
+export { syncVersionTrackingEntityChange, type VersionTrackingEntityChangeEvent };
+
+export async function applyAaVersionTrackingEntityChange(
+  event: VersionTrackingEntityChangeEvent
+): Promise<boolean> {
+  try {
+    const current = await getAaVersionTrackingState();
+    if (!current.enabled || !current.benchmarks || Object.keys(current.benchmarks).length === 0) {
+      return false;
+    }
+
+  const resolvedEvent = { ...event };
+  if (
+    resolvedEvent.type === "model-merged" &&
+    (!resolvedEvent.sourceName || !resolvedEvent.targetName) &&
+    typeof resolvedEvent.sourceId === "number" &&
+    typeof resolvedEvent.targetId === "number"
+  ) {
+    const [sourceModel] = await db
+      .select({ modelName: models.modelName })
+      .from(models)
+      .where(eq(models.id, resolvedEvent.sourceId))
+      .limit(1);
+    const [targetModel] = await db
+      .select({ modelName: models.modelName })
+      .from(models)
+      .where(eq(models.id, resolvedEvent.targetId))
+      .limit(1);
+
+    if (sourceModel?.modelName) {
+      resolvedEvent.sourceName = sourceModel.modelName;
+    }
+    if (targetModel?.modelName) {
+      resolvedEvent.targetName = targetModel.modelName;
+    }
+  }
+
+  if (
+    resolvedEvent.type === "benchmark-merged" &&
+    (!resolvedEvent.sourceName || !resolvedEvent.targetName) &&
+    typeof resolvedEvent.sourceId === "number" &&
+    typeof resolvedEvent.targetId === "number"
+  ) {
+    const [sourceBm] = await db
+      .select({ benchmarkName: benchmarks.benchmarkName, benchmarkType: benchmarks.benchmarkType })
+      .from(benchmarks)
+      .where(eq(benchmarks.id, resolvedEvent.sourceId))
+      .limit(1);
+    const [targetBm] = await db
+      .select({ benchmarkName: benchmarks.benchmarkName, benchmarkType: benchmarks.benchmarkType })
+      .from(benchmarks)
+      .where(eq(benchmarks.id, resolvedEvent.targetId))
+      .limit(1);
+
+    if (sourceBm?.benchmarkName) {
+      resolvedEvent.sourceName = sourceBm.benchmarkName;
+      resolvedEvent.sourceType = sourceBm.benchmarkType;
+    }
+    if (targetBm?.benchmarkName) {
+      resolvedEvent.targetName = targetBm.benchmarkName;
+      resolvedEvent.targetType = targetBm.benchmarkType;
+    }
+  }
+
+    const { state: next, changed } = syncVersionTrackingEntityChange(current, resolvedEvent);
+    if (changed) {
+      await saveAaVersionTrackingState(next);
+      return true;
+    }
+    return false;
+  } catch (error) {
+    if (shouldFallbackToDefaultVersionTracking(error)) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 export type BaselineScoreTarget = {

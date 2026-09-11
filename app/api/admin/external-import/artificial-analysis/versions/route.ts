@@ -77,13 +77,19 @@ export async function POST(request: Request) {
         new Set([...current.previous.activeModelNames, ...current.activeModelNames])
       ).sort();
 
+      const previousIds = current.previous.activeModelIds ?? [];
+      const currentIds = current.activeModelIds ?? [];
+      const mergedActiveIds = Array.from(new Set([...previousIds, ...currentIds])).sort((a, b) => a - b);
+
       const restored: TrackedVersionState = {
         benchmarkName: current.benchmarkName,
         benchmarkType: current.benchmarkType,
+        benchmarkId: current.benchmarkId ?? current.previous.benchmarkId ?? null,
         versionNumber: current.previous.versionNumber,
         startedAt: current.previous.startedAt,
         triggerReason: `管理员撤销换版判定，恢复为第 ${current.previous.versionNumber} 版同版本更新`,
         activeModelNames: mergedActiveModels,
+        activeModelIds: mergedActiveIds.length > 0 ? mergedActiveIds : undefined,
         upstreamIndexVersion: current.upstreamIndexVersion ?? current.previous.upstreamIndexVersion ?? null,
         lastStats: current.lastStats ?? current.previous.lastStats ?? null,
         previous: null

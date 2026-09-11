@@ -18,6 +18,8 @@ function toNullableNumber(value: unknown): number | null {
 
 export type DashboardRow = {
   id: number;
+  modelId?: number;
+  benchmarkId?: number;
   providerName: string;
   providerDisplayName: string;
   providerBrandColor: string | null;
@@ -117,6 +119,8 @@ async function loadDashboardRows(limit: number, sourceFilter: string | null): Pr
   const baseQuery = db
     .select({
       id: benchmarkValues.id,
+      modelId: benchmarkValues.modelId,
+      benchmarkId: benchmarkValues.benchmarkId,
       providerId: providers.id,
       providerName: providers.name,
       providerConfig: providers.config,
@@ -180,6 +184,8 @@ async function loadDashboardRows(limit: number, sourceFilter: string | null): Pr
 
     return {
       id: row.id,
+      modelId: row.modelId,
+      benchmarkId: row.benchmarkId,
       providerName: resolvedProviderName,
       providerDisplayName: resolvedProviderDisplayName,
       providerBrandColor: resolvedProviderBrandColor,

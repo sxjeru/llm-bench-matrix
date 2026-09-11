@@ -469,13 +469,13 @@ describe("collectVersionTrackingBatch", () => {
     expect(intel.benchmarkName).toBe("AA Intelligence (v2)");
     // benchmarkType 被 trim
     expect(intel.benchmarkType).toBe("Overall");
-    expect(intel.scores).toEqual([{ modelName: "GPT-5", score: 85.6 }]);
+    expect(intel.scores).toEqual([{ modelId: 1, modelName: "GPT-5", score: 85.6 }]);
 
     const agentic = batch["evaluations.artificial_analysis_agentic_index"];
     expect(agentic).toBeDefined();
     expect(agentic.benchmarkName).toBe("AA Agentic Index");
     expect(agentic.benchmarkType).toBe("Agentic");
-    expect(agentic.scores).toEqual([{ modelName: "GPT-5", score: 78.2 }]);
+    expect(agentic.scores).toEqual([{ modelId: 1, modelName: "GPT-5", score: 78.2 }]);
   });
 });
 

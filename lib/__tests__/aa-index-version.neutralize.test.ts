@@ -151,5 +151,144 @@ describe("applyOutdatedAaScores - 中性化改写", () => {
     expect(processed[0].valueNum).toBe(62.4);
     expect(processed[0].valueRaw).toBe("62.4");
   });
+
+  test("支持 sourceBenchmarkType 覆盖类别匹配：当 benchmarkType 为 General 但 sourceBenchmarkType 为 composite 时能够正确命中", () => {
+    const rows = [
+      {
+        benchmarkName: "Intelligence Index",
+        benchmarkType: "General", // 数据库原始实体为 General
+        sourceBenchmarkType: "composite", // AA 来源覆盖为 composite
+        modelName: "GPT-4o", // 未在 activeModelNames
+        valueRaw: "62.4",
+        valueNum: 62.4,
+        valueNum2: null,
+        valueNote: null,
+        source: "Artificial Analysis"
+      }
+    ];
+
+    const { rows: processed, hiddenModelCount } = applyOutdatedAaScores(rows, trackingState);
+
+    expect(hiddenModelCount).toBe(1);
+    expect(processed[0].valueNum).toBeNull();
+    expect(processed[0].valueRaw).toBe("");
+    expect(processed[0].valueNote).toContain("该模型未参与 AA 当前版本（第 2 版）评测");
+  });
+
+  test("支持 modelId 匹配：模型在数据库改名后（modelName 变为新名），依然可通过 activeModelIds 判定为活跃而不被中性化", () => {
+    const stateWithIds: AaVersionTrackingState = {
+      enabled: true,
+      forceNewVersionMetricKeys: [],
+      benchmarks: {
+        "evaluations.artificial_analysis_intelligence_index": {
+          benchmarkName: "Intelligence Index",
+          benchmarkType: "composite",
+          versionNumber: 2,
+          startedAt: "2026-09-01T00:00:00.000Z",
+          triggerReason: "检测到新版本",
+          activeModelNames: ["GPT-5"], // 记录的是旧名
+          activeModelIds: [101], // 记录的数据库 modelId
+          previous: null
+        }
+      }
+    };
+
+    const rows = [
+      {
+        modelId: 101, // 数据库 ID 一致
+        modelName: "GPT-5 (2025-New-Name)", // 后台改名后的新名称
+        benchmarkName: "Intelligence Index",
+        benchmarkType: "composite",
+        valueRaw: "92.0",
+        valueNum: 92.0,
+        valueNum2: null,
+        valueNote: null,
+        source: "Artificial Analysis"
+      }
+    ];
+
+    const { rows: processed, hiddenModelCount } = applyOutdatedAaScores(rows, stateWithIds);
+
+    expect(hiddenModelCount).toBe(0);
+    expect(processed[0].valueNum).toBe(92.0);
+    expect(processed[0].valueRaw).toBe("92.0");
+  });
+
+  test("支持 modelId 防借壳：其他模型改名为旧活跃名但 modelId 不同，依然会被判定为陈旧行中性化", () => {
+    const stateWithIds: AaVersionTrackingState = {
+      enabled: true,
+      forceNewVersionMetricKeys: [],
+      benchmarks: {
+        "evaluations.artificial_analysis_intelligence_index": {
+          benchmarkName: "Intelligence Index",
+          benchmarkType: "composite",
+          versionNumber: 2,
+          startedAt: "2026-09-01T00:00:00.000Z",
+          triggerReason: "检测到新版本",
+          activeModelNames: ["GPT-5"],
+          activeModelIds: [101],
+          previous: null
+        }
+      }
+    };
+
+    const rows = [
+      {
+        modelId: 202, // 借壳模型：另一个模型的 ID
+        modelName: "GPT-5", // 改名为了旧活跃模型相同的名称，但 modelId 不同
+        benchmarkName: "Intelligence Index",
+        benchmarkType: "composite",
+        valueRaw: "62.4",
+        valueNum: 62.4,
+        valueNum2: null,
+        valueNote: null,
+        source: "Artificial Analysis"
+      }
+    ];
+
+    const { rows: processed, hiddenModelCount } = applyOutdatedAaScores(rows, stateWithIds);
+
+    expect(hiddenModelCount).toBe(1);
+    expect(processed[0].valueNum).toBeNull();
+  });
+
+  test("支持 benchmarkId 匹配：指标改名后（benchmarkName 变动），依然可通过 benchmarkId 命中版本隔离", () => {
+    const stateWithBenchmarkId: AaVersionTrackingState = {
+      enabled: true,
+      forceNewVersionMetricKeys: [],
+      benchmarks: {
+        "evaluations.artificial_analysis_intelligence_index": {
+          benchmarkId: 99,
+          benchmarkName: "Intelligence Index (Old Name)",
+          benchmarkType: "composite",
+          versionNumber: 2,
+          startedAt: "2026-09-01T00:00:00.000Z",
+          triggerReason: "检测到新版本",
+          activeModelNames: ["GPT-5"],
+          previous: null
+        }
+      }
+    };
+
+    const rows = [
+      {
+        benchmarkId: 99,
+        benchmarkName: "Intelligence Index (Renamed by Admin)", // 指标已改名
+        benchmarkType: "composite",
+        modelName: "GPT-4o",
+        valueRaw: "62.4",
+        valueNum: 62.4,
+        valueNum2: null,
+        valueNote: null,
+        source: "Artificial Analysis"
+      }
+    ];
+
+    const { rows: processed, hiddenModelCount } = applyOutdatedAaScores(rows, stateWithBenchmarkId);
+
+    expect(hiddenModelCount).toBe(1);
+    expect(processed[0].valueNum).toBeNull();
+    expect(processed[0].valueRaw).toBe("");
+  });
 });
 

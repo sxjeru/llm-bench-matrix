@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db/client";
 import { getSettings, invalidateAllCaches, saveSetting } from "@/lib/db/queries";
-import { externalModelMappings, models, providers } from "@/lib/db/schema";
+import { benchmarks, externalModelMappings, models, providers } from "@/lib/db/schema";
 import { normalizeProviderConfig } from "@/lib/provider-config";
 import {
   ensureModelByProviderId,
@@ -620,9 +620,22 @@ export async function runArtificialAnalysisImport(options: {
         ? snapshot.intelligenceIndexVersion
         : null;
 
+    const [benchmarkRecord] = await db
+      .select({ id: benchmarks.id })
+      .from(benchmarks)
+      .where(
+        and(
+          isNull(benchmarks.mergedIntoBenchmarkId),
+          eq(benchmarks.benchmarkName, batchEntry.benchmarkName),
+          eq(benchmarks.benchmarkType, batchEntry.benchmarkType)
+        )
+      )
+      .limit(1);
+
     const decision = evaluateVersionChange({
       benchmarkName: batchEntry.benchmarkName,
       benchmarkType: batchEntry.benchmarkType,
+      benchmarkId: benchmarkRecord?.id ?? null,
       currentState,
       incoming: batchEntry.scores,
       baseline,

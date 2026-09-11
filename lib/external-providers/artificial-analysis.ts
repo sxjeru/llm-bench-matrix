@@ -1180,7 +1180,7 @@ export type VersionTrackingBatchEntry = {
   metricKey: string;
   benchmarkName: string;
   benchmarkType: string;
-  scores: Array<{ modelName: string; score: number }>;
+  scores: Array<{ modelName: string; score: number; modelId?: number }>;
 };
 
 /**
@@ -1232,6 +1232,7 @@ export function collectVersionTrackingBatch(
       if (!Number.isFinite(score)) continue;
 
       batch[metricKey].scores.push({
+        modelId: match.modelId,
         modelName: local.modelName,
         score
       });

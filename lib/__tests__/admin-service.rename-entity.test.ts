@@ -351,4 +351,174 @@ describe("renameEntity", () => {
     expect(updateSet).toHaveBeenCalledWith({ source: "text:new-source" });
     expect(deleteFn).toHaveBeenCalledTimes(1);
   });
+
+  test("model 改名会调用 applyAaVersionTrackingEntityChange 级联更新版本追踪状态", async () => {
+    const aaStoreModule = await import("@/lib/benchmark-versions/aa-index-version-store");
+    const syncSpy = vi.spyOn(aaStoreModule, "applyAaVersionTrackingEntityChange").mockResolvedValue(true);
+
+    const dbSelectWhere = createSelectWhereMock([[]]);
+    const dbSelectFrom = vi.fn(() => ({ where: dbSelectWhere }));
+    vi.spyOn(dbForTest, "select").mockImplementation(() => ({ from: dbSelectFrom }));
+
+    const txSelectWhere = createSelectWhereMock([
+      [
+        {
+          id: 88,
+          providerId: 1,
+          modelName: "Model Old",
+          canonicalKey: "modelold",
+          mergedIntoModelId: null
+        }
+      ],
+      [] // 无冲突
+    ]);
+    const txSelectFrom = vi.fn(() => ({ where: txSelectWhere }));
+    const txSelect = vi.fn(() => ({ from: txSelectFrom }));
+
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const updateSet = vi.fn(() => ({ where: updateWhere }));
+    const update = vi.fn(() => ({ set: updateSet }));
+
+    const tx = { select: txSelect, update };
+
+    vi.spyOn(dbForTest, "transaction").mockImplementation(async (callback: TransactionCallback) => callback(tx));
+
+    const result = await renameEntityForTest({
+      entityType: "model",
+      entityId: 88,
+      nextName: "Model New"
+    });
+
+    expect(result.action).toBe("renamed");
+    expect(syncSpy).toHaveBeenCalledWith({
+      type: "model-renamed",
+      modelId: 88,
+      previousName: "Model Old",
+      nextName: "Model New"
+    });
+  });
+
+  test("benchmark 直接改名与冲突合并改名均会调用 applyAaVersionTrackingEntityChange 级联更新版本追踪状态", async () => {
+    const aaStoreModule = await import("@/lib/benchmark-versions/aa-index-version-store");
+    const syncSpy = vi.spyOn(aaStoreModule, "applyAaVersionTrackingEntityChange").mockResolvedValue(true);
+
+    // 1. 测试 benchmark 直接改名
+    const dbSelectWhere1 = createSelectWhereMock([
+      [], // dedupe rule
+      [
+        {
+          id: 301,
+          benchmarkName: "Bench-Old",
+          benchmarkType: "Type-A",
+          canonicalKey: "benchold:typea",
+          mergedIntoBenchmarkId: null
+        }
+      ],
+      [] // 无冲突
+    ]);
+    const dbSelectFrom1 = vi.fn(() => ({ where: dbSelectWhere1 }));
+    vi.spyOn(dbForTest, "select").mockImplementation(() => ({ from: dbSelectFrom1 }));
+
+    const updateWhere1 = vi.fn().mockResolvedValue(undefined);
+    const updateSet1 = vi.fn(() => ({ where: updateWhere1 }));
+    vi.spyOn(dbForTest, "update").mockImplementation(() => ({ set: updateSet1 }));
+
+    const directResult = await renameEntityForTest({
+      entityType: "benchmark",
+      entityId: 301,
+      nextName: "Bench New"
+    });
+
+    expect(directResult.action).toBe("renamed");
+    expect(syncSpy).toHaveBeenCalledWith({
+      type: "benchmark-renamed",
+      benchmarkId: 301,
+      previousName: "Bench-Old",
+      previousType: "Type-A",
+      nextName: "Bench New",
+      nextType: "Type-A"
+    });
+
+    syncSpy.mockClear();
+
+    // 2. 测试 benchmark 冲突合并改名
+    const dbSelectWhere2 = createSelectWhereMock([
+      [], // dedupe rule
+      [
+        {
+          id: 401,
+          benchmarkName: "Bench-Alpha",
+          benchmarkType: "Type-A",
+          canonicalKey: "benchalpha:typea",
+          mergedIntoBenchmarkId: null
+        }
+      ],
+      [
+        {
+          id: 499,
+          benchmarkName: "Bench Beta",
+          benchmarkType: "Type-A",
+          mergedIntoBenchmarkId: null
+        }
+      ]
+    ]);
+    const dbSelectFrom2 = vi.fn(() => ({ where: dbSelectWhere2 }));
+    vi.spyOn(dbForTest, "select").mockImplementation(() => ({ from: dbSelectFrom2 }));
+
+    const txSelectWhere2 = createSelectWhereMock([
+      [{ benchmarkName: "Bench-Alpha", benchmarkType: "Type-A" }],
+      [],
+      [],
+      [{ benchmarkType: "Type-B", modalities: ["Text"] }],
+      [],
+      []
+    ]);
+    const txSelectFrom2 = vi.fn(() => ({ where: txSelectWhere2 }));
+    const txSelect2 = vi.fn(() => ({ from: txSelectFrom2 }));
+
+    const updateWhere2 = vi.fn().mockResolvedValue(undefined);
+    const updateSet2 = vi.fn(() => ({ where: updateWhere2 }));
+    const update2 = vi.fn(() => ({ set: updateSet2 }));
+
+    const onConflictDoNothing2 = vi.fn().mockResolvedValue(undefined);
+    const insertValues2 = vi.fn(() => ({ onConflictDoNothing: onConflictDoNothing2 }));
+    const insert2 = vi.fn(() => ({ values: insertValues2 }));
+
+    const deleteWhere2 = vi.fn().mockResolvedValue(undefined);
+    const deleteFn2 = vi.fn(() => ({ where: deleteWhere2 }));
+
+    const tx2 = {
+      select: txSelect2,
+      update: update2,
+      insert: insert2,
+      delete: deleteFn2
+    };
+
+    vi.spyOn(dbForTest, "transaction").mockImplementation(async (callback: TransactionCallback) => callback(tx2));
+
+    const mergeResult = await renameEntityForTest({
+      entityType: "benchmark",
+      entityId: 401,
+      nextName: "Bench Beta",
+      mergeOnConflict: true
+    });
+
+    expect(mergeResult.action).toBe("merged-and-renamed");
+    // 验证既触发了被合并冲突项的 benchmark-merged，又触发了幸存主体改名的 benchmark-renamed
+    expect(syncSpy).toHaveBeenCalledWith({
+      type: "benchmark-merged",
+      sourceId: 499,
+      targetId: 401,
+      targetName: "Bench Beta",
+      targetType: "Type-A"
+    });
+    expect(syncSpy).toHaveBeenCalledWith({
+      type: "benchmark-renamed",
+      benchmarkId: 401,
+      previousName: "Bench-Alpha",
+      previousType: "Type-A",
+      nextName: "Bench Beta",
+      nextType: "Type-A"
+    });
+  });
 });

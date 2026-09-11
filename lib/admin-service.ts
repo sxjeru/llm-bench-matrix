@@ -20,6 +20,7 @@ import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, se
 import type { ProviderConfig } from "@/lib/db/schema";
 import { invalidateAllCaches, registerCacheInvalidator } from "@/lib/db/queries";
 import { createVersionedCacheStore, withVersionedCache, invalidateVersionedCacheStore } from "@/lib/server-cache";
+import { applyAaVersionTrackingEntityChange } from "@/lib/benchmark-versions/aa-index-version-store";
 import { getCacheVersion } from "@/lib/cache-versions";
 import { isValidHexColor, normalizeProviderConfig, normalizeProviderConfigPrefix } from "@/lib/provider-config";
 import {
@@ -3212,6 +3213,22 @@ export async function mergeEntity(input: {
       .where(and(eq(benchmarks.id, input.sourceId), isNull(benchmarks.mergedIntoBenchmarkId)));
   });
 
+  if (input.entityType === "model") {
+    await applyAaVersionTrackingEntityChange({
+      type: "model-merged",
+      sourceId: input.sourceId,
+      targetId: input.targetId
+    });
+  } else if (input.entityType === "benchmark") {
+    await applyAaVersionTrackingEntityChange({
+      type: "benchmark-merged",
+      sourceId: input.sourceId,
+      targetId: input.targetId,
+      targetName: input.targetBenchmarkName ? normalizeNameParenthesisSpacing(input.targetBenchmarkName) : undefined,
+      targetType: input.targetBenchmarkType ? normalizeNameParenthesisSpacing(input.targetBenchmarkType).trim() : undefined
+    });
+  }
+
   await invalidateAllCaches();
 }
 
@@ -3446,6 +3463,15 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
         })
         .where(eq(benchmarks.id, current.id));
 
+      await applyAaVersionTrackingEntityChange({
+        type: "benchmark-renamed",
+        benchmarkId: current.id,
+        previousName: current.benchmarkName,
+        previousType: current.benchmarkType,
+        nextName,
+        nextType: normalizedNextBenchmarkType
+      });
+
       await invalidateAllCaches();
 
       return {
@@ -3472,6 +3498,15 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
       targetId: current.id,
       targetBenchmarkName: nextName,
       targetBenchmarkType: normalizedNextBenchmarkType
+    });
+
+    await applyAaVersionTrackingEntityChange({
+      type: "benchmark-renamed",
+      benchmarkId: current.id,
+      previousName: current.benchmarkName,
+      previousType: current.benchmarkType,
+      nextName,
+      nextType: normalizedNextBenchmarkType
     });
 
     return {
@@ -3621,6 +3656,31 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
       mergedSourceName
     };
   });
+
+  if (result.action === "renamed") {
+    await applyAaVersionTrackingEntityChange({
+      type: "model-renamed",
+      modelId: result.entityId,
+      previousName: result.previousName,
+      nextName: result.nextName
+    });
+  } else if (result.action === "merged-and-renamed") {
+    if (result.mergedSourceName) {
+      await applyAaVersionTrackingEntityChange({
+        type: "model-merged",
+        sourceId: result.mergedSourceId,
+        sourceName: result.mergedSourceName,
+        targetId: result.entityId,
+        targetName: result.nextName
+      });
+    }
+    await applyAaVersionTrackingEntityChange({
+      type: "model-renamed",
+      modelId: result.entityId,
+      previousName: result.previousName,
+      nextName: result.nextName
+    });
+  }
 
   await invalidateAllCaches();
 
