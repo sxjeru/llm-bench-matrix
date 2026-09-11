@@ -3303,6 +3303,10 @@ export function AdminConsole({
             onSaveConfig={externalImport.saveConfig}
             onPreviewImport={externalImport.previewImport}
             onRunImport={externalImport.runImport}
+            updatingVersionTracking={externalImport.updatingVersionTracking}
+            onToggleVersionTracking={externalImport.toggleVersionTracking}
+            onForceNewVersion={externalImport.forceNewVersion}
+            onUndoVersionChange={externalImport.undoVersionChange}
           />
         ) : null}
 

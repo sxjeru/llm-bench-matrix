@@ -22,6 +22,7 @@ const SNAPSHOT_URL = "/api/admin/external-import/artificial-analysis/snapshot";
 const MAPPINGS_URL = "/api/admin/external-import/artificial-analysis/mappings";
 const CONFIG_URL = "/api/admin/external-import/artificial-analysis/config";
 const IMPORT_URL = "/api/admin/external-import/artificial-analysis/import";
+const VERSIONS_URL = "/api/admin/external-import/artificial-analysis/versions";
 
 export function toMappingDraft(row: ExternalMappingRow): ExternalMappingDraft {
   return {
@@ -49,6 +50,7 @@ export function useExternalImport({ notifySuccess, notifyError }: UseExternalImp
   const [savingConfig, setSavingConfig] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [updatingVersionTracking, setUpdatingVersionTracking] = useState(false);
   const [summary, setSummary] = useState<ExternalImportSummary | null>(null);
   const [mappingDrafts, setMappingDrafts] = useState<Record<number, ExternalMappingDraft>>({});
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
@@ -274,6 +276,45 @@ export function useExternalImport({ notifySuccess, notifyError }: UseExternalImp
     }
   }
 
+  async function toggleVersionTracking(enabled: boolean) {
+    setUpdatingVersionTracking(true);
+    try {
+      await postJson(VERSIONS_URL, { enabled }, "PATCH");
+      notifySuccess(enabled ? "已启用指标跨版本隔离" : "已停用指标跨版本隔离");
+      await loadSnapshot(false);
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "切换版本追踪开关失败");
+    } finally {
+      setUpdatingVersionTracking(false);
+    }
+  }
+
+  async function forceNewVersion(metricKey: string) {
+    setUpdatingVersionTracking(true);
+    try {
+      await postJson(VERSIONS_URL, { action: "force-new-version", metricKey });
+      notifySuccess("已标记：下次导入该指标时将强制触发新版本");
+      await loadSnapshot(false);
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "设置强制新版本失败");
+    } finally {
+      setUpdatingVersionTracking(false);
+    }
+  }
+
+  async function undoVersionChange(metricKey: string) {
+    setUpdatingVersionTracking(true);
+    try {
+      await postJson(VERSIONS_URL, { action: "undo", metricKey });
+      notifySuccess("已成功撤销上一次版本判定");
+      await loadSnapshot(false);
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "撤销版本判定失败");
+    } finally {
+      setUpdatingVersionTracking(false);
+    }
+  }
+
   return {
     snapshot,
     loading,
@@ -281,6 +322,7 @@ export function useExternalImport({ notifySuccess, notifyError }: UseExternalImp
     savingConfig,
     previewing,
     importing,
+    updatingVersionTracking,
     summary,
     mappingDrafts,
     selectedMetrics,
@@ -303,6 +345,9 @@ export function useExternalImport({ notifySuccess, notifyError }: UseExternalImp
     saveMappings,
     saveConfig,
     previewImport,
-    runImport
+    runImport,
+    toggleVersionTracking,
+    forceNewVersion,
+    undoVersionChange
   };
 }

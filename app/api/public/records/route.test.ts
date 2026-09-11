@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { GET } from "@/app/api/public/records/route";
-import { getDashboardRows } from "@/lib/db/queries";
+import { getDashboardRows, getSettings } from "@/lib/db/queries";
 import { getCacheVersion } from "@/lib/cache-versions";
 
 vi.mock("@/lib/db/queries", () => ({
-  getDashboardRows: vi.fn()
+  getDashboardRows: vi.fn(),
+  getSettings: vi.fn().mockResolvedValue({})
 }));
 
 vi.mock("@/lib/cache-versions", () => ({
@@ -15,6 +16,8 @@ vi.mock("@/lib/cache-versions", () => ({
 describe("GET /api/public/records", () => {
   beforeEach(() => {
     vi.mocked(getDashboardRows).mockReset();
+    vi.mocked(getSettings).mockReset();
+    vi.mocked(getSettings).mockResolvedValue({});
     vi.mocked(getCacheVersion).mockReset();
     vi.mocked(getCacheVersion).mockImplementation(async (domain) => `${domain}-version`);
   });
@@ -211,5 +214,86 @@ describe("GET /api/public/records", () => {
     expect(response.headers.get("Cache-Control")).toBe("private, no-store, no-cache, must-revalidate, max-age=0");
     expect(response.headers.get("CDN-Cache-Control")).toBeNull();
     expect(response.headers.get("Vercel-CDN-Cache-Control")).toBeNull();
+  });
+
+  test("在服务端数据边界对未参与当前版本的旧模型进行中性化改写", async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      "benchmark_versions:artificial-analysis": {
+        enabled: true,
+        forceNewVersionMetricKeys: [],
+        benchmarks: {
+          "evaluations.artificial_analysis_intelligence_index": {
+            benchmarkName: "AA Intelligence Index",
+            benchmarkType: "Overall",
+            versionNumber: 2,
+            startedAt: "2026-09-10T00:00:00.000Z",
+            triggerReason: "initial",
+            activeModelNames: ["GPT-4o"]
+          }
+        }
+      }
+    });
+
+    vi.mocked(getDashboardRows).mockResolvedValue([
+      {
+        id: 1,
+        providerName: "OpenAI",
+        providerDisplayName: "OpenAI",
+        providerBrandColor: null,
+        providerEntityId: 1,
+        modelName: "GPT-4o",
+        benchmarkName: "AA Intelligence Index",
+        benchmarkType: "Overall",
+        sourceBenchmarkType: null,
+        higherIsBetter: true,
+        benchmarkCanonicalKey: "aa-intelligence-index:overall",
+        modalities: ["Text"],
+        sourceModalities: null,
+        benchTime: "2026-09-10T00:00:00.000Z",
+        valueRaw: "88.5",
+        valueNum: 88.5,
+        valueNum2: null,
+        valueNote: null,
+        source: "text:Artificial Analysis",
+        updatedAt: "2026-09-10T00:00:00.000Z"
+      },
+      {
+        id: 2,
+        providerName: "OpenAI",
+        providerDisplayName: "OpenAI",
+        providerBrandColor: null,
+        providerEntityId: 1,
+        modelName: "GPT-3.5-Turbo",
+        benchmarkName: "AA Intelligence Index",
+        benchmarkType: "Overall",
+        sourceBenchmarkType: null,
+        higherIsBetter: true,
+        benchmarkCanonicalKey: "aa-intelligence-index:overall",
+        modalities: ["Text"],
+        sourceModalities: null,
+        benchTime: "2025-06-01T00:00:00.000Z",
+        valueRaw: "62.4",
+        valueNum: 62.4,
+        valueNum2: null,
+        valueNote: null,
+        source: "text:Artificial Analysis",
+        updatedAt: "2025-06-01T00:00:00.000Z"
+      }
+    ] as Awaited<ReturnType<typeof getDashboardRows>>);
+
+    const response = await GET(new Request("https://example.com/api/public/records"));
+    const payload = await response.json();
+
+    expect(payload.rows).toHaveLength(2);
+
+    const gpt4o = payload.rows.find((r: { modelName: string }) => r.modelName === "GPT-4o");
+    expect(gpt4o.valueNum).toBe(88.5);
+    expect(gpt4o.valueRaw).toBe("88.5");
+
+    const gpt35 = payload.rows.find((r: { modelName: string }) => r.modelName === "GPT-3.5-Turbo");
+    expect(gpt35.valueNum).toBeNull();
+    expect(gpt35.valueRaw).toBe("");
+    expect(gpt35.valueNote).toContain("该模型未参与 AA 当前版本（第 2 版）评测");
+    expect(gpt35.valueNote).toContain("旧版本得分 62.4");
   });
 });

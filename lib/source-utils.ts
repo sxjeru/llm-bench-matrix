@@ -50,3 +50,31 @@ const AA_SECONDARY_CATEGORY_SET = new Set(["cost", "performance"]);
 export function isAaSecondaryCategory(category: string): boolean {
   return category.split(" / ").some((part) => AA_SECONDARY_CATEGORY_SET.has(part.trim().toLowerCase()));
 }
+
+export function normalizeTextImportSource(value: string | undefined | null): string | null {
+  if (value === undefined || value === null) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.toLowerCase().startsWith("text:")) {
+    const plain = trimmed.slice(5).trim();
+    return plain ? `text:${plain}` : "text:";
+  }
+
+  return `text:${trimmed}`;
+}
+
+export function buildSourceLookupCandidates(source: string): string[] {
+  const raw = source.trim();
+  const normalized = normalizeTextImportSource(raw);
+  const candidates = new Set<string>();
+
+  if (raw) candidates.add(raw);
+  if (normalized) {
+    candidates.add(normalized);
+    const unprefixed = normalized.slice(5).trim();
+    if (unprefixed) candidates.add(unprefixed);
+  }
+
+  return Array.from(candidates);
+}

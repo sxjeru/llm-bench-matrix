@@ -9,6 +9,7 @@ import {
   parseModelReasoningEffort,
   type ReasoningEffort
 } from "./reasoning-effort";
+import { AA_VERSIONED_METRIC_KEYS } from "@/lib/benchmark-versions/aa-index-version";
 
 /**
  * artificialanalysis.ai 数据 API 适配。
@@ -1170,4 +1171,67 @@ export function buildImportRows(input: BuildImportRowsInput): ExternalImportRow[
   }
 
   return rows;
+}
+
+export type VersionTrackingBatchEntry = {
+  metricKey: string;
+  benchmarkName: string;
+  benchmarkType: string;
+  scores: Array<{ modelName: string; score: number }>;
+};
+
+/**
+ * 收集待进行版本判定的指标分批数据。
+ * 与 buildImportRows 共用同一套模型匹配与指标筛选逻辑，保证判定数据与入库数据无漂移。
+ */
+export function collectVersionTrackingBatch(
+  input: BuildImportRowsInput,
+  trackedKeys: readonly string[] = AA_VERSIONED_METRIC_KEYS
+): Record<string, VersionTrackingBatchEntry> {
+  const upstreamById = new Map(input.upstreamModels.map((model) => [model.id, model]));
+  const catalogByKey = new Map(input.catalog.map((entry) => [entry.key, entry]));
+  const selected = input.config.selectedMetrics.filter((key) => catalogByKey.has(key));
+  const activeTrackedKeys = trackedKeys.filter((key) => selected.includes(key));
+
+  const batch: Record<string, VersionTrackingBatchEntry> = {};
+  for (const metricKey of activeTrackedKeys) {
+    const entry = catalogByKey.get(metricKey)!;
+    const override = input.config.metricOverrides[metricKey] ?? {};
+    batch[metricKey] = {
+      metricKey,
+      benchmarkName: override.benchmarkName ?? entry.label,
+      benchmarkType: override.benchmarkType ?? entry.benchmarkType,
+      scores: []
+    };
+  }
+
+  for (const match of input.matches) {
+    if (match.matchStatus !== "matched" && match.matchStatus !== "manual") continue;
+    if (!match.externalModelId) continue;
+
+    const upstream = upstreamById.get(match.externalModelId);
+    const local = input.localModelsById.get(match.modelId);
+    if (!upstream || !local) continue;
+
+    for (const metricKey of activeTrackedKeys) {
+      const entry = catalogByKey.get(metricKey)!;
+      const value = readMetricValue(upstream, metricKey);
+      if (value === null) continue;
+
+      const override = input.config.metricOverrides[metricKey] ?? {};
+      const valueScale = override.valueScale ?? entry.valueScale;
+      const rawValue = formatMetricValue(value, valueScale);
+      const score = Number.parseFloat(rawValue);
+
+      // 解析不出数值的 incoming 行跳过，不计入统计、不计入 activeModelNames；绝不按 0 处理
+      if (!Number.isFinite(score)) continue;
+
+      batch[metricKey].scores.push({
+        modelName: local.modelName,
+        score
+      });
+    }
+  }
+
+  return batch;
 }

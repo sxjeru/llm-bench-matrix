@@ -69,6 +69,10 @@ type ExternalImportTabProps = {
   onSaveConfig: () => void | Promise<void>;
   onPreviewImport: () => void | Promise<void>;
   onRunImport: () => void | Promise<void>;
+  updatingVersionTracking?: boolean;
+  onToggleVersionTracking?: (enabled: boolean) => void | Promise<void>;
+  onForceNewVersion?: (metricKey: string) => void | Promise<void>;
+  onUndoVersionChange?: (metricKey: string) => void | Promise<void>;
 };
 
 export function getEffectiveStatus(
@@ -154,7 +158,11 @@ export function ExternalImportTab({
   onSaveMappings,
   onSaveConfig,
   onPreviewImport,
-  onRunImport
+  onRunImport,
+  updatingVersionTracking = false,
+  onToggleVersionTracking,
+  onForceNewVersion,
+  onUndoVersionChange
 }: ExternalImportTabProps) {
   const busy = loading || savingMappings || savingConfig || previewing || importing;
   const apiKeyMissing = snapshot !== null && !snapshot.apiKeyConfigured;
@@ -338,6 +346,114 @@ export function ExternalImportTab({
             Artificial Analysis
           </a>
           。
+        </div>
+      ) : null}
+
+      {/* --- AA 指数跨版本隔离状态 --- */}
+      {snapshot?.versionTracking ? (
+        <div className="mb-5 rounded-2xl border border-base-300/70 bg-base-200/30 p-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-base font-semibold">AA 指数跨版本隔离</h4>
+                <span
+                  className={`badge badge-sm font-medium ${
+                    snapshot.versionTracking.enabled ? "badge-success text-success-content" : "badge-ghost opacity-60"
+                  }`}
+                >
+                  {snapshot.versionTracking.enabled ? "已启用" : "未启用"}
+                </span>
+              </div>
+              <p className="mt-1 text-xs opacity-70">
+                启用后，若检测到 AA 发布新版本，未参与该版本评测的历史旧模型分数将在看板中隐藏（显示 -- 与问号），防止与新版本直接比较。
+              </p>
+            </div>
+            {onToggleVersionTracking ? (
+              <button
+                type="button"
+                className={`btn btn-sm ${
+                  snapshot.versionTracking.enabled ? "btn-outline btn-error" : "btn-primary"
+                }`}
+                disabled={busy || updatingVersionTracking}
+                onClick={() => onToggleVersionTracking(!snapshot.versionTracking?.enabled)}
+              >
+                {snapshot.versionTracking.enabled ? "停用跨版本隔离" : "启用跨版本隔离"}
+              </button>
+            ) : null}
+          </div>
+
+          {Object.keys(snapshot.versionTracking.benchmarks).length > 0 ? (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {Object.entries(snapshot.versionTracking.benchmarks).map(([metricKey, item]) => {
+                const isPendingForce = snapshot.versionTracking?.forceNewVersionMetricKeys?.includes(metricKey);
+                return (
+                  <div
+                    key={metricKey}
+                    className="rounded-xl border border-base-300 bg-base-100/75 p-3.5 text-xs shadow-xs"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-sm">{item.benchmarkName}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="badge badge-outline badge-primary font-medium">
+                          第 {item.versionNumber} 版
+                        </span>
+                        {item.upstreamIndexVersion ? (
+                          <span className="badge badge-outline badge-neutral text-[10px]">
+                            上游 v{item.upstreamIndexVersion}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="mt-2.5 space-y-1 opacity-80 leading-relaxed">
+                      <div>
+                        收录模型：<span className="font-medium text-base-content">{item.activeModelCount}</span> 个
+                        {item.hiddenModelCount > 0 ? (
+                          <span className="ml-1 text-amber-500 font-medium">
+                            （已隐藏 {item.hiddenModelCount} 个历史模型）
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="truncate" title={item.triggerReason}>
+                        触发原因：{item.triggerReason}
+                      </div>
+                      <div>生效时间：{new Date(item.startedAt).toLocaleString("zh-CN")}</div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-base-200 pt-2.5">
+                      {onForceNewVersion ? (
+                        <button
+                          type="button"
+                          className={`btn btn-xs ${
+                            isPendingForce ? "btn-warning" : "btn-ghost border border-base-300"
+                          }`}
+                          disabled={busy || updatingVersionTracking || isPendingForce}
+                          onClick={() => onForceNewVersion(metricKey)}
+                          title={isPendingForce ? "下次导入将强制进入新版本" : "标记在下次导入时强制产生新版本"}
+                        >
+                          {isPendingForce ? "待生效：下次导入强制换版" : "下次导入强制标记为新版本"}
+                        </button>
+                      ) : null}
+                      {onUndoVersionChange && item.canUndo ? (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-xs text-error border border-error/30 hover:bg-error/10"
+                          disabled={busy || updatingVersionTracking}
+                          onClick={() => onUndoVersionChange(metricKey)}
+                        >
+                          撤销上次判定
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-base-300 p-3 text-center text-xs opacity-60">
+              尚无版本记录。完成首次导入后将自动建立初始版本基线。
+            </div>
+          )}
         </div>
       ) : null}
 
@@ -700,6 +816,39 @@ export function ExternalImportTab({
               <div className="mt-1 text-lg font-medium">{summary.skipped}</div>
             </div>
           </div>
+
+          {summary.versionDecisions && Object.keys(summary.versionDecisions).length > 0 ? (
+            <div className="mb-3 space-y-2">
+              {Object.entries(summary.versionDecisions).map(([metricKey, dec]) => {
+                const badgeClass =
+                  dec.type === "new_version"
+                    ? "badge-warning"
+                    : dec.type === "initial"
+                      ? "badge-success"
+                      : "badge-info";
+                const label =
+                  dec.type === "new_version"
+                    ? "检测到新版本"
+                    : dec.type === "initial"
+                      ? "初始基准版本"
+                      : "同版本小幅更新";
+
+                return (
+                  <div
+                    key={metricKey}
+                    className="flex flex-wrap items-center gap-2 rounded-xl border border-base-300/80 bg-base-100/80 px-3.5 py-2.5 text-xs shadow-xs"
+                  >
+                    <span className={`badge ${badgeClass} text-xs font-semibold`}>{label}</span>
+                    <span className="font-semibold">（第 {dec.detectedVersionNumber} 版）：</span>
+                    <span className="opacity-90">{dec.reason}</span>
+                    <span className="ml-auto opacity-70">
+                      收录 {dec.activeModelCount} 个模型
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
 
           {summary.createdBenchmarks.length > 0 ? (
             <div className="alert alert-info mb-3 text-sm">

@@ -16,6 +16,7 @@ import {
   ARTIFICIAL_ANALYSIS_SOURCE_ID,
   ARTIFICIAL_ANALYSIS_SOURCE_LABEL,
   buildImportRows,
+  collectVersionTrackingBatch,
   getArtificialAnalysisSnapshot,
   hasArtificialAnalysisApiKey,
   normalizeImportConfig,
@@ -29,6 +30,18 @@ import {
   type ModelMatchResult
 } from "./artificial-analysis";
 import { isReasoningEffort, type ReasoningEffort } from "./reasoning-effort";
+import {
+  evaluateVersionChange,
+  type AaVersionTrackingState,
+  type TrackedVersionStats,
+  type VersionDecision
+} from "@/lib/benchmark-versions/aa-index-version";
+import {
+  countHiddenModels,
+  getAaVersionTrackingState,
+  loadAaBaselineScores,
+  saveAaVersionTrackingState
+} from "@/lib/benchmark-versions/aa-index-version-store";
 
 /**
  * artificialanalysis.ai 导入的服务层：把纯逻辑模块（artificial-analysis.ts）与数据库、
@@ -60,6 +73,26 @@ export type UpstreamOnlyModel = {
   externalCreator: string | null;
 };
 
+export type AaVersionTrackingAdminBenchmarkInfo = {
+  metricKey: string;
+  benchmarkName: string;
+  benchmarkType: string;
+  versionNumber: number;
+  startedAt: string;
+  triggerReason: string;
+  activeModelCount: number;
+  hiddenModelCount: number;
+  canUndo: boolean;
+  upstreamIndexVersion?: number | null;
+  lastStats?: TrackedVersionStats | null;
+};
+
+export type AaVersionTrackingAdminInfo = {
+  enabled: boolean;
+  forceNewVersionMetricKeys: string[];
+  benchmarks: Record<string, AaVersionTrackingAdminBenchmarkInfo>;
+};
+
 export type ArtificialAnalysisAdminSnapshot = {
   apiKeyConfigured: boolean;
   fetchedAt: string | null;
@@ -78,6 +111,8 @@ export type ArtificialAnalysisAdminSnapshot = {
   freePageCount: number;
   /** 旧 API（逐项 benchmark 的来源）失败时的原因 */
   legacyWarning: string | null;
+  /** 指标版本管理状态 */
+  versionTracking?: AaVersionTrackingAdminInfo;
 };
 
 async function getLocalModels(): Promise<Array<LocalModelInput & { providerDisplayName: string | null }>> {
@@ -156,7 +191,12 @@ export async function getArtificialAnalysisAdminSnapshot(options?: {
       upstreamOptions: [],
       intelligenceIndexVersion: null,
       freePageCount: 0,
-      legacyWarning: null
+      legacyWarning: null,
+      versionTracking: {
+        enabled: false,
+        forceNewVersionMetricKeys: [],
+        benchmarks: {}
+      }
     };
   }
 
@@ -233,6 +273,32 @@ export async function getArtificialAnalysisAdminSnapshot(options?: {
     .filter((model) => !boundExternalIds.has(model.id))
     .map(toUpstreamOption);
 
+  const versionTrackingState = await getAaVersionTrackingState();
+  const hiddenCounts = await countHiddenModels(versionTrackingState);
+
+  const versionTracking: AaVersionTrackingAdminInfo = {
+    enabled: versionTrackingState.enabled,
+    forceNewVersionMetricKeys: versionTrackingState.forceNewVersionMetricKeys,
+    benchmarks: Object.fromEntries(
+      Object.entries(versionTrackingState.benchmarks).map(([key, item]) => [
+        key,
+        {
+          metricKey: key,
+          benchmarkName: item.benchmarkName,
+          benchmarkType: item.benchmarkType,
+          versionNumber: item.versionNumber,
+          startedAt: item.startedAt,
+          triggerReason: item.triggerReason,
+          activeModelCount: item.activeModelNames.length,
+          hiddenModelCount: hiddenCounts[key] ?? 0,
+          canUndo: Boolean(item.previous),
+          upstreamIndexVersion: item.upstreamIndexVersion,
+          lastStats: item.lastStats
+        }
+      ])
+    )
+  };
+
   return {
     apiKeyConfigured: true,
     fetchedAt: snapshot.fetchedAt,
@@ -246,7 +312,8 @@ export async function getArtificialAnalysisAdminSnapshot(options?: {
     upstreamOptions: snapshot.models.map(toUpstreamOption),
     intelligenceIndexVersion: snapshot.intelligenceIndexVersion,
     freePageCount: snapshot.freePageCount,
-    legacyWarning: snapshot.legacyWarning
+    legacyWarning: snapshot.legacyWarning,
+    versionTracking
   };
 }
 
@@ -401,6 +468,7 @@ export type ArtificialAnalysisImportSummary = ExternalImportResult & {
   createdModels: string[];
   matchedModelCount: number;
   metricCount: number;
+  versionDecisions?: Record<string, VersionDecision>;
 };
 
 /**
@@ -511,13 +579,99 @@ export async function runArtificialAnalysisImport(options: {
     localModelsById
   });
 
+  const trackingBatch = collectVersionTrackingBatch({
+    upstreamModels: snapshot.models,
+    catalog: snapshot.catalog,
+    config,
+    matches,
+    localModelsById
+  });
+
+  const currentTrackingState = await getAaVersionTrackingState();
+
+  // 1. 基线分数必须在导入之前读取，否则库里已是新值，delta 恒为 0，永远检测不到换版
+  const baselineScoresByMetricKey: Record<string, Map<string, number>> = {};
+  for (const [metricKey, batchEntry] of Object.entries(trackingBatch)) {
+    baselineScoresByMetricKey[metricKey] = await loadAaBaselineScores({
+      benchmarkName: batchEntry.benchmarkName,
+      benchmarkType: batchEntry.benchmarkType
+    });
+  }
+
+  // 2. 执行导入
   const result = await importExternalBenchmarkRows(rows, {
     source: ARTIFICIAL_ANALYSIS_SOURCE_LABEL,
     dryRun
   });
 
-  const publicChanged = result.publicChanged || createdModels.length > 0;
-  if (!dryRun && createdModels.length > 0 && !result.publicChanged) {
+  // 3. 计算版本决策（无论是否 dryRun 均计算供预览/展示）
+  const versionDecisions: Record<string, VersionDecision> = {};
+  let versionStatesChanged = false;
+  const nextBenchmarks = { ...currentTrackingState.benchmarks };
+  const consumedForceNewVersionKeys: string[] = [];
+
+  for (const [metricKey, batchEntry] of Object.entries(trackingBatch)) {
+    const currentState = currentTrackingState.benchmarks[metricKey] ?? null;
+    const baseline = baselineScoresByMetricKey[metricKey] ?? new Map<string, number>();
+    const forceNewVersion = currentTrackingState.forceNewVersionMetricKeys.includes(metricKey);
+
+    const upstreamIndexVersion =
+      metricKey === "evaluations.artificial_analysis_intelligence_index"
+        ? snapshot.intelligenceIndexVersion
+        : null;
+
+    const decision = evaluateVersionChange({
+      benchmarkName: batchEntry.benchmarkName,
+      benchmarkType: batchEntry.benchmarkType,
+      currentState,
+      incoming: batchEntry.scores,
+      baseline,
+      forceNewVersion,
+      upstreamIndexVersion
+    });
+
+    versionDecisions[metricKey] = decision;
+
+    if (forceNewVersion) {
+      consumedForceNewVersionKeys.push(metricKey);
+    }
+
+    if (decision.type === "new_version" || decision.type === "initial") {
+      versionStatesChanged = true;
+    } else if (decision.type === "intra_version") {
+      const currentActiveSet = new Set(currentState?.activeModelNames ?? []);
+      const hasNewModels = decision.nextState.activeModelNames.some((m) => !currentActiveSet.has(m));
+      if (hasNewModels) {
+        versionStatesChanged = true;
+      }
+    }
+
+    nextBenchmarks[metricKey] = decision.nextState;
+  }
+
+  if (consumedForceNewVersionKeys.length > 0) {
+    versionStatesChanged = true;
+  }
+
+  // 4. 非 dryRun 且导入成功时写状态
+  if (!dryRun) {
+    if (versionStatesChanged) {
+      const remainingForceKeys = currentTrackingState.forceNewVersionMetricKeys.filter(
+        (k) => !consumedForceNewVersionKeys.includes(k)
+      );
+
+      const nextTrackingState: AaVersionTrackingState = {
+        enabled: currentTrackingState.enabled ?? true,
+        forceNewVersionMetricKeys: remainingForceKeys,
+        benchmarks: nextBenchmarks
+      };
+
+      await saveAaVersionTrackingState(nextTrackingState);
+    }
+  }
+
+  const publicChanged = result.publicChanged || createdModels.length > 0 || versionStatesChanged;
+  if (!dryRun && (createdModels.length > 0 || versionStatesChanged) && !result.publicChanged) {
     await invalidateAllCaches();
   }
 
@@ -537,6 +691,7 @@ export async function runArtificialAnalysisImport(options: {
     matchedModelCount: matches.filter(
       (match) => match.matchStatus === "matched" || match.matchStatus === "manual"
     ).length,
-    metricCount: config.selectedMetrics.length
+    metricCount: config.selectedMetrics.length,
+    versionDecisions
   };
 }

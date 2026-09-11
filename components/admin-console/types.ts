@@ -330,6 +330,41 @@ export type ExternalMappingConflict = {
   modelIds: number[];
 };
 
+export type ExternalVersionStats = {
+  overlapCount: number;
+  changedCount: number;
+  changedRatio: number;
+  meanDelta: number;
+};
+
+export type ExternalBenchmarkVersionInfo = {
+  metricKey: string;
+  benchmarkName: string;
+  benchmarkType: string;
+  versionNumber: number;
+  startedAt: string;
+  triggerReason: string;
+  activeModelCount: number;
+  hiddenModelCount: number;
+  canUndo: boolean;
+  upstreamIndexVersion?: number | null;
+  lastStats?: ExternalVersionStats | null;
+};
+
+export type ExternalVersionTrackingState = {
+  enabled: boolean;
+  forceNewVersionMetricKeys: string[];
+  benchmarks: Record<string, ExternalBenchmarkVersionInfo>;
+};
+
+export type ExternalVersionDecision = {
+  type: "initial" | "new_version" | "intra_version";
+  reason: string;
+  detectedVersionNumber: number;
+  activeModelCount: number;
+  stats?: ExternalVersionStats | null;
+};
+
 export type ExternalImportSnapshot = {
   apiKeyConfigured: boolean;
   fetchedAt: string | null;
@@ -344,6 +379,7 @@ export type ExternalImportSnapshot = {
   intelligenceIndexVersion: number | null;
   freePageCount: number;
   legacyWarning: string | null;
+  versionTracking?: ExternalVersionTrackingState;
 };
 
 export type ExternalImportPreviewRow = {
@@ -370,6 +406,7 @@ export type ExternalImportSummary = {
   benchTime: string;
   dryRun: boolean;
   preview: ExternalImportPreviewRow[];
+  versionDecisions?: Record<string, ExternalVersionDecision>;
 };
 
 /** 单个模型行的未保存改动 */

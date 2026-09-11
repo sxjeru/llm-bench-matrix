@@ -1,10 +1,15 @@
 import { createHash } from "crypto";
 import { NextResponse } from "next/server";
 import { toMatrixInputRow } from "@/components/benchmark-matrix/map-row";
-import { getDashboardRows } from "@/lib/db/queries";
+import { getDashboardRows, getSettings } from "@/lib/db/queries";
 import { createRateLimiter, getRateLimitKey } from "@/lib/rate-limit";
 import { getCacheVersion } from "@/lib/cache-versions";
 import { ifNoneMatchMatches } from "@/lib/http-etag";
+import {
+  applyOutdatedAaScores,
+  parseVersionTrackingState,
+  BENCHMARK_VERSIONS_SETTINGS_KEY
+} from "@/lib/benchmark-versions/aa-index-version";
 import {
   PUBLIC_CACHE_CONTROL_BROWSER,
   PUBLIC_CACHE_CONTROL_CDN,
@@ -81,8 +86,13 @@ export async function GET(request: Request) {
     });
   }
 
-  const cachedRows = await getDashboardRows(cachedLimit, null, dashboardVersion);
-  const rows = cachedRows.slice(0, limit).map(toMatrixInputRow);
+  const [cachedRows, settings] = await Promise.all([
+    getDashboardRows(cachedLimit, null, dashboardVersion),
+    getSettings()
+  ]);
+  const trackingState = parseVersionTrackingState(settings[BENCHMARK_VERSIONS_SETTINGS_KEY]);
+  const { rows: processedRows } = applyOutdatedAaScores(cachedRows.slice(0, limit), trackingState);
+  const rows = processedRows.map(toMatrixInputRow);
 
   return NextResponse.json(
     { rows },

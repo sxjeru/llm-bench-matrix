@@ -15,6 +15,11 @@ import {
   type PublicDashboardSnapshot,
   type PublicDashboardSnapshotVersions
 } from "@/lib/dashboard-snapshot-cache";
+import {
+  applyOutdatedAaScores,
+  parseVersionTrackingState,
+  BENCHMARK_VERSIONS_SETTINGS_KEY
+} from "@/lib/benchmark-versions/aa-index-version";
 
 type ParsedExportFootnote = {
   exportFootnoteText?: string;
@@ -100,9 +105,12 @@ export async function loadPublicDashboardSnapshot(
     getSettings()
   ]);
 
+  const versionTrackingState = parseVersionTrackingState(settings[BENCHMARK_VERSIONS_SETTINGS_KEY]);
+  const { rows: processedRows } = applyOutdatedAaScores(rows, versionTrackingState);
+
   return {
     versions: resolved,
-    rows: rows.map(toMatrixInputRow),
+    rows: processedRows.map(toMatrixInputRow),
     sourceOptions,
     stats,
     modelPrices: modelPrices.map(toPublicModelPrice).filter(hasPublicModelPriceData),
