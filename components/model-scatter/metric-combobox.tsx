@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, History, Search } from "lucide-react";
 import { describeMetricDirection } from "./metrics";
-import { SNAPSHOT_MAJOR_MODEL_COUNT_THRESHOLD } from "./constants";
 import type { ScatterMetric, ScatterMetricGroup, ScatterMetricSnapshot } from "./types";
 
 type MetricComboboxProps = {
@@ -388,8 +387,7 @@ export function MetricCombobox({
 
             {(() => {
               const snapshots = submenuState.metric.snapshots;
-              const isMajor = (s: ScatterMetricSnapshot) =>
-                Boolean(s.isMajorRevision ?? s.modelCount > SNAPSHOT_MAJOR_MODEL_COUNT_THRESHOLD);
+              const isMajor = (s: ScatterMetricSnapshot) => Boolean(s.isMajorRevision);
               const majorSnapshots = snapshots.filter(isMajor);
               const otherSnapshots = snapshots.filter((s) => !isMajor(s));
 

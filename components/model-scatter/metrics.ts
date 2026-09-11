@@ -22,6 +22,10 @@ import {
   SYNTHETIC_METRIC_SLUGS
 } from "./constants";
 import { isArtificialAnalysisSource } from "@/lib/source-utils";
+import {
+  isAaMajorIndexBenchmark,
+  resolveLatestAaRevisionValues
+} from "@/lib/aa-index-revisions";
 import { extractMetricSnapshots } from "./snapshots";
 import type { MatrixCell, MatrixCellEntry } from "@/components/benchmark-matrix/types";
 import type {
@@ -95,6 +99,24 @@ function resolveMetricUnit(row: MatrixRow): ScatterMetricUnit {
 
 function buildValueByModel(row: MatrixRow): Map<string, number> {
   const valueByModel = new Map<string, number>();
+
+  if (isAaMajorIndexBenchmark(row.benchmark)) {
+    const rowEntries: (MatrixCellEntry & { modelName: string })[] = [];
+    row.cells.forEach((cell, modelName) => {
+      cell.allEntries.forEach((entry) => {
+        rowEntries.push({ ...entry, modelName });
+      });
+    });
+    if (rowEntries.length > 0) {
+      const { latestEntriesByModel } = resolveLatestAaRevisionValues(rowEntries);
+      latestEntriesByModel.forEach((entry, modelName) => {
+        if (entry.valueNum !== null && Number.isFinite(entry.valueNum)) {
+          valueByModel.set(modelName, entry.valueNum);
+        }
+      });
+      return valueByModel;
+    }
+  }
 
   row.cells.forEach((cell, modelName) => {
     const value = cell.valueNum;

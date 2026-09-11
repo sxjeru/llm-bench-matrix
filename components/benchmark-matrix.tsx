@@ -2680,7 +2680,7 @@ export function BenchmarkMatrix({
                       includeBottom: isLastMatrixRow,
                       exportMode: isExportCaptureMode
                     });
-                    const isTrendEligible = showQuestionMarkIcon && isCellTrendEligible(cell, activeSource);
+                    const isTrendEligible = showQuestionMarkIcon && isCellTrendEligible(cell, activeSource, matrixRow.benchmark);
                     const mergedCellBoxShadow = [
                       rowCellBoxShadow,
                       ...sourceFrameShadows,

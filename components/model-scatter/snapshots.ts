@@ -1,5 +1,5 @@
 import { parseTimestampMs } from "@/components/benchmark-matrix/utils";
-import { SNAPSHOT_MAJOR_MODEL_COUNT_THRESHOLD } from "./constants";
+import { detectAdaptiveMajorThreshold } from "@/lib/aa-index-revisions";
 import type {
   ScatterHistorySample,
   ScatterMetricSnapshot
@@ -109,6 +109,9 @@ export function extractMetricSnapshots(
 
   const maxTimestamp = Math.max(...clusters.map((c) => Math.max(...c.timestamps)));
 
+  const clusterCounts = clusters.map((c) => c.models.size);
+  const adaptiveMajorThreshold = detectAdaptiveMajorThreshold(clusterCounts);
+
   const snapshots: ScatterMetricSnapshot[] = clusters.map((cluster) => {
     // 聚类中代表时间取最大值（最新时间）
     const repTime = Math.max(...cluster.timestamps);
@@ -125,11 +128,11 @@ export function extractMetricSnapshots(
       modelCount,
       isLatest,
       isBatchSnapshot: modelCount >= 3 || (totalModels > 0 && modelCount / totalModels >= 0.25),
-      isMajorRevision: modelCount > SNAPSHOT_MAJOR_MODEL_COUNT_THRESHOLD
+      isMajorRevision: modelCount >= adaptiveMajorThreshold
     };
   });
 
-  // 模型数大于 15 的提升到列表最前（主要变动组），组内按时间降序排列
+  // 主要变动组提升到列表最前，组内按时间降序排列
   snapshots.sort((a, b) => {
     const aMajor = a.isMajorRevision ? 1 : 0;
     const bMajor = b.isMajorRevision ? 1 : 0;

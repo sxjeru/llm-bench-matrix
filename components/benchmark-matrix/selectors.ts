@@ -69,6 +69,10 @@ import {
   resolveMatrixCellAggregateModeFromEntries
 } from "./utils";
 import type { SourceValueMode } from "./utils";
+import {
+  isAaMajorIndexBenchmark,
+  resolveLatestAaRevisionValues
+} from "@/lib/aa-index-revisions";
 
 export type SourceOption = { key: string; label: string };
 
@@ -1187,14 +1191,21 @@ export function buildMatrixRows(
 
   return Array.from(matrixMap.values())
     .map((matrixRow) => {
+      const isAaMajorIndex = isAaMajorIndexBenchmark(matrixRow.benchmark);
+      let aaLatestEntriesByModel: Map<string, MatrixCellEntry> | null = null;
+      if (isAaMajorIndex) {
+        const rowEntries: (MatrixCellEntry & { modelName: string })[] = [];
+        matrixRow.cells.forEach((cell, modelName) => {
+          cell.allEntries.forEach((entry) => {
+            rowEntries.push({ ...entry, modelName });
+          });
+        });
+        aaLatestEntriesByModel = resolveLatestAaRevisionValues(rowEntries).latestEntriesByModel;
+      }
+
       const finalizedCells = new Map<string, MatrixCell>();
 
       matrixRow.cells.forEach((cell, modelName) => {
-        if (cell.allEntries.length === 1) {
-          finalizedCells.set(modelName, cell);
-          return;
-        }
-
         const uniqueEntriesMap = new Map<string, MatrixCellEntry>();
         cell.allEntries.forEach((entry) => {
           const dedupKey = getMatrixCellSourceValueDedupKey(entry);
@@ -1210,6 +1221,60 @@ export function buildMatrixRows(
         // uniqueEntries 已按「source + 值」去重，当前 source 仍剩多条即代表该 source 内部存在不同取值
         const hasMultipleActiveSourceValues = activeSource !== SOURCE_ALL
           && uniqueEntries.filter((entry) => getSourceKey(entry.source) === activeSource).length > 1;
+
+        if (isAaMajorIndex && aaLatestEntriesByModel) {
+          const latestEntry = aaLatestEntriesByModel.get(modelName);
+          if (latestEntry) {
+            const effectiveValueRaw = latestEntry.valueRaw;
+            const effectiveValueNum = latestEntry.valueNum;
+            const effectiveValueNum2 = latestEntry.valueNum2;
+            const effectiveValueNote = latestEntry.valueNote;
+            const effectiveSource = latestEntry.source;
+            const effectiveBenchTime = latestEntry.benchTime;
+            const noteText = (effectiveValueNote ?? "").trim();
+            const displayValue = getMatrixCellDisplayValue(effectiveValueNum, effectiveValueNum2, effectiveValueRaw, effectiveValueNote);
+            finalizedCells.set(modelName, {
+              ...cell,
+              valueRaw: effectiveValueRaw,
+              valueNum: effectiveValueNum,
+              valueNum2: effectiveValueNum2,
+              valueNote: effectiveValueNote,
+              source: effectiveSource,
+              benchTime: effectiveBenchTime,
+              uniqueEntries,
+              noteText,
+              displayValue,
+              hasMeaningfulMultipleValues,
+              hasMultipleActiveSourceValues,
+              shouldShowQuestionMark: hasMeaningfulMultipleValues || (noteText.length > 0 && noteText.toLowerCase() !== "x")
+            });
+          } else {
+            // 模型仅存在于旧版本，最新主要变动及后续小变动中无此模型
+            const noteText = (cell.valueNote ?? "").trim();
+            finalizedCells.set(modelName, {
+              ...cell,
+              valueRaw: "",
+              valueNum: null,
+              valueNum2: null,
+              valueNote: null,
+              source: null,
+              benchTime: null,
+              uniqueEntries,
+              noteText,
+              displayValue: "--",
+              hasMeaningfulMultipleValues: false,
+              hasMultipleActiveSourceValues: false,
+              shouldShowQuestionMark: uniqueEntries.length > 0 || (noteText.length > 0 && noteText.toLowerCase() !== "x")
+            });
+          }
+          return;
+        }
+
+        if (cell.allEntries.length === 1) {
+          finalizedCells.set(modelName, cell);
+          return;
+        }
+
         // 目前 Source 原值展示并非只认当前 activeSource：当前 source 无记录时会回退到跨 source 的最优值；
         // 命中当前 source 时，多次导入取最新一条（见 getSourceValueEntry）
         const sourceEntry = displaySourceValuesInCells && hasMeaningfulMultipleValues
@@ -1943,23 +2008,53 @@ export function buildBenchmarkRankingData(
     }
   });
 
-  // 排名弹窗与主表同一口径：按单元格 source 推断，AA 取最新值
-  cellsByModel.forEach((cell) => {
-    const aggregate = aggregateMatrixCellEntries(
-      cell.allEntries,
-      matrixRow.higherIsBetter,
-      resolveMatrixCellAggregateModeFromEntries(cell.allEntries)
-    );
-    if (aggregate.entry) {
-      cell.valueRaw = aggregate.entry.valueRaw;
-      cell.valueNote = aggregate.entry.valueNote;
-      cell.source = aggregate.entry.source;
-      cell.benchTime = aggregate.entry.benchTime;
-    }
-    cell.valueNum = aggregate.valueNum;
-    cell.valueNum2 = aggregate.valueNum2;
-    cell.displayValue = getMatrixCellDisplayValue(cell.valueNum, cell.valueNum2, cell.valueRaw, cell.valueNote);
-  });
+  if (isAaMajorIndexBenchmark(matrixRow.benchmark)) {
+    const rowEntries: (MatrixCellEntry & { modelName: string })[] = [];
+    cellsByModel.forEach((cell, modelName) => {
+      cell.allEntries.forEach((entry) => {
+        rowEntries.push({ ...entry, modelName });
+      });
+    });
+    const { latestEntriesByModel } = resolveLatestAaRevisionValues(rowEntries);
+    cellsByModel.forEach((cell, modelName) => {
+      const target = latestEntriesByModel.get(modelName);
+      if (target) {
+        cell.valueRaw = target.valueRaw;
+        cell.valueNote = target.valueNote;
+        cell.source = target.source;
+        cell.benchTime = target.benchTime;
+        cell.valueNum = target.valueNum;
+        cell.valueNum2 = target.valueNum2;
+        cell.displayValue = getMatrixCellDisplayValue(cell.valueNum, cell.valueNum2, cell.valueRaw, cell.valueNote);
+      } else {
+        cell.valueRaw = "";
+        cell.valueNote = null;
+        cell.source = null;
+        cell.benchTime = null;
+        cell.valueNum = null;
+        cell.valueNum2 = null;
+        cell.displayValue = "--";
+      }
+    });
+  } else {
+    // 排名弹窗与主表同一口径：按单元格 source 推断，AA 取最新值
+    cellsByModel.forEach((cell) => {
+      const aggregate = aggregateMatrixCellEntries(
+        cell.allEntries,
+        matrixRow.higherIsBetter,
+        resolveMatrixCellAggregateModeFromEntries(cell.allEntries)
+      );
+      if (aggregate.entry) {
+        cell.valueRaw = aggregate.entry.valueRaw;
+        cell.valueNote = aggregate.entry.valueNote;
+        cell.source = aggregate.entry.source;
+        cell.benchTime = aggregate.entry.benchTime;
+      }
+      cell.valueNum = aggregate.valueNum;
+      cell.valueNum2 = aggregate.valueNum2;
+      cell.displayValue = getMatrixCellDisplayValue(cell.valueNum, cell.valueNum2, cell.valueRaw, cell.valueNote);
+    });
+  }
 
   const rankingMatrixRow: MatrixRow = {
     ...matrixRow,
