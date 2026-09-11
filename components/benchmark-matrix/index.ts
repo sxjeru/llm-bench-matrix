@@ -142,6 +142,7 @@ export { CellTrendPanel, type CellTrendPanelProps } from "./cell-trend-panel";
 
 // Re-export selectors
 export {
+  buildAaIndexRevisionsByRow,
   buildMatrixRows,
   buildModelColumns,
   buildPriceMatrixRows,

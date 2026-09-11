@@ -1,5 +1,12 @@
-import { parseTimestampMs } from "@/components/benchmark-matrix/utils";
-import { SNAPSHOT_MAJOR_MODEL_COUNT_THRESHOLD } from "./constants";
+import { compareMatrixCellEntryRecency, parseTimestampMs } from "@/components/benchmark-matrix/utils";
+import {
+  clusterEntriesByTime,
+  detectAdaptiveMajorThreshold,
+  groupBatchesIntoMajorRevisions,
+  type LatestAaRevisionResolution,
+  type MajorRevisionGroup,
+  type RevisionBatch
+} from "@/lib/aa-index-revisions";
 import type {
   ScatterHistorySample,
   ScatterMetricSnapshot
@@ -28,95 +35,134 @@ export function formatSnapshotDateTimeLabel(timestampMs: number): string {
   return `${datePart} ${hours}:${minutes}`;
 }
 
-type RawTimestampEntry = {
-  modelName: string;
-  timestamp: number;
-  sample: ScatterHistorySample;
+type SnapshotRevisionEntry = {
+  modelName?: string;
+  value?: number | null;
+  valueNum?: number | null;
+  benchTime?: string | null;
+  recordId?: number | null;
 };
+
+function toScatterSample(entry: SnapshotRevisionEntry): ScatterHistorySample | null {
+  const value = typeof entry.valueNum === "number" ? entry.valueNum : entry.value;
+  if (value === null || value === undefined || !Number.isFinite(value)) return null;
+  return {
+    value,
+    benchTime: entry.benchTime ?? null,
+    recordId: typeof entry.recordId === "number" ? entry.recordId : null
+  };
+}
+
+function buildGroupSampleMap(
+  entryByModel: ReadonlyMap<string, SnapshotRevisionEntry>
+): Map<string, ScatterHistorySample> {
+  const map = new Map<string, ScatterHistorySample>();
+  entryByModel.forEach((entry, modelName) => {
+    const sample = toScatterSample(entry);
+    if (sample) map.set(modelName, sample);
+  });
+  return map;
+}
+
+function buildBatchSampleMap(
+  entries: readonly SnapshotRevisionEntry[]
+): Map<string, ScatterHistorySample> {
+  const map = new Map<string, ScatterHistorySample>();
+  entries.forEach((entry) => {
+    const model = entry.modelName;
+    if (!model) return;
+    const sample = toScatterSample(entry);
+    if (!sample) return;
+    const prev = map.get(model);
+    if (!prev || compareMatrixCellEntryRecency(sample, prev) > 0) {
+      map.set(model, sample);
+    }
+  });
+  return map;
+}
 
 /**
  * 从指标的历史记录中提取并聚类出历史时间快照（公共时间片段）。
  *
  * 算法：
- * 1. 汇集所有模型的历史样本时间戳；
- * 2. 降序排列后，将时间差在 4 小时以内的点聚类为同一快照；
- * 3. 统计每个快照覆盖的不同模型数量（modelCount）；
- * 4. 若同一天内有多个批次，附加时间（HH:mm）以示区分；
- * 5. 若指标仅有 1 个快照（只有初始导入），则返回空数组，避免无意义的下拉展示；
- *    若存在 >= 2 个快照，最新的一项标为 isLatest: true。
+ * 1. 优先复用全量划分的 aaRevision，或汇集样本按 4 小时批次聚类；
+ * 2. 自适应识别主要变动阈值，并将小变动补丁合并进所属的主要变动桶；
+ * 3. 主要变动快照的 sampleByModel 真正包含后续合并补丁更新的最新成绩与新增模型；
+ * 4. 保持快照元数据与历史排序规则一致。
  */
 export function extractMetricSnapshots(
-  historyByModel: ReadonlyMap<string, readonly ScatterHistorySample[]>
+  historyByModel: ReadonlyMap<string, readonly ScatterHistorySample[]>,
+  aaRevision?: LatestAaRevisionResolution
 ): ScatterMetricSnapshot[] {
-  const rawEntries: RawTimestampEntry[] = [];
+  let batches: RevisionBatch<SnapshotRevisionEntry>[];
+  let majorGroups: MajorRevisionGroup<SnapshotRevisionEntry>[];
 
-  historyByModel.forEach((samples, modelName) => {
-    samples.forEach((sample) => {
-      const timeMs = parseTimestampMs(sample.benchTime);
-      if (timeMs === null) return;
-      rawEntries.push({ modelName, timestamp: timeMs, sample });
-    });
-  });
-
-  if (rawEntries.length === 0) return [];
-
-  // 按时间降序排列
-  rawEntries.sort((a, b) => b.timestamp - a.timestamp);
-
-  // 聚类
-  type Cluster = {
-    timestamps: number[];
-    models: Set<string>;
-  };
-
-  const clusters: Cluster[] = [];
-
-  rawEntries.forEach((entry) => {
-    const existing = clusters.find((cluster) => {
-      const maxTime = cluster.timestamps[0] ?? 0;
-      const minTime = cluster.timestamps[cluster.timestamps.length - 1] ?? 0;
-      return (
-        Math.abs(entry.timestamp - maxTime) <= SNAPSHOT_CLUSTER_WINDOW_MS ||
-        Math.abs(entry.timestamp - minTime) <= SNAPSHOT_CLUSTER_WINDOW_MS
-      );
-    });
-
-    if (existing) {
-      existing.timestamps.push(entry.timestamp);
-      existing.models.add(entry.modelName);
-    } else {
-      clusters.push({
-        timestamps: [entry.timestamp],
-        models: new Set([entry.modelName])
+  if (aaRevision && aaRevision.batches.length > 0) {
+    batches = aaRevision.batches;
+    majorGroups = aaRevision.groups;
+  } else {
+    const rawEntries: (ScatterHistorySample & { modelName: string })[] = [];
+    historyByModel.forEach((samples, modelName) => {
+      samples.forEach((sample) => {
+        const timeMs = parseTimestampMs(sample.benchTime);
+        if (timeMs === null) return;
+        rawEntries.push({ ...sample, modelName });
       });
-    }
-  });
+    });
 
-  // 如果聚类后总批次数 <= 1，说明没有历史批次可供回溯
-  if (clusters.length <= 1) {
+    if (rawEntries.length === 0) return [];
+
+    batches = clusterEntriesByTime(rawEntries);
+    if (batches.length <= 1) return [];
+
+    const adaptiveThreshold = detectAdaptiveMajorThreshold(batches.map((b) => b.modelCount));
+    majorGroups = groupBatchesIntoMajorRevisions(batches, adaptiveThreshold);
+  }
+
+  if (batches.length <= 1) {
     return [];
   }
 
-  const totalModels = historyByModel.size;
+  const totalModels = aaRevision ? aaRevision.latestEntriesByModel.size : historyByModel.size;
 
   // 检查是否有同日聚类需要附加时间
   const dayCounts = new Map<string, number>();
-  clusters.forEach((cluster) => {
-    const repTime = cluster.timestamps[0] ?? 0;
-    const day = formatSnapshotDateLabel(repTime);
+  batches.forEach((batch) => {
+    const day = formatSnapshotDateLabel(batch.timestamp);
     dayCounts.set(day, (dayCounts.get(day) ?? 0) + 1);
   });
 
-  const maxTimestamp = Math.max(...clusters.map((c) => Math.max(...c.timestamps)));
+  const maxTimestamp = Math.max(...batches.map((b) => b.timestamp));
 
-  const snapshots: ScatterMetricSnapshot[] = clusters.map((cluster) => {
-    // 聚类中代表时间取最大值（最新时间）
-    const repTime = Math.max(...cluster.timestamps);
+  type BatchMeta = {
+    batch: RevisionBatch<SnapshotRevisionEntry>;
+    group: MajorRevisionGroup<SnapshotRevisionEntry>;
+    isGroupLeader: boolean;
+  };
+
+  const batchMetas: BatchMeta[] = [];
+  majorGroups.forEach((group) => {
+    group.batches.forEach((batch, index) => {
+      batchMetas.push({
+        batch,
+        group,
+        isGroupLeader: index === 0
+      });
+    });
+  });
+
+  const snapshots: ScatterMetricSnapshot[] = batchMetas.map((meta) => {
+    const repTime = meta.batch.timestamp;
     const day = formatSnapshotDateLabel(repTime);
     const hasMultipleInDay = (dayCounts.get(day) ?? 0) > 1;
     const label = hasMultipleInDay ? formatSnapshotDateTimeLabel(repTime) : day;
     const isLatest = repTime === maxTimestamp;
-    const modelCount = cluster.models.size;
+    const modelCount = meta.batch.modelCount;
+    const isMajorRevision = meta.isGroupLeader && meta.group.isMajorRevision;
+
+    const sampleByModel = isMajorRevision
+      ? buildGroupSampleMap(meta.group.entryByModel)
+      : buildBatchSampleMap(meta.batch.entries);
 
     return {
       id: new Date(repTime).toISOString(),
@@ -125,11 +171,12 @@ export function extractMetricSnapshots(
       modelCount,
       isLatest,
       isBatchSnapshot: modelCount >= 3 || (totalModels > 0 && modelCount / totalModels >= 0.25),
-      isMajorRevision: modelCount > SNAPSHOT_MAJOR_MODEL_COUNT_THRESHOLD
+      isMajorRevision,
+      sampleByModel
     };
   });
 
-  // 模型数大于 15 的提升到列表最前（主要变动组），组内按时间降序排列
+  // 主要变动组提升到列表最前，组内按时间降序排列
   snapshots.sort((a, b) => {
     const aMajor = a.isMajorRevision ? 1 : 0;
     const bMajor = b.isMajorRevision ? 1 : 0;

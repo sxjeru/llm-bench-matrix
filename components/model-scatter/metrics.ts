@@ -22,6 +22,10 @@ import {
   SYNTHETIC_METRIC_SLUGS
 } from "./constants";
 import { isArtificialAnalysisSource } from "@/lib/source-utils";
+import {
+  isAaMajorIndexBenchmark,
+  resolveLatestAaRevisionValues
+} from "@/lib/aa-index-revisions";
 import { extractMetricSnapshots } from "./snapshots";
 import type { MatrixCell, MatrixCellEntry } from "@/components/benchmark-matrix/types";
 import type {
@@ -95,6 +99,33 @@ function resolveMetricUnit(row: MatrixRow): ScatterMetricUnit {
 
 function buildValueByModel(row: MatrixRow): Map<string, number> {
   const valueByModel = new Map<string, number>();
+
+  if (row.aaRevision) {
+    row.aaRevision.latestEntriesByModel.forEach((entry, modelName) => {
+      if (row.cells.has(modelName) && entry.valueNum !== null && Number.isFinite(entry.valueNum)) {
+        valueByModel.set(modelName, entry.valueNum);
+      }
+    });
+    return valueByModel;
+  }
+
+  if (isAaMajorIndexBenchmark(row.benchmark)) {
+    const rowEntries: (MatrixCellEntry & { modelName: string })[] = [];
+    row.cells.forEach((cell, modelName) => {
+      cell.allEntries.forEach((entry) => {
+        rowEntries.push({ ...entry, modelName });
+      });
+    });
+    if (rowEntries.length > 0) {
+      const { latestEntriesByModel } = resolveLatestAaRevisionValues(rowEntries);
+      latestEntriesByModel.forEach((entry, modelName) => {
+        if (entry.valueNum !== null && Number.isFinite(entry.valueNum)) {
+          valueByModel.set(modelName, entry.valueNum);
+        }
+      });
+      return valueByModel;
+    }
+  }
 
   row.cells.forEach((cell, modelName) => {
     const value = cell.valueNum;
@@ -181,7 +212,7 @@ export function toScatterMetric(row: MatrixRow): ScatterMetric {
   const unit = resolveMetricUnit(row);
   const category = resolveScatterMetricCategory(row);
   const historyByModel = buildHistoryByModel(row);
-  const snapshots = extractMetricSnapshots(historyByModel);
+  const snapshots = extractMetricSnapshots(historyByModel, row.aaRevision);
   const isArtificialAnalysis = checkIsArtificialAnalysis(row);
 
   return {

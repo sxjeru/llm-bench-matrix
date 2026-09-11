@@ -69,6 +69,11 @@ import {
   resolveMatrixCellAggregateModeFromEntries
 } from "./utils";
 import type { SourceValueMode } from "./utils";
+import {
+  isAaMajorIndexBenchmark,
+  resolveLatestAaRevisionValues,
+  type LatestAaRevisionResolution
+} from "@/lib/aa-index-revisions";
 
 export type SourceOption = { key: string; label: string };
 
@@ -745,13 +750,46 @@ export function buildCoveragePrunedRows(
   );
 }
 
+/** 按完整数据划分 AA 版本；模型筛选和覆盖率裁剪只能发生在此之后。 */
+export function buildAaIndexRevisionsByRow(
+  rows: readonly MatrixInputRow[],
+  showDuplicateRows: boolean
+): Map<string, LatestAaRevisionResolution> {
+  const entriesByRow = new Map<string, (MatrixCellEntry & { modelName: string })[]>();
+  rows.forEach((row) => {
+    if (isAaMajorIndexBenchmark(row.benchmarkName)) {
+      entriesByRow.set(getMatrixGroupingKey(row, showDuplicateRows), []);
+    }
+  });
+  if (entriesByRow.size === 0) return new Map();
+
+  // 同一分组可能还包含规范名不同的记录，统一纳入该指标的完整历史。
+  rows.forEach((row) => {
+    const entries = entriesByRow.get(getMatrixGroupingKey(row, showDuplicateRows));
+    if (!entries) return;
+    entries.push({
+      modelName: row.modelName,
+      recordId: row.recordId ?? null,
+      valueRaw: row.valueRaw,
+      valueNum: row.valueNum,
+      valueNum2: row.valueNum2 ?? null,
+      valueNote: row.valueNote ?? null,
+      source: row.source ?? null,
+      benchTime: row.benchTime
+    });
+  });
+
+  return new Map(Array.from(entriesByRow, ([key, entries]) => [key, resolveLatestAaRevisionValues(entries)]));
+}
+
 export function buildModelColumns(
   coveragePrunedRows: MatrixInputRow[],
   sourceModelHint: string,
   columnSortBenchmarkKey: string | null,
   showDuplicateRows: boolean,
   modelOrderBySource: Record<string, string[]>,
-  activeSource: string
+  activeSource: string,
+  aaRevisionsByRow?: ReadonlyMap<string, LatestAaRevisionResolution>
 ): string[] {
   const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 
@@ -933,6 +971,8 @@ export function buildModelColumns(
     return orderedByManual;
   }
 
+  const aaRevision = (aaRevisionsByRow ?? buildAaIndexRevisionsByRow(coveragePrunedRows, showDuplicateRows))
+    .get(columnSortBenchmarkKey);
   const benchmarkScoreMap = new Map<string, number>();
   const benchmarkRowsByModel = new Map<string, MatrixInputRow[]>();
   coveragePrunedRows.forEach((row) => {
@@ -948,6 +988,20 @@ export function buildModelColumns(
   benchmarkRowsByModel.forEach((matchingRows, modelName) => {
     const representativeRow = matchingRows[0];
     if (!representativeRow) return;
+
+    if (aaRevision) {
+      const entry = aaRevision.latestEntriesByModel.get(modelName);
+      if (!entry) return;
+      const score = getBenchmarkBestComparableScore(
+        representativeRow.benchmarkName,
+        entry.valueNum,
+        entry.valueNum2,
+        representativeRow.benchmarkType,
+        representativeRow.higherIsBetter
+      );
+      if (score !== null) benchmarkScoreMap.set(modelName, score);
+      return;
+    }
 
     const numericMatchingRows = matchingRows.filter(
       (row) => row.valueNum !== null && Number.isFinite(row.valueNum)
@@ -1038,7 +1092,8 @@ export function buildMatrixRows(
   showDuplicateRows: boolean,
   displaySourceValuesInCells: boolean,
   activeSource: string,
-  sourceValueMode: SourceValueMode = "latest"
+  sourceValueMode: SourceValueMode = "latest",
+  aaRevisionsByRow: ReadonlyMap<string, LatestAaRevisionResolution> = buildAaIndexRevisionsByRow(baseSourceRows, showDuplicateRows)
 ): MatrixRow[] {
   const matrixMap = new Map<
     string,
@@ -1187,14 +1242,12 @@ export function buildMatrixRows(
 
   return Array.from(matrixMap.values())
     .map((matrixRow) => {
+      const aaRevision = aaRevisionsByRow.get(matrixRow.rowKey);
+      const aaLatestEntriesByModel = aaRevision?.latestEntriesByModel;
+
       const finalizedCells = new Map<string, MatrixCell>();
 
       matrixRow.cells.forEach((cell, modelName) => {
-        if (cell.allEntries.length === 1) {
-          finalizedCells.set(modelName, cell);
-          return;
-        }
-
         const uniqueEntriesMap = new Map<string, MatrixCellEntry>();
         cell.allEntries.forEach((entry) => {
           const dedupKey = getMatrixCellSourceValueDedupKey(entry);
@@ -1210,6 +1263,60 @@ export function buildMatrixRows(
         // uniqueEntries 已按「source + 值」去重，当前 source 仍剩多条即代表该 source 内部存在不同取值
         const hasMultipleActiveSourceValues = activeSource !== SOURCE_ALL
           && uniqueEntries.filter((entry) => getSourceKey(entry.source) === activeSource).length > 1;
+
+        if (aaLatestEntriesByModel) {
+          const latestEntry = aaLatestEntriesByModel.get(modelName);
+          if (latestEntry) {
+            const effectiveValueRaw = latestEntry.valueRaw;
+            const effectiveValueNum = latestEntry.valueNum;
+            const effectiveValueNum2 = latestEntry.valueNum2;
+            const effectiveValueNote = latestEntry.valueNote;
+            const effectiveSource = latestEntry.source;
+            const effectiveBenchTime = latestEntry.benchTime;
+            const noteText = (effectiveValueNote ?? "").trim();
+            const displayValue = getMatrixCellDisplayValue(effectiveValueNum, effectiveValueNum2, effectiveValueRaw, effectiveValueNote);
+            finalizedCells.set(modelName, {
+              ...cell,
+              valueRaw: effectiveValueRaw,
+              valueNum: effectiveValueNum,
+              valueNum2: effectiveValueNum2,
+              valueNote: effectiveValueNote,
+              source: effectiveSource,
+              benchTime: effectiveBenchTime,
+              uniqueEntries,
+              noteText,
+              displayValue,
+              hasMeaningfulMultipleValues,
+              hasMultipleActiveSourceValues,
+              shouldShowQuestionMark: hasMeaningfulMultipleValues || (noteText.length > 0 && noteText.toLowerCase() !== "x")
+            });
+          } else {
+            // 模型仅存在于旧版本，最新主要变动及后续小变动中无此模型
+            const noteText = (cell.valueNote ?? "").trim();
+            finalizedCells.set(modelName, {
+              ...cell,
+              valueRaw: "",
+              valueNum: null,
+              valueNum2: null,
+              valueNote: null,
+              source: null,
+              benchTime: null,
+              uniqueEntries,
+              noteText,
+              displayValue: "--",
+              hasMeaningfulMultipleValues: false,
+              hasMultipleActiveSourceValues: false,
+              shouldShowQuestionMark: uniqueEntries.length > 0 || (noteText.length > 0 && noteText.toLowerCase() !== "x")
+            });
+          }
+          return;
+        }
+
+        if (cell.allEntries.length === 1) {
+          finalizedCells.set(modelName, cell);
+          return;
+        }
+
         // 目前 Source 原值展示并非只认当前 activeSource：当前 source 无记录时会回退到跨 source 的最优值；
         // 命中当前 source 时，多次导入取最新一条（见 getSourceValueEntry）
         const sourceEntry = displaySourceValuesInCells && hasMeaningfulMultipleValues
@@ -1271,6 +1378,7 @@ export function buildMatrixRows(
       return {
         ...matrixRow,
         cells: finalizedCells,
+        ...(aaRevision ? { aaRevision } : {}),
         rowDataCount,
         rowNumericCount,
         minComparable: comparableValues.length > 0 ? Math.min(...comparableValues) : null,
@@ -1885,6 +1993,7 @@ export function buildBenchmarkRankingData(
     const rowValueNum2 = row.valueNum2 ?? null;
     const rowValueNote = row.valueNote ?? null;
     const entry = {
+      recordId: row.recordId ?? null,
       valueRaw: row.valueRaw,
       valueNum: rowValueNum,
       valueNum2: rowValueNum2,
@@ -1943,23 +2052,48 @@ export function buildBenchmarkRankingData(
     }
   });
 
-  // 排名弹窗与主表同一口径：按单元格 source 推断，AA 取最新值
-  cellsByModel.forEach((cell) => {
-    const aggregate = aggregateMatrixCellEntries(
-      cell.allEntries,
-      matrixRow.higherIsBetter,
-      resolveMatrixCellAggregateModeFromEntries(cell.allEntries)
-    );
-    if (aggregate.entry) {
-      cell.valueRaw = aggregate.entry.valueRaw;
-      cell.valueNote = aggregate.entry.valueNote;
-      cell.source = aggregate.entry.source;
-      cell.benchTime = aggregate.entry.benchTime;
-    }
-    cell.valueNum = aggregate.valueNum;
-    cell.valueNum2 = aggregate.valueNum2;
-    cell.displayValue = getMatrixCellDisplayValue(cell.valueNum, cell.valueNum2, cell.valueRaw, cell.valueNote);
-  });
+  if (isAaMajorIndexBenchmark(matrixRow.benchmark)) {
+    const aaRevision = matrixRow.aaRevision ?? buildAaIndexRevisionsByRow(matchingRows, showDuplicateRows).get(matrixRow.rowKey);
+    const latestEntriesByModel = aaRevision?.latestEntriesByModel;
+    cellsByModel.forEach((cell, modelName) => {
+      const target = latestEntriesByModel?.get(modelName);
+      if (target) {
+        cell.valueRaw = target.valueRaw;
+        cell.valueNote = target.valueNote;
+        cell.source = target.source;
+        cell.benchTime = target.benchTime;
+        cell.valueNum = target.valueNum;
+        cell.valueNum2 = target.valueNum2;
+        cell.displayValue = getMatrixCellDisplayValue(cell.valueNum, cell.valueNum2, cell.valueRaw, cell.valueNote);
+      } else {
+        cell.valueRaw = "";
+        cell.valueNote = null;
+        cell.source = null;
+        cell.benchTime = null;
+        cell.valueNum = null;
+        cell.valueNum2 = null;
+        cell.displayValue = "--";
+      }
+    });
+  } else {
+    // 排名弹窗与主表同一口径：按单元格 source 推断，AA 取最新值
+    cellsByModel.forEach((cell) => {
+      const aggregate = aggregateMatrixCellEntries(
+        cell.allEntries,
+        matrixRow.higherIsBetter,
+        resolveMatrixCellAggregateModeFromEntries(cell.allEntries)
+      );
+      if (aggregate.entry) {
+        cell.valueRaw = aggregate.entry.valueRaw;
+        cell.valueNote = aggregate.entry.valueNote;
+        cell.source = aggregate.entry.source;
+        cell.benchTime = aggregate.entry.benchTime;
+      }
+      cell.valueNum = aggregate.valueNum;
+      cell.valueNum2 = aggregate.valueNum2;
+      cell.displayValue = getMatrixCellDisplayValue(cell.valueNum, cell.valueNum2, cell.valueRaw, cell.valueNote);
+    });
+  }
 
   const rankingMatrixRow: MatrixRow = {
     ...matrixRow,

@@ -49,6 +49,7 @@ import {
   useMatrixPreferenceStorage
 } from "./benchmark-matrix/persistence";
 import {
+  buildAaIndexRevisionsByRow,
   buildAllModelNames,
   buildAllRowsIndex,
   buildBaseBenchmarkKeySet,
@@ -802,6 +803,11 @@ export function BenchmarkMatrix({
     [allRowsIndex]
   );
 
+  const aaRevisionsByRow = useMemo(
+    () => buildAaIndexRevisionsByRow(indexedSourceRows, showDuplicateRows),
+    [indexedSourceRows, showDuplicateRows]
+  );
+
   const baseSourceRows = useMemo(
     () => resolveBaseSourceRows(allRows, rows, scopedRowsBySource, allRowsBySource, activeSource, showDuplicateRows),
     [allRows, rows, scopedRowsBySource, allRowsBySource, activeSource, showDuplicateRows]
@@ -1012,14 +1018,15 @@ export function BenchmarkMatrix({
       columnSortBenchmarkKey === OVERALL_ROW_KEY || isSyntheticRowSortKey ? null : columnSortBenchmarkKey,
       showDuplicateRows,
       modelOrderBySource,
-      activeSource
+      activeSource,
+      aaRevisionsByRow
     ),
-    [coveragePrunedRows, sourceModelHint, columnSortBenchmarkKey, isSyntheticRowSortKey, showDuplicateRows, modelOrderBySource, activeSource]
+    [coveragePrunedRows, sourceModelHint, columnSortBenchmarkKey, isSyntheticRowSortKey, showDuplicateRows, modelOrderBySource, activeSource, aaRevisionsByRow]
   );
 
   const matrixRows = useMemo(
-    () => buildMatrixRows(baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource, sourceValueMode),
-    [baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource, sourceValueMode]
+    () => buildMatrixRows(baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource, sourceValueMode, aaRevisionsByRow),
+    [baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource, sourceValueMode, aaRevisionsByRow]
   );
 
   function getRowSortCycle(): RowSortMode[] {
@@ -2680,7 +2687,7 @@ export function BenchmarkMatrix({
                       includeBottom: isLastMatrixRow,
                       exportMode: isExportCaptureMode
                     });
-                    const isTrendEligible = showQuestionMarkIcon && isCellTrendEligible(cell, activeSource);
+                    const isTrendEligible = showQuestionMarkIcon && isCellTrendEligible(cell, activeSource, matrixRow.benchmark);
                     const mergedCellBoxShadow = [
                       rowCellBoxShadow,
                       ...sourceFrameShadows,

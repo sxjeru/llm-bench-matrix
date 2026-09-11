@@ -1,9 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, History, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, History, Search, Sparkles } from "lucide-react";
 import { describeMetricDirection } from "./metrics";
-import { SNAPSHOT_MAJOR_MODEL_COUNT_THRESHOLD } from "./constants";
 import type { ScatterMetric, ScatterMetricGroup, ScatterMetricSnapshot } from "./types";
 
 type MetricComboboxProps = {
@@ -161,10 +160,10 @@ export function MetricCombobox({
 
       hoverTimeoutRef.current = window.setTimeout(() => {
         const rect = element.getBoundingClientRect();
-        const submenuWidth = 230;
+        const submenuWidth = 268;
         const fitsRight = rect.right + submenuWidth + 8 <= window.innerWidth;
         const left = fitsRight ? rect.right + 4 : Math.max(8, rect.left - submenuWidth - 4);
-        const top = Math.min(rect.top - 4, window.innerHeight - 320);
+        const top = Math.min(rect.top - 4, window.innerHeight - 360);
 
         setSubmenuState({
           metric: targetMetric,
@@ -356,9 +355,12 @@ export function MetricCombobox({
           onMouseDown={(event) => event.preventDefault()}
         >
           <div className="scatter-combobox-submenu-header">
-            <span className="font-semibold">{submenuState.metric.label}</span>
+            <div className="scatter-combobox-submenu-title">
+              <History size={13} className="scatter-combobox-submenu-title-icon" aria-hidden="true" />
+              <span className="scatter-combobox-submenu-title-text">{submenuState.metric.label}</span>
+            </div>
             <div className="scatter-combobox-submenu-hint">
-              按住 Ctrl 点击可半透明叠加对比
+              按住 <kbd className="scatter-combobox-kbd">Ctrl</kbd> 点击可半透明叠加对比
             </div>
           </div>
 
@@ -370,11 +372,16 @@ export function MetricCombobox({
 
               return (
                 <div
-                  className={`scatter-combobox-submenu-item ${isDefaultSelected ? "is-selected" : ""}`}
+                  className={`scatter-combobox-submenu-item scatter-combobox-submenu-item-latest ${
+                    isDefaultSelected ? "is-selected" : ""
+                  }`}
                   onClick={() => selectOption(submenuState.metric.key, null)}
                 >
                   <div className="scatter-combobox-submenu-item-title">
-                    <span>最新数据（默认）</span>
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles size={12} className="text-sky-400 shrink-0" aria-hidden="true" />
+                      <span>最新数据（默认）</span>
+                    </div>
                     {isDefaultSelected ? (
                       <span className="scatter-combobox-badge-new">当前</span>
                     ) : null}
@@ -388,8 +395,7 @@ export function MetricCombobox({
 
             {(() => {
               const snapshots = submenuState.metric.snapshots;
-              const isMajor = (s: ScatterMetricSnapshot) =>
-                Boolean(s.isMajorRevision ?? s.modelCount > SNAPSHOT_MAJOR_MODEL_COUNT_THRESHOLD);
+              const isMajor = (s: ScatterMetricSnapshot) => Boolean(s.isMajorRevision);
               const majorSnapshots = snapshots.filter(isMajor);
               const otherSnapshots = snapshots.filter((s) => !isMajor(s));
 
@@ -398,6 +404,8 @@ export function MetricCombobox({
                   submenuState.metric.key === metric?.key &&
                   selectedSnapshotId === snapshot.id;
                 const isOverlay = overlaySnapshotId === snapshot.id;
+                const labelParts = snapshot.label.split(" ");
+                const hasTime = labelParts.length === 2;
 
                 return (
                   <div
@@ -415,11 +423,20 @@ export function MetricCombobox({
                     }}
                   >
                     <div className="scatter-combobox-submenu-item-title">
-                      <span className="font-medium text-slate-100">{snapshot.label}</span>
-                      <div className="flex items-center gap-1.5">
+                      <div className="scatter-combobox-snapshot-label">
+                        {hasTime ? (
+                          <>
+                            <span className="scatter-combobox-snapshot-date">{labelParts[0]}</span>
+                            <span className="scatter-combobox-snapshot-time">{labelParts[1]}</span>
+                          </>
+                        ) : (
+                          <span className="scatter-combobox-snapshot-date">{snapshot.label}</span>
+                        )}
+                      </div>
+                      <div className="scatter-combobox-submenu-badges">
                         {isOverlay ? (
-                          <span className="text-amber-400 text-[10.5px] font-semibold">
-                            [已叠加背景]
+                          <span className="scatter-combobox-badge-overlay" title="按住 Ctrl 点击取消叠加">
+                            已叠加
                           </span>
                         ) : null}
                         {isSelected ? (
@@ -439,7 +456,7 @@ export function MetricCombobox({
                   {majorSnapshots.length > 0 ? (
                     <>
                       <div className="scatter-combobox-submenu-divider">
-                        主要变动
+                        <span>主要变动</span>
                       </div>
                       {majorSnapshots.map(renderSnapshotItem)}
                     </>
@@ -448,7 +465,7 @@ export function MetricCombobox({
                   {otherSnapshots.length > 0 ? (
                     <>
                       <div className="scatter-combobox-submenu-divider">
-                        {majorSnapshots.length > 0 ? "其他历史快照" : "历史快照批次"}
+                        <span>{majorSnapshots.length > 0 ? "其他历史快照" : "历史快照批次"}</span>
                       </div>
                       {otherSnapshots.map(renderSnapshotItem)}
                     </>

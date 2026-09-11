@@ -53,8 +53,10 @@ export type ScatterMetricSnapshot = {
   isLatest: boolean;
   /** 是否为多模型批量导入批次 */
   isBatchSnapshot: boolean;
-  /** 是否为模型数 > 15 的主要变动快照 */
+  /** 是否为主要变动快照 */
   isMajorRevision?: boolean;
+  /** 该版本快照（含合并小补丁）中各模型的样本数据映射 */
+  sampleByModel?: Map<string, ScatterHistorySample>;
 };
 
 /** 某模型在某指标下的一条真实记录，供历史点按时间对齐。 */

@@ -1,3 +1,5 @@
+import type { LatestAaRevisionResolution } from "@/lib/aa-index-revisions";
+
 export type MatrixInputRow = {
   recordId?: number | null;
   providerName: string;
@@ -61,6 +63,8 @@ export type MatrixRow = {
   higherIsBetter: boolean;
   modalities: string[];
   cells: Map<string, MatrixCell>;
+  /** 使用筛选前的完整历史划分 AA 版本，供表格和散点图共同使用。 */
+  aaRevision?: LatestAaRevisionResolution;
   firstSeenIndex: number;
   sourceOrderKey: number | null;
   rowDataCount: number;

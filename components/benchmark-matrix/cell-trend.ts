@@ -1,5 +1,6 @@
 import { formatLocalDateLabel, formatTooltipTime } from "./formatters";
 import { getSourceKey, sourceTabDisplayLabel, SOURCE_ALL } from "@/lib/source-utils";
+import { isAaMajorIndexBenchmark } from "@/lib/aa-index-revisions";
 import type { MatrixCell, MatrixCellEntry } from "./types";
 
 export type CellTrendPoint = {
@@ -94,9 +95,17 @@ function getValidTrendEntries(cell: MatrixCell, activeSource?: string): {
 /**
  * 判断单元格是否符合展开时间折线图的条件：
  * 有多个值且全部为同一 source（且具备有效的时间戳与数值）。
+ * AA 三大指数等版本间不可比的指标不允许展开折线图。
  */
-export function isCellTrendEligible(cell?: MatrixCell | null, activeSource?: string): boolean {
+export function isCellTrendEligible(
+  cell?: MatrixCell | null,
+  activeSource?: string,
+  benchmarkName?: string
+): boolean {
   if (!cell) return false;
+  if (benchmarkName && isAaMajorIndexBenchmark(benchmarkName)) {
+    return false;
+  }
   return getValidTrendEntries(cell, activeSource) !== null;
 }
 
@@ -109,6 +118,9 @@ export function buildCellTrendData(
   cell: MatrixCell,
   activeSource?: string
 ): CellTrendData | null {
+  if (isAaMajorIndexBenchmark(matrixRow.benchmark)) {
+    return null;
+  }
   const result = getValidTrendEntries(cell, activeSource);
   if (!result) return null;
 
