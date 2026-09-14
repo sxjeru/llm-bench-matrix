@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
 import { createRateLimiter, getRateLimitKey } from "@/lib/rate-limit";
 import { ifNoneMatchMatches } from "@/lib/http-etag";
-import { createPublicDashboardSnapshotEtag, encodePublicDashboardSnapshot } from "@/lib/dashboard-snapshot-cache";
-import {
-  getPublicDashboardSnapshotVersions,
-  loadPublicDashboardSnapshot
-} from "@/lib/dashboard-snapshot";
+import { createPublicDashboardSnapshotEtag } from "@/lib/dashboard-snapshot-cache";
+import { getPublicDashboardSnapshotVersions } from "@/lib/dashboard-snapshot";
+import { getOrBuildPublicDashboardSnapshotRecord } from "@/lib/dashboard-snapshot-store";
 import {
   PUBLIC_CACHE_CONTROL_BROWSER,
   PUBLIC_CACHE_CONTROL_CDN,
@@ -53,6 +51,11 @@ export async function GET(request: Request) {
     });
   }
 
-  const snapshot = await loadPublicDashboardSnapshot(versions);
-  return NextResponse.json(encodePublicDashboardSnapshot(snapshot), { headers });
+  const record = await getOrBuildPublicDashboardSnapshotRecord(versions);
+  return new Response(record.payloadJson, {
+    headers: {
+      ...headers,
+      "Content-Type": "application/json; charset=utf-8"
+    }
+  });
 }

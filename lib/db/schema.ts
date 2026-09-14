@@ -223,3 +223,15 @@ export const settings = pgTable("settings", {
   updatedBy: text("updated_by"),
   note: text("note")
 });
+
+export const publicDashboardSnapshots = pgTable("public_dashboard_snapshots", {
+  key: text("key").primaryKey(),
+  etag: text("etag").notNull(),
+  dashboardVersion: text("dashboard_version").notNull(),
+  pricingVersion: text("pricing_version").notNull(),
+  settingsVersion: text("settings_version").notNull(),
+  payloadJson: text("payload_json").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
+});
+

@@ -64,6 +64,13 @@
       "when": 1788420000000,
       "tag": "0008_model_pricing_release_date",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789392000000,
+      "tag": "0009_public_dashboard_snapshots",
+      "breakpoints": true
     }
   ]
 }

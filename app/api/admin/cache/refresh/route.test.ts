@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { POST } from "@/app/api/admin/cache/refresh/route";
 import { requireAdmin } from "@/lib/admin-auth";
 import { invalidateAllCaches } from "@/lib/db/queries";
+import { rebuildAndPersistPublicDashboardSnapshotRecord } from "@/lib/dashboard-snapshot-store";
 
 vi.mock("@/lib/admin-auth", () => ({
   requireAdmin: vi.fn()
@@ -13,12 +14,18 @@ vi.mock("@/lib/db/queries", () => ({
   invalidateAllCaches: vi.fn()
 }));
 
+vi.mock("@/lib/dashboard-snapshot-store", () => ({
+  rebuildAndPersistPublicDashboardSnapshotRecord: vi.fn()
+}));
+
 describe("POST /api/admin/cache/refresh", () => {
   beforeEach(() => {
     vi.mocked(requireAdmin).mockReset();
     vi.mocked(invalidateAllCaches).mockReset();
+    vi.mocked(rebuildAndPersistPublicDashboardSnapshotRecord).mockReset();
     vi.mocked(requireAdmin).mockResolvedValue(null);
     vi.mocked(invalidateAllCaches).mockResolvedValue(undefined);
+    vi.mocked(rebuildAndPersistPublicDashboardSnapshotRecord).mockResolvedValue({} as never);
   });
 
   test("鉴权通过时会更新缓存", async () => {
@@ -34,6 +41,7 @@ describe("POST /api/admin/cache/refresh", () => {
       message: "缓存已更新"
     });
     expect(invalidateAllCaches).toHaveBeenCalledTimes(1);
+    expect(rebuildAndPersistPublicDashboardSnapshotRecord).toHaveBeenCalledTimes(1);
   });
 
   test("未授权请求不会更新缓存", async () => {
@@ -48,6 +56,7 @@ describe("POST /api/admin/cache/refresh", () => {
 
     expect(response.status).toBe(401);
     expect(invalidateAllCaches).not.toHaveBeenCalled();
+    expect(rebuildAndPersistPublicDashboardSnapshotRecord).not.toHaveBeenCalled();
   });
 
   test("更新缓存失败时返回 500", async () => {

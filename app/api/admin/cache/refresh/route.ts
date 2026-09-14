@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "../../../../../lib/admin-auth";
 import { invalidateAllCaches } from "../../../../../lib/db/queries";
+import { rebuildAndPersistPublicDashboardSnapshotRecord } from "../../../../../lib/dashboard-snapshot-store";
 
 export async function POST(request: Request) {
   const denied = await requireAdmin(request);
@@ -8,6 +9,7 @@ export async function POST(request: Request) {
 
   try {
     await invalidateAllCaches();
+    await rebuildAndPersistPublicDashboardSnapshotRecord();
     return NextResponse.json({
       ok: true,
       message: "缓存已更新"

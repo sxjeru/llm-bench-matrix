@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { GET } from "@/app/api/public/dashboard/route";
 import type { MatrixInputRow } from "@/components/benchmark-matrix/types";
-import { decodePublicDashboardSnapshot } from "@/lib/dashboard-snapshot-cache";
+import { createPublicDashboardSnapshotEtag, decodePublicDashboardSnapshot, encodePublicDashboardSnapshot } from "@/lib/dashboard-snapshot-cache";
 import { getPublicDashboardSnapshotVersions, loadPublicDashboardSnapshot } from "@/lib/dashboard-snapshot";
 
 vi.mock("@/lib/dashboard-snapshot", () => ({
@@ -12,6 +12,22 @@ vi.mock("@/lib/dashboard-snapshot", () => ({
     settings: "settings-version"
   })),
   loadPublicDashboardSnapshot: vi.fn()
+}));
+
+vi.mock("@/lib/dashboard-snapshot-store", () => ({
+  getOrBuildPublicDashboardSnapshotRecord: vi.fn(async (versions) => {
+    const snapshot = await loadPublicDashboardSnapshot(versions);
+    const wire = encodePublicDashboardSnapshot(snapshot);
+    return {
+      key: "default",
+      etag: createPublicDashboardSnapshotEtag(versions),
+      dashboardVersion: versions.dashboard,
+      pricingVersion: versions.pricing,
+      settingsVersion: versions.settings,
+      payloadJson: JSON.stringify(wire),
+      updatedAt: new Date()
+    };
+  })
 }));
 
 const ROWS: MatrixInputRow[] = [
