@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 
 import { GithubStarBadge, GithubStarBadgeView } from "@/components/github-star-badge";
-import { GITHUB_REPO_API_URL, GITHUB_REPO_URL } from "@/lib/github-stars";
+import { GITHUB_REPO_URL, PUBLIC_GITHUB_STARS_API_URL } from "@/lib/github-stars";
 
 describe("GithubStarBadgeView", () => {
   test("展示压缩后的 star 数量并指向仓库", () => {
@@ -19,7 +19,7 @@ describe("GithubStarBadge", () => {
   test("挂载后在客户端拉取 star 数量", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ stargazers_count: 1234 })
+      json: async () => ({ count: 1234, stargazers_count: 1234 })
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -28,11 +28,9 @@ describe("GithubStarBadge", () => {
 
     expect(await screen.findByRole("link", { name: "在 GitHub 上查看项目，当前 1234 个 star" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      GITHUB_REPO_API_URL,
+      PUBLIC_GITHUB_STARS_API_URL,
       expect.objectContaining({
-        headers: expect.objectContaining({
-          Accept: "application/vnd.github+json"
-        })
+        signal: expect.any(AbortSignal)
       })
     );
     expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty("next");

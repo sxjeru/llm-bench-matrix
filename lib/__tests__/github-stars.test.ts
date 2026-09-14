@@ -68,4 +68,64 @@ describe("github-stars", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
     await expect(fetchGithubStarCount()).resolves.toBeNull();
   });
+
+  test("配置 GITHUB_TOKEN 时携带 Authorization 请求头", async () => {
+    const originalToken = process.env.GITHUB_TOKEN;
+    process.env.GITHUB_TOKEN = "test-token-123";
+
+    try {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ stargazers_count: 88 })
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(fetchGithubStarCount()).resolves.toBe(88);
+      expect(fetchMock).toHaveBeenCalledWith(
+        GITHUB_REPO_API_URL,
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: "Bearer test-token-123"
+          })
+        })
+      );
+    } finally {
+      process.env.GITHUB_TOKEN = originalToken;
+    }
+  });
+
+  test("fetchClientGithubStarCount 请求站内代理端点并解析 count 与 stargazers_count", async () => {
+    const { fetchClientGithubStarCount, PUBLIC_GITHUB_STARS_API_URL } = await import("@/lib/github-stars");
+
+    // 优先解析 count
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ count: 99, stargazers_count: 99 })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchClientGithubStarCount()).resolves.toBe(99);
+    expect(fetchMock).toHaveBeenCalledWith(
+      PUBLIC_GITHUB_STARS_API_URL,
+      expect.objectContaining({
+        signal: expect.any(AbortSignal)
+      })
+    );
+
+    // 兼容只有 stargazers_count 的情况
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ stargazers_count: 50 })
+    }));
+    await expect(fetchClientGithubStarCount()).resolves.toBe(50);
+
+    // 失败时返回 null
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+    await expect(fetchClientGithubStarCount()).resolves.toBeNull();
+
+    // 抛出异常时返回 null
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network error")));
+    await expect(fetchClientGithubStarCount()).resolves.toBeNull();
+  });
 });
+

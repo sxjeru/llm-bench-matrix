@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Star } from "lucide-react";
-import { fetchGithubStarCount, formatStarCount, GITHUB_REPO_URL } from "@/lib/github-stars";
+import { fetchClientGithubStarCount, formatStarCount, GITHUB_REPO_URL } from "@/lib/github-stars";
 
 export function GithubStarBadgeView({ count }: { count: number }) {
   return (
@@ -26,7 +26,7 @@ export function GithubStarBadge() {
   useEffect(() => {
     const controller = new AbortController();
 
-    void fetchGithubStarCount(controller.signal).then((nextCount) => {
+    void fetchClientGithubStarCount(controller.signal).then((nextCount) => {
       if (!controller.signal.aborted) setCount(nextCount);
     });
 

@@ -2,6 +2,7 @@ export const GITHUB_REPO_OWNER = "sxjeru";
 export const GITHUB_REPO_NAME = "llm-bench-matrix";
 export const GITHUB_REPO_URL = `https://github.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}`;
 export const GITHUB_REPO_API_URL = `https://api.github.com/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}`;
+export const PUBLIC_GITHUB_STARS_API_URL = "/api/public/github-stars";
 
 const STAR_FETCH_TIMEOUT_MS = 3000;
 
@@ -31,10 +32,12 @@ export function parseStargazersCount(payload: unknown): number | null {
 }
 
 export async function fetchGithubStarCount(signal?: AbortSignal): Promise<number | null> {
+  const token = process.env.GITHUB_TOKEN?.trim();
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
     "User-Agent": "llm-bench-matrix",
-    "X-GitHub-Api-Version": "2022-11-28"
+    "X-GitHub-Api-Version": "2022-11-28",
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
   };
 
   try {
@@ -47,6 +50,23 @@ export async function fetchGithubStarCount(signal?: AbortSignal): Promise<number
 
     if (!response.ok) return null;
     return parseStargazersCount(await response.json());
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchClientGithubStarCount(signal?: AbortSignal): Promise<number | null> {
+  try {
+    const response = await fetch(PUBLIC_GITHUB_STARS_API_URL, {
+      signal: signal ?? AbortSignal.timeout(STAR_FETCH_TIMEOUT_MS)
+    });
+
+    if (!response.ok) return null;
+    const data = (await response.json()) as { count?: unknown; stargazers_count?: unknown };
+    if (typeof data.count === "number" && Number.isFinite(data.count) && data.count >= 0) {
+      return Math.floor(data.count);
+    }
+    return parseStargazersCount(data);
   } catch {
     return null;
   }
