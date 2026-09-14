@@ -2,32 +2,25 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { GET } from "@/app/api/public/dashboard/route";
 import type { MatrixInputRow } from "@/components/benchmark-matrix/types";
-import { createPublicDashboardSnapshotEtag, decodePublicDashboardSnapshot, encodePublicDashboardSnapshot } from "@/lib/dashboard-snapshot-cache";
-import { getPublicDashboardSnapshotVersions, loadPublicDashboardSnapshot } from "@/lib/dashboard-snapshot";
+import {
+  PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION,
+  createPublicDashboardSnapshotEtag,
+  decodePublicDashboardSnapshot,
+  encodePublicDashboardSnapshot
+} from "@/lib/dashboard-snapshot-cache";
+import { getPublicDashboardSnapshotVersions } from "@/lib/dashboard-snapshot";
+import { getOrBuildPublicDashboardSnapshotRecord } from "@/lib/dashboard-snapshot-store";
 
 vi.mock("@/lib/dashboard-snapshot", () => ({
   getPublicDashboardSnapshotVersions: vi.fn(async () => ({
     dashboard: "dashboard-version",
     pricing: "pricing-version",
     settings: "settings-version"
-  })),
-  loadPublicDashboardSnapshot: vi.fn()
+  }))
 }));
 
 vi.mock("@/lib/dashboard-snapshot-store", () => ({
-  getOrBuildPublicDashboardSnapshotRecord: vi.fn(async (versions) => {
-    const snapshot = await loadPublicDashboardSnapshot(versions);
-    const wire = encodePublicDashboardSnapshot(snapshot);
-    return {
-      key: "default",
-      etag: createPublicDashboardSnapshotEtag(versions),
-      dashboardVersion: versions.dashboard,
-      pricingVersion: versions.pricing,
-      settingsVersion: versions.settings,
-      payloadJson: JSON.stringify(wire),
-      updatedAt: new Date()
-    };
-  })
+  getOrBuildPublicDashboardSnapshotRecord: vi.fn()
 }));
 
 const ROWS: MatrixInputRow[] = [
@@ -75,13 +68,21 @@ const SNAPSHOT = {
 describe("GET /api/public/dashboard", () => {
   beforeEach(() => {
     vi.mocked(getPublicDashboardSnapshotVersions).mockReset();
-    vi.mocked(loadPublicDashboardSnapshot).mockReset();
+    vi.mocked(getOrBuildPublicDashboardSnapshotRecord).mockReset();
     vi.mocked(getPublicDashboardSnapshotVersions).mockResolvedValue({
       dashboard: "dashboard-version",
       pricing: "pricing-version",
       settings: "settings-version"
     });
-    vi.mocked(loadPublicDashboardSnapshot).mockResolvedValue(SNAPSHOT);
+    vi.mocked(getOrBuildPublicDashboardSnapshotRecord).mockResolvedValue({
+      key: `default:v${PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION}`,
+      etag: createPublicDashboardSnapshotEtag(SNAPSHOT.versions),
+      dashboardVersion: SNAPSHOT.versions.dashboard,
+      pricingVersion: SNAPSHOT.versions.pricing,
+      settingsVersion: SNAPSHOT.versions.settings,
+      payloadJson: JSON.stringify(encodePublicDashboardSnapshot(SNAPSHOT)),
+      updatedAt: new Date()
+    });
   });
 
   test("返回完整快照、缓存头和版本号", async () => {
@@ -89,7 +90,7 @@ describe("GET /api/public/dashboard", () => {
     const payload = await response.json();
 
     expect(getPublicDashboardSnapshotVersions).toHaveBeenCalledTimes(1);
-    expect(loadPublicDashboardSnapshot).toHaveBeenCalledWith({
+    expect(getOrBuildPublicDashboardSnapshotRecord).toHaveBeenCalledWith({
       dashboard: "dashboard-version",
       pricing: "pricing-version",
       settings: "settings-version"
@@ -115,21 +116,36 @@ describe("GET /api/public/dashboard", () => {
     expect(response.headers.get("X-Pricing-Version")).toBe("pricing-version");
     expect(response.headers.get("X-Settings-Version")).toBe("settings-version");
     expect(response.headers.get("ETag")).toBe(
-      '"dashboard:dashboard-version:pricing-version:settings-version"'
+      `"dashboard:v${PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION}:dashboard-version:pricing-version:settings-version"`
     );
+    expect(response.headers.get("Content-Type")).toBe("application/json; charset=utf-8");
   });
 
   test("If-None-Match 命中时返回 304 且不加载快照", async () => {
     const first = await GET(new Request("https://example.com/api/public/dashboard"));
     const etag = first.headers.get("ETag");
-    vi.mocked(loadPublicDashboardSnapshot).mockClear();
+    vi.mocked(getOrBuildPublicDashboardSnapshotRecord).mockClear();
 
     const response = await GET(new Request("https://example.com/api/public/dashboard", {
       headers: { "If-None-Match": etag ?? "" }
     }));
 
     expect(response.status).toBe(304);
-    expect(loadPublicDashboardSnapshot).not.toHaveBeenCalled();
+    expect(getOrBuildPublicDashboardSnapshotRecord).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    '"dashboard:dashboard-version:pricing-version:settings-version"',
+    `"dashboard:v${PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION - 1}:dashboard-version:pricing-version:settings-version"`
+  ])("旧格式 ETag %s 不返回 304，即使业务数据版本未变", async (oldEtag) => {
+    const response = await GET(new Request("https://example.com/api/public/dashboard", {
+      headers: { "If-None-Match": oldEtag }
+    }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("ETag")).not.toBe(oldEtag);
+    expect(decodePublicDashboardSnapshot(await response.json())).toEqual(SNAPSHOT);
+    expect(getOrBuildPublicDashboardSnapshotRecord).toHaveBeenCalledTimes(1);
   });
 
   test("限流响应明确不进入公共缓存", async () => {

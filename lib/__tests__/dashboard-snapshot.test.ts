@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { getCacheVersion } from "@/lib/cache-versions";
-import { createPublicDashboardSnapshotEtag } from "@/lib/dashboard-snapshot-cache";
+import { PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION, createPublicDashboardSnapshotEtag } from "@/lib/dashboard-snapshot-cache";
 import { loadPublicDashboardSnapshot, parseExportFootnote, toPublicModelPrice } from "@/lib/dashboard-snapshot";
 import { getDashboardRows, getDashboardStats, getModelParamsRows, getSettings, getSourceOptions } from "@/lib/db/queries";
 import { getModelPricingRows } from "@/lib/model-pricing";
@@ -137,12 +137,12 @@ describe("loadPublicDashboardSnapshot", () => {
     expect(getModelPricingRows).toHaveBeenCalledWith("forced-pricing");
   });
 
-  test("快照 ETag 由三个版本域组成", () => {
+  test("快照 ETag 由格式版本和三个数据版本域组成", () => {
     expect(createPublicDashboardSnapshotEtag({
       dashboard: "d1",
       pricing: "p1",
       settings: "s1"
-    })).toBe('"dashboard:d1:p1:s1"');
+    })).toBe(`"dashboard:v${PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION}:d1:p1:s1"`);
   });
 
   test("公开快照丢掉三项费用全空的价格行", async () => {
