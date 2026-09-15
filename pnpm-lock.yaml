@@ -38,8 +38,8 @@ importers:
         specifier: ^0.45.1
         version: 0.45.2(@neondatabase/serverless@1.1.0)(@types/pg@8.23.1)(pg@8.23.0)
       html2canvas-pro:
-        specifier: ^2.4.0
-        version: 2.4.0
+        specifier: ^2.4.2
+        version: 2.4.2
       lucide-react:
         specifier: ^1.33.0
         version: 1.33.0(react@19.2.8)
@@ -840,6 +840,13 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@napi-rs/wasm-runtime@1.2.4':
+    resolution: {integrity: sha512-AJxoUD2/15ESHbvpcyjU274nsAPLuOtPHCk0vKJM5pj//Fg/B1FXNWjPnXTT9PymCYYiHo4zPj0ZomXBKhoy7g==}
+    engines: {node: ^20.19.0 || ^22.13.0 || >=23.5.0}
+    peerDependencies:
+      '@emnapi/core': ^1.7.1 || ^2.0.0-alpha.4
+      '@emnapi/runtime': ^1.7.1 || ^2.0.0-alpha.4
 
   '@napi-rs/wasm-runtime@1.2.4':
     resolution: {integrity: sha512-AJxoUD2/15ESHbvpcyjU274nsAPLuOtPHCk0vKJM5pj//Fg/B1FXNWjPnXTT9PymCYYiHo4zPj0ZomXBKhoy7g==}
@@ -2320,8 +2327,8 @@ packages:
   html-escaper@2.0.2:
     resolution: {integrity: sha512-H2iMtd0I4Mt5eYiapRdIDjp+XzelXQ0tFE4JS7YFwFevXXMmOp9myNrUvCg0D6ws8iqkRPBfKHgbwig1SmlLfg==}
 
-  html2canvas-pro@2.4.0:
-    resolution: {integrity: sha512-ERxMm/ZGRatO9g0mAM2EBlWFgCXDjma7RZFLCHm71gM6q/WqQRYaqB0MIGjjYKEHF8rKvXIeshrrJ8ovImd9aw==}
+  html2canvas-pro@2.4.2:
+    resolution: {integrity: sha512-W0QvhquArW7jnorC66FaCpP1LflcUJUdyLTUD8zAz0ka8kJv/PLW45W+lg5ZonBU1lOtKZU+FOntr+XTu1iPcA==}
     engines: {node: '>=16.0.0'}
 
   ignore@5.3.2:
@@ -4086,6 +4093,13 @@ snapshots:
       '@tybys/wasm-util': 0.10.3
     optional: true
 
+  '@napi-rs/wasm-runtime@1.2.4(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)':
+    dependencies:
+      '@emnapi/core': 1.10.0
+      '@emnapi/runtime': 1.10.0
+      '@tybys/wasm-util': 0.10.3
+    optional: true
+
   '@neondatabase/serverless@1.1.0': {}
 
   '@next/env@16.3.3': {}
@@ -5513,7 +5527,7 @@ snapshots:
 
   html-escaper@2.0.2: {}
 
-  html2canvas-pro@2.4.0:
+  html2canvas-pro@2.4.2:
     dependencies:
       css-line-break: 2.1.0
       text-segmentation: 1.0.3
