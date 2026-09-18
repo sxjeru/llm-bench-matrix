@@ -674,6 +674,63 @@ describe("paper-table 文本解析", () => {
     expect(benchmarkNames.has("ϕ-bench")).toBe(true);
   });
 
+  test("HTML 表格中包含 score-capability 等评测能力/注释元素时会自动筛除并保留 benchmark 主名称", async () => {
+    const htmlInput = [
+      '<html><body><table class="source-performance-table">',
+      "<thead>",
+      "<tr>",
+      '<th scope="col" class="score-target"><br class="Apple-interchange-newline">Qwen3.8-Omni-Flash</th>',
+      '<th scope="col">Qwen3.8-<br>Flash</th>',
+      '<th scope="col">Qwen3.8-<br>27B</th>',
+      '<th scope="col">Qwen3.7-<br>Plus</th>',
+      '<th scope="col">DeepSeek-V4-Flash-0731</th>',
+      '<th scope="col">Claude-Opus-4.6 (Max)</th>',
+      "</tr>",
+      "</thead>",
+      "<tbody>",
+      '<tr class="score-group"><td colspan="7">Coding and Agent</td></tr>',
+      "<tr>",
+      '<td><div class="score-benchmark">DeepSWE 1.1</div><div class="score-capability">Long-horizon software engineering</div></td>',
+      '<td class="score-target">57.8</td>',
+      "<td><strong>58.7</strong></td>",
+      "<td>42.2</td>",
+      "<td>16.5</td>",
+      "<td>54.4</td>",
+      "<td>--</td>",
+      "</tr>",
+      "</tbody>",
+      "</table></body></html>"
+    ].join("");
+
+    const parsed = await parseBenchmarkTextRowsForTest(htmlInput, "text:unit-test");
+    expect(parsed.parseSource).toBe("html");
+    expect(parsed.modelColumns).toEqual([
+      "Qwen3.8-Omni-Flash",
+      "Qwen3.8-Flash",
+      "Qwen3.8-27B",
+      "Qwen3.7-Plus",
+      "DeepSeek-V4-Flash-0731",
+      "Claude-Opus-4.6 (Max)"
+    ]);
+
+    const deepSweRows = parsed.rows.filter((row) => row.benchmarkName === "DeepSWE 1.1");
+    expect(deepSweRows).toHaveLength(5);
+    expect(deepSweRows.every((row) => row.benchmarkType === "Coding and Agent")).toBe(true);
+
+    const valueByModel = new Map(deepSweRows.map((row) => [row.modelName, row.valueRaw]));
+    expect(valueByModel.get("Qwen3.8-Omni-Flash")).toBe("57.8");
+    expect(valueByModel.get("Qwen3.8-Flash")).toBe("58.7");
+    expect(valueByModel.get("Qwen3.8-27B")).toBe("42.2");
+    expect(valueByModel.get("Qwen3.7-Plus")).toBe("16.5");
+    expect(valueByModel.get("DeepSeek-V4-Flash-0731")).toBe("54.4");
+    expect(valueByModel.has("Claude-Opus-4.6 (Max)")).toBe(false);
+
+    const dirtyNameRows = parsed.rows.filter((row) =>
+      row.benchmarkName.includes("Long-horizon")
+    );
+    expect(dirtyNameRows).toHaveLength(0);
+  });
+
   test("多行堆叠模型表头可重建并正确对齐数值列", async () => {
     const inputText = [
       "Evaluation Claude family",

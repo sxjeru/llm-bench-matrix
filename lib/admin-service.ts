@@ -684,6 +684,7 @@ function normalizeHtmlImportCellText(value: unknown): string {
     ? ""
     : convertInlineLatexGreekLetters(String(value))
       .replace(/\u00A0/g, " ")
+      .replace(/-\s*[\r\n]+\s*/g, "-")
       .replace(/\r?\n+/g, " ")
       .replace(/\s+/g, " ")
       .trim();
@@ -723,10 +724,32 @@ function extractHtmlTableLeadingTypeHints(inputHtml: string): string[] {
   return Array.from(new Set(hints));
 }
 
+const HTML_ANNOTATION_ELEMENT_CLASS_REGEX =
+  /\b(?:score-(?:capability|desc(?:ription)?|sub(?:title)?|note|footnote|annotation)|benchmark-(?:capability|desc(?:ription)?|note|subtitle))\b/i;
+
+function sanitizeHtmlTableForImport(inputHtml: string): string {
+  let current = inputHtml.replace(/<!--[\s\S]*?-->/g, "");
+  let prev = "";
+  while (prev !== current) {
+    prev = current;
+    current = current.replace(/<(div|span|p|small)\b([^>]*)>([\s\S]*?)<\/\1>/gi, (match, _tag, attrs) => {
+      const classMatch = attrs.match(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+      const className = classMatch ? (classMatch[1] || classMatch[2] || classMatch[3] || "") : "";
+      if (HTML_ANNOTATION_ELEMENT_CLASS_REGEX.test(className)) {
+        return "";
+      }
+      return match;
+    });
+  }
+
+  return current;
+}
+
 async function parseHtmlTableToText(inputHtml: string): Promise<string | null> {
   try {
+    const sanitizedHtml = sanitizeHtmlTableForImport(inputHtml);
     const XLSX = await import("xlsx");
-    const workbook = XLSX.read(inputHtml, { type: "string", raw: true });
+    const workbook = XLSX.read(sanitizedHtml, { type: "string", raw: true });
     const selectedSheet = workbook.SheetNames[0];
     if (!selectedSheet) return null;
 
