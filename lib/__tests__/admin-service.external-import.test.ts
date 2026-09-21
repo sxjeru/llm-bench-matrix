@@ -77,6 +77,21 @@ function makeBenchmarkRow(overrides: Partial<BenchmarkRow> = {}): BenchmarkRow {
  * 从外部读 `table._.name` 拿不到。表对象必须来自与被测模块同一次模块注册周期，
  * 所以由 `setup()` 动态 import 后传进来。
  */
+function findChunkValue(node: unknown): string | null {
+  if (!node || typeof node !== "object") return null;
+  if ("value" in node && typeof (node as { value: unknown }).value === "string") {
+    const val = (node as { value: string }).value;
+    if (val.includes(":")) return val;
+  }
+  if ("queryChunks" in node && Array.isArray((node as { queryChunks: unknown[] }).queryChunks)) {
+    for (const chunk of (node as { queryChunks: unknown[] }).queryChunks) {
+      const res = findChunkValue(chunk);
+      if (res) return res;
+    }
+  }
+  return null;
+}
+
 function createDbMock(
   schema: Schema,
   options: {
@@ -84,6 +99,7 @@ function createDbMock(
     /** 传入表示该 benchmark 已存在，ensureBenchmark 会复用它 */
     existingBenchmark?: BenchmarkRow | null;
     existingSourceMeta?: SourceMetaRow[];
+    findBenchmark?: (canonicalKey: string) => BenchmarkRow | null;
   }
 ) {
   const { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } = schema;
@@ -124,16 +140,23 @@ function createDbMock(
           return { where: vi.fn().mockResolvedValue(existingValues) };
         }
 
-        const resolveLimit = () => {
+        const resolveLimit = (clause?: unknown) => {
           if (table === providers) return Promise.resolve([PROVIDER_ROW]);
           if (table === models) return Promise.resolve([MODEL_ROW]);
-          if (table === benchmarks) return Promise.resolve(existingBenchmark ? [existingBenchmark] : []);
+          if (table === benchmarks) {
+            if (options.findBenchmark) {
+              const key = findChunkValue(clause);
+              const found = key ? options.findBenchmark(key) : null;
+              return Promise.resolve(found ? [found] : []);
+            }
+            return Promise.resolve(existingBenchmark ? [existingBenchmark] : []);
+          }
           if (table === settings) return Promise.resolve([]);
           return Promise.resolve([]);
         };
 
         return {
-          where: vi.fn(() => ({ limit: vi.fn(resolveLimit) })),
+          where: vi.fn((clause?: unknown) => ({ limit: vi.fn(() => resolveLimit(clause)) })),
           limit: vi.fn(resolveLimit)
         };
       })
@@ -504,5 +527,57 @@ describe("importExternalBenchmarkRows", () => {
     await expect(
       importExternalBenchmarkRows([{ ...BASE_ROW, rawValue: "1" }], { source: "   " })
     ).rejects.toThrow("必须指定 source");
+  });
+
+  test("预览结果中覆盖（值未变）排在后面，且即使未变行达到上限新增与追加行也绝不被截断", async () => {
+    const existing = makeBenchmarkRow();
+    const { importExternalBenchmarkRows } = await setup({
+      existingBenchmark: existing,
+      findBenchmark: (key) => (key.includes("mmlupro") ? existing : null),
+      existingValues: [existingValue({ valueRaw: "79.1", valueNum: "79.100000" })]
+    });
+
+    // 构造 210 行 unchanged 行（超过 EXTERNAL_IMPORT_PREVIEW_LIMIT = 200）
+    const unchangedRows = Array.from({ length: 210 }, () => ({
+      ...BASE_ROW,
+      rawValue: "79.1"
+    }));
+
+    // 在其后追加 1 个 appended 行（数值变化）和 1 个 inserted 行（新 benchmark）
+    const appendedRow = {
+      ...BASE_ROW,
+      rawValue: "85.0"
+    };
+    const insertedRow = {
+      ...BASE_ROW,
+      benchmarkName: "New Bench",
+      rawValue: "90.0"
+    };
+
+    const result = await importExternalBenchmarkRows(
+      [...unchangedRows, appendedRow, insertedRow],
+      { source: "Artificial Analysis", dryRun: true }
+    );
+
+    expect(result.inserted).toBe(1);
+    expect(result.appended).toBe(1);
+    expect(result.unchanged).toBe(210);
+
+    // 新增与追加行必须出现在 preview 最前面，且绝不能因为 210 行 unchanged 而被截断
+    expect(result.preview[0]).toMatchObject({
+      benchmarkName: "New Bench",
+      outcome: "inserted",
+      rawValue: "90.0"
+    });
+    expect(result.preview[1]).toMatchObject({
+      outcome: "appended",
+      rawValue: "85.0"
+    });
+
+    // 覆盖（值未变）排在后面，上限截断为 200 条
+    const unchangedInPreview = result.preview.filter((row) => row.outcome === "unchanged");
+    expect(unchangedInPreview).toHaveLength(200);
+    expect(result.preview).toHaveLength(202);
+    expect(result.preview[2].outcome).toBe("unchanged");
   });
 });

@@ -337,6 +337,79 @@ describe("ExternalImportTab", () => {
     expect(screen.getByText("覆盖（值未变）")).toBeInTheDocument();
   });
 
+  test("预览结果将覆盖（值未变）排在后面，且支持按处理状态筛选", async () => {
+    const user = userEvent.setup();
+    await renderTab({
+      summary: {
+        source: "text:Artificial Analysis",
+        total: 3,
+        inserted: 1,
+        appended: 1,
+        unchanged: 1,
+        skipped: 0,
+        createdBenchmarks: [],
+        publicChanged: true,
+        createdModels: [],
+        matchedModelCount: 3,
+        metricCount: 1,
+        benchTime: "2026-08-02T00:00:00.000Z",
+        dryRun: true,
+        // 输入时有意把 unchanged 放在最前面
+        preview: [
+          {
+            modelName: "Model Unchanged",
+            benchmarkName: "MMLU-Pro",
+            benchmarkType: "Knowledge",
+            rawValue: "80",
+            previousValue: "80",
+            outcome: "unchanged"
+          },
+          {
+            modelName: "Model Appended",
+            benchmarkName: "MMLU-Pro",
+            benchmarkType: "Knowledge",
+            rawValue: "85",
+            previousValue: "70",
+            outcome: "appended"
+          },
+          {
+            modelName: "Model Inserted",
+            benchmarkName: "MMLU-Pro",
+            benchmarkType: "Knowledge",
+            rawValue: "90",
+            previousValue: null,
+            outcome: "inserted"
+          }
+        ]
+      }
+    });
+
+    // 默认展示全部，检查排序：Model Inserted 在前，Model Appended 居中，Model Unchanged 处于末尾
+    const previewContainer = screen.getByText("预览结果（未落库）").closest(".rounded-2xl");
+    const rows = within(previewContainer!).getAllByRole("row");
+    // row 0 是 thead，row 1 是 inserted，row 2 是 appended，row 3 是 unchanged
+    expect(rows[1]).toHaveTextContent("Model Inserted");
+    expect(rows[1]).toHaveTextContent("新增");
+    expect(rows[2]).toHaveTextContent("Model Appended");
+    expect(rows[2]).toHaveTextContent("追加历史");
+    expect(rows[3]).toHaveTextContent("Model Unchanged");
+    expect(rows[3]).toHaveTextContent("覆盖（值未变）");
+
+    // 点击「仅看变更」筛选按钮
+    const changedBtn = screen.getByRole("button", { name: "仅看变更（2）" });
+    await user.click(changedBtn);
+    expect(screen.getByText("Model Inserted")).toBeInTheDocument();
+    expect(screen.getByText("Model Appended")).toBeInTheDocument();
+    expect(screen.queryByText("Model Unchanged")).not.toBeInTheDocument();
+
+    // 点击「首次新增」卡片筛选
+    const insertedCard = screen.getByRole("button", { name: /首次新增/ });
+    await user.click(insertedCard);
+    expect(screen.getByText("Model Inserted")).toBeInTheDocument();
+    expect(screen.queryByText("Model Appended")).not.toBeInTheDocument();
+    expect(screen.queryByText("Model Unchanged")).not.toBeInTheDocument();
+  });
+
   test("尚未拉取上游时给出引导文案", async () => {
     await renderTab({ snapshot: null });
 

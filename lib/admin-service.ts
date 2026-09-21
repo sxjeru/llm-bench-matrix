@@ -4343,7 +4343,10 @@ export async function importExternalBenchmarkRows(
         { benchmarkId: number; source: string; benchmarkType: string; modalities: string[] }
       >();
       const createdBenchmarks = new Set<string>();
-      const preview: ExternalImportPreviewRow[] = [];
+      const insertedPreview: ExternalImportPreviewRow[] = [];
+      const appendedPreview: ExternalImportPreviewRow[] = [];
+      const unchangedPreview: ExternalImportPreviewRow[] = [];
+      const skippedPreview: ExternalImportPreviewRow[] = [];
 
       let inserted = 0;
       let appended = 0;
@@ -4351,9 +4354,14 @@ export async function importExternalBenchmarkRows(
       let skipped = 0;
       let publicChanged = false;
 
-      const pushPreview = (row: ExternalImportPreviewRow) => {
-        if (preview.length >= EXTERNAL_IMPORT_PREVIEW_LIMIT) return;
-        preview.push(row);
+      const pushSkippedPreview = (row: ExternalImportPreviewRow) => {
+        if (skippedPreview.length >= EXTERNAL_IMPORT_PREVIEW_LIMIT) return;
+        skippedPreview.push(row);
+      };
+
+      const pushUnchangedPreview = (row: ExternalImportPreviewRow) => {
+        if (unchangedPreview.length >= EXTERNAL_IMPORT_PREVIEW_LIMIT) return;
+        unchangedPreview.push(row);
       };
 
       for (const row of rows) {
@@ -4363,7 +4371,7 @@ export async function importExternalBenchmarkRows(
 
         if (!modelName || !benchmarkName || isEmptyImportValue(row.rawValue)) {
           skipped += 1;
-          pushPreview({
+          pushSkippedPreview({
             modelName: row.modelName,
             benchmarkName: row.benchmarkName,
             benchmarkType,
@@ -4468,7 +4476,7 @@ export async function importExternalBenchmarkRows(
             valueNum2: parsedValue.valueNum2,
             source: existing.source
           });
-          pushPreview({
+          pushUnchangedPreview({
             modelName,
             benchmarkName: benchmark.benchmarkName,
             benchmarkType,
@@ -4492,19 +4500,26 @@ export async function importExternalBenchmarkRows(
 
         if (existing) {
           appended += 1;
+          appendedPreview.push({
+            modelName,
+            benchmarkName: benchmark.benchmarkName,
+            benchmarkType,
+            rawValue: parsedValue.valueRaw,
+            previousValue: existing.valueRaw,
+            outcome: "appended"
+          });
         } else {
           inserted += 1;
+          insertedPreview.push({
+            modelName,
+            benchmarkName: benchmark.benchmarkName,
+            benchmarkType,
+            rawValue: parsedValue.valueRaw,
+            previousValue: null,
+            outcome: "inserted"
+          });
         }
         publicChanged = true;
-
-        pushPreview({
-          modelName,
-          benchmarkName: benchmark.benchmarkName,
-          benchmarkType,
-          rawValue: parsedValue.valueRaw,
-          previousValue: existing?.valueRaw ?? null,
-          outcome: existing ? "appended" : "inserted"
-        });
 
         latestBySlot.set(slotKey, {
           id: -1,
@@ -4546,6 +4561,14 @@ export async function importExternalBenchmarkRows(
             }
           });
       }
+
+      // 保证新增与变化追加行全部显示（不被 preview 数量限制截断），覆盖（值未变）排在后面
+      const preview: ExternalImportPreviewRow[] = [
+        ...insertedPreview,
+        ...appendedPreview,
+        ...unchangedPreview,
+        ...skippedPreview
+      ];
 
       const result: ExternalImportResult = {
         source: normalizedSource,

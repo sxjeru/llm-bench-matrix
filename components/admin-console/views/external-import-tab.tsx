@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, type Dispatch, type SetStateAction } from "react";
+import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { Cloud, Download, Eye, RefreshCw, RotateCcw, Save } from "lucide-react";
 import type {
   ExternalImportSnapshot,
@@ -206,6 +206,33 @@ export function ExternalImportTab({
   const unmatchedCount = snapshot?.mappings.filter((row) => row.matchStatus === "unmatched").length ?? 0;
   const highestEffortDefaultCount =
     snapshot?.mappings.filter((row) => row.matchReason === "highest-effort-default").length ?? 0;
+
+  const [previewFilter, setPreviewFilter] = useState<
+    "all" | "changed" | "inserted" | "appended" | "unchanged" | "skipped"
+  >("all");
+
+  const sortedPreview = useMemo(() => {
+    if (!summary?.preview) return [];
+    const outcomeOrder: Record<string, number> = {
+      inserted: 0,
+      appended: 1,
+      unchanged: 2,
+      skipped: 3
+    };
+    return [...summary.preview].sort((a, b) => {
+      const orderA = outcomeOrder[a.outcome] ?? 99;
+      const orderB = outcomeOrder[b.outcome] ?? 99;
+      return orderA - orderB;
+    });
+  }, [summary?.preview]);
+
+  const filteredPreview = useMemo(() => {
+    if (previewFilter === "all") return sortedPreview;
+    if (previewFilter === "changed") {
+      return sortedPreview.filter((row) => row.outcome === "inserted" || row.outcome === "appended");
+    }
+    return sortedPreview.filter((row) => row.outcome === previewFilter);
+  }, [sortedPreview, previewFilter]);
 
   return (
     <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
@@ -683,22 +710,58 @@ export function ExternalImportTab({
             {summary.dryRun ? "预览结果（未落库）" : "导入结果"}
           </h4>
           <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-4">
-            <div className="rounded-xl border border-base-300/70 bg-base-100/75 px-3 py-2">
+            <button
+              type="button"
+              className={`rounded-xl border bg-base-100/75 px-3 py-2 text-left transition-all ${
+                previewFilter === "inserted"
+                  ? "border-success ring-2 ring-success/30"
+                  : "border-base-300/70 hover:border-base-content/30"
+              }`}
+              onClick={() => setPreviewFilter((curr) => (curr === "inserted" ? "all" : "inserted"))}
+              title="点击按「首次新增」筛选"
+            >
               <div className="text-xs uppercase tracking-wide opacity-60">首次新增</div>
-              <div className="mt-1 text-lg font-medium">{summary.inserted}</div>
-            </div>
-            <div className="rounded-xl border border-base-300/70 bg-base-100/75 px-3 py-2">
+              <div className="mt-1 text-lg font-medium text-success">{summary.inserted}</div>
+            </button>
+            <button
+              type="button"
+              className={`rounded-xl border bg-base-100/75 px-3 py-2 text-left transition-all ${
+                previewFilter === "appended"
+                  ? "border-info ring-2 ring-info/30"
+                  : "border-base-300/70 hover:border-base-content/30"
+              }`}
+              onClick={() => setPreviewFilter((curr) => (curr === "appended" ? "all" : "appended"))}
+              title="点击按「值变化追加」筛选"
+            >
               <div className="text-xs uppercase tracking-wide opacity-60">值变化追加</div>
-              <div className="mt-1 text-lg font-medium">{summary.appended}</div>
-            </div>
-            <div className="rounded-xl border border-base-300/70 bg-base-100/75 px-3 py-2">
+              <div className="mt-1 text-lg font-medium text-info">{summary.appended}</div>
+            </button>
+            <button
+              type="button"
+              className={`rounded-xl border bg-base-100/75 px-3 py-2 text-left transition-all ${
+                previewFilter === "unchanged"
+                  ? "border-base-content/50 ring-2 ring-base-content/20"
+                  : "border-base-300/70 hover:border-base-content/30"
+              }`}
+              onClick={() => setPreviewFilter((curr) => (curr === "unchanged" ? "all" : "unchanged"))}
+              title="点击按「值未变覆盖」筛选"
+            >
               <div className="text-xs uppercase tracking-wide opacity-60">值未变覆盖</div>
               <div className="mt-1 text-lg font-medium">{summary.unchanged}</div>
-            </div>
-            <div className="rounded-xl border border-base-300/70 bg-base-100/75 px-3 py-2">
+            </button>
+            <button
+              type="button"
+              className={`rounded-xl border bg-base-100/75 px-3 py-2 text-left transition-all ${
+                previewFilter === "skipped"
+                  ? "border-warning ring-2 ring-warning/30"
+                  : "border-base-300/70 hover:border-base-content/30"
+              }`}
+              onClick={() => setPreviewFilter((curr) => (curr === "skipped" ? "all" : "skipped"))}
+              title="点击按「跳过」筛选"
+            >
               <div className="text-xs uppercase tracking-wide opacity-60">跳过</div>
               <div className="mt-1 text-lg font-medium">{summary.skipped}</div>
-            </div>
+            </button>
           </div>
 
           {summary.createdBenchmarks.length > 0 ? (
@@ -706,6 +769,62 @@ export function ExternalImportTab({
               <span>将新建 benchmark：{summary.createdBenchmarks.join("、")}</span>
             </div>
           ) : null}
+
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs opacity-60 mr-1">显示筛选：</span>
+              <button
+                type="button"
+                className={`btn btn-xs ${previewFilter === "all" ? "btn-neutral" : "btn-ghost"}`}
+                onClick={() => setPreviewFilter("all")}
+              >
+                全部（{sortedPreview.length}）
+              </button>
+              <button
+                type="button"
+                className={`btn btn-xs ${previewFilter === "changed" ? "btn-neutral" : "btn-ghost"}`}
+                onClick={() => setPreviewFilter("changed")}
+              >
+                仅看变更（{summary.inserted + summary.appended}）
+              </button>
+              {summary.inserted > 0 ? (
+                <button
+                  type="button"
+                  className={`btn btn-xs ${previewFilter === "inserted" ? "btn-neutral" : "btn-ghost"}`}
+                  onClick={() => setPreviewFilter("inserted")}
+                >
+                  新增（{summary.inserted}）
+                </button>
+              ) : null}
+              {summary.appended > 0 ? (
+                <button
+                  type="button"
+                  className={`btn btn-xs ${previewFilter === "appended" ? "btn-neutral" : "btn-ghost"}`}
+                  onClick={() => setPreviewFilter("appended")}
+                >
+                  追加历史（{summary.appended}）
+                </button>
+              ) : null}
+              {summary.unchanged > 0 ? (
+                <button
+                  type="button"
+                  className={`btn btn-xs ${previewFilter === "unchanged" ? "btn-neutral" : "btn-ghost"}`}
+                  onClick={() => setPreviewFilter("unchanged")}
+                >
+                  值未变覆盖（{summary.unchanged}）
+                </button>
+              ) : null}
+              {summary.skipped > 0 ? (
+                <button
+                  type="button"
+                  className={`btn btn-xs ${previewFilter === "skipped" ? "btn-neutral" : "btn-ghost"}`}
+                  onClick={() => setPreviewFilter("skipped")}
+                >
+                  跳过（{summary.skipped}）
+                </button>
+              ) : null}
+            </div>
+          </div>
 
           <div className="max-h-96 overflow-auto rounded-box border border-base-300">
             <table className="table table-zebra table-sm">
@@ -719,29 +838,52 @@ export function ExternalImportTab({
                 </tr>
               </thead>
               <tbody>
-                {summary.preview.map((row, index) => (
-                  <tr key={`${row.modelName}-${row.benchmarkName}-${index}`}>
+                {filteredPreview.map((row, index) => (
+                  <tr
+                    key={`${row.modelName}-${row.benchmarkName}-${index}`}
+                    className={
+                      row.outcome === "inserted"
+                        ? "bg-success/5"
+                        : row.outcome === "appended"
+                          ? "bg-info/5"
+                          : undefined
+                    }
+                  >
                     <td>{row.modelName}</td>
                     <td>{row.benchmarkName}</td>
                     <td className="font-mono text-xs">{row.rawValue}</td>
                     <td className="font-mono text-xs opacity-60">{row.previousValue ?? "--"}</td>
                     <td className="text-xs">
-                      {row.outcome === "inserted"
-                        ? "新增"
-                        : row.outcome === "appended"
-                          ? "追加历史"
-                          : row.outcome === "unchanged"
-                            ? "覆盖（值未变）"
-                            : "跳过"}
+                      {row.outcome === "inserted" ? (
+                        <span className="badge badge-success badge-sm font-medium">新增</span>
+                      ) : row.outcome === "appended" ? (
+                        <span className="badge badge-info badge-sm font-medium">追加历史</span>
+                      ) : row.outcome === "unchanged" ? (
+                        <span className="badge badge-ghost badge-sm opacity-80">覆盖（值未变）</span>
+                      ) : (
+                        <span className="badge badge-warning badge-sm font-medium">跳过</span>
+                      )}
                     </td>
                   </tr>
                 ))}
+                {filteredPreview.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-6 text-center text-xs opacity-60">
+                      该筛选条件下无记录
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
           {summary.total > summary.preview.length ? (
             <div className="mt-2 text-xs opacity-60">
-              共 {summary.total} 行，此处仅展示前 {summary.preview.length} 行。
+              共 {summary.total} 行，此处展示前 {summary.preview.length} 行（已包含全部新增与变化追加行）。
+              {previewFilter !== "all" ? ` 当前筛选展示 ${filteredPreview.length} 行。` : ""}
+            </div>
+          ) : previewFilter !== "all" ? (
+            <div className="mt-2 text-xs opacity-60">
+              当前筛选展示 {filteredPreview.length} 行（共 {summary.preview.length} 行）。
             </div>
           ) : null}
         </div>
