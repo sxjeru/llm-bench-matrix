@@ -385,7 +385,7 @@ describe("ExternalImportTab", () => {
     });
 
     // 默认展示全部，检查排序：Model Inserted 在前，Model Appended 居中，Model Unchanged 处于末尾
-    const previewContainer = screen.getByText("预览结果（未落库）").closest(".rounded-2xl");
+    const previewContainer = screen.getByText("预览结果（未落库）").closest<HTMLElement>(".rounded-2xl");
     const rows = within(previewContainer!).getAllByRole("row");
     // row 0 是 thead，row 1 是 inserted，row 2 是 appended，row 3 是 unchanged
     expect(rows[1]).toHaveTextContent("Model Inserted");
