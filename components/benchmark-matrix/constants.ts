@@ -10,6 +10,10 @@ export const LOWER_IS_BETTER_RULES: RegExp[] = [
 ];
 export const LOWER_IS_BETTER_ASR_TYPE_REGEX = /\basr\b/i;
 
+export const LATEST_VALUE_BENCHMARK_RULES: RegExp[] = [
+  /\b(?:elo)\b/i
+];
+
 export { SOURCE_ALL, SOURCE_EMPTY } from "@/lib/source-utils";
 export const OVERALL_ROW_KEY = "__OVERALL__";
 export const SOURCE_NEW_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;

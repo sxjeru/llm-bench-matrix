@@ -1,4 +1,8 @@
-import { LOWER_IS_BETTER_ASR_TYPE_REGEX, LOWER_IS_BETTER_RULES } from "./constants";
+import {
+  LATEST_VALUE_BENCHMARK_RULES,
+  LOWER_IS_BETTER_ASR_TYPE_REGEX,
+  LOWER_IS_BETTER_RULES
+} from "./constants";
 import type { MatrixRow, OverallScoreDisplayItem } from "./types";
 import { formatValueNumForDisplay } from "./formatters";
 import { isImportValueEmptySegment } from "@/lib/import/value-patterns";
@@ -29,6 +33,28 @@ export function isLowerBetterBenchmark(benchmarkName: string, benchmarkType?: st
   }
 
   return LOWER_IS_BETTER_RULES.some((rule) => rule.test(benchmarkName));
+}
+
+export function isLatestValueBenchmark(
+  benchmarkName?: string | null,
+  benchmarkType?: string | null
+): boolean {
+  if (benchmarkType && LATEST_VALUE_BENCHMARK_RULES.some((rule) => rule.test(benchmarkType))) {
+    return true;
+  }
+
+  if (benchmarkName && LATEST_VALUE_BENCHMARK_RULES.some((rule) => rule.test(benchmarkName))) {
+    return true;
+  }
+
+  return false;
+}
+
+export function isEloBenchmark(
+  benchmarkName?: string | null,
+  benchmarkType?: string | null
+): boolean {
+  return isLatestValueBenchmark(benchmarkName, benchmarkType);
 }
 
 export function getBenchmarkComparableScore(

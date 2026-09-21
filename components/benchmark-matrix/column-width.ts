@@ -245,7 +245,10 @@ export function buildAutoModelWidthMap({
           ? getSourceValueDisplayItem(cell.uniqueEntries, activeSource, row.higherIsBetter, sourceValueMode)
           : null;
         const sourceDeltaRaw = displaySourceValueDeltasInCells && hasMeaningfulMultipleValues
-          ? getSourceValueDeltaRaw(cell.allEntries, activeSource, row.higherIsBetter, sourceValueMode)
+          ? getSourceValueDeltaRaw(cell.allEntries, activeSource, row.higherIsBetter, sourceValueMode, {
+            benchmarkName: row.benchmark,
+            benchmarkType: row.category
+          })
           : null;
         const shouldRenderSourceValues = Boolean(sourceValueItem);
         const hasSourceValueNote = noteText.length > 0 && noteText.toLowerCase() !== "x";
@@ -288,6 +291,7 @@ export function buildAutoModelWidthMap({
     const preferredEntryByGroup = new Map<string, MatrixCellEntry>();
     const higherIsBetterByGroup = new Map<string, boolean>();
     const modelNameByGroup = new Map<string, string>();
+    const rowContextByGroup = new Map<string, { benchmarkName: string; benchmarkType?: string }>();
 
     const rowsForEntries = baseSourceRows && baseSourceRows.length > 0 ? baseSourceRows : coveragePrunedRows;
     rowsForEntries.forEach((row) => {
@@ -305,6 +309,10 @@ export function buildAutoModelWidthMap({
 
       if (!entriesByGroup.has(groupKey)) {
         entriesByGroup.set(groupKey, []);
+        rowContextByGroup.set(groupKey, {
+          benchmarkName: row.benchmarkName,
+          benchmarkType: row.benchmarkType
+        });
         const rowHigherIsBetter = typeof row.higherIsBetter === "boolean"
           ? row.higherIsBetter
           : !isLowerBetterBenchmark(row.benchmarkName, row.benchmarkType);
@@ -314,7 +322,8 @@ export function buildAutoModelWidthMap({
 
       const groupHigherIsBetter = higherIsBetterByGroup.get(groupKey) ?? true;
       const groupEntries = entriesByGroup.get(groupKey) ?? [entry];
-      if (resolveMatrixCellAggregateModeFromEntries(groupEntries) === "latest") {
+      const rowAggregateContext = rowContextByGroup.get(groupKey);
+      if (resolveMatrixCellAggregateModeFromEntries(groupEntries, rowAggregateContext) === "latest") {
         const latest = getLatestMatrixCellEntry(groupEntries);
         if (latest) preferredEntryByGroup.set(groupKey, latest);
       } else {
@@ -331,7 +340,8 @@ export function buildAutoModelWidthMap({
       const modelName = modelNameByGroup.get(groupKey);
       if (!modelName || entries.length === 0) return;
 
-      const preferredEntry = resolveMatrixCellAggregateModeFromEntries(entries) === "latest"
+      const rowAggregateContext = rowContextByGroup.get(groupKey);
+      const preferredEntry = resolveMatrixCellAggregateModeFromEntries(entries, rowAggregateContext) === "latest"
         ? (getLatestMatrixCellEntry(entries) ?? preferredEntryByGroup.get(groupKey) ?? entries[0]!)
         : (preferredEntryByGroup.get(groupKey) ?? entries[0]!);
       const displayValue = getMatrixCellDisplayValue(
@@ -360,7 +370,7 @@ export function buildAutoModelWidthMap({
         ? getSourceValueDisplayItem(uniqueEntries, activeSource, groupHigherIsBetter, sourceValueMode)
         : null;
       const sourceDeltaRaw = displaySourceValueDeltasInCells && hasMeaningfulMultipleValues
-        ? getSourceValueDeltaRaw(uniqueEntries, activeSource, groupHigherIsBetter, sourceValueMode)
+        ? getSourceValueDeltaRaw(entries, activeSource, groupHigherIsBetter, sourceValueMode, rowAggregateContext)
         : null;
       const sourceDeltaPadding = sourceDeltaRaw !== null
         ? Math.min(28, 9 + formatComparisonDeltaValue(sourceDeltaRaw).length * 3)

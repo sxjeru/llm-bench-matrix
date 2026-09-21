@@ -1568,7 +1568,13 @@ export function BenchmarkMatrix({
         }
 
         if (displaySourceValueDeltasInCells && cell.hasMeaningfulMultipleValues) {
-          const deltaRaw = getSourceValueDeltaRaw(cell.allEntries, activeSource, matrixRow.higherIsBetter);
+          const deltaRaw = getSourceValueDeltaRaw(
+            cell.allEntries,
+            activeSource,
+            matrixRow.higherIsBetter,
+            "latest",
+            { benchmarkName: matrixRow.benchmark, benchmarkType: matrixRow.category }
+          );
           if (deltaRaw !== null) {
             const deltaAbs = Math.abs(deltaRaw);
             if (Number.isFinite(deltaAbs)) {
@@ -2534,7 +2540,10 @@ export function BenchmarkMatrix({
                       ? getSourceValueDisplayItem(uniqueEntries, activeSource, matrixRow.higherIsBetter, sourceValueMode)
                       : null;
                     const sourceValueDeltaRaw = displaySourceValueDeltasInCells && cell?.hasMeaningfulMultipleValues
-                      ? getSourceValueDeltaRaw(cell.allEntries, activeSource, matrixRow.higherIsBetter, sourceValueMode)
+                      ? getSourceValueDeltaRaw(cell.allEntries, activeSource, matrixRow.higherIsBetter, sourceValueMode, {
+                        benchmarkName: matrixRow.benchmark,
+                        benchmarkType: matrixRow.category
+                      })
                       : null;
                     const shouldRenderSourceValues = Boolean(sourceValueItem);
                     // 展示 source 原值时，tooltip 收敛到当前 source 的记录，与单元格里的取值范围一致

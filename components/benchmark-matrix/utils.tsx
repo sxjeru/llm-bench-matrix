@@ -19,7 +19,11 @@ import {
 import type { CompareDirection, MatrixCellEntry, MatrixInputRow } from "./types";
 import { SOURCE_ALL } from "./constants";
 import { blendColor } from "./colors";
-import { getMatrixCellDisplayValue, hasMatrixCellPairRawValue } from "./scoring";
+import {
+  getMatrixCellDisplayValue,
+  hasMatrixCellPairRawValue,
+  isLatestValueBenchmark
+} from "./scoring";
 
 export { normalizeModalityName };
 export {
@@ -143,17 +147,32 @@ export type MatrixCellAggregateValues = {
 export type MatrixCellAggregateMode = "median" | "latest";
 export type SourceValueMode = "latest" | "max";
 
+export type MatrixCellAggregateContext = {
+  benchmarkName?: string | null;
+  benchmarkType?: string | null;
+};
+
 function isPairMatrixCellEntry(entry: MatrixCellEntry): boolean {
   return entry.valueNum2 !== null || hasMatrixCellPairRawValue(entry.valueRaw);
 }
 
-export function resolveMatrixCellAggregateMode(source: string | null | undefined): MatrixCellAggregateMode {
+export function resolveMatrixCellAggregateMode(
+  source: string | null | undefined,
+  context?: MatrixCellAggregateContext
+): MatrixCellAggregateMode {
+  if (context && isLatestValueBenchmark(context.benchmarkName, context.benchmarkType)) {
+    return "latest";
+  }
   return isArtificialAnalysisSource(source) ? "latest" : "median";
 }
 
 export function resolveMatrixCellAggregateModeFromEntries(
-  entries: ReadonlyArray<{ source?: string | null }>
+  entries: ReadonlyArray<{ source?: string | null }>,
+  context?: MatrixCellAggregateContext
 ): MatrixCellAggregateMode {
+  if (context && isLatestValueBenchmark(context.benchmarkName, context.benchmarkType)) {
+    return "latest";
+  }
   const sources = entries
     .map((entry) => entry.source)
     .filter((source): source is string => typeof source === "string" && source.trim().length > 0);
@@ -185,14 +204,16 @@ function collapseArtificialAnalysisEntries(entries: MatrixCellEntry[]): MatrixCe
  * （越大越优取较大者，越小越优取较小者），因此结果始终是真实存在的记录。
  * 双值只拿前值参与排序；纯双值集合仍整条记录择优，避免拼出不存在的数值对。
  * Artificial Analysis 按 source 取最新一次同步值，与当前页签无关。
+ * Elo 等基准按行规则取最新一次记录。
  */
 export function aggregateMatrixCellEntries(
   entries: MatrixCellEntry[],
   higherIsBetter = true,
-  mode?: MatrixCellAggregateMode
+  mode?: MatrixCellAggregateMode,
+  context?: MatrixCellAggregateContext
 ): MatrixCellAggregateValues {
   const collapsedEntries = collapseArtificialAnalysisEntries(entries);
-  const effectiveMode = mode ?? resolveMatrixCellAggregateModeFromEntries(collapsedEntries);
+  const effectiveMode = mode ?? resolveMatrixCellAggregateModeFromEntries(collapsedEntries, context);
 
   if (collapsedEntries.length === 0) {
     return { entry: null, valueNum: null, valueNum2: null };
@@ -329,10 +350,13 @@ export function getSourceValueDeltaRaw(
   entries: MatrixCellEntry[],
   activeSource: string,
   higherIsBetter = true,
-  mode: SourceValueMode = "latest"
+  mode: SourceValueMode = "latest",
+  contextOrAggregateMode?: MatrixCellAggregateMode | MatrixCellAggregateContext
 ): number | null {
   const sourceEntry = getSourceValueEntry(entries, activeSource, higherIsBetter, mode);
-  const aggregate = aggregateMatrixCellEntries(entries, higherIsBetter);
+  const aggregateMode = typeof contextOrAggregateMode === "string" ? contextOrAggregateMode : undefined;
+  const context = typeof contextOrAggregateMode === "object" ? contextOrAggregateMode : undefined;
+  const aggregate = aggregateMatrixCellEntries(entries, higherIsBetter, aggregateMode, context);
 
   if (!sourceEntry || sourceEntry.valueNum === null || aggregate.valueNum === null) {
     return null;

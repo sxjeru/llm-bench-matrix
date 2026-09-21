@@ -15,7 +15,11 @@ import {
   resolveMatrixCellAggregateModeFromEntries
 } from "@/components/benchmark-matrix/utils";
 import { calculateBoxPlotStats } from "@/lib/boxplot-stats";
-import { hasMatrixCellPairRawValue } from "@/components/benchmark-matrix/scoring";
+import {
+  hasMatrixCellPairRawValue,
+  isEloBenchmark,
+  isLatestValueBenchmark
+} from "@/components/benchmark-matrix/scoring";
 
 function makeEntry(valueNum: number | null, overrides: Partial<MatrixCellEntry> = {}): MatrixCellEntry {
   return {
@@ -297,5 +301,157 @@ describe("benchmark matrix repeated-value aggregation", () => {
     expect(rows.map((row) => row.benchmark)).toEqual(["Late Bench"]);
     expect(rows[0]!.firstSeenIndex).toBe(2);
     expect(rows[0]!.cells.get("M2")?.valueNum).toBe(30);
+  });
+
+  test("isLatestValueBenchmark 与 isEloBenchmark 能精确识别各种形式的 Elo 基准且不误伤普通词汇", () => {
+    expect(isLatestValueBenchmark("Chatbot Arena (Elo)")).toBe(true);
+    expect(isLatestValueBenchmark("GDPval-AA (Elo)")).toBe(true);
+    expect(isLatestValueBenchmark("Arena Hard (elo)")).toBe(true);
+    expect(isLatestValueBenchmark("Chatbot Arena（Elo）")).toBe(true);
+    expect(isLatestValueBenchmark("LMSYS Chatbot Arena Elo")).toBe(true);
+    expect(isLatestValueBenchmark("Coding Elo")).toBe(true);
+    expect(isLatestValueBenchmark("Arena", "Elo")).toBe(true);
+    expect(isLatestValueBenchmark("Arena", "Arena Elo")).toBe(true);
+
+    expect(isEloBenchmark("Chatbot Arena (Elo)")).toBe(true);
+
+    // 不误伤普通基准及包含 elo 子串的英文单词
+    expect(isLatestValueBenchmark("MMLU-Pro", "General")).toBe(false);
+    expect(isLatestValueBenchmark("GSM8K")).toBe(false);
+    expect(isLatestValueBenchmark("Below Average")).toBe(false);
+    expect(isLatestValueBenchmark("Model Velocity")).toBe(false);
+    expect(isLatestValueBenchmark("Belonging Test")).toBe(false);
+  });
+
+  test("识别到 Elo 行时，无论数据源为何，聚合模式均返回 latest 并展示最新记录", () => {
+    const eloEntries = [
+      makeEntry(1200, { source: "text:LMSYS", benchTime: "2026-03-01T00:00:00.000Z", recordId: 1 }),
+      makeEntry(1250, { source: "text:LMSYS", benchTime: "2026-04-01T00:00:00.000Z", recordId: 2 }),
+      makeEntry(1300, { source: "text:LMSYS", benchTime: "2026-05-01T00:00:00.000Z", recordId: 3 })
+    ];
+
+    const context = { benchmarkName: "Chatbot Arena (Elo)", benchmarkType: "General" };
+
+    // 普通无 context 时，非 AA 仍按中位数
+    expect(resolveMatrixCellAggregateModeFromEntries(eloEntries)).toBe("median");
+    // 传入 Elo 上下文时，自动切换为 latest
+    expect(resolveMatrixCellAggregateModeFromEntries(eloEntries, context)).toBe("latest");
+
+    const aggregate = aggregateMatrixCellEntries(eloEntries, true, undefined, context);
+    expect(aggregate.valueNum).toBe(1300);
+    expect(aggregate.entry?.recordId).toBe(3);
+    expect(aggregate.entry?.benchTime).toBe("2026-05-01T00:00:00.000Z");
+
+    // 跨非 AA 多源也是取最新一条
+    const mixedNonAaEntries = [
+      makeEntry(1220, { source: "text:Source1", benchTime: "2026-03-01T00:00:00.000Z", recordId: 10 }),
+      makeEntry(1350, { source: "text:Source2", benchTime: "2026-06-01T00:00:00.000Z", recordId: 11 }),
+      makeEntry(1280, { source: "text:Source1", benchTime: "2026-04-01T00:00:00.000Z", recordId: 12 })
+    ];
+    const mixedAggregate = aggregateMatrixCellEntries(mixedNonAaEntries, true, undefined, context);
+    expect(mixedAggregate.valueNum).toBe(1350);
+    expect(mixedAggregate.entry?.source).toBe("text:Source2");
+  });
+
+  test("矩阵 buildMatrixRows 对 Elo 行展示最新值，对普通行保持中位数", () => {
+    const eloRows = [
+      {
+        ...makeRow("Model A", 1200, 0),
+        benchmarkName: "Chatbot Arena (Elo)",
+        benchmarkCanonicalKey: "chatbot-arena-elo:general",
+        benchTime: "2026-03-01T00:00:00.000Z",
+        source: "text:LMSYS"
+      },
+      {
+        ...makeRow("Model A", 1250, 1),
+        benchmarkName: "Chatbot Arena (Elo)",
+        benchmarkCanonicalKey: "chatbot-arena-elo:general",
+        benchTime: "2026-04-01T00:00:00.000Z",
+        source: "text:LMSYS"
+      },
+      {
+        ...makeRow("Model A", 1300, 2),
+        benchmarkName: "Chatbot Arena (Elo)",
+        benchmarkCanonicalKey: "chatbot-arena-elo:general",
+        benchTime: "2026-05-01T00:00:00.000Z",
+        source: "text:LMSYS"
+      }
+    ];
+
+    const matrixRows = buildMatrixRows(eloRows, eloRows, false, false, SOURCE_ALL);
+    expect(matrixRows).toHaveLength(1);
+    const cell = matrixRows[0]!.cells.get("Model A");
+    // Elo 行取最新值 1300，而不是中位数 1250
+    expect(cell?.valueNum).toBe(1300);
+    expect(cell?.benchTime).toBe("2026-05-01T00:00:00.000Z");
+
+    // 对比常规行（如 MMLU-Pro）在相同数值下仍取中位数 1250
+    const regularRows = eloRows.map((r) => ({
+      ...r,
+      benchmarkName: "MMLU-Pro",
+      benchmarkCanonicalKey: "mmlu-pro:general"
+    }));
+    const regularMatrixRows = buildMatrixRows(regularRows, regularRows, false, false, SOURCE_ALL);
+    const regularCell = regularMatrixRows[0]!.cells.get("Model A");
+    expect(regularCell?.valueNum).toBe(1250);
+  });
+
+  test("Elo 行的列排序和排名弹窗数据与最新值口径一致", () => {
+    const eloRows = [
+      {
+        ...makeRow("Model 1", 1200, 0),
+        benchmarkName: "Arena (Elo)",
+        benchmarkCanonicalKey: "arena-elo:general",
+        benchTime: "2026-03-01T00:00:00.000Z"
+      },
+      {
+        ...makeRow("Model 1", 1400, 1), // Model 1 最新值为 1400（历史中位数为 1300）
+        benchmarkName: "Arena (Elo)",
+        benchmarkCanonicalKey: "arena-elo:general",
+        benchTime: "2026-05-01T00:00:00.000Z"
+      },
+      {
+        ...makeRow("Model 1", 1300, 2),
+        benchmarkName: "Arena (Elo)",
+        benchmarkCanonicalKey: "arena-elo:general",
+        benchTime: "2026-04-01T00:00:00.000Z"
+      },
+      {
+        ...makeRow("Model 2", 1350, 3), // Model 2 值为 1350
+        benchmarkName: "Arena (Elo)",
+        benchmarkCanonicalKey: "arena-elo:general",
+        benchTime: "2026-04-01T00:00:00.000Z"
+      }
+    ];
+
+    const matrixRows = buildMatrixRows(eloRows, eloRows, false, false, SOURCE_ALL);
+    const eloRow = matrixRows[0]!;
+
+    // Model 1 最新值 1400 > Model 2 的 1350；若按中位数 1300 则 Model 2 会排前面
+    const sortedColumns = buildModelColumns(
+      eloRows,
+      "",
+      eloRow.rowKey,
+      false,
+      {},
+      SOURCE_ALL
+    );
+    expect(sortedColumns.slice(0, 2)).toEqual(["Model 1", "Model 2"]);
+
+    // 排名弹窗数据验证
+    const rankingData = buildBenchmarkRankingData(
+      eloRow,
+      eloRows,
+      ["Model 1", "Model 2"],
+      ["Model 1", "Model 2"],
+      false,
+      "relative"
+    );
+    const item1 = rankingData.items.find((i) => i.modelName === "Model 1");
+    const item2 = rankingData.items.find((i) => i.modelName === "Model 2");
+    expect(item1?.valueNum).toBe(1400);
+    expect(item2?.valueNum).toBe(1350);
+    expect(item1?.rank).toBe(1);
+    expect(item2?.rank).toBe(2);
   });
 });

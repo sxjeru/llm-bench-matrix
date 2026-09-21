@@ -10,6 +10,7 @@ import {
   measureCellDisplayWidth
 } from "../benchmark-matrix/column-width";
 import { getModelColumnWidthKey } from "../benchmark-matrix/utils";
+import { buildMatrixRows } from "../benchmark-matrix/selectors";
 import type { MatrixCell, MatrixInputRow, MatrixRow } from "../benchmark-matrix/types";
 
 describe("measureCellDisplayWidth", () => {
@@ -239,6 +240,74 @@ describe("buildAutoModelWidthMap", () => {
 
     const width = map.get(getModelColumnWidthKey("GPT-4o"))!;
     expect(width).toBeGreaterThanOrEqual(DUAL_VALUE_QUESTION_MARK_MIN_WIDTH);
+  });
+
+  test("Elo 基准展示 source 差值时在两个路径均按 latest 计算 delta 预留列宽", () => {
+    const rows: MatrixInputRow[] = [
+      {
+        providerName: "OpenAI",
+        modelName: "Model A",
+        benchmarkName: "Chatbot Arena (Elo)",
+        benchmarkType: "General",
+        benchmarkCanonicalKey: "chatbot-arena-elo:general",
+        benchTime: "2026-03-01T00:00:00.000Z",
+        valueRaw: "1000",
+        valueNum: 1000,
+        source: "text:S1"
+      },
+      {
+        providerName: "OpenAI",
+        modelName: "Model A",
+        benchmarkName: "Chatbot Arena (Elo)",
+        benchmarkType: "General",
+        benchmarkCanonicalKey: "chatbot-arena-elo:general",
+        benchTime: "2026-04-01T00:00:00.000Z",
+        valueRaw: "1100",
+        valueNum: 1100,
+        source: "text:S2"
+      },
+      {
+        providerName: "OpenAI",
+        modelName: "Model A",
+        benchmarkName: "Chatbot Arena (Elo)",
+        benchmarkType: "General",
+        benchmarkCanonicalKey: "chatbot-arena-elo:general",
+        benchTime: "2026-05-01T00:00:00.000Z",
+        valueRaw: "2000",
+        valueNum: 2000,
+        source: "text:S2"
+      }
+    ];
+
+    // 路径 2：未传入 matrixRows 的回退路径
+    const mapFallback = buildAutoModelWidthMap({
+      modelColumns: ["Model A"],
+      coveragePrunedRows: rows,
+      showDuplicateRows: false,
+      displaySourceValuesInCells: true,
+      displaySourceValueDeltasInCells: true,
+      activeSource: "text:S1",
+      sourceValueMode: "latest"
+    });
+
+    // 路径 1：传入 matrixRows 的主路径
+    const matrixRows = buildMatrixRows(rows, rows, false, true, "text:S1");
+    const mapWithMatrixRows = buildAutoModelWidthMap({
+      modelColumns: ["Model A"],
+      coveragePrunedRows: rows,
+      matrixRows,
+      showDuplicateRows: false,
+      displaySourceValuesInCells: true,
+      displaySourceValueDeltasInCells: true,
+      activeSource: "text:S1",
+      sourceValueMode: "latest"
+    });
+
+    const key = getModelColumnWidthKey("Model A");
+    expect(mapFallback.get(key)).toBeDefined();
+    expect(mapWithMatrixRows.get(key)).toBeDefined();
+    // 两个路径的测算宽度完全一致，且均按 delta = -1000 测算
+    expect(mapFallback.get(key)).toBe(mapWithMatrixRows.get(key));
   });
 });
 

@@ -9,6 +9,8 @@ export * from "./constants";
 // Re-export all functions from scoring module
 export {
   isLowerBetterBenchmark,
+  isLatestValueBenchmark,
+  isEloBenchmark,
   getBenchmarkComparableScore,
   getMatrixRowComparableScore,
   getBenchmarkBestComparableScore,
@@ -74,6 +76,7 @@ export {
   getSourceValueDeltaRaw,
   getSourceValueDisplayItem,
   type SourceValueMode,
+  type MatrixCellAggregateContext,
   parseTimestampMs,
   getSourceKey,
   getSourceLabel,

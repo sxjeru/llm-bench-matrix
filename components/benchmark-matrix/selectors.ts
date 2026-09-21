@@ -1047,10 +1047,15 @@ export function buildModelColumns(
       : matchingRows.some((candidate) => candidate.higherIsBetter === true)
         ? true
         : !isLowerBetterBenchmark(representativeRow.benchmarkName, representativeRow.benchmarkType);
+    const rowAggregateContext = {
+      benchmarkName: representativeRow.benchmarkName,
+      benchmarkType: representativeRow.benchmarkType
+    };
     const aggregate = aggregateMatrixCellEntries(
       entries,
       higherIsBetter,
-      resolveMatrixCellAggregateModeFromEntries(entries)
+      resolveMatrixCellAggregateModeFromEntries(entries, rowAggregateContext),
+      rowAggregateContext
     );
     // 重名 benchmark 合并后各行的 name / type 可能不同，可比分要用聚合命中的那一行来算
     const scoringRow = (aggregate.entry ? entryRowMap.get(aggregate.entry) : null) ?? representativeRow;
@@ -1322,11 +1327,16 @@ export function buildMatrixRows(
         const sourceEntry = displaySourceValuesInCells && hasMeaningfulMultipleValues
           ? getSourceValueEntry(uniqueEntries, activeSource, matrixRow.higherIsBetter, sourceValueMode)
           : null;
-        // Artificial Analysis 默认展示最新值；其余 source 仍用中位数
+        // Artificial Analysis 默认展示最新值；Elo 类行按规则展示最新值；其余 source 仍用中位数
+        const rowAggregateContext = {
+          benchmarkName: matrixRow.benchmark,
+          benchmarkType: matrixRow.category
+        };
         const aggregate = aggregateMatrixCellEntries(
           cell.allEntries,
           matrixRow.higherIsBetter,
-          resolveMatrixCellAggregateModeFromEntries(cell.allEntries)
+          resolveMatrixCellAggregateModeFromEntries(cell.allEntries, rowAggregateContext),
+          rowAggregateContext
         );
         // 没有 sourceEntry 时整格都以聚合出的那条记录为准：数值、原始文本、货币符号、星标、
         // source 与 benchTime 必须同源，否则会出现「显示 $9.00、排序按 5」这类错位
@@ -2076,12 +2086,17 @@ export function buildBenchmarkRankingData(
       }
     });
   } else {
-    // 排名弹窗与主表同一口径：按单元格 source 推断，AA 取最新值
+    // 排名弹窗与主表同一口径：按单元格 source 及行规则推断，AA 与 Elo 取最新值
+    const rowAggregateContext = {
+      benchmarkName: matrixRow.benchmark,
+      benchmarkType: matrixRow.category
+    };
     cellsByModel.forEach((cell) => {
       const aggregate = aggregateMatrixCellEntries(
         cell.allEntries,
         matrixRow.higherIsBetter,
-        resolveMatrixCellAggregateModeFromEntries(cell.allEntries)
+        resolveMatrixCellAggregateModeFromEntries(cell.allEntries, rowAggregateContext),
+        rowAggregateContext
       );
       if (aggregate.entry) {
         cell.valueRaw = aggregate.entry.valueRaw;
