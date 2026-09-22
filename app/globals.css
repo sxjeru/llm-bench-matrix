@@ -511,20 +511,54 @@ body.column-resizing * {
   user-select: none !important;
 }
 
+/* 徽章系统全局适配：兼容 DaisyUI 变量与旧版手写徽章，彻底解决未分层样式导致的对比度覆盖问题 */
 .badge {
   display: inline-flex;
   align-items: center;
-  border: 1px solid #355086;
+  border: 1px solid var(--badge-color, #355086);
   border-radius: 999px;
   padding: 2px 10px;
   font-size: 12px;
-  color: #c8dcff;
+  color: var(--badge-fg, #c8dcff);
 }
 
-/* warning 黄底上用深色字，避免被上面默认浅色盖掉导致对比度不足 */
-.badge.badge-warning {
-  color: #422006;
+/* 亮底实心徽章：使用深色字与透明边框，彻底避免被全局默认浅色覆盖导致对比度严重不足 */
+.badge.badge-warning:not(.badge-outline):not(.badge-soft) {
+  color: var(--color-warning-content, #422006);
   font-weight: 600;
+  border-color: transparent;
+}
+
+.badge.badge-success:not(.badge-outline):not(.badge-soft) {
+  color: var(--color-success-content, #052e16);
+  font-weight: 600;
+  border-color: transparent;
+}
+
+.badge.badge-info:not(.badge-outline):not(.badge-soft) {
+  color: var(--color-info-content, #041c2c);
+  font-weight: 600;
+  border-color: transparent;
+}
+
+.badge.badge-error:not(.badge-outline):not(.badge-soft) {
+  color: var(--color-error-content, #450a0a);
+  font-weight: 600;
+  border-color: transparent;
+}
+
+/* outline 描边徽章：统一继承自身主题强调色与边框，避免被全局未分层样式冲刷 */
+.badge.badge-outline {
+  color: var(--badge-color, currentColor);
+  border-color: currentColor;
+  background-color: transparent;
+}
+
+/* soft 柔光徽章：自动根据主题强调色渲染微透背景与清晰字体 */
+.badge.badge-soft {
+  color: var(--badge-color, var(--color-base-content));
+  border-color: color-mix(in oklab, var(--badge-color, var(--color-base-content)) 20%, transparent);
+  background-color: color-mix(in oklab, var(--badge-color, var(--color-base-content)) 14%, transparent);
 }
 
 /* 深色主题下原生 option 默认白底，后台 select 展开后会看不清 */

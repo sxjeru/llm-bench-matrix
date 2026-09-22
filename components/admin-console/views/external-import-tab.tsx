@@ -211,20 +211,21 @@ export function ExternalImportTab({
     "all" | "changed" | "inserted" | "appended" | "unchanged" | "skipped"
   >("all");
 
+  const preview = summary?.preview;
   const sortedPreview = useMemo(() => {
-    if (!summary?.preview) return [];
+    if (!preview) return [];
     const outcomeOrder: Record<string, number> = {
       inserted: 0,
       appended: 1,
       unchanged: 2,
       skipped: 3
     };
-    return [...summary.preview].sort((a, b) => {
+    return [...preview].sort((a, b) => {
       const orderA = outcomeOrder[a.outcome] ?? 99;
       const orderB = outcomeOrder[b.outcome] ?? 99;
       return orderA - orderB;
     });
-  }, [summary?.preview]);
+  }, [preview]);
 
   const filteredPreview = useMemo(() => {
     if (previewFilter === "all") return sortedPreview;
@@ -547,7 +548,7 @@ export function ExternalImportTab({
                             {isNew ? (
                               <span
                                 data-testid={`new-match-badge-${row.modelId}`}
-                                className="badge badge-success badge-xs shrink-0 font-medium whitespace-nowrap"
+                                className="badge badge-success badge-xs shrink-0 font-semibold whitespace-nowrap"
                               >
                                 新
                               </span>
@@ -855,13 +856,13 @@ export function ExternalImportTab({
                     <td className="font-mono text-xs opacity-60">{row.previousValue ?? "--"}</td>
                     <td className="text-xs">
                       {row.outcome === "inserted" ? (
-                        <span className="badge badge-success badge-sm font-medium">新增</span>
+                        <span className="badge badge-success badge-sm font-semibold">新增</span>
                       ) : row.outcome === "appended" ? (
-                        <span className="badge badge-info badge-sm font-medium">追加历史</span>
+                        <span className="badge badge-info badge-sm font-semibold">追加历史</span>
                       ) : row.outcome === "unchanged" ? (
                         <span className="badge badge-ghost badge-sm opacity-80">覆盖（值未变）</span>
                       ) : (
-                        <span className="badge badge-warning badge-sm font-medium">跳过</span>
+                        <span className="badge badge-warning badge-sm font-semibold">跳过</span>
                       )}
                     </td>
                   </tr>
