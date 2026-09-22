@@ -68,6 +68,7 @@ let normalizeDuplicateCompareTextForTest: (input: string) => string;
 let getDuplicateNameSimilarityForTest: (left: string, right: string) => number;
 let hasBenchmarkNumericTokenMismatchForTest: (left: string, right: string) => boolean;
 let hasBenchmarkVariantNoiseNormalizedNameMatchForTest: (left: string, right: string) => boolean;
+let sanitizeHtmlTableForImportForTest: (inputHtml: string) => string;
 
 beforeAll(async () => {
   process.env.DATABASE_URL ??= "postgres://test:test@127.0.0.1:5432/test";
@@ -83,6 +84,8 @@ beforeAll(async () => {
     adminServiceModule.__hasBenchmarkNumericTokenMismatchForTest as typeof hasBenchmarkNumericTokenMismatchForTest;
   hasBenchmarkVariantNoiseNormalizedNameMatchForTest =
     adminServiceModule.__hasBenchmarkVariantNoiseNormalizedNameMatchForTest as typeof hasBenchmarkVariantNoiseNormalizedNameMatchForTest;
+  sanitizeHtmlTableForImportForTest =
+    adminServiceModule.__sanitizeHtmlTableForImportForTest as typeof sanitizeHtmlTableForImportForTest;
 });
 
 describe("paper-table 文本解析", () => {
@@ -729,6 +732,32 @@ describe("paper-table 文本解析", () => {
       row.benchmarkName.includes("Long-horizon")
     );
     expect(dirtyNameRows).toHaveLength(0);
+  });
+
+  test("HTML 表格净化可彻底清除嵌套和各种形式的 HTML 注释以防注入", () => {
+    // 嵌套注释
+    const nestedCommentHtml = "<div>prefix<!-- outer <!-- inner --> outer-tail -->suffix</div>";
+    expect(sanitizeHtmlTableForImportForTest(nestedCommentHtml)).toBe("<div>prefixsuffix</div>");
+
+    // HTML5 注释 (--!>)
+    const html5Comment = "<table><!-- comment --!><tr><td>100</td></tr></table>";
+    expect(sanitizeHtmlTableForImportForTest(html5Comment)).toBe("<table><tr><td>100</td></tr></table>");
+
+    // 多段独立注释
+    const multipleComments = "<!-- c1 --><tr><!-- c2 --><td>val</td><!-- c3 --></tr><!-- c4 -->";
+    expect(sanitizeHtmlTableForImportForTest(multipleComments)).toBe("<tr><td>val</td></tr>");
+
+    // 未闭合注释不会导致死循环
+    const unclosedComment = "<table><!-- unclosed tr><td>val</td>";
+    expect(sanitizeHtmlTableForImportForTest(unclosedComment)).toBe("<table><!-- unclosed tr><td>val</td>");
+
+    // 注释与评测注释元素嵌套并存
+    const complexNested = '<td><div class="score-capability"><!-- comment inside -->text</div><!-- comment outside --></td>';
+    expect(sanitizeHtmlTableForImportForTest(complexNested)).toBe("<td></td>");
+
+    // 空/异常输入
+    expect(sanitizeHtmlTableForImportForTest("")).toBe("");
+    expect(sanitizeHtmlTableForImportForTest(null as unknown as string)).toBe("");
   });
 
   test("多行堆叠模型表头可重建并正确对齐数值列", async () => {

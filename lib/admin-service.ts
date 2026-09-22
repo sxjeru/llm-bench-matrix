@@ -728,10 +728,17 @@ const HTML_ANNOTATION_ELEMENT_CLASS_REGEX =
   /\b(?:score-(?:capability|desc(?:ription)?|sub(?:title)?|note|footnote|annotation)|benchmark-(?:capability|desc(?:ription)?|note|subtitle))\b/i;
 
 function sanitizeHtmlTableForImport(inputHtml: string): string {
-  let current = inputHtml.replace(/<!--[\s\S]*?-->/g, "");
+  if (!inputHtml || typeof inputHtml !== "string") {
+    return "";
+  }
+
+  let current = inputHtml;
   let prev = "";
   while (prev !== current) {
     prev = current;
+    while (current.includes("<!--") && /<!--(?:(?!<!--)[\s\S])*?(?:-->|--!>)/.test(current)) {
+      current = current.replace(/<!--(?:(?!<!--)[\s\S])*?(?:-->|--!>)/g, "");
+    }
     current = current.replace(/<(div|span|p|small)\b([^>]*)>([\s\S]*?)<\/\1>/gi, (match, _tag, attrs) => {
       const classMatch = attrs.match(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
       const className = classMatch ? (classMatch[1] || classMatch[2] || classMatch[3] || "") : "";
@@ -7437,4 +7444,8 @@ export async function __buildProviderCanonicalNameResolverForTest(
 
 export function __invalidateDuplicateCandidatesCacheForTest() {
   invalidateVersionedCacheStore(duplicateCandidatesStore);
+}
+
+export function __sanitizeHtmlTableForImportForTest(inputHtml: string): string {
+  return sanitizeHtmlTableForImport(inputHtml);
 }
