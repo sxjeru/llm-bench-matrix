@@ -455,6 +455,211 @@ export function compareModelNameByColumnOrder(left: string, right: string, colla
   return collator.compare(right, left);
 }
 
+const EXPAND_SOURCE_COMPOUND_NAMES_CACHE_LIMIT = 4096;
+const expandSourceCompoundNamesCache = new Map<string, readonly string[]>();
+
+const KNOWN_MODEL_VARIANTS = new Set([
+  "mythos",
+  "fable",
+  "opus",
+  "sonnet",
+  "haiku",
+  "astra",
+  "sol",
+  "terra",
+  "luna",
+  "ultra",
+  "super",
+  "max",
+  "pro",
+  "flash",
+  "mini",
+  "nano",
+  "base",
+  "turbo",
+  "plus",
+  "lite"
+]);
+
+function isScaleToken(token: string): boolean {
+  return /^[eE]?\d+(?:\.\d+)?[bB]$|^\d+x\d+[bB]$/.test(token);
+}
+
+function isVersionToken(token: string): boolean {
+  return /^[vV]?\d+(?:\.\d+)*$|^[rR]\d+$/.test(token);
+}
+
+function isVariantWord(token: string): boolean {
+  const clean = token.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return KNOWN_MODEL_VARIANTS.has(clean) || isScaleToken(token) || isVersionToken(token);
+}
+
+function findVariantSpan(tokens: readonly string[]): { index: number; length: number } | null {
+  // 1. Multi-word variants (e.g. sol ultra, flash lite)
+  for (let i = 0; i < tokens.length - 1; i++) {
+    const w1 = tokens[i].toLowerCase().replace(/[^a-z0-9]/g, "");
+    const w2 = tokens[i + 1].toLowerCase().replace(/[^a-z0-9]/g, "");
+    if ((w1 === "sol" && w2 === "ultra") || (w1 === "flash" && w2 === "lite")) {
+      return { index: i, length: 2 };
+    }
+  }
+
+  // 2. Known model variants (tiers, named variants like sol, luna, pro, etc.)
+  for (let i = 0; i < tokens.length; i++) {
+    const clean = tokens[i].toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (KNOWN_MODEL_VARIANTS.has(clean)) {
+      return { index: i, length: 1 };
+    }
+  }
+
+  // 3. Scale tokens (e.g. 8B, 70B)
+  for (let i = 0; i < tokens.length; i++) {
+    if (isScaleToken(tokens[i])) {
+      return { index: i, length: 1 };
+    }
+  }
+
+  // 4. Version tokens (e.g. V3, R1) - only if preceded by family name
+  for (let i = tokens.length - 1; i >= 1; i--) {
+    if (isVersionToken(tokens[i])) {
+      return { index: i, length: 1 };
+    }
+  }
+
+  return null;
+}
+
+export function expandSourceCompoundNames(sourceLabel: string): string[] {
+  const cached = expandSourceCompoundNamesCache.get(sourceLabel);
+  if (cached !== undefined) return [...cached];
+
+  const cleanLabel = sourceTabDisplayLabel(sourceLabel).trim();
+  if (!cleanLabel) return [];
+
+  const setCacheAndReturn = (result: readonly string[]): string[] => {
+    if (expandSourceCompoundNamesCache.size >= EXPAND_SOURCE_COMPOUND_NAMES_CACHE_LIMIT) {
+      expandSourceCompoundNamesCache.clear();
+    }
+    const frozen = Object.freeze([...result]);
+    expandSourceCompoundNamesCache.set(sourceLabel, frozen);
+    return [...frozen];
+  };
+
+  // Check if string contains compound delimiter
+  const delimiterRegex = /\s*[/|／｜]\s*/;
+  if (!delimiterRegex.test(cleanLabel)) {
+    return setCacheAndReturn([cleanLabel]);
+  }
+
+  // Check repo-style path: org/repo with no spaces and no variant tokens
+  if (
+    /^[a-zA-Z0-9_\.\-]+[/][a-zA-Z0-9_\.\-]+$/.test(cleanLabel) &&
+    !cleanLabel.includes(" ")
+  ) {
+    const [leftPart, rightPart] = cleanLabel.split("/");
+    const leftHasVariant = isVariantWord(leftPart);
+    const rightHasVariant = isVariantWord(rightPart);
+    if (!leftHasVariant && !rightHasVariant) {
+      return setCacheAndReturn([cleanLabel]);
+    }
+  }
+
+  const rawSegments = cleanLabel
+    .split(delimiterRegex)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (rawSegments.length <= 1) {
+    return setCacheAndReturn([cleanLabel]);
+  }
+
+  const s0 = rawSegments[0];
+  const tokens0 = s0.split(/\s+/);
+  const span0 = findVariantSpan(tokens0);
+
+  const prefixTokens0 = span0 ? tokens0.slice(0, span0.index) : tokens0.slice(0, Math.max(1, tokens0.length - 1));
+  const suffixTokens0 = span0 ? tokens0.slice(span0.index + span0.length) : [];
+
+  const results: string[] = [];
+  let s0WithSuffix: string | null = null;
+
+  for (let i = 1; i < rawSegments.length; i++) {
+    const sI = rawSegments[i];
+    const tokensI = sI.split(/\s+/);
+
+    // Case 1: sI already starts with prefixTokens0
+    if (
+      prefixTokens0.length > 0 &&
+      tokensI.length >= prefixTokens0.length &&
+      tokensI.slice(0, prefixTokens0.length).join(" ").toLowerCase() === prefixTokens0.join(" ").toLowerCase()
+    ) {
+      results.push(sI);
+      continue;
+    }
+
+    // Case 2: sI starts with a sub-slice of prefixTokens0 (e.g. "3.5 Haiku" after "Claude 3.5 Sonnet")
+    let sharedSubPrefixIndex = -1;
+    for (let p = 1; p < prefixTokens0.length; p++) {
+      const subPrefix = prefixTokens0.slice(p).join(" ").toLowerCase();
+      if (tokensI.join(" ").toLowerCase().startsWith(subPrefix)) {
+        sharedSubPrefixIndex = p;
+        break;
+      }
+    }
+    if (sharedSubPrefixIndex > 0) {
+      const missingPrefix = prefixTokens0.slice(0, sharedSubPrefixIndex);
+      results.push([...missingPrefix, ...tokensI].join(" "));
+      continue;
+    }
+
+    // Case 3: Structure-aware expansion based on variant & suffix
+    const spanI = findVariantSpan(tokensI);
+    if (spanI) {
+      const prefixI = tokensI.slice(0, spanI.index);
+      const variantI = tokensI.slice(spanI.index, spanI.index + spanI.length);
+      const suffixI = tokensI.slice(spanI.index + spanI.length);
+
+      // If sI has a suffix but s0 has none, propagate suffix to s0
+      if (suffixI.length > 0 && suffixTokens0.length === 0 && !s0WithSuffix) {
+        s0WithSuffix = [...tokens0, ...suffixI].join(" ");
+      }
+
+      const effectivePrefix = prefixI.length > 0 ? prefixI : prefixTokens0;
+      const effectiveSuffix = suffixI.length > 0 ? suffixI : suffixTokens0;
+
+      results.push([...effectivePrefix, ...variantI, ...effectiveSuffix].join(" "));
+      continue;
+    }
+
+    // Case 4: General token-count fallback
+    if (suffixTokens0.length > 0) {
+      results.push([...prefixTokens0, ...tokensI, ...suffixTokens0].join(" "));
+    } else {
+      results.push([...prefixTokens0, ...tokensI].join(" "));
+    }
+  }
+
+  const initialExpanded: string[] = [];
+  if (s0WithSuffix) {
+    initialExpanded.push(s0WithSuffix);
+  }
+  initialExpanded.push(s0);
+  initialExpanded.push(...results);
+
+  // Return deduplicated results
+  const seen = new Set<string>();
+  const finalResults: string[] = [];
+  for (const item of initialExpanded) {
+    const trimmed = item.trim();
+    if (trimmed && !seen.has(trimmed.toLowerCase())) {
+      seen.add(trimmed.toLowerCase());
+      finalResults.push(trimmed);
+    }
+  }
+
+  return setCacheAndReturn(finalResults);
+}
+
 function normalizeHeaderPrefixMatchToken(input: string): string {
   return input
     .toLowerCase()
@@ -463,11 +668,15 @@ function normalizeHeaderPrefixMatchToken(input: string): string {
 }
 
 export function isSourceHeaderPrefixMatch(modelName: string, sourceLabel: string): boolean {
-  const normalizedSourceLabel = normalizeHeaderPrefixMatchToken(sourceLabel);
-  if (!normalizedSourceLabel) return false;
+  if (!modelName || !sourceLabel) return false;
 
   const normalizedModelName = normalizeHeaderPrefixMatchToken(modelName);
   if (!normalizedModelName) return false;
 
-  return normalizedModelName.startsWith(normalizedSourceLabel);
+  const targetLabels = expandSourceCompoundNames(sourceLabel);
+  return targetLabels.some((target) => {
+    const normalizedTarget = normalizeHeaderPrefixMatchToken(target);
+    if (!normalizedTarget) return false;
+    return normalizedModelName.startsWith(normalizedTarget);
+  });
 }

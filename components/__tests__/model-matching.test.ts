@@ -5,7 +5,9 @@ import {
   compareSourceTabKeysByVersion,
   compareModelNameByColumnOrder,
   extractModelTierToken,
-  getModelFamilyMatchKey
+  getModelFamilyMatchKey,
+  expandSourceCompoundNames,
+  isSourceHeaderPrefixMatch
 } from "../benchmark-matrix/model-matching";
 
 describe("model-matching variant sorting", () => {
@@ -220,6 +222,100 @@ describe("model-matching variant sorting", () => {
     expect(
       ["text:Muse Spark", "text:Muse Spark Thinking", "text:Muse Spark 1.1"].sort(compareSourceTabKeysByVersion)
     ).toEqual(["text:Muse Spark 1.1", "text:Muse Spark", "text:Muse Spark Thinking"]);
+  });
+});
+
+describe("expandSourceCompoundNames and isSourceHeaderPrefixMatch", () => {
+  test("expandSourceCompoundNames correctly expands compound model names", () => {
+    expect(expandSourceCompoundNames("GPT-6 Sol / Luna")).toEqual(["GPT-6 Sol", "GPT-6 Luna"]);
+    expect(expandSourceCompoundNames("Claude Fable 5.1 / Mythos 5.1")).toEqual(["Claude Fable 5.1", "Claude Mythos 5.1"]);
+    expect(expandSourceCompoundNames("Claude Fable / Mythos 5.1")).toEqual(["Claude Fable 5.1", "Claude Fable", "Claude Mythos 5.1"]);
+    expect(expandSourceCompoundNames("Claude 3.5 Sonnet / Haiku")).toEqual(["Claude 3.5 Sonnet", "Claude 3.5 Haiku"]);
+    expect(expandSourceCompoundNames("Claude 3.5 Sonnet / 3.5 Haiku")).toEqual(["Claude 3.5 Sonnet", "Claude 3.5 Haiku"]);
+    expect(expandSourceCompoundNames("Llama 3.1 8B / 70B / 405B")).toEqual(["Llama 3.1 8B", "Llama 3.1 70B", "Llama 3.1 405B"]);
+    expect(expandSourceCompoundNames("DeepSeek V3 / R1")).toEqual(["DeepSeek V3", "DeepSeek R1"]);
+    expect(expandSourceCompoundNames("Gemini 1.5 Pro / Flash")).toEqual(["Gemini 1.5 Pro", "Gemini 1.5 Flash"]);
+    expect(expandSourceCompoundNames("GPT-4o / GPT-4o mini")).toEqual(["GPT-4o", "GPT-4o mini"]);
+    expect(expandSourceCompoundNames("Nemotron 3 Ultra / Super")).toEqual(["Nemotron 3 Ultra", "Nemotron 3 Super"]);
+    expect(expandSourceCompoundNames("Qwen 2.5 7B / 14B / 32B / 72B")).toEqual([
+      "Qwen 2.5 7B",
+      "Qwen 2.5 14B",
+      "Qwen 2.5 32B",
+      "Qwen 2.5 72B"
+    ]);
+  });
+
+  test("expandSourceCompoundNames preserves non-compound sources and repo IDs", () => {
+    expect(expandSourceCompoundNames("Gemma 4")).toEqual(["Gemma 4"]);
+    expect(expandSourceCompoundNames("meta-llama/Llama-3-8B")).toEqual(["meta-llama/Llama-3-8B"]);
+    expect(expandSourceCompoundNames("text:GPT-6 Sol / Luna")).toEqual(["GPT-6 Sol", "GPT-6 Luna"]);
+    expect(expandSourceCompoundNames("")).toEqual([]);
+  });
+
+  test("expandSourceCompoundNames returns a defensive copy and does not pollute cache on mutation", () => {
+    const source = "GPT-6 Sol / Luna";
+    const firstCall = expandSourceCompoundNames(source);
+    expect(firstCall).toEqual(["GPT-6 Sol", "GPT-6 Luna"]);
+
+    // Mutate the returned array
+    firstCall.push("Corrupted Model");
+    expect(firstCall).toContain("Corrupted Model");
+
+    // Next call from cache should be pristine
+    const secondCall = expandSourceCompoundNames(source);
+    expect(secondCall).toEqual(["GPT-6 Sol", "GPT-6 Luna"]);
+    expect(secondCall).not.toContain("Corrupted Model");
+  });
+
+  test("isSourceHeaderPrefixMatch matches GPT-6 Sol and GPT-6 Luna but NOT unrelated luna models", () => {
+    const source = "GPT-6 Sol / Luna";
+
+    // Positives
+    expect(isSourceHeaderPrefixMatch("GPT-6 Sol", source)).toBe(true);
+    expect(isSourceHeaderPrefixMatch("GPT-6 Luna", source)).toBe(true);
+    expect(isSourceHeaderPrefixMatch("GPT-6-Sol", source)).toBe(true);
+    expect(isSourceHeaderPrefixMatch("GPT-6-Luna", source)).toBe(true);
+    expect(isSourceHeaderPrefixMatch("GPT-6 Sol (Thinking)", source)).toBe(true);
+    expect(isSourceHeaderPrefixMatch("GPT-6 Luna (Thinking)", source)).toBe(true);
+    expect(isSourceHeaderPrefixMatch("GPT-6 Luna Preview", source)).toBe(true);
+
+    // Negatives: models that contain luna or sol but are not GPT-6 Sol / Luna
+    expect(isSourceHeaderPrefixMatch("Luna 8B", source)).toBe(false);
+    expect(isSourceHeaderPrefixMatch("Luna", source)).toBe(false);
+    expect(isSourceHeaderPrefixMatch("Solar Luna", source)).toBe(false);
+    expect(isSourceHeaderPrefixMatch("Luna AI", source)).toBe(false);
+    expect(isSourceHeaderPrefixMatch("Baidu Luna", source)).toBe(false);
+    expect(isSourceHeaderPrefixMatch("GPT-6 Astra", source)).toBe(false);
+    expect(isSourceHeaderPrefixMatch("GPT-6 Terra", source)).toBe(false);
+    expect(isSourceHeaderPrefixMatch("GPT-4", source)).toBe(false);
+  });
+
+  test("isSourceHeaderPrefixMatch matches Claude Fable 5.1 and Claude Mythos 5.1 without false positives", () => {
+    const source = "Claude Fable 5.1 / Mythos 5.1";
+
+    // Positives
+    expect(isSourceHeaderPrefixMatch("Claude Fable 5.1", source)).toBe(true);
+    expect(isSourceHeaderPrefixMatch("Claude Mythos 5.1", source)).toBe(true);
+    expect(isSourceHeaderPrefixMatch("Claude-Fable-5.1", source)).toBe(true);
+    expect(isSourceHeaderPrefixMatch("Claude-Mythos-5.1", source)).toBe(true);
+    expect(isSourceHeaderPrefixMatch("Claude Fable 5.1 (Thinking)", source)).toBe(true);
+    expect(isSourceHeaderPrefixMatch("Claude Mythos 5.1 Preview", source)).toBe(true);
+
+    // Negatives
+    expect(isSourceHeaderPrefixMatch("Mythos 5.1", source)).toBe(false);
+    expect(isSourceHeaderPrefixMatch("Claude Sonnet 5.1", source)).toBe(false);
+    expect(isSourceHeaderPrefixMatch("Claude Opus 4.8", source)).toBe(false);
+    expect(isSourceHeaderPrefixMatch("Claude Haiku 5.1", source)).toBe(false);
+    expect(isSourceHeaderPrefixMatch("Claude Fable 4.5", source)).toBe(false);
+  });
+
+  test("isSourceHeaderPrefixMatch handles single non-compound sources seamlessly", () => {
+    expect(isSourceHeaderPrefixMatch("Gemma 4 27B", "Gemma 4")).toBe(true);
+    expect(isSourceHeaderPrefixMatch("Gemma 4 9B", "Gemma 4")).toBe(true);
+    expect(isSourceHeaderPrefixMatch("Gemma 2 9B", "Gemma 4")).toBe(false);
+    expect(isSourceHeaderPrefixMatch("Llama 3", "Gemma 4")).toBe(false);
+    expect(isSourceHeaderPrefixMatch("", "Gemma 4")).toBe(false);
+    expect(isSourceHeaderPrefixMatch("Gemma 4", "")).toBe(false);
   });
 });
 

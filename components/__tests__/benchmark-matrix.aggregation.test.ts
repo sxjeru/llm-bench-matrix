@@ -454,4 +454,27 @@ describe("benchmark matrix repeated-value aggregation", () => {
     expect(item1?.rank).toBe(1);
     expect(item2?.rank).toBe(2);
   });
+
+  test("buildModelColumns sorts compound source models to Rank 0 at the front", () => {
+    const rows: MatrixInputRow[] = [
+      makeRow("Claude 3.5 Sonnet", 90, 0),
+      makeRow("GPT-4", 80, 1),
+      makeRow("GPT-6 Sol", 95, 2),
+      makeRow("GPT-6 Luna", 92, 3),
+      makeRow("Luna 8B", 70, 4)
+    ];
+
+    const sortedColumns = buildModelColumns(
+      rows,
+      "gpt 6 sol luna",
+      null,
+      false,
+      {},
+      "text:GPT-6 Sol / Luna"
+    );
+
+    expect(sortedColumns.slice(0, 2)).toEqual(["GPT-6 Sol", "GPT-6 Luna"]);
+    expect(sortedColumns).toContain("Luna 8B");
+    expect(sortedColumns.indexOf("Luna 8B")).toBeGreaterThan(1);
+  });
 });

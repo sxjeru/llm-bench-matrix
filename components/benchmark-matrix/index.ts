@@ -53,6 +53,7 @@ export {
   compareModelTierPriority,
   getModelFamilyMatchKey,
   compareModelNameByColumnOrder,
+  expandSourceCompoundNames,
   isSourceHeaderPrefixMatch
 } from "./model-matching";
 

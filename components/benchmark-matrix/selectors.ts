@@ -16,7 +16,8 @@ import {
 import {
   compareModelNameByColumnOrder,
   compareSourceTabKeysByVersion,
-  getModelFamilyMatchKey
+  getModelFamilyMatchKey,
+  isSourceHeaderPrefixMatch
 } from "./model-matching";
 import {
   buildDenseRankMap,
@@ -66,7 +67,8 @@ import {
   normalizeModalityList,
   parseTimestampMs,
   pickPreferredBenchmarkDisplayName,
-  resolveMatrixCellAggregateModeFromEntries
+  resolveMatrixCellAggregateModeFromEntries,
+  sourceTabDisplayLabel
 } from "./utils";
 import type { SourceValueMode } from "./utils";
 import {
@@ -485,7 +487,7 @@ export function buildProviderGroups(coverageMetaByModel: CoverageMetaByModel, so
       const normalizedProvider = normalizeMatchToken(providerName);
       const isSourceRelated = sourceModelHint.length > 0 && (
         normalizedProvider.includes(sourceModelHint) ||
-        models.some((modelName) => normalizeMatchToken(modelName).includes(sourceModelHint))
+        models.some((modelName) => isSourceHeaderPrefixMatch(modelName, sourceModelHint) || normalizeMatchToken(modelName).includes(sourceModelHint))
       );
 
       return {
@@ -826,9 +828,11 @@ export function buildModelColumns(
 
   const baseOrderedModels = (() => {
     if (activeSource !== SOURCE_ALL) {
-      const sourceFamilyHint = getModelFamilyMatchKey(sourceModelHint);
+      const sourceLabel = sourceTabDisplayLabel(activeSource).trim();
+      const sourceFamilyHint = getModelFamilyMatchKey(sourceModelHint || sourceLabel);
 
       const getSourceMatchRank = (modelName: string, providerName: string | undefined) => {
+        if (sourceLabel && isSourceHeaderPrefixMatch(modelName, sourceLabel)) return 0;
         if (!sourceModelHint) return 0;
 
         const normalizedModel = normalizeMatchToken(modelName);

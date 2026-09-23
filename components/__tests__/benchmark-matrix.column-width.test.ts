@@ -7,6 +7,8 @@ import {
   buildActiveColumnWidthMap,
   buildAutoModelWidthMap,
   buildModelColumnMeta,
+  buildSourceMatchedGroupBoundaryByModel,
+  buildSourceMatchedModelSet,
   measureCellDisplayWidth
 } from "../benchmark-matrix/column-width";
 import { getModelColumnWidthKey } from "../benchmark-matrix/utils";
@@ -378,5 +380,40 @@ describe("buildActiveColumnWidthMap 与 buildModelColumnMeta 自适应优化", (
     });
 
     expect(meta[0].columnWidth).toBe(80);
+  });
+});
+
+describe("buildSourceMatchedModelSet with compound source labels", () => {
+  test("correctly matches GPT-6 Sol and GPT-6 Luna, forming contiguous box boundaries", () => {
+    const modelColumns = ["GPT-6 Sol", "GPT-6 Luna", "Luna 8B", "Solar Luna", "Claude 3.5 Sonnet"];
+    const sourceLabel = "GPT-6 Sol / Luna";
+
+    const matchedSet = buildSourceMatchedModelSet(modelColumns, sourceLabel);
+    expect(matchedSet.has("GPT-6 Sol")).toBe(true);
+    expect(matchedSet.has("GPT-6 Luna")).toBe(true);
+    expect(matchedSet.has("Luna 8B")).toBe(false);
+    expect(matchedSet.has("Solar Luna")).toBe(false);
+    expect(matchedSet.has("Claude 3.5 Sonnet")).toBe(false);
+
+    const boundaries = buildSourceMatchedGroupBoundaryByModel(modelColumns, matchedSet);
+    expect(boundaries.firstSet.has("GPT-6 Sol")).toBe(true);
+    expect(boundaries.firstSet.has("GPT-6 Luna")).toBe(false);
+    expect(boundaries.lastSet.has("GPT-6 Sol")).toBe(false);
+    expect(boundaries.lastSet.has("GPT-6 Luna")).toBe(true);
+  });
+
+  test("correctly matches Claude Fable 5.1 and Claude Mythos 5.1 without selecting unrelated Claude versions", () => {
+    const modelColumns = ["Claude Fable 5.1", "Claude Mythos 5.1", "Claude Sonnet 5.1", "Mythos 5.1"];
+    const sourceLabel = "Claude Fable 5.1 / Mythos 5.1";
+
+    const matchedSet = buildSourceMatchedModelSet(modelColumns, sourceLabel);
+    expect(matchedSet.has("Claude Fable 5.1")).toBe(true);
+    expect(matchedSet.has("Claude Mythos 5.1")).toBe(true);
+    expect(matchedSet.has("Claude Sonnet 5.1")).toBe(false);
+    expect(matchedSet.has("Mythos 5.1")).toBe(false);
+
+    const boundaries = buildSourceMatchedGroupBoundaryByModel(modelColumns, matchedSet);
+    expect(boundaries.firstSet.has("Claude Fable 5.1")).toBe(true);
+    expect(boundaries.lastSet.has("Claude Mythos 5.1")).toBe(true);
   });
 });
