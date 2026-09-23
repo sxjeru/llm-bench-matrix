@@ -249,7 +249,7 @@ export type ModelVersionToken = {
 
 export type ModelVariantToken = {
   familyKey: string;
-  variant: "max" | "pro" | "base" | "flash" | "flash-lite" | "mini" | "nano" | "ultra" | "super" | "sol-ultra" | "sol" | "terra" | "luna";
+  variant: "max" | "pro" | "base" | "flash" | "flash-lite" | "mini" | "nano" | "ultra" | "super" | "astra" | "sol-ultra" | "sol" | "terra" | "luna";
 };
 
 export type ModelTierToken = {

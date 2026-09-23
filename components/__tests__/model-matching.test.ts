@@ -42,6 +42,14 @@ describe("model-matching variant sorting", () => {
       familyKey: "ds v4",
       variant: "max"
     });
+    expect(extractModelVariantToken("GPT-6 Astra")).toEqual({
+      familyKey: "gpt 6",
+      variant: "astra"
+    });
+    expect(extractModelVariantToken("GPT-6 Sol")).toEqual({
+      familyKey: "gpt 6",
+      variant: "sol"
+    });
   });
 
   test("compareModelVariantPriority should sort max > pro > mini", () => {
@@ -162,12 +170,14 @@ describe("model-matching variant sorting", () => {
     expect(compareModelNameByColumnOrder("Claude Mythos Preview", "Claude Opus", collator)).toBeLessThan(0);
   });
 
-  test("compareModelNameByColumnOrder should sort GPT variants by sol ultra > pro > sol > terra > luna", () => {
+  test("compareModelNameByColumnOrder should sort GPT variants by sol ultra > pro > astra > sol > terra > luna", () => {
     const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 
-    // Relative order: GPT-4-sol-ultra > GPT-4-pro > GPT-4-sol > GPT-4-terra > GPT-4-luna
+    // Relative order: GPT-4-sol-ultra > GPT-4-pro > GPT-4-astra > GPT-4-sol > GPT-4-terra > GPT-4-luna
     expect(compareModelNameByColumnOrder("GPT-4-sol-ultra", "GPT-4-pro", collator)).toBeLessThan(0);
+    expect(compareModelNameByColumnOrder("GPT-4-pro", "GPT-4-astra", collator)).toBeLessThan(0);
     expect(compareModelNameByColumnOrder("GPT-4-pro", "GPT-4-sol", collator)).toBeLessThan(0);
+    expect(compareModelNameByColumnOrder("GPT-4-astra", "GPT-4-sol", collator)).toBeLessThan(0);
     expect(compareModelNameByColumnOrder("GPT-4-sol", "GPT-4-terra", collator)).toBeLessThan(0);
     expect(compareModelNameByColumnOrder("GPT-4-terra", "GPT-4-luna", collator)).toBeLessThan(0);
     
@@ -175,13 +185,17 @@ describe("model-matching variant sorting", () => {
     expect(compareModelNameByColumnOrder("GPT-4-luna", "GPT-4", collator)).toBeLessThan(0);
     expect(compareModelNameByColumnOrder("GPT-4-terra", "GPT-4", collator)).toBeLessThan(0);
     expect(compareModelNameByColumnOrder("GPT-4-sol", "GPT-4", collator)).toBeLessThan(0);
+    expect(compareModelNameByColumnOrder("GPT-4-astra", "GPT-4", collator)).toBeLessThan(0);
 
     // Also with spaces
     expect(compareModelNameByColumnOrder("GPT-4 sol ultra", "GPT-4 pro", collator)).toBeLessThan(0);
+    expect(compareModelNameByColumnOrder("GPT-6 Astra", "GPT-6 Sol", collator)).toBeLessThan(0);
 
     // Also compareSourceTabKeysByVersion
     expect(compareSourceTabKeysByVersion("text:GPT-4-sol-ultra", "text:GPT-4-pro")).toBeLessThan(0);
     expect(compareSourceTabKeysByVersion("text:GPT-4-pro", "text:GPT-4-sol")).toBeLessThan(0);
+    expect(compareSourceTabKeysByVersion("text:GPT-4-astra", "text:GPT-4-sol")).toBeLessThan(0);
+    expect(compareSourceTabKeysByVersion("text:GPT-6 Astra", "text:GPT-6 Sol")).toBeLessThan(0);
     expect(compareSourceTabKeysByVersion("text:GPT-4-sol", "text:GPT-4-terra")).toBeLessThan(0);
     expect(compareSourceTabKeysByVersion("text:GPT-4-terra", "text:GPT-4-luna")).toBeLessThan(0);
     expect(compareSourceTabKeysByVersion("text:GPT-4-luna", "text:GPT-4")).toBeLessThan(0);

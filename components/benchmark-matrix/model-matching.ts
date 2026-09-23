@@ -201,6 +201,7 @@ export function extractModelVariantToken(modelName: string): ModelVariantToken |
 
   const variant: ModelVariantToken["variant"] = (() => {
     if (isGpt) {
+      if (/\bastra\b/.test(normalized)) return "astra";
       if (/\bsol\s+ultra\b/.test(normalized)) return "sol-ultra";
       if (/\bsol\b/.test(normalized)) return "sol";
       if (/\bterra\b/.test(normalized)) return "terra";
@@ -218,7 +219,8 @@ export function extractModelVariantToken(modelName: string): ModelVariantToken |
   })();
 
   const variantMatch = (isGpt
-    ? (normalized.match(/\bsol\s+ultra\b/) ??
+    ? (normalized.match(/\bastra\b/) ??
+       normalized.match(/\bsol\s+ultra\b/) ??
        normalized.match(/\bsol\b/) ??
        normalized.match(/\bterra\b/) ??
        normalized.match(/\bluna\b/))
@@ -250,6 +252,7 @@ export function compareModelVariantPriority(
     max: 7.5,
     super: 7,
     pro: 6,
+    astra: 5.9,
     sol: 5.8,
     terra: 5.5,
     luna: 5.2,
