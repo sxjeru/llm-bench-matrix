@@ -34,6 +34,9 @@ export function toMappingDraft(row: ExternalMappingRow): ExternalMappingDraft {
 
 export function isMappingDraftDirty(row: ExternalMappingRow, draft: ExternalMappingDraft | undefined): boolean {
   if (!draft) return false;
+  if (row.isNewMatch) {
+    return true;
+  }
   return (
     draft.externalModelId !== row.externalModelId ||
     draft.reasoningEffort !== row.reasoningEffort ||
@@ -185,8 +188,10 @@ export function useExternalImport({ notifySuccess, notifyError }: UseExternalImp
           modelId: row.modelId,
           externalModelId: draft.externalModelId,
           reasoningEffort: draft.reasoningEffort,
-          matchStatus: "manual" as const,
-          manualOverride: true
+          matchStatus: draft.manualOverride ? ("manual" as const) : ("matched" as const),
+          manualOverride: draft.manualOverride,
+          matchConfidence: draft.manualOverride ? 100 : row.matchConfidence,
+          matchReason: draft.manualOverride ? "manual" : row.matchReason
         };
       });
 

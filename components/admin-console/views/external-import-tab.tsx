@@ -107,15 +107,17 @@ export function isNewMatchRow(
   row: ExternalMappingRow,
   draft: ExternalMappingDraft | undefined
 ): boolean {
+  // 后台手动修改或手动覆盖的条目无需置顶并显示“新”tag，主要用于自动匹配上时
+  if (draft?.manualOverride || row.manualOverride) {
+    return false;
+  }
+
   const effectiveExternalId = draft ? draft.externalModelId : row.externalModelId;
   const isIgnored = draft ? draft.ignored : row.matchStatus === "ignored";
   const isCurrentlyMatched = Boolean(effectiveExternalId && !isIgnored);
   if (!isCurrentlyMatched) return false;
 
-  if (row.isNewMatch) return true;
-  if (row.matchStatus === "unmatched") return true;
-
-  return false;
+  return Boolean(row.isNewMatch);
 }
 
 function formatSampleValue(entry: ExternalMetricCatalogEntry) {
@@ -539,26 +541,31 @@ export function ExternalImportTab({
                 return (
                   <tr key={row.modelId} className={conflictModelIds.has(row.modelId) ? "bg-error/10" : undefined}>
                     <td className="align-top overflow-hidden">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5 truncate">
-                            <span className="truncate font-semibold" title={row.modelName}>
-                              {row.modelName}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 truncate">
+                          <span className="min-w-0 truncate font-semibold" title={row.modelName}>
+                            {row.modelName}
+                          </span>
+                          {isNew ? (
+                            <span
+                              data-testid={`new-match-badge-${row.modelId}`}
+                              className="badge badge-success badge-xs shrink-0 font-semibold whitespace-nowrap"
+                            >
+                              新
                             </span>
-                            {isNew ? (
-                              <span
-                                data-testid={`new-match-badge-${row.modelId}`}
-                                className="badge badge-success badge-xs shrink-0 font-semibold whitespace-nowrap"
-                              >
-                                新
-                              </span>
-                            ) : null}
-                          </div>
-                          <div className="truncate text-xs opacity-60" title={row.providerName}>
-                            {row.providerName}
-                          </div>
+                          ) : null}
+                          {dirty ? (
+                            <span
+                              data-testid={`dirty-mapping-badge-${row.modelId}`}
+                              className="badge badge-warning badge-xs shrink-0 whitespace-nowrap"
+                            >
+                              未保存
+                            </span>
+                          ) : null}
                         </div>
-                        {dirty ? <span className="badge badge-warning badge-xs shrink-0 whitespace-nowrap">未保存</span> : null}
+                        <div className="truncate text-xs opacity-60" title={row.providerName}>
+                          {row.providerName}
+                        </div>
                       </div>
                     </td>
                     <td className="align-top overflow-hidden">
@@ -641,8 +648,7 @@ export function ExternalImportTab({
                           const nextIgnored = event.target.checked;
                           onUpdateMappingDraft(row.modelId, (current) => ({
                             ...current,
-                            ignored: nextIgnored,
-                            manualOverride: nextIgnored ? false : current.manualOverride
+                            ignored: nextIgnored
                           }));
                         }}
                         aria-label={`忽略 ${row.modelName}`}

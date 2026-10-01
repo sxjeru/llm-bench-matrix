@@ -158,4 +158,51 @@ describe("useExternalImport - saveMappings", () => {
       "PATCH"
     );
   });
+
+  test("自动匹配上的条目默认为未保存状态，保存时提交 matchStatus: 'matched' 且 manualOverride: false", async () => {
+    const snapshot = makeSnapshot();
+    // 将模型 2 设为新自动匹配
+    snapshot.mappings[1] = {
+      ...snapshot.mappings[1],
+      isNewMatch: true
+    };
+    vi.mocked(api.getJson).mockResolvedValue(snapshot);
+    vi.mocked(api.postJson).mockResolvedValue({ ok: true, updatedCount: 1 });
+
+    const notifySuccess = vi.fn();
+    const notifyError = vi.fn();
+
+    const { result } = renderHook(() => useExternalImport({ notifySuccess, notifyError }));
+
+    // 1. 加载快照
+    await act(async () => {
+      await result.current.loadSnapshot();
+    });
+
+    // 2. 无需用户任何修改，新自动匹配条目默认即为未保存（dirtyMappingCount 为 1）
+    expect(result.current.dirtyMappingCount).toBe(1);
+
+    // 3. 点击保存匹配
+    await act(async () => {
+      await result.current.saveMappings();
+    });
+
+    expect(api.postJson).toHaveBeenCalledWith(
+      "/api/admin/external-import/artificial-analysis/mappings",
+      {
+        updates: [
+          {
+            modelId: 2,
+            externalModelId: "aa-opus",
+            reasoningEffort: null,
+            matchStatus: "matched",
+            manualOverride: false,
+            matchConfidence: 95,
+            matchReason: "fuzzy-model-name"
+          }
+        ]
+      },
+      "PATCH"
+    );
+  });
 });

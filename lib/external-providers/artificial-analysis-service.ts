@@ -192,9 +192,20 @@ export async function getArtificialAnalysisAdminSnapshot(options?: {
     const local = localById.get(match.modelId)!;
     const stored = manualByModelId.get(match.modelId);
     const upstream = match.externalModelId ? upstreamById.get(match.externalModelId) : undefined;
-    const isNewMatch =
-      stored?.matchStatus === "unmatched" &&
-      (match.matchStatus === "matched" || match.matchStatus === "manual");
+
+    const isAutoMatched =
+      match.matchStatus === "matched" &&
+      Boolean(match.externalModelId) &&
+      !stored?.manualOverride;
+
+    const isAlreadySaved =
+      Boolean(stored) &&
+      stored?.matchStatus === "matched" &&
+      stored?.externalModelId === match.externalModelId &&
+      (stored?.reasoningEffort || null) === (match.reasoningEffort || null) &&
+      !stored?.manualOverride;
+
+    const isNewMatch = isAutoMatched && !isAlreadySaved;
 
     return {
       modelId: match.modelId,
@@ -259,7 +270,9 @@ const mappingUpdateSchema = z.object({
   externalModelId: z.string().trim().min(1).nullable(),
   reasoningEffort: z.string().trim().nullable().optional(),
   matchStatus: z.enum(["matched", "unmatched", "ignored", "manual"]).optional(),
-  manualOverride: z.boolean().optional()
+  manualOverride: z.boolean().optional(),
+  matchConfidence: z.number().int().min(0).max(100).optional(),
+  matchReason: z.string().optional()
 });
 
 export type ArtificialAnalysisMappingUpdate = z.input<typeof mappingUpdateSchema>;
@@ -319,21 +332,29 @@ export async function saveArtificialAnalysisMappings(inputs: unknown) {
   const now = new Date();
 
   await db.transaction(async (tx) => {
-    // 先清掉这批模型原本占用的上游绑定，避免唯一索引在「A、B 互换绑定」时中途冲突
+    // 批次外的绑定必须显式解除，不能因保存新自动匹配而被删除。
     const externalIds = updates
       .map((update) => update.externalModelId)
       .filter((id): id is string => id !== null);
     if (externalIds.length > 0) {
-      await tx
-        .delete(externalModelMappings)
+      const existing = await tx
+        .select({ modelId: externalModelMappings.modelId, externalModelId: externalModelMappings.externalModelId })
+        .from(externalModelMappings)
         .where(
           and(
             eq(externalModelMappings.source, ARTIFICIAL_ANALYSIS_SOURCE_ID),
             inArray(externalModelMappings.externalModelId, externalIds)
           )
         );
+      const updatedModelIds = new Set(updates.map((update) => update.modelId));
+      for (const mapping of existing) {
+        if (mapping.modelId === null || !updatedModelIds.has(mapping.modelId)) {
+          throw new Error(`上游条目 ${mapping.externalModelId} 已被${mapping.modelId === null ? "其他映射" : `模型 #${mapping.modelId}`}绑定，请先解除绑定或在同一批次中改绑`);
+        }
+      }
     }
 
+    // 仅删除本批次模型的旧映射，也支持 A、B 在同一批次互换绑定。
     await tx.delete(externalModelMappings).where(
       and(
         eq(externalModelMappings.source, ARTIFICIAL_ANALYSIS_SOURCE_ID),
@@ -348,14 +369,17 @@ export async function saveArtificialAnalysisMappings(inputs: unknown) {
       const upstream = update.externalModelId ? upstreamById.get(update.externalModelId) : undefined;
       const matchStatus =
         update.matchStatus ?? (update.externalModelId ? "manual" : "ignored");
-      const manualOverride = update.manualOverride ?? true;
-      const matchConfidence = matchStatus === "unmatched" ? 0 : manualOverride ? 100 : 0;
+      const manualOverride = update.manualOverride ?? (matchStatus === "manual");
+      const matchConfidence =
+        update.matchConfidence ??
+        (matchStatus === "unmatched" ? 0 : manualOverride ? 100 : 0);
       const matchReason =
-        matchStatus === "unmatched"
+        update.matchReason ??
+        (matchStatus === "unmatched"
           ? "unbound"
           : manualOverride
             ? "manual"
-            : "auto";
+            : "auto");
 
       return {
         source: ARTIFICIAL_ANALYSIS_SOURCE_ID,

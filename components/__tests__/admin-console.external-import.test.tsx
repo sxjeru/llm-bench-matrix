@@ -148,10 +148,32 @@ async function renderTab(overrides: Partial<Parameters<typeof ExternalImportTab>
     ...overrides
   };
 
-  await renderReady(<ExternalImportTab {...props} />);
+  const rendered = await renderReady(<ExternalImportTab {...props} />);
+  return { ...rendered, props };
 }
 
 describe("ExternalImportTab", () => {
+  test("勾选再取消忽略保留人工绑定和推理强度", async () => {
+    const user = userEvent.setup();
+    let draft: ExternalMappingDraft = {
+      externalModelId: "aa-high",
+      reasoningEffort: "high",
+      ignored: false,
+      manualOverride: true
+    };
+    const originalDraft = { ...draft };
+    const { rerender, props } = await renderTab({
+      mappingDrafts: { 1: draft },
+      onUpdateMappingDraft: (_modelId, updater) => { draft = updater(draft); }
+    });
+
+    await user.click(screen.getByRole("checkbox", { name: "忽略 GPT 5.4" }));
+    expect(draft.ignored).toBe(true);
+    rerender(<ExternalImportTab {...props} mappingDrafts={{ 1: draft }} />);
+    await user.click(screen.getByRole("checkbox", { name: "忽略 GPT 5.4" }));
+    expect(draft).toEqual(originalDraft);
+  });
+
   test("渲染指标目录，并标出需要 ×100 的小数量纲", async () => {
     await renderTab();
 
@@ -499,7 +521,7 @@ describe("ExternalImportTab", () => {
     expect(rows[2]).toHaveTextContent("GPT 5.4");
   });
 
-  test("未匹配条目首次匹配上时，展示新 tag 并提升到列表开头（在警告行之后）", async () => {
+  test("新自动匹配上的条目展示新 tag 和未保存 tag，并提升到列表开头（在警告行之后）", async () => {
     const snapshot = makeSnapshot({
       mappings: [
         {
@@ -532,7 +554,70 @@ describe("ExternalImportTab", () => {
         },
         {
           modelId: 3,
-          modelName: "新匹配上的模型",
+          modelName: "新自动匹配上的模型",
+          providerName: "OpenAI",
+          externalModelId: "aa-high",
+          externalModelName: "GPT 5.4 (high)",
+          externalCreator: "OpenAI",
+          reasoningEffort: "high",
+          matchStatus: "matched",
+          matchConfidence: 85,
+          matchReason: "normalized-name",
+          manualOverride: false,
+          externalMissing: false,
+          isNewMatch: true
+        }
+      ]
+    });
+
+    await renderTab({
+      snapshot,
+      mappingDrafts: {
+        1: { externalModelId: "aa-xhigh", reasoningEffort: "xhigh", ignored: false, manualOverride: false },
+        2: { externalModelId: "aa-gone", reasoningEffort: null, ignored: false, manualOverride: true },
+        // 模型 3 为新自动匹配，草稿未手动修改
+        3: { externalModelId: "aa-high", reasoningEffort: "high", ignored: false, manualOverride: false }
+      }
+    });
+
+    const mappingTable = document.querySelector(".admin-mapping-table")!;
+    const rows = within(mappingTable as HTMLElement).getAllByRole("row");
+    // 排序顺序：1. 警告行（模型 2） 2. 新自动匹配行（模型 3） 3. 普通行（模型 1）
+    expect(rows[1]).toHaveTextContent("警告失效模型");
+    expect(rows[2]).toHaveTextContent("新自动匹配上的模型");
+    expect(rows[3]).toHaveTextContent("普通已匹配模型");
+
+    // 模型 3 包含“新”tag 和默认为未保存状态的“未保存”tag
+    const newBadge = screen.getByTestId("new-match-badge-3");
+    const dirtyBadge = screen.getByTestId("dirty-mapping-badge-3");
+    expect(newBadge).toHaveTextContent("新");
+    expect(dirtyBadge).toHaveTextContent("未保存");
+
+    // 两个 tag 在同一个 flex 容器中垂直对齐
+    expect(newBadge.parentElement).toBe(dirtyBadge.parentElement);
+    expect(newBadge.parentElement).toHaveClass("flex", "items-center");
+  });
+
+  test("手动修改的模型匹配无需置顶且不显示“新”tag，仅显示未保存", async () => {
+    const snapshot = makeSnapshot({
+      mappings: [
+        {
+          modelId: 1,
+          modelName: "普通已匹配模型",
+          providerName: "OpenAI",
+          externalModelId: "aa-xhigh",
+          externalModelName: "GPT 5.4 (xhigh)",
+          externalCreator: "OpenAI",
+          reasoningEffort: "xhigh",
+          matchStatus: "matched",
+          matchConfidence: 88,
+          matchReason: "highest-effort-default",
+          manualOverride: false,
+          externalMissing: false
+        },
+        {
+          modelId: 2,
+          modelName: "手动修改的模型",
           providerName: "OpenAI",
           externalModelId: null,
           externalModelName: null,
@@ -551,20 +636,19 @@ describe("ExternalImportTab", () => {
       snapshot,
       mappingDrafts: {
         1: { externalModelId: "aa-xhigh", reasoningEffort: "xhigh", ignored: false, manualOverride: false },
-        2: { externalModelId: "aa-gone", reasoningEffort: null, ignored: false, manualOverride: true },
-        // 模型 3 在草稿中首次匹配上
-        3: { externalModelId: "aa-high", reasoningEffort: "high", ignored: false, manualOverride: true }
+        // 模型 2 由管理员在后台手动修改绑定
+        2: { externalModelId: "aa-high", reasoningEffort: "high", ignored: false, manualOverride: true }
       }
     });
 
     const mappingTable = document.querySelector(".admin-mapping-table")!;
     const rows = within(mappingTable as HTMLElement).getAllByRole("row");
-    // 排序顺序：1. 警告行（模型 2） 2. 新匹配行（模型 3） 3. 普通行（模型 1）
-    expect(rows[1]).toHaveTextContent("警告失效模型");
-    expect(rows[2]).toHaveTextContent("新匹配上的模型");
-    expect(rows[3]).toHaveTextContent("普通已匹配模型");
+    // 手动修改无需置顶：按原顺序排列，模型 1 依然在模型 2 前面
+    expect(rows[1]).toHaveTextContent("普通已匹配模型");
+    expect(rows[2]).toHaveTextContent("手动修改的模型");
 
-    // 模型 3 包含“新”tag
-    expect(screen.getByTestId("new-match-badge-3")).toHaveTextContent("新");
+    // 不显示“新”tag，仅显示“未保存”tag
+    expect(screen.queryByTestId("new-match-badge-2")).not.toBeInTheDocument();
+    expect(screen.getByTestId("dirty-mapping-badge-2")).toHaveTextContent("未保存");
   });
 });
