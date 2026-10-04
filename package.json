@@ -21,7 +21,7 @@
     "@neondatabase/serverless": "^1.1.0",
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
-    "csv-parse": "^7.0.2",
+    "csv-parse": "^7.0.3",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.1",
     "html2canvas-pro": "^2.4.2",
