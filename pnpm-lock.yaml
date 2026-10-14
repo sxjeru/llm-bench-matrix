@@ -20,8 +20,8 @@ importers:
   .:
     dependencies:
       '@neondatabase/serverless':
-        specifier: ^1.1.0
-        version: 1.1.0
+        specifier: ^1.2.0
+        version: 1.2.0
       '@vercel/analytics':
         specifier: ^2.0.1
         version: 2.0.1(next@16.3.8(@babel/core@7.29.7)(@types/node@26.4.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)
@@ -36,7 +36,7 @@ importers:
         version: 18.0.6
       drizzle-orm:
         specifier: ^0.45.3
-        version: 0.45.3(@neondatabase/serverless@1.1.0)(@types/pg@8.23.1)(pg@8.23.1)
+        version: 0.45.3(@neondatabase/serverless@1.2.0)(@types/pg@8.23.1)(pg@8.23.1)
       html2canvas-pro:
         specifier: ^2.4.2
         version: 2.4.2
@@ -864,8 +864,8 @@ packages:
       '@emnapi/core': ^1.7.1 || ^2.0.0-alpha.4
       '@emnapi/runtime': ^1.7.1 || ^2.0.0-alpha.4
 
-  '@neondatabase/serverless@1.1.0':
-    resolution: {integrity: sha512-r3ZZhRjEcfEdKIZnoB1RusNgvHuaBRqfCzV4Gi+5A9yUX0S4HTws/ASWqt13wL4y4I+0rqsWGdA2w7EQXHi3+Q==}
+  '@neondatabase/serverless@1.2.0':
+    resolution: {integrity: sha512-tnaqgixUengZQNd9ZrS3ytQfamJzLKY8QxgqWQTNHHtB+KrFQWk77JTbbpg4RD+J3qE4eO2lVytvGDX5Kj6FdQ==}
     engines: {node: '>=19.0.0'}
 
   '@next/env@16.3.8':
@@ -4087,7 +4087,7 @@ snapshots:
       '@tybys/wasm-util': 0.10.4
     optional: true
 
-  '@neondatabase/serverless@1.1.0': {}
+  '@neondatabase/serverless@1.2.0': {}
 
   '@next/env@16.3.8': {}
 
@@ -4941,9 +4941,9 @@ snapshots:
       esbuild: 0.25.12
       tsx: 4.23.15
 
-  drizzle-orm@0.45.3(@neondatabase/serverless@1.1.0)(@types/pg@8.23.1)(pg@8.23.1):
+  drizzle-orm@0.45.3(@neondatabase/serverless@1.2.0)(@types/pg@8.23.1)(pg@8.23.1):
     optionalDependencies:
-      '@neondatabase/serverless': 1.1.0
+      '@neondatabase/serverless': 1.2.0
       '@types/pg': 8.23.1
       pg: 8.23.1
 
