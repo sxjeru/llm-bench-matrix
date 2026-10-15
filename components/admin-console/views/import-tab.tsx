@@ -1176,6 +1176,7 @@ export function ImportTab({
                           <div className="space-y-1">
                             {(() => {
                               const benchmarkInputValue = matrixBenchmarkNameDrafts[matrixRow.key] ?? matrixRow.benchmarkName;
+                              const benchmarkTypeValue = matrixBenchmarkTypeDrafts[matrixRow.key] ?? matrixRow.benchmarkType;
                               const mergedBenchmarkRecords = getMergedBenchmarkRecordsForSourceName(
                                 benchmarkInputValue,
                                 mergedRecords
@@ -1202,7 +1203,7 @@ export function ImportTab({
                                 ...(benchmarkMergeCandidateMap.get(matrixRow.key) ?? []),
                                 ...(warning?.candidateTargetIds ?? []),
                                 ...(warning?.suggestedTargetId ? [warning.suggestedTargetId] : []),
-                                ...getBenchmarkSearchCandidateIds(benchmarkInputValue, matrixRow.benchmarkType, benchmarks)
+                                ...getBenchmarkSearchCandidateIds(benchmarkInputValue, benchmarkTypeValue, benchmarks)
                               ])).slice(0, 30);
                               const benchmarkCandidateOptions = benchmarkCandidateTargetIds.map((targetId) => {
                                 const target = benchmarkEntityOptions.find((item) => String(item.id) === String(targetId));

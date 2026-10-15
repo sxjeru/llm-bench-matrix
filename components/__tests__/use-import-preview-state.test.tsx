@@ -252,6 +252,135 @@ describe("useImportPreviewState Hook - benchmarkPreviewValueOverlapPayload", () 
     expect(result.current.benchmarkPreviewValueOverlapTriggerKey).not.toBe(initialTriggerKey);
   });
 
+  test("Benchmark 名编辑草稿会立即用于重复率检查并更新重算触发 key", () => {
+    const draftRow: TextImportPreviewRow = {
+      rowNumber: 1,
+      providerName: "OpenAI",
+      modelName: "GPT-4",
+      benchmarkName: "MMLU",
+      benchmarkType: "Multiple Choice",
+      rawValue: "0.85",
+      valueNum: 0.85,
+      valueNum2: null,
+      valueNote: null,
+      source: null,
+      valid: true
+    };
+
+    const benchmarkMMLU: BenchmarkOption = {
+      id: 101,
+      benchmarkName: "MMLU",
+      benchmarkType: "Multiple Choice",
+      modalities: ["Text"]
+    };
+
+    const benchmarkGSM8K: BenchmarkOption = {
+      id: 202,
+      benchmarkName: "GSM8K",
+      benchmarkType: "Multiple Choice",
+      modalities: ["Text"]
+    };
+
+    const { result, rerender } = renderHook(
+      ({ benchmarkNameDrafts }) => useImportPreviewState(createMockOptions({
+        benchmarks: [benchmarkMMLU, benchmarkGSM8K],
+        textImportDraftRows: [draftRow],
+        matrixBenchmarkNameDrafts: benchmarkNameDrafts
+      })),
+      { initialProps: { benchmarkNameDrafts: {} as Record<string, string> } }
+    );
+
+    const initialTriggerKey = result.current.benchmarkPreviewValueOverlapTriggerKey;
+    expect(result.current.benchmarkPreviewValueOverlapPayload.items[0].candidateBenchmarkIds).toEqual([101]);
+
+    rerender({ benchmarkNameDrafts: { "MMLU@@Multiple Choice": "GSM8K" } });
+
+    expect(result.current.benchmarkPreviewValueOverlapPayload.items[0].candidateBenchmarkIds).toContain(202);
+    expect(result.current.benchmarkPreviewValueOverlapTriggerKey).not.toBe(initialTriggerKey);
+  });
+
+  test("Benchmark 类别编辑草稿会立即更新重算触发 key", () => {
+    const draftRow: TextImportPreviewRow = {
+      rowNumber: 1,
+      providerName: "OpenAI",
+      modelName: "GPT-4",
+      benchmarkName: "MMLU",
+      benchmarkType: "Multiple Choice",
+      rawValue: "0.85",
+      valueNum: 0.85,
+      valueNum2: null,
+      valueNote: null,
+      source: null,
+      valid: true
+    };
+
+    const benchmark: BenchmarkOption = {
+      id: 101,
+      benchmarkName: "MMLU",
+      benchmarkType: "Multiple Choice",
+      modalities: ["Text"]
+    };
+
+    const { result, rerender } = renderHook(
+      ({ benchmarkTypeDrafts }) => useImportPreviewState(createMockOptions({
+        benchmarks: [benchmark],
+        textImportDraftRows: [draftRow],
+        matrixBenchmarkTypeDrafts: benchmarkTypeDrafts
+      })),
+      { initialProps: { benchmarkTypeDrafts: {} as Record<string, string> } }
+    );
+
+    const initialTriggerKey = result.current.benchmarkPreviewValueOverlapTriggerKey;
+
+    rerender({ benchmarkTypeDrafts: { "MMLU@@Multiple Choice": "Reasoning" } });
+
+    expect(result.current.benchmarkPreviewValueOverlapTriggerKey).not.toBe(initialTriggerKey);
+  });
+
+  test("提交（commit）修改后的 Benchmark 名或类别后，重算触发 key 随之更新", () => {
+    const draftRow: TextImportPreviewRow = {
+      rowNumber: 1,
+      providerName: "OpenAI",
+      modelName: "GPT-4",
+      benchmarkName: "MMLU",
+      benchmarkType: "Multiple Choice",
+      rawValue: "0.85",
+      valueNum: 0.85,
+      valueNum2: null,
+      valueNote: null,
+      source: null,
+      valid: true
+    };
+
+    const benchmark: BenchmarkOption = {
+      id: 101,
+      benchmarkName: "MMLU",
+      benchmarkType: "Multiple Choice",
+      modalities: ["Text"]
+    };
+
+    const { result, rerender } = renderHook(
+      ({ rows }) => useImportPreviewState(createMockOptions({
+        benchmarks: [benchmark],
+        textImportDraftRows: rows
+      })),
+      { initialProps: { rows: [draftRow] } }
+    );
+
+    const initialTriggerKey = result.current.benchmarkPreviewValueOverlapTriggerKey;
+
+    rerender({
+      rows: [
+        {
+          ...draftRow,
+          benchmarkName: "MMLU-Pro"
+        }
+      ]
+    });
+
+    expect(result.current.benchmarkPreviewValueOverlapTriggerKey).not.toBe(initialTriggerKey);
+  });
+
   test("评分排序：完全匹配名称及类型 > 完全匹配名称不同类型 > 部分匹配且类型匹配 > 部分匹配且类型不匹配", () => {
     const draftRow: TextImportPreviewRow = {
       rowNumber: 1,

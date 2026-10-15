@@ -584,7 +584,9 @@ export function useImportPreviewState({
     });
 
     matrixPreview.rows.forEach((row) => {
-      const searchCandidateIds = getBenchmarkSearchCandidateIds(row.benchmarkName, row.benchmarkType, benchmarks);
+      const effectiveBenchmarkName = matrixBenchmarkNameDrafts[row.key]?.trim() || row.benchmarkName;
+      const effectiveBenchmarkType = matrixBenchmarkTypeDrafts[row.key]?.trim() || row.benchmarkType;
+      const searchCandidateIds = getBenchmarkSearchCandidateIds(effectiveBenchmarkName, effectiveBenchmarkType, benchmarks);
       if (searchCandidateIds.length === 0) return;
 
       candidateMap.set(row.key, Array.from(new Set([...(candidateMap.get(row.key) ?? []), ...searchCandidateIds])));
@@ -623,20 +625,40 @@ export function useImportPreviewState({
       key: items.length > 0 ? JSON.stringify(items) : "",
       items
     };
-  }, [benchmarks, benchmarkWarnings, benchmarkMergeCandidateMap, matrixPreview.rows, matrixModelNameDrafts, textImportDraftRows]);
+  }, [
+    benchmarks,
+    benchmarkWarnings,
+    benchmarkMergeCandidateMap,
+    matrixPreview.rows,
+    matrixModelNameDrafts,
+    matrixBenchmarkNameDrafts,
+    matrixBenchmarkTypeDrafts,
+    textImportDraftRows
+  ]);
 
   const benchmarkPreviewValueOverlapTriggerKey = useMemo(() => {
     if (textImportDraftRows.length === 0) {
       return "";
     }
 
-    return textImportDraftRows
+    const rowTokens = textImportDraftRows
       .map((row, rowIndex) => {
+        const rowBenchmarkKey = getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType);
+        const benchmarkName = matrixBenchmarkNameDrafts[rowBenchmarkKey]?.trim() || row.benchmarkName;
+        const benchmarkType = matrixBenchmarkTypeDrafts[rowBenchmarkKey]?.trim() || row.benchmarkType;
         const modelName = matrixModelNameDrafts[row.modelName]?.trim() || row.modelName;
-        return `${rowIndex}:${modelName}\u001e${row.rawValue}`;
+        return `${rowIndex}:${benchmarkName}@@${benchmarkType}\u001e${modelName}\u001e${row.rawValue}`;
       })
       .join("\u001f");
-  }, [matrixModelNameDrafts, textImportDraftRows]);
+
+    return `${rowTokens}\u001d${benchmarkPreviewValueOverlapPayload.key}`;
+  }, [
+    matrixBenchmarkNameDrafts,
+    matrixBenchmarkTypeDrafts,
+    matrixModelNameDrafts,
+    textImportDraftRows,
+    benchmarkPreviewValueOverlapPayload.key
+  ]);
 
   const pairValueRows = useMemo(() => {
     return textImportDraftRows

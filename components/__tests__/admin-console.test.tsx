@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 
 import { AdminConsole } from "@/components/admin-console";
-import type { ModelParamsRow, ModelPricingRow } from "@/components/admin-console/types";
+import type { BenchmarkOption, ModelParamsRow, ModelPricingRow } from "@/components/admin-console/types";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -2002,6 +2002,107 @@ describe("AdminConsole text import", () => {
     await user.click(benchmarkInput);
 
     expect(await screen.findByText("重复 0")).toBeInTheDocument();
+  });
+
+  test("在矩阵预览中修改 benchmark 名称后会重新触发重复率检查且不被阻断", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "Bench 1",
+          benchmarkType: "Type-C",
+          rawValue: "70.1",
+          valueNum: 70.1,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    const overlapRequests: Array<{ items: unknown[] }> = [];
+    const queuedPayloads: unknown[] = [previewResponse];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+
+      if (url === "/api/admin/benchmarks/preview-value-overlap") {
+        if (init?.body) {
+          overlapRequests.push(JSON.parse(String(init.body)));
+        }
+        return createJsonResponse({
+          stats: [
+            {
+              previewBenchmarkKey: "Bench 1@@Type-C",
+              candidateBenchmarkId: 11,
+              previewTotal: 1,
+              modelOverlapCount: 1,
+              exactDuplicateCount: 1,
+              conflictCount: 0,
+              duplicateRate: 1
+            },
+            {
+              previewBenchmarkKey: "Bench 2@@Type-C",
+              candidateBenchmarkId: 12,
+              previewTotal: 1,
+              modelOverlapCount: 1,
+              exactDuplicateCount: 1,
+              conflictCount: 0,
+              duplicateRate: 1
+            }
+          ]
+        });
+      }
+
+      return createJsonResponse(queuedPayloads.shift() ?? {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const baseProps = buildProps();
+    const benchmark2: BenchmarkOption = {
+      id: 12,
+      benchmarkName: "Bench 2",
+      benchmarkType: "Type-C",
+      modalities: ["Text"]
+    };
+
+    await renderReady(
+      <AdminConsole
+        {...baseProps}
+        benchmarks={[...baseProps.benchmarks, benchmark2]}
+      />
+    );
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const matrixTable = await findMatrixPreviewTable();
+    const benchmarkInput = within(matrixTable).getByDisplayValue("Bench 1") as HTMLInputElement;
+
+    await user.click(benchmarkInput);
+    expect(await screen.findByText("重复 1/1 (100%)")).toBeInTheDocument();
+
+    await user.clear(benchmarkInput);
+    await user.type(benchmarkInput, "Bench 2");
+    fireEvent.blur(benchmarkInput);
+
+    await waitFor(() => {
+      expect(overlapRequests.length).toBeGreaterThanOrEqual(2);
+      const latestPayload = overlapRequests[overlapRequests.length - 1];
+      expect(JSON.stringify(latestPayload)).toContain("Bench 2");
+    });
   });
 
   test("预览内 benchmark 快捷合并后仍优先保留导入 type", async () => {
