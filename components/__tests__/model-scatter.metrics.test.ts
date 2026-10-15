@@ -286,6 +286,16 @@ describe("toScatterMetric", () => {
         })
       ).category
     ).toBe("Cost");
+
+    expect(
+      toScatterMetric(
+        createBenchmarkRow({
+          rowKey: "merged::aa-omniscience",
+          benchmark: "AA-Omniscience Index",
+          category: "Knowledge"
+        })
+      ).category
+    ).toBe("Knowledge");
   });
 });
 

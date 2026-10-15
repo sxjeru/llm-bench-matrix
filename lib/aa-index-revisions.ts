@@ -16,7 +16,7 @@ export const AA_MAJOR_INDEX_NAMES = new Set([
 
 /**
  * 判断是否属于 AA 三大指数（或 AA 官方复合指数）。
- * 排除如 "AA Intelligence Index Cost per Task" 等成本指标。
+ * 排除如 "AA Intelligence Index Cost per Task" 等成本指标，以及 AA-Omniscience 等单项评测 benchmark。
  */
 export function isAaMajorIndexBenchmark(
   benchmarkName: string | null | undefined,
@@ -24,6 +24,11 @@ export function isAaMajorIndexBenchmark(
 ): boolean {
   if (!benchmarkName) return false;
   const trimmed = benchmarkName.trim();
+
+  // 显式排除 Omniscience 系列等单项评测 benchmark，避免误伤
+  if (/omniscience/i.test(trimmed)) {
+    return false;
+  }
 
   if (AA_MAJOR_INDEX_NAMES.has(trimmed)) {
     return true;

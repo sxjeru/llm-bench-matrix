@@ -28,6 +28,14 @@ describe("lib/aa-index-revisions", () => {
       expect(isAaMajorIndexBenchmark("MMLU-Pro", "text:Artificial Analysis")).toBe(false);
       expect(isAaMajorIndexBenchmark("GPQA Diamond")).toBe(false);
     });
+
+    test("排除 AA-Omniscience Index 等单项评测 benchmark，避免误伤过滤", () => {
+      expect(isAaMajorIndexBenchmark("AA-Omniscience Index")).toBe(false);
+      expect(isAaMajorIndexBenchmark("AA-Omniscience Index", "text:Artificial Analysis")).toBe(false);
+      expect(isAaMajorIndexBenchmark("AA Omniscience Index")).toBe(false);
+      expect(isAaMajorIndexBenchmark("AA-Omniscience Accuracy")).toBe(false);
+      expect(isAaMajorIndexBenchmark("AA-Omniscience Non-Hallucination Rate")).toBe(false);
+    });
   });
 
   describe("clusterEntriesByTime", () => {

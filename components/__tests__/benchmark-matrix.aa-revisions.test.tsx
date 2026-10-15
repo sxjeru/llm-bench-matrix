@@ -157,6 +157,8 @@ describe("AA 三大指数主要变动自适应与版本合并", () => {
 
     // 普通指标支持折线图
     expect(isCellTrendEligible(mockCell, "text:Artificial Analysis", "MMLU-Pro")).toBe(true);
+    // AA-Omniscience Index 属于普通 benchmark，不禁止折线图
+    expect(isCellTrendEligible(mockCell, "text:Artificial Analysis", "AA-Omniscience Index")).toBe(true);
 
     // AA三大指数全部禁止折线图
     expect(isCellTrendEligible(mockCell, "text:Artificial Analysis", "AA Intelligence Index")).toBe(false);
@@ -456,5 +458,38 @@ describe("AA 三大指数主要变动自适应与版本合并", () => {
     expect(currentModelIndex).toBeGreaterThanOrEqual(0);
     expect(oldTopModelIndex).toBeGreaterThanOrEqual(0);
     expect(currentModelIndex).toBeLessThan(oldTopModelIndex);
+  });
+
+  test("AA-Omniscience Index 作为普通评测指标，跨批次数据不被误判为过时版本并置空", () => {
+    const omniscienceBenchmark = "AA-Omniscience Index";
+    const rows: MatrixInputRow[] = [];
+    let id = 1;
+
+    // Batch 1 (早期批次：100 个模型)
+    for (let i = 0; i < 100; i += 1) {
+      rows.push(makeRow(`early_model_${i}`, omniscienceBenchmark, "75", 75, "2026-01-01T00:00:00.000Z", id++));
+    }
+    // Batch 2 (后期批次：110 个新模型)
+    for (let i = 0; i < 110; i += 1) {
+      rows.push(makeRow(`later_model_${i}`, omniscienceBenchmark, "85", 85, "2026-04-01T00:00:00.000Z", id++));
+    }
+
+    const aaRevisionsByRow = buildAaIndexRevisionsByRow(rows, false);
+    // AA-Omniscience Index 不应被纳入 aaRevisionsByRow
+    expect(aaRevisionsByRow.size).toBe(0);
+
+    const matrixRows = buildMatrixRows(rows, rows, false, false, "__ALL__", "latest", aaRevisionsByRow);
+    const targetRow = matrixRows.find((r) => r.benchmark === omniscienceBenchmark)!;
+    expect(targetRow).toBeDefined();
+
+    // 早期批次模型不应被置空为 "--"，应保留正常有效分 75
+    const earlyCell = targetRow.cells.get("early_model_0")!;
+    expect(earlyCell.valueNum).toBe(75);
+    expect(earlyCell.displayValue).toBe("75");
+
+    // 后期批次模型也正常展示
+    const laterCell = targetRow.cells.get("later_model_0")!;
+    expect(laterCell.valueNum).toBe(85);
+    expect(laterCell.displayValue).toBe("85");
   });
 });

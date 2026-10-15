@@ -49,9 +49,10 @@ export const METRIC_CATEGORY_PRIORITY: Readonly<Record<string, number>> = {
 
 /**
  * 散点下拉里并入 Summary 的 AA 复合指数名。
- * 要求整段以 Index 收尾，避免把 Cost per Task 等后缀项误归类。
+ * 要求整段以 Index 收尾，避免把 Cost per Task 等后缀项误归类；
+ * 仅匹配以空格分隔的官方复合指数（如 "AA Intelligence Index"），排除 "AA-Omniscience Index" 等单项评测 benchmark。
  */
-export const AA_SUMMARY_INDEX_LABEL_REGEX = /^AA[\s-].+ Index$/;
+export const AA_SUMMARY_INDEX_LABEL_REGEX = /^AA\s(?!.*Omniscience).+ Index$/i;
 
 /** 散点轴下拉里始终保留的 benchmark 分类（全匹配），不受「含低覆盖指标」裁剪 */
 export const SCATTER_ALWAYS_VISIBLE_BENCHMARK_TYPES = new Set(["Cost", "Performance"]);
