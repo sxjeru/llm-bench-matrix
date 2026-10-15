@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   __applyExportCompareBaselineFallbackForTest,
+  __applyExportOverallRowNudgeFallbackForTest,
   __applyExportSourceFrameFallbackForTest,
   __buildSourceFrameShadowsForTest,
   __resolveCaptureDimensionsForTest,
@@ -815,6 +816,41 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     expect(cell.style.paddingLeft).toBe("8px");
     expect(cell.style.paddingRight).toBe("8px");
     vi.restoreAllMocks();
+  });
+
+  test("导出总评行处理应保持天然基线对齐，不施加人工下沉或不对称 padding", () => {
+    const root = document.createElement("div");
+    const tr = document.createElement("tr");
+    tr.setAttribute("data-overall-row", "1");
+
+    const labelCell = document.createElement("td");
+    labelCell.setAttribute("data-overall-benchmark-label", "1");
+    // 模拟可能存在的旧内联样式
+    labelCell.style.paddingTop = "8px";
+    labelCell.style.paddingBottom = "4px";
+
+    const cnSpan = document.createElement("span");
+    cnSpan.setAttribute("data-overall-benchmark-cn-text", "1");
+    cnSpan.style.display = "inline-block";
+    cnSpan.style.transform = "translateY(2px)";
+
+    const trigger = document.createElement("span");
+    trigger.setAttribute("data-overall-tooltip-trigger", "1");
+    trigger.style.top = "56%";
+
+    labelCell.appendChild(cnSpan);
+    labelCell.appendChild(trigger);
+    tr.appendChild(labelCell);
+    root.appendChild(tr);
+
+    __applyExportOverallRowNudgeFallbackForTest(root);
+
+    // 确认已清理人工 translateY 偏移与不对称 padding
+    expect(cnSpan.style.transform).toBe("");
+    expect(cnSpan.style.display).toBe("");
+    expect(labelCell.style.paddingTop).toBe("");
+    expect(labelCell.style.paddingBottom).toBe("");
+    expect(trigger.style.top).toBe("");
   });
 
   test("表头 tooltip 仅显示点击动作且会随排序状态更新", async () => {

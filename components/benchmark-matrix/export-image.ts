@@ -231,24 +231,33 @@ export function __applyExportPresenceFilterFallbackForTest(root: HTMLElement): v
 }
 
 export function applyExportOverallRowNudgeFallback(root: HTMLElement): void {
+  // html2canvas-pro >= 2.4.3 (PR #240 / commit 7710c4b) 已在上游原生修复了 letter-spacing 场景下
+  // CJK 字符被错误切至 ideographic 基线导致中文抬高的问题。旧版本中用于对抗上浮的 translateY(2px)、
+  // paddingTop 8px 及 tooltip 56% 偏移已不再需要；在 2.5.2 下继续施加偏移会导致中文反向沉降、
+  // 与同行英文 " / Ranking" 基线错位。
+  // 此处确保清理内联偏移，保证中英文基线天然对齐并保持居中。
   const overallRow = root.querySelector<HTMLTableRowElement>("tr[data-overall-row='1']");
   if (!overallRow) return;
 
   const overallBenchmarkLabel = overallRow.querySelector<HTMLElement>("[data-overall-benchmark-label='1']");
   if (overallBenchmarkLabel) {
-    overallBenchmarkLabel.style.paddingTop = "8px";
-    overallBenchmarkLabel.style.paddingBottom = "4px";
+    overallBenchmarkLabel.style.paddingTop = "";
+    overallBenchmarkLabel.style.paddingBottom = "";
   }
 
   const overallBenchmarkCnText = overallRow.querySelector<HTMLElement>("[data-overall-benchmark-cn-text='1']");
   if (overallBenchmarkCnText) {
-    overallBenchmarkCnText.style.display = "inline-block";
-    overallBenchmarkCnText.style.transform = "translateY(2px)";
+    overallBenchmarkCnText.style.display = "";
+    overallBenchmarkCnText.style.transform = "";
   }
 
   overallRow.querySelectorAll<HTMLElement>("[data-overall-tooltip-trigger]").forEach((trigger) => {
-    trigger.style.top = "56%";
+    trigger.style.top = "";
   });
+}
+
+export function __applyExportOverallRowNudgeFallbackForTest(root: HTMLElement): void {
+  applyExportOverallRowNudgeFallback(root);
 }
 
 export function resolveCaptureDimensions(element: HTMLElement): { width: number; height: number } {

@@ -119,6 +119,7 @@ export {
   applyExportPresenceFilterFallback,
   __applyExportPresenceFilterFallbackForTest,
   applyExportOverallRowNudgeFallback,
+  __applyExportOverallRowNudgeFallbackForTest,
   resolveCaptureDimensions,
   __resolveCaptureDimensionsForTest,
   loadHtml2Canvas,

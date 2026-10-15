@@ -3161,6 +3161,7 @@ export {
   __applyExportSourceFrameFallbackForTest,
   __applyExportCompareBaselineFallbackForTest,
   __applyExportPresenceFilterFallbackForTest,
+  __applyExportOverallRowNudgeFallbackForTest,
   __buildOverallScoreDisplayDecimalsMapForTest,
   __resolveCaptureDimensionsForTest
 } from "./benchmark-matrix/index";
