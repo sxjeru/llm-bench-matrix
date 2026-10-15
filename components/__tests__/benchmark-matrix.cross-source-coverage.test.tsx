@@ -818,14 +818,49 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     vi.restoreAllMocks();
   });
 
-  test("导出总评行处理应保持天然基线对齐，不施加人工下沉或不对称 padding", () => {
+  test("导出总评行处理必须保留天然 padding: 6px 8px，且结构符合真实 model cell 中的 tooltip trigger", () => {
+    const root = document.createElement("div");
+    const tr = document.createElement("tr");
+    tr.setAttribute("data-overall-row", "1");
+
+    // 1. 总评 label 单元格：真实 DOM (benchmark-matrix.tsx:2913) 带有内联 padding: "6px 8px"
+    const labelCell = document.createElement("td");
+    labelCell.setAttribute("data-overall-benchmark-label", "1");
+    labelCell.style.padding = "6px 8px";
+
+    const cnSpan = document.createElement("span");
+    cnSpan.setAttribute("data-overall-benchmark-cn-text", "1");
+    labelCell.appendChild(cnSpan);
+
+    // 2. 模型得分单元格：真实 DOM (benchmark-matrix.tsx:2973) 中 trigger 位于 model cell 内而非 label 内
+    const modelCell = document.createElement("td");
+    const trigger = document.createElement("span");
+    trigger.setAttribute("data-overall-tooltip-trigger", "model-a");
+    modelCell.appendChild(trigger);
+
+    tr.appendChild(labelCell);
+    tr.appendChild(modelCell);
+    root.appendChild(tr);
+
+    __applyExportOverallRowNudgeFallbackForTest(root);
+
+    // 核心断言：天然的 6px 上下 padding 绝不能被置空破坏
+    expect(labelCell.style.paddingTop).toBe("6px");
+    expect(labelCell.style.paddingBottom).toBe("6px");
+    expect(labelCell.style.paddingLeft).toBe("8px");
+    expect(labelCell.style.paddingRight).toBe("8px");
+    expect(cnSpan.style.transform).toBe("");
+    expect(trigger.style.top).toBe("");
+  });
+
+  test("导出总评行处理能安全纠正旧版遗留的 8px/4px 偏斜并回退到天然 6px", () => {
     const root = document.createElement("div");
     const tr = document.createElement("tr");
     tr.setAttribute("data-overall-row", "1");
 
     const labelCell = document.createElement("td");
     labelCell.setAttribute("data-overall-benchmark-label", "1");
-    // 模拟可能存在的旧内联样式
+    labelCell.style.padding = "6px 8px";
     labelCell.style.paddingTop = "8px";
     labelCell.style.paddingBottom = "4px";
 
@@ -833,23 +868,25 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     cnSpan.setAttribute("data-overall-benchmark-cn-text", "1");
     cnSpan.style.display = "inline-block";
     cnSpan.style.transform = "translateY(2px)";
-
-    const trigger = document.createElement("span");
-    trigger.setAttribute("data-overall-tooltip-trigger", "1");
-    trigger.style.top = "56%";
-
     labelCell.appendChild(cnSpan);
-    labelCell.appendChild(trigger);
+
+    const modelCell = document.createElement("td");
+    const trigger = document.createElement("span");
+    trigger.setAttribute("data-overall-tooltip-trigger", "model-b");
+    trigger.style.top = "56%";
+    modelCell.appendChild(trigger);
+
     tr.appendChild(labelCell);
+    tr.appendChild(modelCell);
     root.appendChild(tr);
 
     __applyExportOverallRowNudgeFallbackForTest(root);
 
-    // 确认已清理人工 translateY 偏移与不对称 padding
+    // 8px/4px 被恢复为天然的 6px，且 transform 和 top 偏移被清除
+    expect(labelCell.style.paddingTop).toBe("6px");
+    expect(labelCell.style.paddingBottom).toBe("6px");
     expect(cnSpan.style.transform).toBe("");
     expect(cnSpan.style.display).toBe("");
-    expect(labelCell.style.paddingTop).toBe("");
-    expect(labelCell.style.paddingBottom).toBe("");
     expect(trigger.style.top).toBe("");
   });
 
