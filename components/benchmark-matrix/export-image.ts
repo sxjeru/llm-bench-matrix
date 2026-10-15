@@ -230,6 +230,27 @@ export function __applyExportPresenceFilterFallbackForTest(root: HTMLElement): v
   applyExportPresenceFilterFallback(root);
 }
 
+export function applyExportStickyShadowRemoval(root: HTMLElement): void {
+  // 在 Web 界面中，固定（sticky）列 Benchmark 带有右侧阴影（8px 0 12px rgba(...)）
+  // 以提供水平滚动视觉提示（affordance）。
+  // html2canvas-pro 2.5.2 原生修复了层叠上下文（commit 70815f7）并正确放大了 shadowBlur（commit 7e42bff），
+  // 导致该阴影在导出时被真实绘制并投射到右侧第一列模型单元格上，形成明显的暗色阴影带。
+  // 在导出完整图片时，表格处于全展开展现状态（无滚动交互），不需要横向滚动阴影。
+  // 此函数在 onclone 中清除 sticky 列的所有滚动阴影，避免遮挡相邻数据列。
+  const cells = root.querySelectorAll<HTMLElement>("th, td");
+  const stickyShadowRegex = /8px\s+0(?:px)?\s+12px|rgba\(\s*2,\s*6,\s*23/;
+  cells.forEach((cell) => {
+    const shadow = cell.style.boxShadow;
+    if (shadow && stickyShadowRegex.test(shadow)) {
+      cell.style.boxShadow = "none";
+    }
+  });
+}
+
+export function __applyExportStickyShadowRemovalForTest(root: HTMLElement): void {
+  applyExportStickyShadowRemoval(root);
+}
+
 export function applyExportOverallRowNudgeFallback(root: HTMLElement): void {
   // html2canvas-pro >= 2.4.3 (PR #240 / commit 7710c4b) 已在上游原生修复了 letter-spacing 场景下
   // CJK 字符被错误切至 ideographic 基线导致中文抬高的问题。旧版本中用于对抗上浮的 translateY(2px)、
@@ -395,6 +416,7 @@ export async function renderElementToImageBlob(
           const exportSourceFrameWidth = 2;
           const exportCompareBaselineColor = "rgba(250, 211, 106, 0.9)";
           const exportCompareBaselineWidth = 2;
+          applyExportStickyShadowRemoval(clonedRoot);
           applyExportOverallRowNudgeFallback(clonedRoot);
           applyExportSourceFrameFallback(clonedRoot, exportSourceFrameColor, exportSourceFrameWidth);
           applyExportCompareBaselineFallback(clonedRoot, exportCompareBaselineColor, exportCompareBaselineWidth);

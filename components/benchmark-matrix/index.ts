@@ -118,6 +118,8 @@ export {
   __applyExportCompareBaselineFallbackForTest,
   applyExportPresenceFilterFallback,
   __applyExportPresenceFilterFallbackForTest,
+  applyExportStickyShadowRemoval,
+  __applyExportStickyShadowRemovalForTest,
   applyExportOverallRowNudgeFallback,
   __applyExportOverallRowNudgeFallbackForTest,
   resolveCaptureDimensions,

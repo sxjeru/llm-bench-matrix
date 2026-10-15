@@ -2111,7 +2111,7 @@ export function BenchmarkMatrix({
                   padding: "6px 8px",
                   background: "rgba(20, 27, 45, 0.98)",
                   backdropFilter: "blur(6px)",
-                  boxShadow: "8px 0 12px rgba(2, 6, 23, 0.35)",
+                  boxShadow: isExportCaptureMode ? undefined : "8px 0 12px rgba(2, 6, 23, 0.35)",
                   whiteSpace: "nowrap"
                 }}
               >
@@ -2479,7 +2479,7 @@ export function BenchmarkMatrix({
                       maxWidth: benchmarkColumnWidth,
                       padding: "6px 8px",
                       backgroundColor: "rgba(20, 27, 45, 0.96)",
-                      boxShadow: "8px 0 12px rgba(2, 6, 23, 0.28)",
+                      boxShadow: isExportCaptureMode ? undefined : "8px 0 12px rgba(2, 6, 23, 0.28)",
                       whiteSpace: "nowrap",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
@@ -2913,7 +2913,7 @@ export function BenchmarkMatrix({
                     padding: "6px 8px",
                     borderTop: "1px solid rgba(147, 197, 253, 0.4)",
                     backgroundColor: "rgba(18, 31, 52, 0.98)",
-                    boxShadow: "8px 0 12px rgba(2, 6, 23, 0.28)",
+                    boxShadow: isExportCaptureMode ? undefined : "8px 0 12px rgba(2, 6, 23, 0.28)",
                     fontWeight: 800,
                     letterSpacing: "0.02em"
                   }}
@@ -3161,6 +3161,7 @@ export {
   __applyExportSourceFrameFallbackForTest,
   __applyExportCompareBaselineFallbackForTest,
   __applyExportPresenceFilterFallbackForTest,
+  __applyExportStickyShadowRemovalForTest,
   __applyExportOverallRowNudgeFallbackForTest,
   __buildOverallScoreDisplayDecimalsMapForTest,
   __resolveCaptureDimensionsForTest

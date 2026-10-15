@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
   __applyExportCompareBaselineFallbackForTest,
   __applyExportOverallRowNudgeFallbackForTest,
+  __applyExportStickyShadowRemovalForTest,
   __applyExportSourceFrameFallbackForTest,
   __buildSourceFrameShadowsForTest,
   __resolveCaptureDimensionsForTest,
@@ -888,6 +889,41 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     expect(cnSpan.style.transform).toBe("");
     expect(cnSpan.style.display).toBe("");
     expect(trigger.style.top).toBe("");
+  });
+
+  test("导出 sticky 阴影清理能精准移除 Benchmark 列向右投射的滚动阴影，且不影响其它边框与阴影", () => {
+    const root = document.createElement("div");
+
+    // 1. 表头 Benchmark sticky 单元格
+    const th = document.createElement("th");
+    th.style.boxShadow = "8px 0 12px rgba(2, 6, 23, 0.35)";
+
+    // 2. 数据行 Benchmark sticky 单元格
+    const tdRow = document.createElement("td");
+    tdRow.style.boxShadow = "8px 0 12px rgba(2, 6, 23, 0.28)";
+
+    // 3. 浏览器规范化序列化格式（如 Chromium 中颜色可能在前，0 带有 px 单位）
+    const tdBrowserVariant = document.createElement("td");
+    tdBrowserVariant.style.boxShadow = "rgba(2, 6, 23, 0.28) 8px 0px 12px 0px";
+
+    // 4. 其他单元格阴影（如对比模式/筛选光效），不应被误清除
+    const tdOther = document.createElement("td");
+    tdOther.style.boxShadow = "0 0 0 1px rgba(94, 234, 212, 0.22)";
+
+    root.appendChild(th);
+    root.appendChild(tdRow);
+    root.appendChild(tdBrowserVariant);
+    root.appendChild(tdOther);
+
+    __applyExportStickyShadowRemovalForTest(root);
+
+    // sticky 阴影应被完全置为 "none"
+    expect(th.style.boxShadow).toBe("none");
+    expect(tdRow.style.boxShadow).toBe("none");
+    expect(tdBrowserVariant.style.boxShadow).toBe("none");
+
+    // 无关阴影保持原样
+    expect(tdOther.style.boxShadow).toBe("0 0 0 1px rgba(94, 234, 212, 0.22)");
   });
 
   test("表头 tooltip 仅显示点击动作且会随排序状态更新", async () => {
