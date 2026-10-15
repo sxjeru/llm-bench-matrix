@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   __applyExportCompareBaselineFallbackForTest,
+  __applyExportOverallRowNudgeFallbackForTest,
+  __applyExportStickyShadowRemovalForTest,
   __applyExportSourceFrameFallbackForTest,
   __buildSourceFrameShadowsForTest,
   __resolveCaptureDimensionsForTest,
@@ -815,6 +817,113 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     expect(cell.style.paddingLeft).toBe("8px");
     expect(cell.style.paddingRight).toBe("8px");
     vi.restoreAllMocks();
+  });
+
+  test("导出总评行处理必须保留天然 padding: 6px 8px，且结构符合真实 model cell 中的 tooltip trigger", () => {
+    const root = document.createElement("div");
+    const tr = document.createElement("tr");
+    tr.setAttribute("data-overall-row", "1");
+
+    // 1. 总评 label 单元格：真实 DOM (benchmark-matrix.tsx:2913) 带有内联 padding: "6px 8px"
+    const labelCell = document.createElement("td");
+    labelCell.setAttribute("data-overall-benchmark-label", "1");
+    labelCell.style.padding = "6px 8px";
+
+    const cnSpan = document.createElement("span");
+    cnSpan.setAttribute("data-overall-benchmark-cn-text", "1");
+    labelCell.appendChild(cnSpan);
+
+    // 2. 模型得分单元格：真实 DOM (benchmark-matrix.tsx:2973) 中 trigger 位于 model cell 内而非 label 内
+    const modelCell = document.createElement("td");
+    const trigger = document.createElement("span");
+    trigger.setAttribute("data-overall-tooltip-trigger", "model-a");
+    modelCell.appendChild(trigger);
+
+    tr.appendChild(labelCell);
+    tr.appendChild(modelCell);
+    root.appendChild(tr);
+
+    __applyExportOverallRowNudgeFallbackForTest(root);
+
+    // 核心断言：天然的 6px 上下 padding 绝不能被置空破坏
+    expect(labelCell.style.paddingTop).toBe("6px");
+    expect(labelCell.style.paddingBottom).toBe("6px");
+    expect(labelCell.style.paddingLeft).toBe("8px");
+    expect(labelCell.style.paddingRight).toBe("8px");
+    expect(cnSpan.style.transform).toBe("");
+    expect(trigger.style.top).toBe("");
+  });
+
+  test("导出总评行处理能安全纠正旧版遗留的 8px/4px 偏斜并回退到天然 6px", () => {
+    const root = document.createElement("div");
+    const tr = document.createElement("tr");
+    tr.setAttribute("data-overall-row", "1");
+
+    const labelCell = document.createElement("td");
+    labelCell.setAttribute("data-overall-benchmark-label", "1");
+    labelCell.style.padding = "6px 8px";
+    labelCell.style.paddingTop = "8px";
+    labelCell.style.paddingBottom = "4px";
+
+    const cnSpan = document.createElement("span");
+    cnSpan.setAttribute("data-overall-benchmark-cn-text", "1");
+    cnSpan.style.display = "inline-block";
+    cnSpan.style.transform = "translateY(2px)";
+    labelCell.appendChild(cnSpan);
+
+    const modelCell = document.createElement("td");
+    const trigger = document.createElement("span");
+    trigger.setAttribute("data-overall-tooltip-trigger", "model-b");
+    trigger.style.top = "56%";
+    modelCell.appendChild(trigger);
+
+    tr.appendChild(labelCell);
+    tr.appendChild(modelCell);
+    root.appendChild(tr);
+
+    __applyExportOverallRowNudgeFallbackForTest(root);
+
+    // 8px/4px 被恢复为天然的 6px，且 transform 和 top 偏移被清除
+    expect(labelCell.style.paddingTop).toBe("6px");
+    expect(labelCell.style.paddingBottom).toBe("6px");
+    expect(cnSpan.style.transform).toBe("");
+    expect(cnSpan.style.display).toBe("");
+    expect(trigger.style.top).toBe("");
+  });
+
+  test("导出 sticky 阴影清理能精准移除 Benchmark 列向右投射的滚动阴影，且不影响其它边框与阴影", () => {
+    const root = document.createElement("div");
+
+    // 1. 表头 Benchmark sticky 单元格
+    const th = document.createElement("th");
+    th.style.boxShadow = "8px 0 12px rgba(2, 6, 23, 0.35)";
+
+    // 2. 数据行 Benchmark sticky 单元格
+    const tdRow = document.createElement("td");
+    tdRow.style.boxShadow = "8px 0 12px rgba(2, 6, 23, 0.28)";
+
+    // 3. 浏览器规范化序列化格式（如 Chromium 中颜色可能在前，0 带有 px 单位）
+    const tdBrowserVariant = document.createElement("td");
+    tdBrowserVariant.style.boxShadow = "rgba(2, 6, 23, 0.28) 8px 0px 12px 0px";
+
+    // 4. 其他单元格阴影（如对比模式/筛选光效），不应被误清除
+    const tdOther = document.createElement("td");
+    tdOther.style.boxShadow = "0 0 0 1px rgba(94, 234, 212, 0.22)";
+
+    root.appendChild(th);
+    root.appendChild(tdRow);
+    root.appendChild(tdBrowserVariant);
+    root.appendChild(tdOther);
+
+    __applyExportStickyShadowRemovalForTest(root);
+
+    // sticky 阴影应被完全置为 "none"
+    expect(th.style.boxShadow).toBe("none");
+    expect(tdRow.style.boxShadow).toBe("none");
+    expect(tdBrowserVariant.style.boxShadow).toBe("none");
+
+    // 无关阴影保持原样
+    expect(tdOther.style.boxShadow).toBe("0 0 0 1px rgba(94, 234, 212, 0.22)");
   });
 
   test("表头 tooltip 仅显示点击动作且会随排序状态更新", async () => {
