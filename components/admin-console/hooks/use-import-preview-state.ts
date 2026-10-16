@@ -30,7 +30,12 @@ import {
   parseSingleRawValue,
   parseStarSingleRawValue
 } from "../utils/import-values";
-import { buildModelCompareKey, normalizeModelNameByDedupeRule } from "../utils/model";
+import {
+  buildModelCompareKey,
+  getMergedModelRecordsForSourceName,
+  getMergedModelTargetIdsBySourceName,
+  normalizeModelNameByDedupeRule
+} from "../utils/model";
 import { normalizeModalityList, normalizeModalityName } from "../utils/modality";
 import { getProviderDisplayNameById } from "../utils/provider";
 
@@ -171,10 +176,12 @@ export function useImportPreviewState({
   const modelWarnings = useMemo(() => {
     const importedModels = Array.from(new Set(textImportDraftRows.map((item) => item.modelName.trim()).filter(Boolean)));
     const warnings: ModelWarningItem[] = [];
+    const mergedModelTargetIdsBySourceName = getMergedModelTargetIdsBySourceName(mergedRecords);
 
     importedModels.forEach((modelName) => {
       const exactExisting = existingModelExactMap.get(modelName.toLowerCase());
-      if (exactExisting) {
+      const mergedTargetIds = mergedModelTargetIdsBySourceName.get(modelName.trim().toLowerCase()) ?? [];
+      if (exactExisting || mergedTargetIds.length > 0) {
         return;
       }
 
@@ -212,7 +219,7 @@ export function useImportPreviewState({
     });
 
     return warnings;
-  }, [textImportDraftRows, existingModelByCompareKey, existingModelExactMap]);
+  }, [textImportDraftRows, existingModelByCompareKey, existingModelExactMap, mergedRecords]);
 
   const modelsWithParentheses = useMemo(() => {
     return Array.from(
@@ -804,6 +811,14 @@ export function useImportPreviewState({
           if (target) {
             modelName = target.modelName;
           }
+        } else {
+          const mergedRecordsForModel = getMergedModelRecordsForSourceName(modelName, mergedRecords);
+          if (mergedRecordsForModel.length > 0) {
+            const target = modelById.get(mergedRecordsForModel[0].targetId);
+            if (target) {
+              modelName = target.modelName;
+            }
+          }
         }
 
         modelName = modelName.trim();
@@ -910,7 +925,8 @@ export function useImportPreviewState({
     existingModelExactMap,
     existingModelByCanonicalKey,
     existingModelByNameMap,
-    existingBenchmarkExactMap
+    existingBenchmarkExactMap,
+    mergedRecords
   ]);
 
   const ignoredTextImportCount = useMemo(() => {

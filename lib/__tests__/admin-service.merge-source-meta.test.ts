@@ -35,7 +35,14 @@ type GetDashboardRowsFn = (limit?: number | null, sourceFilter?: string | null) 
 
 type TransactionCallback = (tx: unknown) => Promise<unknown>;
 
+type UpdateMergedEntityRecordFn = (input: {
+  entityType: "model" | "benchmark";
+  sourceId: number;
+  targetId: number;
+}) => Promise<{ ok: true }>;
+
 let mergeEntityForTest: MergeEntityFn;
+let updateMergedEntityRecordForTest: UpdateMergedEntityRecordFn;
 let rebuildBenchmarkCanonicalKeysByRuleForTest: RebuildBenchmarkCanonicalKeysByRuleFn;
 let importBenchmarkCsvForTest: ImportBenchmarkCsvFn;
 let hasBenchmarkSymbolSemanticMismatchForTest: HasBenchmarkSymbolSemanticMismatchFn;
@@ -50,6 +57,7 @@ beforeAll(async () => {
 
   const adminServiceModule = await import("@/lib/admin-service");
   mergeEntityForTest = adminServiceModule.mergeEntity as MergeEntityFn;
+  updateMergedEntityRecordForTest = adminServiceModule.updateMergedEntityRecord as UpdateMergedEntityRecordFn;
   rebuildBenchmarkCanonicalKeysByRuleForTest = adminServiceModule.rebuildBenchmarkCanonicalKeysByRule as RebuildBenchmarkCanonicalKeysByRuleFn;
   importBenchmarkCsvForTest = adminServiceModule.importBenchmarkCsv as ImportBenchmarkCsvFn;
   hasBenchmarkSymbolSemanticMismatchForTest = adminServiceModule.__hasBenchmarkSymbolSemanticMismatchForTest as HasBenchmarkSymbolSemanticMismatchFn;
@@ -64,6 +72,15 @@ beforeAll(async () => {
 beforeEach(() => {
   vi.restoreAllMocks();
 });
+
+function createSelectFromMock<T>(result: T) {
+  const promise = Promise.resolve(result);
+  return vi.fn().mockReturnValue(
+    Object.assign(promise, {
+      where: vi.fn().mockResolvedValue(result)
+    })
+  );
+}
 
 describe("mergeEntity benchmark source meta migration", () => {
   test("benchmark 重复检测会识别 @ 和 ^ 的关键语义差异", () => {
@@ -529,7 +546,8 @@ describe("mergeEntity benchmark source meta migration", () => {
     const modelSelectFrom = vi.fn().mockReturnValue({ where: modelSelectWhere });
 
     const txSelect = vi.fn()
-      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(activeBenchmarks) }) })
+      .mockReturnValueOnce({ from: createSelectFromMock(activeBenchmarks) })
+      .mockReturnValueOnce({ from: createSelectFromMock([]) })
       .mockReturnValueOnce({ from: providerSelectFrom })
       .mockReturnValueOnce({ from: modelSelectFrom });
 
@@ -638,7 +656,8 @@ describe("mergeEntity benchmark source meta migration", () => {
     };
 
     const txSelect = vi.fn()
-      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(activeBenchmarks) }) })
+      .mockReturnValueOnce({ from: createSelectFromMock(activeBenchmarks) })
+      .mockReturnValueOnce({ from: createSelectFromMock([]) })
       .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([createdProvider]) }) }) })
       .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }) }) });
 
@@ -739,7 +758,8 @@ describe("mergeEntity benchmark source meta migration", () => {
     };
 
     const txSelect = vi.fn()
-      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(existingBenchmarks) }) })
+      .mockReturnValueOnce({ from: createSelectFromMock(existingBenchmarks) })
+      .mockReturnValueOnce({ from: createSelectFromMock([]) })
       .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([createdProvider]) }) }) })
       .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }) }) });
 
@@ -840,7 +860,8 @@ describe("mergeEntity benchmark source meta migration", () => {
     };
 
     const txSelect = vi.fn()
-      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(activeBenchmarks) }) })
+      .mockReturnValueOnce({ from: createSelectFromMock(activeBenchmarks) })
+      .mockReturnValueOnce({ from: createSelectFromMock([]) })
       .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([createdProvider]) }) }) })
       .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }) }) });
 
@@ -955,7 +976,8 @@ describe("mergeEntity benchmark source meta migration", () => {
     };
 
     const txSelect = vi.fn()
-      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(activeBenchmarks) }) })
+      .mockReturnValueOnce({ from: createSelectFromMock(activeBenchmarks) })
+      .mockReturnValueOnce({ from: createSelectFromMock([]) })
       .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([createdProvider]) }) }) })
       .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }) }) });
 
@@ -1043,7 +1065,8 @@ describe("mergeEntity benchmark source meta migration", () => {
     };
 
     const txSelect = vi.fn()
-      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }) })
+      .mockReturnValueOnce({ from: createSelectFromMock([]) })
+      .mockReturnValueOnce({ from: createSelectFromMock([]) })
       .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([createdProvider]) }) }) })
       .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }) }) })
       .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }) }) })
@@ -1078,6 +1101,191 @@ describe("mergeEntity benchmark source meta migration", () => {
       const result = await importBenchmarkCsvForTest(inputText, "text:unit-test");
       expect(result.inserted).toBe(1);
       expect(txInsert).toHaveBeenCalled();
+    } finally {
+      transactionSpy.mockRestore();
+      dbSelectSpy.mockRestore();
+    }
+  });
+
+  test("合并 model 时会同步迁移 benchmark_values 的 modelId 并展平下游已合并 model", async () => {
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const updateSet = vi.fn(() => ({ where: updateWhere }));
+    const update = vi.fn(() => ({ set: updateSet }));
+
+    const tx = {
+      update,
+      select: vi.fn(),
+      insert: vi.fn(),
+      delete: vi.fn()
+    };
+
+    const transactionSpy = vi
+      .spyOn(dbForTest, "transaction")
+      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+
+    try {
+      await mergeEntityForTest({
+        entityType: "model",
+        sourceId: 10,
+        targetId: 20
+      });
+
+      expect(updateSet).toHaveBeenCalledWith({ modelId: 20 });
+      expect(updateSet).toHaveBeenCalledWith({ mergedIntoModelId: 20 });
+      expect(update).toHaveBeenCalledTimes(3);
+    } finally {
+      transactionSpy.mockRestore();
+    }
+  });
+
+  test("更新已合并 model 记录时会同步迁移 benchmark_values 并展平下游已合并 model", async () => {
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const updateSet = vi.fn(() => ({ where: updateWhere }));
+    const update = vi.fn(() => ({ set: updateSet }));
+
+    const tx = {
+      update,
+      select: vi.fn(),
+      insert: vi.fn(),
+      delete: vi.fn()
+    };
+
+    const transactionSpy = vi
+      .spyOn(dbForTest, "transaction")
+      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+
+    try {
+      const result = await updateMergedEntityRecordForTest({
+        entityType: "model",
+        sourceId: 10,
+        targetId: 30
+      });
+
+      expect(result.ok).toBe(true);
+      expect(updateSet).toHaveBeenCalledWith({ modelId: 30 });
+      expect(updateSet).toHaveBeenCalledWith({ mergedIntoModelId: 30 });
+      expect(update).toHaveBeenCalledTimes(3);
+    } finally {
+      transactionSpy.mockRestore();
+    }
+  });
+
+  test("更新已合并 benchmark 记录时会同步迁移 benchmark_values 并展平下游已合并 benchmark", async () => {
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const updateSet = vi.fn(() => ({ where: updateWhere }));
+    const update = vi.fn(() => ({ set: updateSet }));
+
+    const tx = {
+      update,
+      select: vi.fn(),
+      insert: vi.fn(),
+      delete: vi.fn()
+    };
+
+    const transactionSpy = vi
+      .spyOn(dbForTest, "transaction")
+      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+
+    try {
+      const result = await updateMergedEntityRecordForTest({
+        entityType: "benchmark",
+        sourceId: 10,
+        targetId: 30
+      });
+
+      expect(result.ok).toBe(true);
+      expect(updateSet).toHaveBeenCalledWith({ benchmarkId: 30 });
+      expect(updateSet).toHaveBeenCalledWith({ mergedIntoBenchmarkId: 30 });
+      expect(update).toHaveBeenCalledTimes(3);
+    } finally {
+      transactionSpy.mockRestore();
+    }
+  });
+
+  test("导入已合并 model 时会自动写入合并目标 modelId", async () => {
+    const inputText = [
+      "Category\tBenchmark\tGPT-Legacy",
+      "General\tMMLU\t80.5"
+    ].join("\n");
+
+    const dbSelectSpy = vi.spyOn(dbForTest, "select").mockImplementation(() => {
+      throw new Error("connect ECONNREFUSED 127.0.0.1:5432");
+    });
+
+    const activeBenchmarks = [
+      {
+        id: 10,
+        benchmarkName: "MMLU",
+        benchmarkType: "General",
+        unit: "%",
+        higherIsBetter: true,
+        modalities: ["Text"],
+        canonicalKey: "mmlu:general",
+        sourceBenchmarkId: null,
+        mergedIntoBenchmarkId: null,
+        createdAt: new Date("2026-04-01T00:00:00.000Z")
+      }
+    ];
+
+    const createdProvider = { id: 1, name: "OpenAI", slug: "openai", createdAt: new Date("2026-04-01T00:00:00.000Z") };
+    const mergedModel = {
+      id: 100,
+      providerId: 1,
+      modelName: "GPT-Legacy",
+      modelAlias: null,
+      canonicalKey: "gptlegacy",
+      sourceModelId: null,
+      mergedIntoModelId: 200,
+      createdAt: new Date("2026-04-01T00:00:00.000Z")
+    };
+    const targetModel = {
+      id: 200,
+      providerId: 1,
+      modelName: "GPT-Target",
+      modelAlias: null,
+      canonicalKey: "gpttarget",
+      sourceModelId: null,
+      mergedIntoModelId: null,
+      createdAt: new Date("2026-04-01T00:00:00.000Z")
+    };
+
+    const txSelect = vi.fn()
+      .mockReturnValueOnce({ from: createSelectFromMock(activeBenchmarks) })
+      .mockReturnValueOnce({ from: createSelectFromMock([mergedModel, targetModel]) })
+      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([createdProvider]) }) }) });
+
+    const providerReturning = vi.fn().mockResolvedValue([createdProvider]);
+    const valueRowsInsert = vi.fn().mockResolvedValue(undefined);
+    const sourceMetaOnConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
+
+    const txInsert = vi.fn()
+      .mockReturnValueOnce({ values: vi.fn(() => ({ onConflictDoUpdate: vi.fn(() => ({ returning: providerReturning })) })) })
+      .mockReturnValueOnce({ values: valueRowsInsert })
+      .mockReturnValueOnce({ values: vi.fn(() => ({ onConflictDoUpdate: sourceMetaOnConflictDoUpdate })) });
+
+    const tx = {
+      select: txSelect,
+      insert: txInsert,
+      update: vi.fn(() => ({ set: vi.fn() })),
+      delete: vi.fn()
+    };
+
+    const transactionSpy = vi
+      .spyOn(dbForTest, "transaction")
+      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+
+    try {
+      const result = await importBenchmarkCsvForTest(inputText, "text:merged-model-test");
+
+      expect(result.inserted).toBe(1);
+      expect(valueRowsInsert).toHaveBeenCalledWith([
+        expect.objectContaining({
+          modelId: 200,
+          benchmarkId: 10,
+          valueRaw: "80.5",
+          source: "text:merged-model-test"
+        })
+      ]);
     } finally {
       transactionSpy.mockRestore();
       dbSelectSpy.mockRestore();

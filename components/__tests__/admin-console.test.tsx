@@ -1865,6 +1865,66 @@ describe("AdminConsole text import", () => {
     })).toBeInTheDocument();
   });
 
+  test("再次导入已合并 model 时矩阵预览显示绿点且下拉展示 A -> B", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model-Old",
+          benchmarkName: "Bench-1",
+          benchmarkType: "Type-A",
+          rawValue: "70.1",
+          valueNum: 70.1,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    mockFetchSequence(previewResponse);
+    await renderReady(
+      <AdminConsole
+        {...buildProps()}
+        mergedRecords={[
+          {
+            entityType: "model",
+            sourceId: 99,
+            sourceName: "Model-Old",
+            targetId: 2,
+            targetName: "Model B (OpenAI)"
+          }
+        ]}
+      />
+    );
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const matrixTable = await findMatrixPreviewTable();
+    const modelInput = within(matrixTable).getByDisplayValue("Model-Old") as HTMLInputElement;
+    const field = modelInput.closest("[data-matrix-model-candidate-container='true']");
+    if (!field) {
+      throw new Error("Model candidate field not found");
+    }
+
+    expect(within(field as HTMLElement).getByTitle("已匹配合并记录：Model-Old -> Model B")).toBeInTheDocument();
+
+    await user.click(modelInput);
+
+    expect(screen.getByRole("option", {
+      name: /Model-Old -> Model B \[2\]/
+    })).toBeInTheDocument();
+  });
+
   test("矩阵预览中的重复嫌疑 benchmark 候选显示重复率与冲突数", async () => {
     const user = userEvent.setup();
 

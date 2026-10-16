@@ -27,7 +27,11 @@ import { buildStructuredCsvText } from "../utils/csv";
 import { toDomSafeId } from "../utils/dom";
 import { formatPreviewNumericValue } from "../utils/import-values";
 import { parseExplicitMergeEntityId } from "../utils/merge";
-import { getModelSearchCandidateIds } from "../utils/model";
+import {
+  formatMergedModelCandidateLabel,
+  getMergedModelRecordsForSourceName,
+  getModelSearchCandidateIds
+} from "../utils/model";
 import { normalizeModalityList, normalizeModalityName } from "../utils/modality";
 import { ModalityBadge } from "./shared/modality-badge";
 
@@ -263,6 +267,7 @@ type MatrixModelCandidateFieldProps = {
   modelName: string;
   inputValue: string;
   hasExactMatch: boolean;
+  exactMatchTitle?: string;
   candidateOptions: ModelCandidateOption[];
   isOpen: boolean;
   setOpenMatrixModelCandidateFor: Dispatch<SetStateAction<string | null>>;
@@ -275,6 +280,7 @@ function MatrixModelCandidateField({
   modelName,
   inputValue,
   hasExactMatch,
+  exactMatchTitle = "已匹配库内同名 model",
   candidateOptions,
   isOpen,
   setOpenMatrixModelCandidateFor,
@@ -380,7 +386,7 @@ function MatrixModelCandidateField({
           );
         }}
       />
-      {hasExactMatch ? <ExactMatchDot title="已匹配库内同名 model" /> : null}
+      {hasExactMatch ? <ExactMatchDot title={exactMatchTitle} /> : null}
       {dropdown}
     </div>
   );
@@ -640,7 +646,12 @@ export function ImportTab({
 
   function hasExactModelMatch(inputValue: string) {
     const normalizedInput = inputValue.trim().toLowerCase();
-    return normalizedInput.length > 0 && modelEntityOptions.some((item) => item.label.trim().toLowerCase() === normalizedInput);
+    if (!normalizedInput) return false;
+
+    return (
+      modelEntityOptions.some((item) => item.label.trim().toLowerCase() === normalizedInput)
+      || getMergedModelRecordsForSourceName(inputValue, mergedRecords).length > 0
+    );
   }
 
   function hasExactBenchmarkMatch(inputValue: string) {
@@ -1081,17 +1092,41 @@ export function ImportTab({
                     {matrixPreview.modelNames.map((modelName) => {
                       const modelWarning = modelWarningMap.get(modelName);
                       const modelInputValue = matrixModelNameDrafts[modelName] ?? modelName;
+                      const mergedModelRecords = getMergedModelRecordsForSourceName(
+                        modelInputValue,
+                        mergedRecords
+                      );
+                      const mergedModelTargetIds = mergedModelRecords.map((record) => record.targetId);
                       const modelCandidateTargetIds = Array.from(new Set([
+                        ...mergedModelTargetIds,
                         ...(modelWarning?.candidateTargetIds ?? []),
                         ...(modelWarning?.suggestedTargetId ? [modelWarning.suggestedTargetId] : []),
                         ...getModelSearchCandidateIds(modelInputValue, modelCandidateSearchOptions)
                       ])).slice(0, 30);
                       const hasModelMatch = hasExactModelMatch(modelInputValue);
+                      const mergedExactMatchTitle = mergedModelRecords.length > 0
+                        ? `已匹配合并记录：${formatMergedModelCandidateLabel(
+                          mergedModelRecords[0].sourceName,
+                          modelEntityOptions.find((item) => item.id === mergedModelRecords[0].targetId)?.label
+                            ?? mergedModelRecords[0].targetName
+                        )}`
+                        : "已匹配库内同名 model";
+                      const mergedLabelByTargetId = new Map(
+                        mergedModelRecords.map((record) => [
+                          record.targetId,
+                          formatMergedModelCandidateLabel(
+                            record.sourceName,
+                            modelEntityOptions.find((item) => item.id === record.targetId)?.label
+                              ?? record.targetName
+                          )
+                        ])
+                      );
                       const modelCandidateOptions = modelCandidateTargetIds.map((targetId) => {
                         const target = modelEntityOptions.find((item) => String(item.id) === String(targetId));
+                        const mergedLabel = mergedLabelByTargetId.get(targetId);
                         return {
                           targetId,
-                          label: target?.label ?? `#${targetId}`
+                          label: mergedLabel ?? target?.label ?? `#${targetId}`
                         };
                       });
 
@@ -1104,6 +1139,7 @@ export function ImportTab({
                             modelName={modelName}
                             inputValue={modelInputValue}
                             hasExactMatch={hasModelMatch}
+                            exactMatchTitle={mergedExactMatchTitle}
                             candidateOptions={modelCandidateOptions}
                             isOpen={modelCandidateOptions.length > 0 && openMatrixModelCandidateFor === modelName}
                             setOpenMatrixModelCandidateFor={setOpenMatrixModelCandidateFor}

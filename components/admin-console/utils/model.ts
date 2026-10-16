@@ -1,5 +1,5 @@
 import { DEFAULT_MODEL_DEDUPE_RULE, MODEL_HYPHEN_VARIANT_REGEX } from "../constants";
-import type { ModelDedupeRule } from "../types";
+import type { MergedRecord, ModelDedupeRule } from "../types";
 
 export function normalizeModelDedupeRule(raw: unknown): ModelDedupeRule {
   if (!raw || typeof raw !== "object") {
@@ -104,4 +104,42 @@ export function normalizeModelNameByDedupeRule(input: string, rule: ModelDedupeR
   }
 
   return normalized;
+}
+
+export function getMergedModelRecordsForSourceName(
+  inputValue: string,
+  mergedRecords: MergedRecord[]
+): MergedRecord[] {
+  const normalizedInput = inputValue.trim().toLowerCase();
+  if (!normalizedInput) return [];
+
+  return mergedRecords.filter((record) => (
+    record.entityType === "model"
+    && record.sourceName.trim().toLowerCase() === normalizedInput
+  ));
+}
+
+export function getMergedModelTargetIdsBySourceName(
+  mergedRecords: MergedRecord[]
+): Map<string, number[]> {
+  const map = new Map<string, number[]>();
+
+  mergedRecords.forEach((record) => {
+    if (record.entityType !== "model") return;
+
+    const key = record.sourceName.trim().toLowerCase();
+    if (!key) return;
+
+    const existing = map.get(key) ?? [];
+    if (!existing.includes(record.targetId)) {
+      existing.push(record.targetId);
+    }
+    map.set(key, existing);
+  });
+
+  return map;
+}
+
+export function formatMergedModelCandidateLabel(sourceName: string, targetLabel: string): string {
+  return `${sourceName} -> ${targetLabel}`;
 }

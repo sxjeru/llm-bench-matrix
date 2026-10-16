@@ -673,6 +673,60 @@ describe("useImportPreviewState Hook - merged benchmark reimport", () => {
   });
 });
 
+describe("useImportPreviewState Hook - merged model reimport", () => {
+  test("再次导入已合并的 model 时，不产生未知警告且 finalizedTextImportRows 自动映射到目标 modelName", () => {
+    const draftRow: TextImportPreviewRow = {
+      rowNumber: 1,
+      providerName: "OpenAI",
+      modelName: "Model-Old",
+      benchmarkName: "MMLU",
+      benchmarkType: "General",
+      rawValue: "70.1",
+      valueNum: 70.1,
+      valueNum2: null,
+      valueNote: null,
+      source: null,
+      valid: true
+    };
+
+    const targetModel: ModelOption = {
+      id: 12,
+      providerId: 1,
+      modelName: "Model-New",
+      canonicalKey: "modelnew"
+    };
+
+    const targetProvider: ProviderOption = {
+      id: 1,
+      name: "OpenAI",
+      slug: "openai"
+    };
+
+    const mergedRecords: MergedRecord[] = [
+      {
+        entityType: "model",
+        sourceId: 99,
+        sourceName: "Model-Old",
+        targetId: 12,
+        targetName: "Model-New (OpenAI)"
+      }
+    ];
+
+    const options = createMockOptions({
+      modelById: new Map([[12, targetModel]]),
+      providerById: new Map([[1, targetProvider]]),
+      existingModelExactMap: new Map([["model-new", targetModel]]),
+      textImportDraftRows: [draftRow],
+      mergedRecords
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+
+    expect(result.current.modelWarnings).toEqual([]);
+    expect(result.current.finalizedTextImportRows[0].modelName).toBe("Model-New");
+  });
+});
+
 describe("useImportPreviewState Hook - matrixPreview column order", () => {
   test("当排在前面的模型在首行缺失时，matrixPreview.modelNames 依然保持 importModelColumns 的原始列顺序", () => {
     // 模拟原始表格:

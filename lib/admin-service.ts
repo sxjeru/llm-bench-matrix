@@ -2505,6 +2505,68 @@ export async function ensureProvider(name: string, options?: { db?: DbExecutor }
   return provider;
 }
 
+async function resolveActiveModel(
+  model: typeof models.$inferSelect,
+  executor: DbExecutor
+): Promise<typeof models.$inferSelect> {
+  if (model.mergedIntoModelId === null) {
+    return model;
+  }
+  let current = model;
+  const seenIds = new Set<number>([current.id]);
+  while (current.mergedIntoModelId !== null) {
+    const nextId = current.mergedIntoModelId;
+    if (seenIds.has(nextId)) {
+      break;
+    }
+    seenIds.add(nextId);
+    const [next] = await executor
+      .select()
+      .from(models)
+      .where(eq(models.id, nextId))
+      .limit(1);
+    if (!next) {
+      break;
+    }
+    current = next;
+  }
+  return current;
+}
+
+function populateModelCacheWithExisting(
+  existingModels: Array<typeof models.$inferSelect>,
+  modelCache: Map<string, typeof models.$inferSelect>
+) {
+  if (!Array.isArray(existingModels)) return;
+
+  existingModels
+    .filter((model) => model.mergedIntoModelId === null)
+    .forEach((model) => {
+      modelCache.set(model.canonicalKey, model);
+    });
+
+  const existingMergedModels = existingModels.filter((model) => model.mergedIntoModelId !== null);
+  existingMergedModels
+    .sort((left, right) => left.id - right.id)
+    .forEach((model) => {
+      if (!model.mergedIntoModelId) return;
+
+      const targetId = model.mergedIntoModelId;
+      let target = existingModels.find((item) => item.id === targetId) ?? null;
+      const seenIds = new Set<number>([model.id, targetId]);
+      while (target && target.mergedIntoModelId !== null) {
+        const nextId = target.mergedIntoModelId;
+        if (seenIds.has(nextId)) break;
+        seenIds.add(nextId);
+        target = existingModels.find((item) => item.id === nextId) ?? null;
+      }
+
+      if (!target) return;
+
+      modelCache.set(model.canonicalKey, target);
+    });
+}
+
 export async function ensureModelByProviderId(input: {
   providerId: number;
   modelName: string;
@@ -2529,7 +2591,7 @@ export async function ensureModelByProviderId(input: {
   const [existing] = await executor.select().from(models).where(eq(models.canonicalKey, canonicalKey)).limit(1);
 
   if (existing) {
-    return existing;
+    return resolveActiveModel(existing, executor);
   }
 
   const createdResult = await executor
@@ -3066,6 +3128,11 @@ export async function mergeEntity(input: {
         .set({ mergedIntoModelId: input.targetId })
         .where(and(eq(models.id, input.sourceId), isNull(models.mergedIntoModelId)));
 
+      await tx
+        .update(models)
+        .set({ mergedIntoModelId: input.targetId })
+        .where(eq(models.mergedIntoModelId, input.sourceId));
+
       return;
     }
 
@@ -3257,6 +3324,11 @@ export async function mergeEntity(input: {
       .update(benchmarks)
       .set({ mergedIntoBenchmarkId: input.targetId })
       .where(and(eq(benchmarks.id, input.sourceId), isNull(benchmarks.mergedIntoBenchmarkId)));
+
+    await tx
+      .update(benchmarks)
+      .set({ mergedIntoBenchmarkId: input.targetId })
+      .where(eq(benchmarks.mergedIntoBenchmarkId, input.sourceId));
   });
 
   await invalidateAllCaches();
@@ -3683,17 +3755,39 @@ export async function updateMergedEntityRecord(input: {
     throw new Error("sourceId and targetId cannot be the same");
   }
 
-  if (input.entityType === "model") {
-    await db
-      .update(models)
-      .set({ mergedIntoModelId: input.targetId })
-      .where(eq(models.id, input.sourceId));
-  } else {
-    await db
-      .update(benchmarks)
-      .set({ mergedIntoBenchmarkId: input.targetId })
-      .where(eq(benchmarks.id, input.sourceId));
-  }
+  await db.transaction(async (tx: DbTransactionClient) => {
+    if (input.entityType === "model") {
+      await tx
+        .update(benchmarkValues)
+        .set({ modelId: input.targetId })
+        .where(eq(benchmarkValues.modelId, input.sourceId));
+
+      await tx
+        .update(models)
+        .set({ mergedIntoModelId: input.targetId })
+        .where(eq(models.id, input.sourceId));
+
+      await tx
+        .update(models)
+        .set({ mergedIntoModelId: input.targetId })
+        .where(eq(models.mergedIntoModelId, input.sourceId));
+    } else {
+      await tx
+        .update(benchmarkValues)
+        .set({ benchmarkId: input.targetId })
+        .where(eq(benchmarkValues.benchmarkId, input.sourceId));
+
+      await tx
+        .update(benchmarks)
+        .set({ mergedIntoBenchmarkId: input.targetId })
+        .where(eq(benchmarks.id, input.sourceId));
+
+      await tx
+        .update(benchmarks)
+        .set({ mergedIntoBenchmarkId: input.targetId })
+        .where(eq(benchmarks.mergedIntoBenchmarkId, input.sourceId));
+    }
+  });
 
   await invalidateAllCaches();
 
@@ -3719,6 +3813,94 @@ export async function deleteMergedEntityRecord(input: {
   await invalidateAllCaches();
 
   return { ok: true };
+}
+
+export async function migrateOrphanedMergedEntityValues(options?: {
+  db?: DbExecutor;
+}): Promise<{ migratedModels: number; migratedBenchmarks: number }> {
+  const executor = options?.db ?? db;
+
+  const [mergedModels, mergedBenchmarks] = await Promise.all([
+    executor
+      .select({ id: models.id, mergedIntoModelId: models.mergedIntoModelId })
+      .from(models)
+      .where(isNotNull(models.mergedIntoModelId)),
+    executor
+      .select({ id: benchmarks.id, mergedIntoBenchmarkId: benchmarks.mergedIntoBenchmarkId })
+      .from(benchmarks)
+      .where(isNotNull(benchmarks.mergedIntoBenchmarkId))
+  ]);
+
+  let migratedModels = 0;
+  if (mergedModels.length > 0) {
+    const modelMap = new Map(mergedModels.map((m) => [m.id, m.mergedIntoModelId]));
+    const resolvedTargetMap = new Map<number, number>();
+    for (const item of mergedModels) {
+      let currentTargetId = item.mergedIntoModelId;
+      const seen = new Set<number>([item.id]);
+      while (currentTargetId !== null && modelMap.has(currentTargetId)) {
+        if (seen.has(currentTargetId)) break;
+        seen.add(currentTargetId);
+        const next = modelMap.get(currentTargetId) ?? null;
+        if (next === null) break;
+        currentTargetId = next;
+      }
+      if (currentTargetId !== null) {
+        resolvedTargetMap.set(item.id, currentTargetId);
+      }
+    }
+    for (const [sourceId, finalTargetId] of resolvedTargetMap.entries()) {
+      if (sourceId === finalTargetId) continue;
+      const updateResult = await executor
+        .update(benchmarkValues)
+        .set({ modelId: finalTargetId })
+        .where(eq(benchmarkValues.modelId, sourceId))
+        .returning({ id: benchmarkValues.id });
+      migratedModels += updateResult.length;
+    }
+  }
+
+  let migratedBenchmarks = 0;
+  if (mergedBenchmarks.length > 0) {
+    const benchmarkMap = new Map(mergedBenchmarks.map((b) => [b.id, b.mergedIntoBenchmarkId]));
+    const resolvedTargetMap = new Map<number, number>();
+    for (const item of mergedBenchmarks) {
+      let currentTargetId = item.mergedIntoBenchmarkId;
+      const seen = new Set<number>([item.id]);
+      while (currentTargetId !== null && benchmarkMap.has(currentTargetId)) {
+        if (seen.has(currentTargetId)) break;
+        seen.add(currentTargetId);
+        const next = benchmarkMap.get(currentTargetId) ?? null;
+        if (next === null) break;
+        currentTargetId = next;
+      }
+      if (currentTargetId !== null) {
+        resolvedTargetMap.set(item.id, currentTargetId);
+      }
+    }
+    for (const [sourceId, finalTargetId] of resolvedTargetMap.entries()) {
+      if (sourceId === finalTargetId) continue;
+      const updateResult = await executor
+        .update(benchmarkValues)
+        .set({ benchmarkId: finalTargetId })
+        .where(eq(benchmarkValues.benchmarkId, sourceId))
+        .returning({ id: benchmarkValues.id });
+      migratedBenchmarks += updateResult.length;
+    }
+  }
+
+  if (migratedModels > 0 || migratedBenchmarks > 0) {
+    await invalidateAllCaches();
+  }
+
+  return { migratedModels, migratedBenchmarks };
+}
+
+export async function migrateOrphanedMergedModelValues(options?: {
+  db?: DbExecutor;
+}): Promise<{ migratedCount: number }> {
+  const result = await migrateOrphanedMergedEntityValues(options);
+  return { migratedCount: result.migratedModels };
 }
 
 export async function importParsedRecords(
@@ -3785,10 +3967,12 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
     >();
     const valueRows: Array<typeof benchmarkValues.$inferInsert> = [];
 
-    const existingBenchmarks = await tx
-      .select()
-      .from(benchmarks)
-      .where(or(isNull(benchmarks.mergedIntoBenchmarkId), isNotNull(benchmarks.mergedIntoBenchmarkId))) as Array<typeof benchmarks.$inferSelect>;
+    const [existingBenchmarks, existingModels] = await Promise.all([
+      tx.select().from(benchmarks) as Promise<Array<typeof benchmarks.$inferSelect>>,
+      tx.select().from(models) as Promise<Array<typeof models.$inferSelect>>
+    ]);
+
+    populateModelCacheWithExisting(existingModels, modelCache);
 
     const existingActiveBenchmarks = existingBenchmarks.filter((benchmark) => benchmark.mergedIntoBenchmarkId === null);
 
@@ -4283,7 +4467,7 @@ export async function importExternalBenchmarkRows(
       const modelCache = new Map<string, Awaited<ReturnType<typeof ensureModelByProviderId>>>();
       const benchmarkCache = new Map<string, typeof benchmarks.$inferSelect>();
 
-      const [preexistingBenchmarkRows, preexistingProviderRows, existingSourceMetaRows] = await Promise.all([
+      const [preexistingBenchmarkRows, preexistingProviderRows, existingSourceMetaRows, existingModels] = await Promise.all([
         tx.select({
           id: benchmarks.id,
           canonicalKey: benchmarks.canonicalKey,
@@ -4298,8 +4482,10 @@ export async function importExternalBenchmarkRows(
             modalities: benchmarkSourceMeta.modalities
           })
           .from(benchmarkSourceMeta)
-          .where(inArray(benchmarkSourceMeta.source, sourceCandidates))
+          .where(inArray(benchmarkSourceMeta.source, sourceCandidates)),
+        tx.select().from(models) as Promise<Array<typeof models.$inferSelect>>
       ]);
+      populateModelCacheWithExisting(existingModels, modelCache);
       const preexistingBenchmarkById = new Map(preexistingBenchmarkRows.map((row) => [row.id, row]));
       const preexistingProviderNameBySlug = new Map(preexistingProviderRows.map((row) => [row.slug, row.name]));
       const existingSourceMetaByKey = new Map(
