@@ -22,3 +22,4 @@ export const STAR_NOTE_HISTORY_STORAGE_KEY = "admin-console:star-note-history";
 export const RENAME_LIST_ROW_HEIGHT = 38;
 export const RENAME_LIST_VIEWPORT_HEIGHT = 320;
 export const RENAME_LIST_OVERSCAN = 8;
+export const MERGED_RECORDS_AUTO_COLLAPSE_THRESHOLD = 30;

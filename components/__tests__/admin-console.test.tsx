@@ -3457,6 +3457,66 @@ describe("AdminConsole merge interactions", () => {
 
     expect(within(mergedRow).getByDisplayValue("Bench-2-Renamed [Type-B] [12]")).toBeInTheDocument();
   });
+
+  test("已有合并记录较多（> 30 条）时默认折叠避免卡顿，并支持点击展开和折叠", async () => {
+    const user = userEvent.setup();
+    const records = Array.from({ length: 31 }, (_, i) => ({
+      entityType: "model" as const,
+      sourceId: i + 1,
+      sourceName: `Source-Model-${i + 1}`,
+      targetId: 100,
+      targetName: "Target-Model"
+    }));
+
+    await renderReady(<AdminConsole {...buildProps()} mergedRecords={records} initialTab="merge" />);
+
+    expect(screen.getByText("已有合并去重记录")).toBeInTheDocument();
+    expect(screen.getByText("（31）")).toBeInTheDocument();
+    expect(screen.getByText("默认折叠")).toBeInTheDocument();
+    expect(screen.getByText("点击展开")).toBeInTheDocument();
+
+    // Table rows should not be rendered into DOM when collapsed to avoid page stutter
+    expect(screen.queryByText(/^Source-Model-1 \[1\]$/)).not.toBeInTheDocument();
+
+    // Click to expand
+    await user.click(screen.getByText("点击展开"));
+
+    expect(screen.getByText("点击折叠")).toBeInTheDocument();
+    expect(await screen.findByText(/^Source-Model-1 \[1\]$/)).toBeInTheDocument();
+    expect(screen.getByText(/^Source-Model-31 \[31\]$/)).toBeInTheDocument();
+
+    // Click again to collapse
+    await user.click(screen.getByText("点击折叠"));
+
+    expect(screen.getByText("点击展开")).toBeInTheDocument();
+    expect(screen.queryByText(/^Source-Model-1 \[1\]$/)).not.toBeInTheDocument();
+  });
+
+  test("已有合并记录较少（<= 30 条）时默认展开", async () => {
+    const records = Array.from({ length: 30 }, (_, i) => ({
+      entityType: "model" as const,
+      sourceId: i + 1,
+      sourceName: `Source-Model-${i + 1}`,
+      targetId: 100,
+      targetName: "Target-Model"
+    }));
+
+    await renderReady(<AdminConsole {...buildProps()} mergedRecords={records} initialTab="merge" />);
+
+    expect(screen.getByText("已有合并去重记录")).toBeInTheDocument();
+    expect(screen.getByText("（30）")).toBeInTheDocument();
+    expect(screen.queryByText("默认折叠")).not.toBeInTheDocument();
+    expect(screen.getByText("点击折叠")).toBeInTheDocument();
+    expect(screen.getByText(/^Source-Model-1 \[1\]$/)).toBeInTheDocument();
+    expect(screen.getByText(/^Source-Model-30 \[30\]$/)).toBeInTheDocument();
+  });
+
+  test("无合并记录时展示暂无已合并记录提示", async () => {
+    await renderReady(<AdminConsole {...buildProps()} mergedRecords={[]} initialTab="merge" />);
+
+    expect(screen.getByText("已有合并去重记录")).toBeInTheDocument();
+    expect(screen.getByText("暂无已合并记录")).toBeInTheDocument();
+  });
 });
 
 describe("AdminConsole rename tab", () => {

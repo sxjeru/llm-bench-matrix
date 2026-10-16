@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import type { Dispatch, FormEvent, RefObject, SetStateAction } from "react";
 import { Merge as MergeIcon, Search, Sparkles } from "lucide-react";
+import { MERGED_RECORDS_AUTO_COLLAPSE_THRESHOLD } from "../constants";
 import type {
   BenchmarkValueOverlapStats,
   DuplicateBenchmarkCandidate,
@@ -126,6 +128,11 @@ export function MergeTab({
   modelEntityOptions,
   benchmarkEntityOptions
 }: MergeTabProps) {
+  const shouldDefaultCollapse =
+    mergedRecordList.length > MERGED_RECORDS_AUTO_COLLAPSE_THRESHOLD;
+  const [userToggledOpen, setUserToggledOpen] = useState<boolean | null>(null);
+  const isRecordsOpen = userToggledOpen ?? !shouldDefaultCollapse;
+
   return (
     <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
       <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold">
@@ -425,79 +432,115 @@ export function MergeTab({
         </div>
       </form>
 
-      <h4 className="mt-6 mb-2 font-semibold">已有合并去重记录</h4>
       {mergedRecordList.length === 0 ? (
-        <p className="text-sm opacity-70">暂无已合并记录</p>
-      ) : (
-        <div className="overflow-x-auto rounded-box border border-base-300">
-          <table className="table table-zebra table-sm">
-            <thead>
-              <tr>
-                <th>Type</th>
-                <th>Source</th>
-                <th>Target（可编辑）</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {mergedRecordList.map((record) => {
-                const recordKey = `${record.entityType}:${record.sourceId}`;
-                const inputValue = mergedRecordTargetInputs[recordKey] ?? `${record.targetName} [${record.targetId}]`;
-
-                return (
-                  <tr key={recordKey}>
-                    <td>{record.entityType}</td>
-                    <td>{record.sourceName} [{record.sourceId}]</td>
-                    <td>
-                      <input
-                        list={`merge-edit-options-${record.entityType}`}
-                        className="input input-bordered input-sm w-full min-w-[300px]"
-                        value={inputValue}
-                        onChange={(e) =>
-                          setMergedRecordTargetInputs((prev) => ({
-                            ...prev,
-                            [recordKey]: e.target.value
-                          }))
-                        }
-                        placeholder="输入名称或ID"
-                      />
-                    </td>
-                    <td>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          className="btn btn-xs btn-outline"
-                          onClick={() => onUpdateMergedRecord(record)}
-                        >
-                          保存修改
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-xs btn-outline btn-error"
-                          onClick={() => onDeleteMergedRecord(record)}
-                        >
-                          删除记录
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="mt-6">
+          <h4 className="mb-2 font-semibold">已有合并去重记录</h4>
+          <p className="text-sm opacity-70">暂无已合并记录</p>
         </div>
-      )}
+      ) : (
+        <details
+          open={isRecordsOpen}
+          className="mt-6 rounded-2xl border border-base-300/70 bg-base-100 shadow-sm transition-shadow open:shadow-md"
+        >
+          <summary
+            className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 select-none [&::-webkit-details-marker]:hidden"
+            onClick={(e) => {
+              e.preventDefault();
+              setUserToggledOpen(!isRecordsOpen);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setUserToggledOpen(!isRecordsOpen);
+              }
+            }}
+          >
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <h4 className="text-base font-semibold">已有合并去重记录</h4>
+              <span className="text-xs opacity-70">（{mergedRecordList.length}）</span>
+              {shouldDefaultCollapse ? (
+                <span className="badge badge-ghost badge-sm">默认折叠</span>
+              ) : null}
+            </div>
+            <span className="text-xs opacity-55">
+              {isRecordsOpen ? "点击折叠" : "点击展开"}
+            </span>
+          </summary>
 
-      <datalist id="merge-edit-options-model">
-        {modelEntityOptions.map((item) => (
-          <option key={`merge-edit-model-${item.id}`} value={`${item.label} [${item.id}]`} />
-        ))}
-      </datalist>
-      <datalist id="merge-edit-options-benchmark">
-        {benchmarkEntityOptions.map((item) => (
-          <option key={`merge-edit-benchmark-${item.id}`} value={`${item.label} [${item.id}]`} />
-        ))}
-      </datalist>
+          {isRecordsOpen ? (
+            <div className="border-t border-base-300/50 p-4">
+              <div className="max-h-[560px] overflow-auto rounded-box border border-base-300">
+                <table className="table table-zebra table-sm">
+                  <thead>
+                    <tr>
+                      <th>Type</th>
+                      <th>Source</th>
+                      <th>Target（可编辑）</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mergedRecordList.map((record) => {
+                      const recordKey = `${record.entityType}:${record.sourceId}`;
+                      const inputValue = mergedRecordTargetInputs[recordKey] ?? `${record.targetName} [${record.targetId}]`;
+
+                      return (
+                        <tr key={recordKey}>
+                          <td>{record.entityType}</td>
+                          <td>{record.sourceName} [{record.sourceId}]</td>
+                          <td>
+                            <input
+                              list={`merge-edit-options-${record.entityType}`}
+                              className="input input-bordered input-sm w-full min-w-[300px]"
+                              value={inputValue}
+                              onChange={(e) =>
+                                setMergedRecordTargetInputs((prev) => ({
+                                  ...prev,
+                                  [recordKey]: e.target.value
+                                }))
+                              }
+                              placeholder="输入名称或ID"
+                            />
+                          </td>
+                          <td>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                className="btn btn-xs btn-outline"
+                                onClick={() => onUpdateMergedRecord(record)}
+                              >
+                                保存修改
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-xs btn-outline btn-error"
+                                onClick={() => onDeleteMergedRecord(record)}
+                              >
+                                删除记录
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <datalist id="merge-edit-options-model">
+                {modelEntityOptions.map((item) => (
+                  <option key={`merge-edit-model-${item.id}`} value={`${item.label} [${item.id}]`} />
+                ))}
+              </datalist>
+              <datalist id="merge-edit-options-benchmark">
+                {benchmarkEntityOptions.map((item) => (
+                  <option key={`merge-edit-benchmark-${item.id}`} value={`${item.label} [${item.id}]`} />
+                ))}
+              </datalist>
+            </div>
+          ) : null}
+        </details>
+      )}
     </section>
   );
 }
