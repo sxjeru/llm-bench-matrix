@@ -147,6 +147,19 @@ export {
 
 export { CellTrendPanel, type CellTrendPanelProps } from "./cell-trend-panel";
 
+export {
+  HighlightText,
+  type HighlightTextProps
+} from "./highlight-text";
+
+export {
+  escapeRegExp,
+  extractSearchTokens,
+  createSearchMatcher,
+  getSearchHighlightPlan,
+  type SearchHighlightPlan
+} from "./search-match";
+
 // Re-export selectors
 export {
   buildAaIndexRevisionsByRow,

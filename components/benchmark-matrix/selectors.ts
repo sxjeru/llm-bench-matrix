@@ -19,6 +19,7 @@ import {
   getModelFamilyMatchKey,
   isSourceHeaderPrefixMatch
 } from "./model-matching";
+import { createSearchMatcher } from "./search-match";
 import {
   buildDenseRankMap,
   buildOverallScoreDisplayDecimalsMap,
@@ -553,7 +554,8 @@ export function buildFilteredRows(
   }
 
   const result: MatrixInputRow[] = [];
-  const normalizedQuery = benchmarkSearchQuery.trim().toLowerCase();
+  // 筛选与单元格高亮共用 search-match 的分词规则：命中任一关键词即算命中。
+  const searchMatcher = createSearchMatcher(benchmarkSearchQuery);
 
   selectedModels.forEach((modelName) => {
     const indexedRows = allRowsIndex.rowsByModel.get(modelName);
@@ -563,9 +565,9 @@ export function buildFilteredRows(
 
     indexedRows.forEach((indexed) => {
       if (baseBenchmarkKeySet.has(indexed.matrixKey)) {
-        if (normalizedQuery) {
-          const matchName = indexed.row.benchmarkName?.toLowerCase().includes(normalizedQuery);
-          const matchType = indexed.row.benchmarkType?.toLowerCase().includes(normalizedQuery);
+        if (searchMatcher) {
+          const matchName = searchMatcher(indexed.row.benchmarkName);
+          const matchType = searchMatcher(indexed.row.benchmarkType);
           if (!matchName && !matchType) {
             return;
           }

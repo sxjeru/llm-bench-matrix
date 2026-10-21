@@ -148,6 +148,7 @@ import {
   getSourceValueDisplayItem,
   getSourceKey,
   buildMatrixMarkdownTable,
+  HighlightText,
   type SourceValueMode
 } from "./benchmark-matrix/index";
 
@@ -2464,7 +2465,7 @@ export function BenchmarkMatrix({
                       }}
                       title={matrixRow.category}
                     >
-                      {matrixRow.category}
+                      <HighlightText text={matrixRow.category} query={benchmarkSearchQuery} />
                     </td>
                   ) : null}
 
@@ -2506,7 +2507,7 @@ export function BenchmarkMatrix({
                           opacity: isRowExcludedFromOverall ? 0.5 : undefined
                         }}
                       >
-                        {matrixRow.benchmark}
+                        <HighlightText text={matrixRow.benchmark} query={benchmarkSearchQuery} />
                       </span>
                       {isRowLowerBetter ? (
                         <span
