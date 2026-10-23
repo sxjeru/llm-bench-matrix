@@ -441,6 +441,7 @@ type ImportTabProps = {
     format: string;
     total: number;
     skipped: number;
+    duplicateCount?: number;
   } | null;
   textImportDraftRows: TextImportPreviewRow[];
   finalizedTextImportRows: StructuredCsvImportRow[];
@@ -945,7 +946,14 @@ export function ImportTab({
           <div className="alert alert-info mt-4">
             <div>
               <div>识别格式：{textImportPreviewMeta.format}</div>
-              <div>可导入：{textImportPreviewMeta.total} 条，跳过：{textImportPreviewMeta.skipped} 条</div>
+              <div>
+                可导入：{textImportPreviewMeta.total} 条，跳过：{textImportPreviewMeta.skipped} 条
+                {textImportPreviewMeta.duplicateCount ? (
+                  <span className="ml-1 text-warning font-medium">
+                    （库内重复已忽略：{textImportPreviewMeta.duplicateCount} 条）
+                  </span>
+                ) : null}
+              </div>
               {textImportDraftRows.length > 0 ? (
                 <div>
                   当前草稿：{finalizedTextImportRows.length} 条可提交，忽略/空值 {ignoredTextImportCount} 条
@@ -1304,17 +1312,22 @@ export function ImportTab({
                         </td>
                         {matrixPreview.modelNames.map((modelName) => {
                           const rowIndex = matrixRow.cellRowIndexByModel[modelName];
+                          const draftRow = rowIndex !== undefined ? textImportDraftRows[rowIndex] : undefined;
+                          const isDuplicate = Boolean(
+                            draftRow?.isDuplicate &&
+                              draftRow.rawValue.trim() === (draftRow.originalRawValue ?? draftRow.rawValue).trim()
+                          );
                           const normalizedHint =
                             rowIndex === undefined
                               ? null
                               : getOmniDocBenchNormalizeHint(
                                   matrixRow.benchmarkName,
-                                  textImportDraftRows[rowIndex]?.rawValue ?? ""
+                                  draftRow?.rawValue ?? ""
                                 );
                           const noteText =
                             rowIndex === undefined
                               ? ""
-                              : (textImportDraftRows[rowIndex]?.valueNote?.trim() ?? "");
+                              : (draftRow?.valueNote?.trim() ?? "");
 
                           return (
                             <td key={`${matrixRow.key}-${modelName}`}>
@@ -1324,9 +1337,18 @@ export function ImportTab({
                                 <div className="space-y-1">
                                   <div className="relative">
                                     <input
-                                      className="input input-bordered input-xs w-full min-w-[90px] pr-7"
-                                      value={textImportDraftRows[rowIndex]?.rawValue ?? ""}
+                                      className={`input input-bordered input-xs w-full min-w-[90px] pr-7 ${
+                                        isDuplicate
+                                          ? "border-warning/50 bg-base-200/80 text-base-content/60 opacity-60 line-through"
+                                          : ""
+                                      }`}
+                                      value={draftRow?.rawValue ?? ""}
                                       onChange={(e) => onUpdateTextImportDraftValue(rowIndex, e.target.value)}
+                                      title={
+                                        isDuplicate
+                                          ? "库内现有相同 source 已存在相同模型名、benchmark 与分数的值，默认忽略不导入"
+                                          : undefined
+                                      }
                                     />
                                     {noteText ? (
                                       <span
@@ -1337,7 +1359,15 @@ export function ImportTab({
                                       </span>
                                     ) : null}
                                   </div>
-                                  {normalizedHint ? (
+                                  {isDuplicate ? (
+                                    <div
+                                      className="flex items-center gap-1 text-[10px] font-medium text-warning"
+                                      title="库内现有相同 source 已存在相同模型名、benchmark 与分数的值，默认忽略不导入"
+                                    >
+                                      <span className="badge badge-warning badge-xs px-1 py-0 text-[9px] font-bold">重复</span>
+                                      <span>已忽略不导入</span>
+                                    </div>
+                                  ) : normalizedHint ? (
                                     <div className="text-[10px] text-warning">入库校对 → {normalizedHint}</div>
                                   ) : null}
                                 </div>

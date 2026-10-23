@@ -5762,15 +5762,136 @@ async function collectBenchmarkDirectionWarnings(rows: NormalizedTextImportRow[]
     });
 }
 
+function isSameScore(
+  imported: { valueRaw: string; valueNum: number | null; valueNum2: number | null },
+  existing: { valueRaw: string; valueNum: string | null; valueNum2: string | null }
+): boolean {
+  if (imported.valueNum !== null && existing.valueNum !== null) {
+    const existingNum = Number(existing.valueNum);
+    if (Number.isFinite(existingNum) && Math.abs(imported.valueNum - existingNum) <= 1e-6) {
+      const importedNum2 = imported.valueNum2;
+      const existingNum2 = existing.valueNum2 !== null ? Number(existing.valueNum2) : null;
+      if (importedNum2 === null && existingNum2 === null) {
+        return true;
+      }
+      if (
+        importedNum2 !== null &&
+        existingNum2 !== null &&
+        Number.isFinite(existingNum2) &&
+        Math.abs(importedNum2 - existingNum2) <= 1e-6
+      ) {
+        return true;
+      }
+    }
+  }
+
+  const importedRawClean = imported.valueRaw.trim().toLowerCase();
+  const existingRawClean = existing.valueRaw.trim().toLowerCase();
+  return importedRawClean.length > 0 && importedRawClean === existingRawClean;
+}
+
 export async function previewBenchmarkTextImport(inputText: string, sourceInput?: string | null, htmlInput?: string | null) {
   const parsed = await parseBenchmarkTextRows(inputText, sourceInput, htmlInput);
   const directionWarnings = await collectBenchmarkDirectionWarnings(parsed.rows);
   const parseWarnings = parsed.warnings ?? [];
   const allWarnings = [...parseWarnings, ...directionWarnings];
 
+  const rawSource = sourceInput?.trim();
+  const existingValuesBySlot = new Map<
+    string,
+    Array<{
+      valueRaw: string;
+      valueNum: string | null;
+      valueNum2: string | null;
+    }>
+  >();
+  let hasExistingSource = false;
+
+  if (rawSource) {
+    const sourceCandidates = buildSourceLookupCandidates(rawSource);
+    const lowerCandidates = Array.from(new Set(sourceCandidates.map((c) => c.toLowerCase())));
+
+    try {
+      const existingRows = await db
+        .select({
+          valueRaw: benchmarkValues.valueRaw,
+          valueNum: benchmarkValues.valueNum,
+          valueNum2: benchmarkValues.valueNum2,
+          source: benchmarkValues.source,
+          modelName: models.modelName,
+          modelAlias: models.modelAlias,
+          benchmarkName: benchmarks.benchmarkName,
+          benchmarkType: benchmarks.benchmarkType
+        })
+        .from(benchmarkValues)
+        .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+        .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+        .where(
+          or(
+            inArray(benchmarkValues.source, sourceCandidates),
+            inArray(sql<string>`lower(${benchmarkValues.source})`, lowerCandidates)
+          )
+        );
+
+      if (existingRows.length > 0) {
+        hasExistingSource = true;
+        for (const row of existingRows) {
+          const normModel = normalizeNameParenthesisSpacing(row.modelName).trim().toLowerCase();
+          const normBench = normalizeNameParenthesisSpacing(row.benchmarkName).trim().toLowerCase();
+          const slotKey = `${normModel}::${normBench}`;
+          const list = existingValuesBySlot.get(slotKey) ?? [];
+          list.push({
+            valueRaw: row.valueRaw,
+            valueNum: row.valueNum,
+            valueNum2: row.valueNum2
+          });
+          existingValuesBySlot.set(slotKey, list);
+
+          if (row.modelAlias?.trim()) {
+            const aliasKey = `${normalizeNameParenthesisSpacing(row.modelAlias).trim().toLowerCase()}::${normBench}`;
+            const aliasList = existingValuesBySlot.get(aliasKey) ?? [];
+            aliasList.push({
+              valueRaw: row.valueRaw,
+              valueNum: row.valueNum,
+              valueNum2: row.valueNum2
+            });
+            existingValuesBySlot.set(aliasKey, aliasList);
+          }
+        }
+      }
+    } catch {
+      // Ignored for environments without DB connection
+    }
+  }
+
   const previewRows = parsed.rows.map((row) => {
     const parsedValue = parseBenchmarkValue(row.valueRaw);
     const mergedNote = mergeImportValueNotes(row.valueNote, parsedValue.valueNote);
+
+    let isDuplicate = false;
+    if (hasExistingSource) {
+      const normModel = normalizeNameParenthesisSpacing(row.modelName).trim().toLowerCase();
+      const normBench = normalizeNameParenthesisSpacing(row.benchmarkName).trim().toLowerCase();
+      const slotKey = `${normModel}::${normBench}`;
+      const candidates = existingValuesBySlot.get(slotKey);
+      if (candidates && candidates.length > 0) {
+        for (const existing of candidates) {
+          if (
+            isSameScore(
+              {
+                valueRaw: row.valueRaw,
+                valueNum: parsedValue.valueNum,
+                valueNum2: parsedValue.valueNum2
+              },
+              existing
+            )
+          ) {
+            isDuplicate = true;
+            break;
+          }
+        }
+      }
+    }
 
     return {
       rowNumber: row.rowNumber,
@@ -5782,20 +5903,26 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
       higherIsBetter: row.higherIsBetter,
       modalities: normalizeModalities(row.modalities),
       rawValue: row.valueRaw,
+      originalRawValue: row.valueRaw,
       valueNum: parsedValue.valueNum,
       valueNum2: parsedValue.valueNum2,
       valueNote: mergedNote,
       source: row.source,
-      valid: parsedValue.valueRaw.length > 0 && (parsedValue.valueNum !== null || parsedValue.valueNum2 !== null)
+      valid: parsedValue.valueRaw.length > 0 && (parsedValue.valueNum !== null || parsedValue.valueNum2 !== null),
+      isDuplicate
     };
   });
+
+  const duplicateCount = previewRows.filter((row) => row.isDuplicate).length;
+  const nonDuplicateTotal = previewRows.length - duplicateCount;
 
   return {
     format: parsed.format,
     parseSource: parsed.parseSource ?? "text",
     modelColumns: parsed.modelColumns,
-    total: parsed.rows.length,
+    total: nonDuplicateTotal,
     skipped: parsed.skipped,
+    duplicateCount,
     warningCount: allWarnings.length,
     warnings: allWarnings,
     previewRows

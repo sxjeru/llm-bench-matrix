@@ -220,6 +220,7 @@ export function AdminConsole({
     format: string;
     total: number;
     skipped: number;
+    duplicateCount?: number;
   } | null>(null);
   const [textImportPreviewVisibleCount, setTextImportPreviewVisibleCount] = useState(200);
 
@@ -1685,7 +1686,7 @@ export function AdminConsole({
       setHasParsedHtmlTable(result.parseSource === "html");
       const previewRows = applyExistingEloBenchmarkToPreviewRows((result.previewRows ?? []) as TextImportPreviewRow[]);
       setTextImportPreviewRows(previewRows);
-      setTextImportDraftRows(previewRows.map((row) => ({ ...row })));
+      setTextImportDraftRows(previewRows.map((row) => ({ ...row, originalRawValue: row.originalRawValue ?? row.rawValue })));
       setTextImportModelColumns((result.modelColumns ?? []) as string[]);
       setGlobalStarSupplement("");
       setBenchmarkMergeTargets({});
@@ -1707,19 +1708,22 @@ export function AdminConsole({
       setTextImportPreviewMeta({
         format: result.format ?? "matrix-table",
         total: result.total ?? 0,
-        skipped: result.skipped ?? 0
+        skipped: result.skipped ?? 0,
+        duplicateCount: result.duplicateCount ?? 0
       });
       setTextImportPreviewVisibleCount(200);
 
       const directionWarningCount = Number(result.warningCount ?? 0);
+      const duplicateCount = Number(result.duplicateCount ?? 0);
+      const duplicateMsg = duplicateCount > 0 ? `（库内重复 ${duplicateCount} 条已忽略）` : "";
       const warningDetails = extractTextImportWarningDetails(result.warnings);
       if (directionWarningCount > 0) {
         notifyError(
-          `文本预览完成：可导入 ${result.total ?? 0} 条，跳过 ${result.skipped ?? 0} 条；检测到 ${directionWarningCount} 条解析警告（导入时会自动清洗/修正）`,
+          `文本预览完成：可导入 ${result.total ?? 0} 条，跳过 ${result.skipped ?? 0} 条${duplicateMsg}；检测到 ${directionWarningCount} 条解析警告（导入时会自动清洗/修正）`,
           warningDetails
         );
       } else {
-        notifySuccess(`文本预览完成：可导入 ${result.total ?? 0} 条，跳过 ${result.skipped ?? 0} 条`);
+        notifySuccess(`文本预览完成：可导入 ${result.total ?? 0} 条，跳过 ${result.skipped ?? 0} 条${duplicateMsg}`);
       }
     } catch (error) {
       setHasParsedHtmlTable(false);

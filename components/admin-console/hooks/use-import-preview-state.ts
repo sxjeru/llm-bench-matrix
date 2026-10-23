@@ -761,6 +761,13 @@ export function useImportPreviewState({
           return null;
         }
 
+        if (
+          row.isDuplicate &&
+          rawValueInput === (row.originalRawValue ?? row.rawValue).trim()
+        ) {
+          return null;
+        }
+
         const pairValue = parsePairRawValue(rawValueInput);
         const starSingleValue = pairValue ? null : parseStarSingleRawValue(rawValueInput);
 

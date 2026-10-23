@@ -2691,6 +2691,179 @@ describe("AdminConsole text import", () => {
       })
     ]);
   });
+
+  test("预览导入时比对现有 source 重复值并在矩阵预览中显示忽略，执行导入时不提交重复行", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse = {
+      format: "matrix-table",
+      total: 1,
+      skipped: 0,
+      duplicateCount: 1,
+      modelColumns: ["Model A", "Model B"],
+      warningCount: 0,
+      warnings: [],
+      previewRows: [
+        {
+          rowNumber: 2,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "MMLU",
+          benchmarkType: "general",
+          rawValue: "85.0",
+          originalRawValue: "85.0",
+          valueNum: 85,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:existing-src",
+          valid: true,
+          isDuplicate: true,
+          duplicateReason: "库内已存在相同模型名、benchmark 与分数值"
+        },
+        {
+          rowNumber: 2,
+          providerName: "OpenAI",
+          modelName: "Model B",
+          benchmarkName: "MMLU",
+          benchmarkType: "general",
+          rawValue: "90.0",
+          originalRawValue: "90.0",
+          valueNum: 90,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:existing-src",
+          valid: true,
+          isDuplicate: false
+        }
+      ]
+    };
+
+    const importResponse = {
+      format: "structured-preview",
+      total: 1,
+      skipped: 0,
+      inserted: 1,
+      warningCount: 0,
+      warnings: []
+    };
+
+    const fetchMock = mockFetchSequence(previewResponse, importResponse);
+    await renderReady(<AdminConsole {...buildProps()} />);
+
+    // 输入 source
+    const sourceInput = screen.getByPlaceholderText(/source（可选/i);
+    await user.type(sourceInput, "existing-src");
+
+    await user.type(screen.getByLabelText("粘贴 CSV / 文本"), "Benchmark,Model A,Model B\nMMLU,85.0,90.0");
+    await user.click(screen.getByRole("button", { name: "预览导入结果" }));
+
+    // 检查提示信息包含重复忽略
+    expect(await screen.findByText(/库内重复已忽略：1 条/)).toBeInTheDocument();
+    expect(screen.getByText(/当前草稿：1 条可提交，忽略\/空值 1 条/)).toBeInTheDocument();
+
+    // 检查矩阵预览中体现重复忽略
+    const matrixTable = await findMatrixPreviewTable();
+    expect(within(matrixTable).getByText("已忽略不导入")).toBeInTheDocument();
+
+    // 点击执行导入
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const secondCall = fetchMock.mock.calls[1];
+    const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
+      rows?: Array<{ modelName: string; benchmarkName: string; rawValue: string }>;
+    };
+
+    // 重复行 Model A (85.0) 应当被忽略，仅提交 Model B (90.0)
+    expect(secondPayload.rows).toHaveLength(1);
+    expect(secondPayload.rows![0]).toMatchObject({
+      modelName: "Model B",
+      benchmarkName: "MMLU",
+      rawValue: "90.0"
+    });
+  });
+
+  test("在矩阵预览中修改重复值后，取消忽略标记并允许正常提交导入", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse = {
+      format: "matrix-table",
+      total: 0,
+      skipped: 0,
+      duplicateCount: 1,
+      modelColumns: ["Model A"],
+      warningCount: 0,
+      warnings: [],
+      previewRows: [
+        {
+          rowNumber: 2,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "MMLU",
+          benchmarkType: "general",
+          rawValue: "85.0",
+          originalRawValue: "85.0",
+          valueNum: 85,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:existing-src",
+          valid: true,
+          isDuplicate: true
+        }
+      ]
+    };
+
+    const importResponse = {
+      format: "structured-preview",
+      total: 1,
+      skipped: 0,
+      inserted: 1,
+      warningCount: 0,
+      warnings: []
+    };
+
+    const fetchMock = mockFetchSequence(previewResponse, importResponse);
+    await renderReady(<AdminConsole {...buildProps()} />);
+
+    await user.type(screen.getByPlaceholderText(/source（可选/i), "existing-src");
+    await user.type(screen.getByLabelText("粘贴 CSV / 文本"), "Benchmark,Model A\nMMLU,85.0");
+    await user.click(screen.getByRole("button", { name: "预览导入结果" }));
+
+    const matrixTable = await findMatrixPreviewTable();
+    expect(within(matrixTable).getByText("已忽略不导入")).toBeInTheDocument();
+    expect(screen.getByText(/当前草稿：0 条可提交，忽略\/空值 1 条/)).toBeInTheDocument();
+
+    // 修改分数
+    const scoreInput = within(matrixTable).getByDisplayValue("85.0");
+    await user.clear(scoreInput);
+    await user.type(scoreInput, "88.5");
+
+    // 忽略标签消失，可提交数变为 1
+    expect(within(matrixTable).queryByText("已忽略不导入")).not.toBeInTheDocument();
+    expect(screen.getByText(/当前草稿：1 条可提交，忽略\/空值 0 条/)).toBeInTheDocument();
+
+    // 点击执行导入
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const secondCall = fetchMock.mock.calls[1];
+    const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
+      rows?: Array<{ modelName: string; benchmarkName: string; rawValue: string }>;
+    };
+
+    expect(secondPayload.rows).toHaveLength(1);
+    expect(secondPayload.rows![0]).toMatchObject({
+      modelName: "Model A",
+      benchmarkName: "MMLU",
+      rawValue: "88.5"
+    });
+  });
 });
 
 describe("AdminConsole data maintenance", () => {
