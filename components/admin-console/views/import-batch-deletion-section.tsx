@@ -1,17 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   History,
   Eye,
   Trash2,
   RefreshCw,
   AlertTriangle,
-  ChevronDown,
-  ChevronUp,
-  Database,
-  Layers,
-  Sparkles
+  Database
 } from "lucide-react";
 import { getJson, postJson } from "../api";
 import type { ImportBatchPreview, ImportBatchSummary } from "@/lib/import-batch-service";
@@ -36,9 +32,6 @@ export function ImportBatchDeletionSection({
 
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-
-  const [isModelsExpanded, setIsModelsExpanded] = useState(false);
-  const [isBenchmarksExpanded, setIsBenchmarksExpanded] = useState(false);
 
   async function loadBatches(autoSelectFirst = false) {
     setIsLoadingBatches(true);
@@ -103,7 +96,7 @@ export function ImportBatchDeletionSection({
     try {
       const params = new URLSearchParams({
         batchTime: selectedBatch.batchTime,
-        sampleLimit: "50"
+        sampleLimit: "1000"
       });
       if (selectedBatch.source !== null && selectedBatch.source !== undefined) {
         params.set("source", selectedBatch.source);
@@ -150,14 +143,35 @@ export function ImportBatchDeletionSection({
     }
   }
 
+  // 构建二维矩阵数据映射（Benchmark 为行，Model 为列）
+  const { matrixMap, benchmarkTypeMap } = useMemo(() => {
+    const cellMap = new Map<string, { valueRaw: string; valueNum: number | null; valueNote: string | null }>();
+    const typeMap = new Map<string, string>();
+
+    if (preview?.sampleRecords) {
+      for (const item of preview.sampleRecords) {
+        cellMap.set(`${item.benchmarkName}:::${item.modelName}`, {
+          valueRaw: item.valueRaw,
+          valueNum: item.valueNum,
+          valueNote: item.valueNote
+        });
+        if (item.benchmarkType && !typeMap.has(item.benchmarkName)) {
+          typeMap.set(item.benchmarkName, item.benchmarkType);
+        }
+      }
+    }
+
+    return { matrixMap: cellMap, benchmarkTypeMap: typeMap };
+  }, [preview]);
+
   return (
-    <div className="mb-5 rounded-box border border-error/40 bg-base-200/50 p-4">
+    <div className="mb-5 rounded-box border border-error/50 bg-base-200/60 p-4">
       <div className="flex items-center gap-2 mb-2">
         <History className="h-5 w-5 text-error" />
-        <h4 className="font-semibold text-error">按导入时间删除（批次清理 / 回滚）</h4>
+        <h4 className="font-semibold text-error">按导入时间删除</h4>
       </div>
       <p className="mb-3 text-sm opacity-80">
-        同一批次导入的数据具有严格一致的入库时间（精确到微秒）。支持在删除前完整预览待删除的数据明细与受影响的模型，删除时将自动级联清理孤儿元数据（source_meta），且前台矩阵将自动平滑回退至上一有效打分版本。
+        同一批次导入的数据具有严格一致的入库时间。
       </p>
 
       {/* 批次选择与操作区 */}
@@ -165,7 +179,7 @@ export function ImportBatchDeletionSection({
         <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto_auto] md:items-center">
           <div className="relative">
             <select
-              className="select select-bordered w-full font-mono text-sm"
+              className="select select-bordered w-full font-mono text-sm text-base-content bg-base-100"
               value={selectedBatchKey}
               onChange={(e) => {
                 setSelectedBatchKey(e.target.value);
@@ -187,7 +201,7 @@ export function ImportBatchDeletionSection({
 
           <button
             type="button"
-            className="btn btn-outline"
+            className="btn btn-outline text-base-content"
             onClick={() => loadBatches(false)}
             disabled={isLoadingBatches}
             title="刷新导入批次列表"
@@ -221,32 +235,37 @@ export function ImportBatchDeletionSection({
 
         {/* 预览数据展示面板 */}
         {preview ? (
-          <div className="mt-4 rounded-xl border border-warning/50 bg-base-100 p-4 shadow-sm space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-base-200 pb-3">
-              <div className="flex items-center gap-2">
-                <Database className="h-5 w-5 text-warning" />
-                <span className="font-semibold text-base">待删除批次数据概览</span>
-                <span className="badge badge-error badge-sm font-mono font-bold">
+          <div className="mt-4 rounded-xl border border-warning/60 bg-base-100 p-4 shadow-sm space-y-4">
+            {/* 顶栏信息与高对比度徽章 */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-base-300 pb-3">
+              <div className="flex items-center gap-2.5">
+                <Database className="h-5 w-5 text-amber-500 shrink-0" />
+                <span className="font-bold text-base text-base-content">待删除批次数据概览</span>
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-rose-500/20 text-rose-600 dark:text-rose-300 border border-rose-500/40">
                   {preview.totalRecords} 条记录
                 </span>
-                <span className="badge badge-neutral badge-sm font-mono">
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-semibold bg-base-300 dark:bg-base-200 text-base-content border border-base-content/20">
                   {preview.sourceLabel}
                 </span>
               </div>
-              <span className="text-xs opacity-70 font-mono">
+              <span className="text-xs font-mono font-medium text-base-content/85">
                 入库时间: {preview.displayTime}
               </span>
             </div>
 
-            {/* 级联清理与回退预告 */}
-            <div className="rounded-lg bg-warning/10 border border-warning/30 p-3 text-xs leading-relaxed text-warning-content flex items-start gap-2.5">
-              <AlertTriangle className="h-4 w-4 shrink-0 text-warning mt-0.5" />
-              <div>
-                <p className="font-semibold text-sm mb-0.5">级联清理与回滚说明</p>
-                <p>
-                  本次将删除该批次写入的 <strong>{preview.totalRecords}</strong> 条评测打分。
+            {/* 高对比度级联清理与回退预告 */}
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 dark:bg-amber-500/15 p-3 text-xs leading-relaxed text-amber-950 dark:text-amber-100 flex items-start gap-2.5">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+              <div className="space-y-1">
+                <p className="font-bold text-sm text-amber-900 dark:text-amber-200">级联清理与回滚说明</p>
+                <p className="text-amber-950/90 dark:text-amber-100/90 leading-relaxed">
+                  本次将删除该批次写入的{" "}
+                  <strong className="font-bold text-amber-950 dark:text-white underline decoration-amber-500/60 underline-offset-2">
+                    {preview.totalRecords}
+                  </strong>{" "}
+                  条评测打分。
                   {preview.orphanSourceMetaCount > 0 ? (
-                    <span className="text-error font-medium">
+                    <span className="text-rose-700 dark:text-rose-300 font-semibold">
                       {" "}检测到其中 {preview.orphanSourceMetaCount} 项 Benchmark 配置在该 source 下已无其它数据残留，将自动级联清理孤儿 source_meta。
                     </span>
                   ) : (
@@ -257,125 +276,112 @@ export function ImportBatchDeletionSection({
               </div>
             </div>
 
-            {/* 涉及的模型与指标概览折叠区 */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-              <div className="rounded-lg border border-base-300 p-2.5 bg-base-200/40">
-                <div
-                  className="flex items-center justify-between cursor-pointer select-none font-medium text-sm mb-1.5"
-                  onClick={() => setIsModelsExpanded(!isModelsExpanded)}
-                >
-                  <span className="inline-flex items-center gap-1.5">
-                    <Layers className="h-4 w-4 text-primary" />
-                    涉及模型 ({preview.modelCount} 个)
-                  </span>
-                  {isModelsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                </div>
-                {isModelsExpanded ? (
-                  <div className="flex flex-wrap gap-1 mt-2 max-h-36 overflow-y-auto pt-1">
-                    {preview.models.map((name) => (
-                      <span key={name} className="badge badge-sm badge-outline">
-                        {name}
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="opacity-70 truncate">
-                    {preview.models.slice(0, 5).join("、")}
-                    {preview.models.length > 5 ? ` 等共 ${preview.models.length} 个模型` : ""}
-                  </p>
-                )}
-              </div>
-
-              <div className="rounded-lg border border-base-300 p-2.5 bg-base-200/40">
-                <div
-                  className="flex items-center justify-between cursor-pointer select-none font-medium text-sm mb-1.5"
-                  onClick={() => setIsBenchmarksExpanded(!isBenchmarksExpanded)}
-                >
-                  <span className="inline-flex items-center gap-1.5">
-                    <Sparkles className="h-4 w-4 text-secondary" />
-                    涉及 Benchmark ({preview.benchmarkCount} 个)
-                  </span>
-                  {isBenchmarksExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                </div>
-                {isBenchmarksExpanded ? (
-                  <div className="flex flex-wrap gap-1 mt-2 max-h-36 overflow-y-auto pt-1">
-                    {preview.benchmarks.map((name) => (
-                      <span key={name} className="badge badge-sm badge-outline">
-                        {name}
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="opacity-70 truncate">
-                    {preview.benchmarks.slice(0, 5).join("、")}
-                    {preview.benchmarks.length > 5 ? ` 等共 ${preview.benchmarks.length} 个基准` : ""}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* 待删除数据明细表格预览 */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-semibold text-xs opacity-80">
-                  待删除数据明细抽样（展示前 {preview.sampleRecords.length} / {preview.totalRecords} 条）
+            {/* 二维数据矩阵表格（Model 为列，Benchmark 为行） */}
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-semibold text-xs text-base-content/85">
+                  待删除数据矩阵预览（Model 为列，Benchmark 为行）
+                </span>
+                <span className="text-xs text-base-content/75 font-mono">
+                  共 <strong className="text-base-content">{preview.benchmarks.length}</strong> 行 Benchmark ×{" "}
+                  <strong className="text-base-content">{preview.models.length}</strong> 列 Model
                 </span>
               </div>
-              <div className="max-h-64 overflow-x-auto overflow-y-auto rounded-lg border border-base-300">
-                <table className="table table-zebra table-xs w-full">
-                  <thead className="bg-base-200 sticky top-0 z-10">
+
+              <div className="overflow-x-auto overflow-y-auto max-h-[460px] rounded-lg border border-base-300 dark:border-base-content/20 bg-base-100 shadow-inner">
+                <table className="table table-xs border-separate border-spacing-0 w-full">
+                  <thead>
                     <tr>
-                      <th className="w-16">ID</th>
-                      <th>模型名称</th>
-                      <th>Benchmark</th>
-                      <th>类别</th>
-                      <th>原始打分</th>
-                      <th>解析数值</th>
-                      <th>评测时间</th>
-                      <th>备注</th>
+                      <th className="sticky top-0 left-0 z-30 bg-base-200 dark:bg-base-300 font-bold border-b border-r border-base-300 dark:border-base-content/20 p-2 min-w-[200px] text-base-content">
+                        <div className="flex items-center justify-between gap-1">
+                          <span>Benchmark</span>
+                          <span className="text-[11px] font-normal text-base-content/60">
+                            ({preview.benchmarks.length})
+                          </span>
+                        </div>
+                      </th>
+                      {preview.models.map((modelName) => (
+                        <th
+                          key={modelName}
+                          className="sticky top-0 z-20 bg-base-200 dark:bg-base-300 font-semibold text-center border-b border-r border-base-300 dark:border-base-content/20 p-2 min-w-[120px] max-w-[200px] text-base-content"
+                          title={modelName}
+                        >
+                          <span className="block truncate text-xs">{modelName}</span>
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {preview.sampleRecords.map((item) => (
-                      <tr key={item.id}>
-                        <td className="font-mono text-opacity-70">{item.id}</td>
-                        <td className="font-medium">{item.modelName}</td>
-                        <td>{item.benchmarkName}</td>
-                        <td>
-                          <span className="badge badge-ghost badge-xs">{item.benchmarkType}</span>
-                        </td>
-                        <td className="font-mono font-medium text-warning">{item.valueRaw}</td>
-                        <td className="font-mono">{item.valueNum ?? "-"}</td>
-                        <td className="font-mono text-xs opacity-70">
-                          {item.benchTime ? item.benchTime.split("T")[0] : "-"}
-                        </td>
-                        <td className="max-w-[160px] truncate opacity-70" title={item.valueNote ?? ""}>
-                          {item.valueNote || "-"}
-                        </td>
-                      </tr>
-                    ))}
+                    {preview.benchmarks.map((benchmarkName) => {
+                      const type = benchmarkTypeMap.get(benchmarkName);
+                      return (
+                        <tr key={benchmarkName} className="hover:bg-base-200/50 transition-colors">
+                          <th className="sticky left-0 z-10 bg-base-100 dark:bg-base-200 font-medium border-b border-r border-base-300 dark:border-base-content/20 p-2 text-base-content min-w-[200px]">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-semibold text-xs truncate max-w-[170px]" title={benchmarkName}>
+                                {benchmarkName}
+                              </span>
+                              {type ? (
+                                <span className="badge badge-ghost badge-xs shrink-0 font-normal text-base-content/75 border border-base-content/15">
+                                  {type}
+                                </span>
+                              ) : null}
+                            </div>
+                          </th>
+                          {preview.models.map((modelName) => {
+                            const cell = matrixMap.get(`${benchmarkName}:::${modelName}`);
+                            return (
+                              <td
+                                key={`${benchmarkName}:::${modelName}`}
+                                className="border-b border-r border-base-300/80 dark:border-base-content/10 p-2 text-center font-mono text-xs text-base-content"
+                              >
+                                {cell ? (
+                                  <span
+                                    className="inline-block px-1.5 py-0.5 rounded font-medium text-amber-600 dark:text-amber-300 bg-amber-500/10 dark:bg-amber-500/20 hover:bg-amber-500/30 transition-colors cursor-default"
+                                    title={
+                                      cell.valueNote
+                                        ? `打分: ${cell.valueRaw}\n注释: ${cell.valueNote}`
+                                        : `打分: ${cell.valueRaw}`
+                                    }
+                                  >
+                                    {cell.valueRaw}
+                                  </span>
+                                ) : (
+                                  <span className="text-base-content/25 select-none">-</span>
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             </div>
 
             {/* 预览卡片底部操作条 */}
-            <div className="flex items-center justify-between pt-2 border-t border-base-200">
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setPreview(null)}
-              >
-                收起预览
-              </button>
-              <button
-                type="button"
-                className="btn btn-error btn-sm gap-1.5"
-                onClick={() => setIsConfirmModalOpen(true)}
-              >
-                <Trash2 className="h-4 w-4" />
-                确认删除此批次（共 {preview.totalRecords} 条）
-              </button>
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-base-200 dark:border-base-content/10">
+              <div className="text-xs text-base-content/70">
+                提示：悬浮单元格可查看详细打分及导入注释。
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm text-base-content"
+                  onClick={() => setPreview(null)}
+                >
+                  收起预览
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-error btn-sm gap-1.5 shadow-sm text-white dark:text-base-content"
+                  onClick={() => setIsConfirmModalOpen(true)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  确认删除此批次（共 {preview.totalRecords} 条）
+                </button>
+              </div>
             </div>
           </div>
         ) : null}
@@ -384,19 +390,19 @@ export function ImportBatchDeletionSection({
       {/* 确认删除二次确认弹窗 */}
       {isConfirmModalOpen && selectedBatch ? (
         <div className="modal modal-open">
-          <div className="modal-box">
+          <div className="modal-box border border-error/30 bg-base-100 text-base-content">
             <h3 className="font-bold text-lg text-error flex items-center gap-2">
               <AlertTriangle className="h-5 w-5" />
               确认删除该导入批次？
             </h3>
-            <div className="py-3 text-sm space-y-2 opacity-90">
+            <div className="py-3 text-sm space-y-2 text-base-content/90">
               <p>
                 您即将删除于{" "}
                 <span className="font-mono font-bold text-error">{selectedBatch.displayTime}</span> 导入、属于{" "}
-                <span className="font-bold">{selectedBatch.sourceLabel}</span> 的全部{" "}
+                <span className="font-bold text-base-content">{selectedBatch.sourceLabel}</span> 的全部{" "}
                 <span className="font-mono font-bold text-error">{selectedBatch.recordCount}</span> 条评测数据。
               </p>
-              <p className="text-xs opacity-75">
+              <p className="text-xs text-base-content/70 leading-relaxed">
                 • 系统将自动清理失去引用的孤儿 source 元数据，并重置前台矩阵缓存。
                 <br />
                 • 该操作不可撤销，请确认是否继续。
@@ -405,7 +411,7 @@ export function ImportBatchDeletionSection({
             <div className="modal-action">
               <button
                 type="button"
-                className="btn btn-ghost"
+                className="btn btn-ghost text-base-content"
                 onClick={() => setIsConfirmModalOpen(false)}
                 disabled={isDeleting}
               >
@@ -413,7 +419,7 @@ export function ImportBatchDeletionSection({
               </button>
               <button
                 type="button"
-                className="btn btn-error"
+                className="btn btn-error text-white dark:text-base-content"
                 onClick={onExecuteDelete}
                 disabled={isDeleting}
               >
@@ -426,4 +432,3 @@ export function ImportBatchDeletionSection({
     </div>
   );
 }
-

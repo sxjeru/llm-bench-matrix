@@ -173,7 +173,7 @@ export async function previewImportBatch(input: {
   const client = input.executor ?? db;
   const whereClause = buildBatchWhereClause(input.batchTime, input.source);
   const { isoString } = resolveBatchTimeWindow(input.batchTime);
-  const sampleLimit = Math.max(1, Math.min(input.sampleLimit ?? 50, 200));
+  const sampleLimit = Math.max(1, Math.min(input.sampleLimit ?? 1000, 2000));
 
   const rows = await client
     .select({

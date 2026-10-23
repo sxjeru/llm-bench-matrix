@@ -6,7 +6,7 @@ import { previewImportBatch } from "@/lib/import-batch-service";
 const previewBatchSchema = z.object({
   batchTime: z.string().min(1, "batchTime 不能为空"),
   source: z.string().nullable().optional(),
-  sampleLimit: z.coerce.number().int().min(1).max(200).optional().default(50)
+  sampleLimit: z.coerce.number().int().min(1).max(2000).optional().default(1000)
 });
 
 export async function GET(request: Request) {
