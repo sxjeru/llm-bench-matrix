@@ -4,6 +4,7 @@ import { useState, type Dispatch, type FormEvent, type SetStateAction } from "re
 import { Settings2, HelpCircle, RefreshCw } from "lucide-react";
 import type { ModelDedupeRule } from "../types";
 import { postJson } from "../api";
+import { ImportBatchDeletionSection } from "./import-batch-deletion-section";
 
 type SettingsTabProps = {
   modelDedupeRule: ModelDedupeRule;
@@ -311,6 +312,12 @@ export function SettingsTab({
           </button>
         </div>
       </div>
+
+      <ImportBatchDeletionSection
+        notifySuccess={notifySuccess}
+        notifyError={notifyError}
+        onRefreshCaches={onRefreshCaches}
+      />
 
       <form onSubmit={onSaveSetting} className="grid grid-cols-1 gap-3 md:grid-cols-12">
         <div className="md:col-span-3">
