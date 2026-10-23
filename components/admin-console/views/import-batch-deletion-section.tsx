@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState } from "react";
 import {
   History,
   Eye,
@@ -28,7 +28,7 @@ export function ImportBatchDeletionSection({
   onRefreshCaches
 }: ImportBatchDeletionSectionProps) {
   const [batches, setBatches] = useState<ImportBatchSummary[]>([]);
-  const [isLoadingBatches, setIsLoadingBatches] = useState(false);
+  const [isLoadingBatches, setIsLoadingBatches] = useState(true);
   const [selectedBatchKey, setSelectedBatchKey] = useState<string>("");
 
   const [preview, setPreview] = useState<ImportBatchPreview | null>(null);
@@ -63,8 +63,36 @@ export function ImportBatchDeletionSection({
   }
 
   useEffect(() => {
-    loadBatches(true);
-  }, []);
+    let ignore = false;
+    async function initBatches() {
+      try {
+        const res = await getJson("/api/admin/data-maintenance/import-batches?limit=100");
+        if (ignore) return;
+        const list: ImportBatchSummary[] = res?.batches ?? [];
+        setBatches(list);
+
+        if (list.length > 0) {
+          setSelectedBatchKey(list[0].batchKey);
+        } else {
+          setSelectedBatchKey("");
+          setPreview(null);
+        }
+      } catch (error) {
+        if (!ignore) {
+          notifyError(error instanceof Error ? error.message : "获取导入批次列表失败");
+        }
+      } finally {
+        if (!ignore) {
+          setIsLoadingBatches(false);
+        }
+      }
+    }
+
+    void initBatches();
+    return () => {
+      ignore = true;
+    };
+  }, [notifyError]);
 
   const selectedBatch = batches.find((b) => b.batchKey === selectedBatchKey) ?? null;
 

@@ -6,6 +6,7 @@ vi.mock("@/lib/db/queries", () => ({
   invalidateAllCaches: vi.fn().mockResolvedValue(undefined)
 }));
 
+type DbClient = import("@/lib/import-batch-service").DbClient;
 let resolveBatchTimeWindow: typeof import("@/lib/import-batch-service").resolveBatchTimeWindow;
 let buildBatchWhereClause: typeof import("@/lib/import-batch-service").buildBatchWhereClause;
 let deleteImportBatch: typeof import("@/lib/import-batch-service").deleteImportBatch;
@@ -91,7 +92,7 @@ describe("import-batch-service", () => {
       const result = await deleteImportBatch({
         batchTime: "2026-10-23T15:10:25.000Z",
         source: "text:test",
-        executor: mockDb as any
+        executor: mockDb as unknown as DbClient
       });
 
       expect(result).toEqual({
@@ -119,7 +120,7 @@ describe("import-batch-service", () => {
       const result = await deleteImportBatch({
         batchTime: "2026-10-23T15:10:25.000Z",
         source: "text:test",
-        executor: mockDb as any
+        executor: mockDb as unknown as DbClient
       });
 
       expect(result).toEqual({
