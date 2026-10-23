@@ -383,6 +383,7 @@ export function AdminConsole({
     starValueRows,
     starRowsMissingSupplementCount,
     finalizedTextImportRows,
+    skippedDuplicateRowIndices,
     ignoredTextImportCount,
     textImportPreviewTableRows,
     visibleResolvedTextImportPreviewRows
@@ -3200,6 +3201,7 @@ export function AdminConsole({
             textImportPreviewMeta={textImportPreviewMeta}
             textImportDraftRows={textImportDraftRows}
             finalizedTextImportRows={finalizedTextImportRows}
+            skippedDuplicateRowIndices={skippedDuplicateRowIndices}
             ignoredTextImportCount={ignoredTextImportCount}
             pairValueRows={pairValueRows}
             pairRowsMissingNoteCount={pairRowsMissingNoteCount}

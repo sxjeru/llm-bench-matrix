@@ -2864,6 +2864,86 @@ describe("AdminConsole text import", () => {
       rawValue: "88.5"
     });
   });
+
+  test("在矩阵预览中把重复行模型修改后，取消忽略标记并允许正常提交导入", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse = {
+      format: "matrix-table",
+      total: 0,
+      skipped: 0,
+      duplicateCount: 1,
+      modelColumns: ["Model A"],
+      warningCount: 0,
+      warnings: [],
+      previewRows: [
+        {
+          rowNumber: 2,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "MMLU",
+          benchmarkType: "general",
+          rawValue: "85.0",
+          originalRawValue: "85.0",
+          valueNum: 85,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:existing-src",
+          valid: true,
+          isDuplicate: true,
+          duplicateSlotKey: "model a::mmlu"
+        }
+      ]
+    };
+
+    const importResponse = {
+      format: "structured-preview",
+      total: 1,
+      skipped: 0,
+      inserted: 1,
+      warningCount: 0,
+      warnings: []
+    };
+
+    const fetchMock = mockFetchSequence(previewResponse, importResponse);
+    await renderReady(<AdminConsole {...buildProps()} />);
+
+    await user.type(screen.getByPlaceholderText(/source（可选/i), "existing-src");
+    await user.type(screen.getByLabelText("粘贴 CSV / 文本"), "Benchmark,Model A\nMMLU,85.0");
+    await user.click(screen.getByRole("button", { name: "预览导入结果" }));
+
+    const matrixTable = await findMatrixPreviewTable();
+    expect(within(matrixTable).getByText("已忽略不导入")).toBeInTheDocument();
+    expect(screen.getByText(/当前草稿：0 条可提交，忽略\/空值 1 条/)).toBeInTheDocument();
+
+    // 在矩阵列头直接改写模型名（例如改为 Model B）
+    const modelHeaderInput = within(matrixTable).getByDisplayValue("Model A");
+    await user.clear(modelHeaderInput);
+    await user.type(modelHeaderInput, "Model B");
+
+    // 忽略标签消失，可提交数变为 1
+    expect(within(matrixTable).queryByText("已忽略不导入")).not.toBeInTheDocument();
+    expect(screen.getByText(/当前草稿：1 条可提交，忽略\/空值 0 条/)).toBeInTheDocument();
+
+    // 点击执行导入
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const secondCall = fetchMock.mock.calls[1];
+    const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
+      rows?: Array<{ modelName: string; benchmarkName: string; rawValue: string }>;
+    };
+
+    expect(secondPayload.rows).toHaveLength(1);
+    expect(secondPayload.rows![0]).toMatchObject({
+      modelName: "Model B",
+      benchmarkName: "MMLU",
+      rawValue: "85.0"
+    });
+  });
 });
 
 describe("AdminConsole data maintenance", () => {

@@ -78,3 +78,8 @@ export function composeStarRawValue(value: string, note?: string | null): string
   const normalized = note?.trim();
   return normalized ? `${value}* ${normalized}` : `${value}*`;
 }
+
+export {
+  normalizeNameParenthesisSpacing,
+  buildDuplicateSlotKey
+} from "@/lib/import/slot-key";

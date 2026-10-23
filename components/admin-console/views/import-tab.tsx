@@ -445,6 +445,7 @@ type ImportTabProps = {
   } | null;
   textImportDraftRows: TextImportPreviewRow[];
   finalizedTextImportRows: StructuredCsvImportRow[];
+  skippedDuplicateRowIndices?: Set<number>;
   ignoredTextImportCount: number;
   pairValueRows: PairValueRow[];
   pairRowsMissingNoteCount: number;
@@ -567,6 +568,7 @@ export function ImportTab({
   textImportPreviewMeta,
   textImportDraftRows,
   finalizedTextImportRows,
+  skippedDuplicateRowIndices,
   ignoredTextImportCount,
   pairValueRows,
   pairRowsMissingNoteCount,
@@ -948,9 +950,9 @@ export function ImportTab({
               <div>识别格式：{textImportPreviewMeta.format}</div>
               <div>
                 可导入：{textImportPreviewMeta.total} 条，跳过：{textImportPreviewMeta.skipped} 条
-                {textImportPreviewMeta.duplicateCount ? (
+                {(skippedDuplicateRowIndices ? skippedDuplicateRowIndices.size : textImportPreviewMeta.duplicateCount) ? (
                   <span className="ml-1 text-warning font-medium">
-                    （库内重复已忽略：{textImportPreviewMeta.duplicateCount} 条）
+                    （库内重复已忽略：{skippedDuplicateRowIndices ? skippedDuplicateRowIndices.size : textImportPreviewMeta.duplicateCount} 条）
                   </span>
                 ) : null}
               </div>
@@ -1313,10 +1315,7 @@ export function ImportTab({
                         {matrixPreview.modelNames.map((modelName) => {
                           const rowIndex = matrixRow.cellRowIndexByModel[modelName];
                           const draftRow = rowIndex !== undefined ? textImportDraftRows[rowIndex] : undefined;
-                          const isDuplicate = Boolean(
-                            draftRow?.isDuplicate &&
-                              draftRow.rawValue.trim() === (draftRow.originalRawValue ?? draftRow.rawValue).trim()
-                          );
+                          const isDuplicate = rowIndex !== undefined && (skippedDuplicateRowIndices?.has(rowIndex) ?? false);
                           const normalizedHint =
                             rowIndex === undefined
                               ? null

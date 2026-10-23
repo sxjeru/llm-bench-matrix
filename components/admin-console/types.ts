@@ -85,6 +85,7 @@ export type TextImportPreviewRow = {
   valid: boolean;
   isDuplicate?: boolean;
   duplicateReason?: string;
+  duplicateSlotKey?: string;
 };
 
 export type Props = {

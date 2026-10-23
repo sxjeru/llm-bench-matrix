@@ -15,6 +15,7 @@ import {
   isImportValueEmptyMarker
 } from "@/lib/import/value-patterns";
 import { composeImportPairValueRaw, isEmptyImportPairValue, parseImportPairValue } from "@/lib/import/pair-value";
+import { buildDuplicateSlotKey, normalizeNameParenthesisSpacing } from "@/lib/import/slot-key";
 import type { ParsedImportRecord } from "@/lib/import/xlsm";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 import type { ProviderConfig } from "@/lib/db/schema";
@@ -553,16 +554,6 @@ function expandMetricLabeledImportRows(rows: NormalizedTextImportRow[]): Normali
   });
 
   return expandedRows;
-}
-
-function normalizeNameParenthesisSpacing(rawName: string): string {
-  const trimmed = rawName.trim();
-  if (!trimmed) return "";
-
-  return trimmed
-    .replace(HYPHEN_VARIANT_REGEX, "-")
-    .replace(/([^\s（(])([（(])/g, "$1 $2")
-    .replace(/\s+([（(])/g, " $1");
 }
 
 function stripBenchmarkCitationRefs(rawBenchmarkName: string): string {
@@ -5836,9 +5827,7 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
       if (existingRows.length > 0) {
         hasExistingSource = true;
         for (const row of existingRows) {
-          const normModel = normalizeNameParenthesisSpacing(row.modelName).trim().toLowerCase();
-          const normBench = normalizeNameParenthesisSpacing(row.benchmarkName).trim().toLowerCase();
-          const slotKey = `${normModel}::${normBench}`;
+          const slotKey = buildDuplicateSlotKey(row.modelName, row.benchmarkName);
           const list = existingValuesBySlot.get(slotKey) ?? [];
           list.push({
             valueRaw: row.valueRaw,
@@ -5848,7 +5837,7 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
           existingValuesBySlot.set(slotKey, list);
 
           if (row.modelAlias?.trim()) {
-            const aliasKey = `${normalizeNameParenthesisSpacing(row.modelAlias).trim().toLowerCase()}::${normBench}`;
+            const aliasKey = buildDuplicateSlotKey(row.modelAlias, row.benchmarkName);
             const aliasList = existingValuesBySlot.get(aliasKey) ?? [];
             aliasList.push({
               valueRaw: row.valueRaw,
@@ -5869,10 +5858,9 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
     const mergedNote = mergeImportValueNotes(row.valueNote, parsedValue.valueNote);
 
     let isDuplicate = false;
+    let duplicateSlotKey: string | undefined = undefined;
     if (hasExistingSource) {
-      const normModel = normalizeNameParenthesisSpacing(row.modelName).trim().toLowerCase();
-      const normBench = normalizeNameParenthesisSpacing(row.benchmarkName).trim().toLowerCase();
-      const slotKey = `${normModel}::${normBench}`;
+      const slotKey = buildDuplicateSlotKey(row.modelName, row.benchmarkName);
       const candidates = existingValuesBySlot.get(slotKey);
       if (candidates && candidates.length > 0) {
         for (const existing of candidates) {
@@ -5887,6 +5875,7 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
             )
           ) {
             isDuplicate = true;
+            duplicateSlotKey = slotKey;
             break;
           }
         }
@@ -5909,7 +5898,8 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
       valueNote: mergedNote,
       source: row.source,
       valid: parsedValue.valueRaw.length > 0 && (parsedValue.valueNum !== null || parsedValue.valueNum2 !== null),
-      isDuplicate
+      isDuplicate,
+      duplicateSlotKey
     };
   });
 

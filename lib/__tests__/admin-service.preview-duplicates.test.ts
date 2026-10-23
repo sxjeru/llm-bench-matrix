@@ -111,24 +111,28 @@ describe("previewBenchmarkTextImport 来源存在性检查与重复值比对", (
       (r: any) => r.benchmarkName === "MMLU" && r.modelName === "Model A"
     );
     expect(mmluModelA?.isDuplicate).toBe(true);
+    expect(mmluModelA?.duplicateSlotKey).toBe("model a::mmlu");
 
     // MMLU + Model B: 92.0 vs DB has no MMLU for Model B -> not duplicate
     const mmluModelB = result.previewRows.find(
       (r: any) => r.benchmarkName === "MMLU" && r.modelName === "Model B"
     );
     expect(mmluModelB?.isDuplicate).toBe(false);
+    expect(mmluModelB?.duplicateSlotKey).toBeUndefined();
 
     // GSM8K + Model A: 60.0 vs DB has no GSM8K for Model A -> not duplicate
     const gsm8kModelA = result.previewRows.find(
       (r: any) => r.benchmarkName === "GSM8K" && r.modelName === "Model A"
     );
     expect(gsm8kModelA?.isDuplicate).toBe(false);
+    expect(gsm8kModelA?.duplicateSlotKey).toBeUndefined();
 
     // GSM8K + Model B: 70.5 vs 70.5 -> duplicate
     const gsm8kModelB = result.previewRows.find(
       (r: any) => r.benchmarkName === "GSM8K" && r.modelName === "Model B"
     );
     expect(gsm8kModelB?.isDuplicate).toBe(true);
+    expect(gsm8kModelB?.duplicateSlotKey).toBe("model b::gsm8k");
   });
 
   test("相同模型和 benchmark 但分数不同时不判定为重复", async () => {
