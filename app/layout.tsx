@@ -31,6 +31,13 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN" data-theme="dark">
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{if(!location.pathname.startsWith('/admin')){window.__PRELOADED_FAST_STATS__=fetch('/api/public/dashboard/stats');window.__PRELOADED_SNAPSHOT__=fetch('/api/public/dashboard');}}catch(e){}`
+          }}
+        />
+      </head>
       <body>
         <header className="topbar">
           <div className="container topbar-inner">

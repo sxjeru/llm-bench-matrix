@@ -389,6 +389,40 @@ describe("DashboardProvider", () => {
     expect(spyMeta).toHaveBeenCalledTimes(1);
   });
 
+  test("优先复用 window 上的预加载请求并在消费后清理", async () => {
+    const fetchMock = stubFetchByRoute();
+    const preloadedStats = Promise.resolve(Response.json({ stats: SNAPSHOT.stats }));
+    const preloadedSnapshot = Promise.resolve(Response.json(encodePublicDashboardSnapshot(SNAPSHOT)));
+
+    window.__PRELOADED_FAST_STATS__ = preloadedStats;
+    window.__PRELOADED_SNAPSHOT__ = preloadedSnapshot;
+
+    function Consumer() {
+      const { snapshot, stats } = useDashboardSnapshot();
+      return (
+        <div>
+          <span data-testid="snap-ready">{snapshot ? "ready" : "pending"}</span>
+          <span data-testid="stats-ready">{stats ? "ready" : "pending"}</span>
+        </div>
+      );
+    }
+
+    render(
+      <DashboardProvider>
+        <Consumer />
+      </DashboardProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("snap-ready")).toHaveTextContent("ready");
+      expect(screen.getByTestId("stats-ready")).toHaveTextContent("ready");
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(window.__PRELOADED_FAST_STATS__).toBeUndefined();
+    expect(window.__PRELOADED_SNAPSHOT__).toBeUndefined();
+  });
+
   test("没有 Provider 时 useSharedMatrixDerived 返回 null", () => {
     function Outside() {
       const shared = useSharedMatrixDerived(ROWS, ROWS);

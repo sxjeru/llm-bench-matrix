@@ -1,10 +1,15 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { HomeBenchmarkMatrix } from "@/components/home-benchmark-matrix";
-import { HomeModelScatter } from "@/components/home-model-scatter";
 import { isHomePath, isScatterPath } from "@/lib/public-routes";
 import { usePathname } from "next/navigation";
 import { Activity, Suspense, useState, type ReactNode } from "react";
+
+const HomeModelScatter = dynamic(
+  () => import("@/components/home-model-scatter").then((mod) => mod.HomeModelScatter),
+  { ssr: false }
+);
 
 /**
  * 矩阵与散点挂在公开 layout 上，用 Activity 按路由显隐，切页不卸载。

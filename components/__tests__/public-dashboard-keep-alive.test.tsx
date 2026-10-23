@@ -27,7 +27,7 @@ describe("PublicDashboardKeepAlive", () => {
     pathnameState.value = HOME_PATH;
   });
 
-  test("首页先只挂矩阵，散点等到第一次访问再挂", () => {
+  test("首页先只挂矩阵，散点等到第一次访问再挂", async () => {
     const { rerender } = render(
       <PublicDashboardKeepAlive>
         <div data-testid="page-shell">home</div>
@@ -49,7 +49,7 @@ describe("PublicDashboardKeepAlive", () => {
     expect(screen.getByTestId("home-matrix")).toBeInTheDocument();
     expect(screen.getByTestId("home-matrix")).not.toBeVisible();
     expect(screen.getByTestId("home-matrix")).toHaveAttribute("data-url-sync", "false");
-    expect(screen.getByTestId("home-scatter")).toBeVisible();
+    expect(await screen.findByTestId("home-scatter")).toBeVisible();
     expect(screen.getByTestId("home-scatter")).toHaveAttribute("data-url-sync", "true");
   });
 

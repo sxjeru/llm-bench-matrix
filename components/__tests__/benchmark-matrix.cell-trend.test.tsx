@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { flushQueuedStateUpdates, renderReady } from "@/tests/flush-microtasks";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -317,8 +317,11 @@ describe("BenchmarkMatrix question mark trend chart interaction", () => {
     fireEvent.click(trigger!);
 
     // 应弹出对应 benchmark 的趋势面板
-    const panel = container.querySelector('[data-cell-trend-panel="Bench-Trend"]');
-    expect(panel).not.toBeNull();
+    const panel = await waitFor(() => {
+      const el = container.querySelector('[data-cell-trend-panel="Bench-Trend"]');
+      expect(el).not.toBeNull();
+      return el!;
+    });
 
     // 面板内显示模型名称与变化量
     expect(panel).toHaveTextContent("Model A");

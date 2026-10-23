@@ -55,6 +55,13 @@ function buildSharedDashboardDerived(rows: MatrixInputRow[]): SharedDashboardDer
   };
 }
 
+declare global {
+  interface Window {
+    __PRELOADED_FAST_STATS__?: Promise<Response>;
+    __PRELOADED_SNAPSHOT__?: Promise<Response>;
+  }
+}
+
 export function DashboardProvider({ children }: { children: ReactNode }) {
   const [snapshot, setSnapshot] = useState<PublicDashboardSnapshot | null>(null);
   const [derived, setDerived] = useState<SharedDashboardDerived | null>(null);
@@ -73,7 +80,12 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
     async function loadStats() {
       try {
-        const response = await fetch("/api/public/dashboard/stats", { signal: controller.signal });
+        const preloaded = typeof window !== "undefined" ? window.__PRELOADED_FAST_STATS__ : undefined;
+        if (typeof window !== "undefined") {
+          delete window.__PRELOADED_FAST_STATS__;
+        }
+
+        const response = await (preloaded ?? fetch("/api/public/dashboard/stats", { signal: controller.signal }));
         if (!response.ok) return;
 
         const payload = await response.json() as { stats: PublicDashboardStats };
@@ -87,9 +99,15 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
     async function loadSnapshot() {
       try {
+        const preloaded = typeof window !== "undefined" ? window.__PRELOADED_SNAPSHOT__ : undefined;
+        if (typeof window !== "undefined") {
+          delete window.__PRELOADED_SNAPSHOT__;
+        }
+
         // 不手动带 If-None-Match：交给浏览器自己按 ETag revalidate，
         // 命中 304 时它会直接复用磁盘上的压缩副本并以 200 交回完整 body。
-        const response = await fetch("/api/public/dashboard", { signal: controller.signal });
+        // 首屏若已由 HTML head 预加载则优先复用，消灭串行等待。
+        const response = await (preloaded ?? fetch("/api/public/dashboard", { signal: controller.signal }));
         if (!response.ok) {
           throw new Error(`Failed to load dashboard snapshot: ${response.status}`);
         }
