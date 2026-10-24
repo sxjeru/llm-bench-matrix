@@ -24,11 +24,10 @@ import {
   getBenchmarkSearchCandidateIds
 } from "../utils/benchmark";
 import {
-  buildDuplicateSlotKey,
+  buildDuplicateNameSlotKey,
   composePairRawValue,
   composeStarRawValue,
   isSameImportSource,
-  normalizeNameParenthesisSpacing,
   parsePairRawValue,
   parseSingleRawValue,
   parseStarSingleRawValue
@@ -909,11 +908,12 @@ export function useImportPreviewState({
         }
       }
 
-      const currentSlotKey = buildDuplicateSlotKey(modelName, benchmarkName, benchmarkType);
-      const legacySlotKey = `${normalizeNameParenthesisSpacing(modelName).trim().toLowerCase()}::${normalizeNameParenthesisSpacing(benchmarkName).trim().toLowerCase()}`;
+      // 查重只看 model + benchmark 名称，benchmarkType 不参与（改类型不应解除重复忽略）
+      const currentSlotKey = buildDuplicateNameSlotKey(modelName, benchmarkName);
       const isSlotMatched = !row.duplicateSlotKey
-        || currentSlotKey === row.duplicateSlotKey
-        || (row.duplicateSlotKey.split("::").length === 2 && row.duplicateSlotKey === legacySlotKey);
+        || row.duplicateSlotKey === currentSlotKey
+        // 兼容历史预览数据里的三段式槽位键（model::benchmark::type）
+        || row.duplicateSlotKey.startsWith(`${currentSlotKey}::`);
 
       const isSourceClearedAfterPreview = Boolean(
         textImportPreviewSource &&

@@ -969,23 +969,36 @@ describe("useImportPreviewState Hook - duplicate row filtering and slot key inva
     expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(false);
   });
 
-  test("当通过 matrixBenchmarkTypeDrafts 改写 benchmark 类别时，槽位变化不再跳过（解除重复锁定）", () => {
+  test("当通过 matrixBenchmarkTypeDrafts 改写 benchmark 类别时，仍然保持重复忽略（类型不参与查重）", () => {
     const benchmarkKey = "MMLU@@General";
-    const rowWithSlotKey: TextImportPreviewRow = {
-      ...baseDuplicateRow,
-      duplicateSlotKey: "model a::mmlu::general"
-    };
     const options = createMockOptions({
-      textImportDraftRows: [rowWithSlotKey],
+      textImportDraftRows: [baseDuplicateRow],
       matrixBenchmarkTypeDrafts: {
         [benchmarkKey]: "5-shot"
       }
     });
 
     const { result } = renderHook(() => useImportPreviewState(options));
-    expect(result.current.finalizedTextImportRows).toHaveLength(1);
-    expect(result.current.finalizedTextImportRows[0].benchmarkType).toBe("5-shot");
-    expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(false);
+    expect(result.current.finalizedTextImportRows).toHaveLength(0);
+    expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(true);
+  });
+
+  test("兼容历史三段式 duplicateSlotKey：仅改类型仍视为同一槽位", () => {
+    const benchmarkKey = "MMLU@@General";
+    const rowWithLegacySlotKey: TextImportPreviewRow = {
+      ...baseDuplicateRow,
+      duplicateSlotKey: "model a::mmlu::general"
+    };
+    const options = createMockOptions({
+      textImportDraftRows: [rowWithLegacySlotKey],
+      matrixBenchmarkTypeDrafts: {
+        [benchmarkKey]: "5-shot"
+      }
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    expect(result.current.finalizedTextImportRows).toHaveLength(0);
+    expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(true);
   });
 
   test("当预览后修改了 csvSource 且与 row.source 不一致时，旧来源的重复标记失效，正常进入提交列表", () => {

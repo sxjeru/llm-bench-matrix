@@ -10,15 +10,14 @@ export function normalizeNameParenthesisSpacing(rawName: string): string {
     .replace(/\s+([（(])/g, " $1");
 }
 
-export function buildDuplicateSlotKey(
-  modelName: string,
-  benchmarkName: string,
-  benchmarkType?: string | null
-): string {
+/**
+ * 查重槽位键（`model::benchmark`）。
+ * 同一个 benchmark 只有一条实体，benchmarkType 只是分类标注，不参与查重。
+ */
+export function buildDuplicateNameSlotKey(modelName: string, benchmarkName: string): string {
   const normModel = normalizeNameParenthesisSpacing(modelName).trim().toLowerCase();
   const normBench = normalizeNameParenthesisSpacing(benchmarkName).trim().toLowerCase();
-  const normType = normalizeNameParenthesisSpacing(benchmarkType ?? "").trim().toLowerCase() || "general";
-  return `${normModel}::${normBench}::${normType}`;
+  return `${normModel}::${normBench}`;
 }
 
 export function normalizeImportSourceKey(source: string | null | undefined): string {

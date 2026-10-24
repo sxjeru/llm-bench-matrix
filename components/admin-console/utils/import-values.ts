@@ -81,7 +81,7 @@ export function composeStarRawValue(value: string, note?: string | null): string
 
 export {
   normalizeNameParenthesisSpacing,
-  buildDuplicateSlotKey,
+  buildDuplicateNameSlotKey,
   normalizeImportSourceKey,
   isSameImportSource
 } from "@/lib/import/slot-key";

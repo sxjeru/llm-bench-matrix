@@ -15,7 +15,10 @@ import {
   isImportValueEmptyMarker
 } from "@/lib/import/value-patterns";
 import { composeImportPairValueRaw, isEmptyImportPairValue, parseImportPairValue } from "@/lib/import/pair-value";
-import { buildDuplicateSlotKey, normalizeNameParenthesisSpacing } from "@/lib/import/slot-key";
+import {
+  buildDuplicateNameSlotKey,
+  normalizeNameParenthesisSpacing
+} from "@/lib/import/slot-key";
 import type { ParsedImportRecord } from "@/lib/import/xlsm";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 import type { ProviderConfig } from "@/lib/db/schema";
@@ -5891,8 +5894,7 @@ export async function previewBenchmarkTextImport(
 
       if (existingRows.length > 0) {
         hasExistingSource = true;
-        for (const row of existingRows) {
-          const slotKey = buildDuplicateSlotKey(row.modelName, row.benchmarkName, row.benchmarkType);
+        const addValueToSlot = (slotKey: string, row: (typeof existingRows)[number]) => {
           const list = existingValuesBySlot.get(slotKey) ?? [];
           list.push({
             valueRaw: row.valueRaw,
@@ -5900,16 +5902,15 @@ export async function previewBenchmarkTextImport(
             valueNum2: row.valueNum2
           });
           existingValuesBySlot.set(slotKey, list);
+        };
+
+        for (const row of existingRows) {
+          // 查重只看 model + benchmark 名称：benchmarkType 只是同一 benchmark 的分类标注，
+          // 同一个 benchmark 不应因为类型不同而被当成两条记录。
+          addValueToSlot(buildDuplicateNameSlotKey(row.modelName, row.benchmarkName), row);
 
           if (row.modelAlias?.trim()) {
-            const aliasKey = buildDuplicateSlotKey(row.modelAlias, row.benchmarkName, row.benchmarkType);
-            const aliasList = existingValuesBySlot.get(aliasKey) ?? [];
-            aliasList.push({
-              valueRaw: row.valueRaw,
-              valueNum: row.valueNum,
-              valueNum2: row.valueNum2
-            });
-            existingValuesBySlot.set(aliasKey, aliasList);
+            addValueToSlot(buildDuplicateNameSlotKey(row.modelAlias, row.benchmarkName), row);
           }
         }
       }
@@ -5931,7 +5932,7 @@ export async function previewBenchmarkTextImport(
     let isDuplicate = false;
     let duplicateSlotKey: string | undefined = undefined;
     if (hasExistingSource) {
-      const slotKey = buildDuplicateSlotKey(row.modelName, row.benchmarkName, row.benchmarkType);
+      const slotKey = buildDuplicateNameSlotKey(row.modelName, row.benchmarkName);
       const candidates = existingValuesBySlot.get(slotKey);
       if (candidates && candidates.length > 0) {
         for (const existing of candidates) {

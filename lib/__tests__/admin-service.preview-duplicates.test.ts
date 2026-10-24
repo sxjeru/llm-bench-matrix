@@ -165,7 +165,7 @@ describe("previewBenchmarkTextImport 来源存在性检查与重复值比对", (
       (r: any) => r.benchmarkName === "MMLU" && r.modelName === "Model A"
     );
     expect(mmluModelA?.isDuplicate).toBe(true);
-    expect(mmluModelA?.duplicateSlotKey).toBe("model a::mmlu::general");
+    expect(mmluModelA?.duplicateSlotKey).toBe("model a::mmlu");
 
     // MMLU + Model B: 92.0 vs DB has no MMLU for Model B -> not duplicate
     const mmluModelB = result.previewRows.find(
@@ -186,7 +186,7 @@ describe("previewBenchmarkTextImport 来源存在性检查与重复值比对", (
       (r: any) => r.benchmarkName === "GSM8K" && r.modelName === "Model B"
     );
     expect(gsm8kModelB?.isDuplicate).toBe(true);
-    expect(gsm8kModelB?.duplicateSlotKey).toBe("model b::gsm8k::general");
+    expect(gsm8kModelB?.duplicateSlotKey).toBe("model b::gsm8k");
   });
 
   test("相同模型和 benchmark 但分数不同时不判定为重复", async () => {
@@ -333,7 +333,7 @@ describe("previewBenchmarkTextImport 来源存在性检查与重复值比对", (
     );
   });
 
-  test("相同模型和 benchmark 但 benchmarkType 不同时，即使分数相同也不判定为重复（避免静默丢数据）", async () => {
+  test("相同模型和 benchmark 但 benchmarkType 不同时，分数相同仍判定为重复（类型不参与查重）", async () => {
     // 库内已有 MMLU [5-shot] = 85.0
     const existingDbRows = [
       {
@@ -358,11 +358,11 @@ describe("previewBenchmarkTextImport 来源存在性检查与重复值比对", (
 
     const result = await previewBenchmarkTextImport(inputText, "paper-src", null, { checkDuplicates: true });
 
-    // 不应判定为重复，应保留可导入
-    expect(result.duplicateCount).toBe(0);
-    expect(result.total).toBe(1);
-    expect(result.previewRows[0].isDuplicate).toBe(false);
+    expect(result.duplicateCount).toBe(1);
+    expect(result.total).toBe(0);
+    expect(result.previewRows[0].isDuplicate).toBe(true);
     expect(result.previewRows[0].benchmarkType).toBe("0-shot");
+    expect(result.previewRows[0].duplicateSlotKey).toBe("model a::mmlu");
   });
 
   test("相同模型、相同 benchmark 且相同 benchmarkType 且分数相同时判定为重复", async () => {
@@ -391,7 +391,68 @@ describe("previewBenchmarkTextImport 来源存在性检查与重复值比对", (
     expect(result.duplicateCount).toBe(1);
     expect(result.total).toBe(0);
     expect(result.previewRows[0].isDuplicate).toBe(true);
-    expect(result.previewRows[0].duplicateSlotKey).toBe("model a::mmlu::5-shot");
+    expect(result.previewRows[0].duplicateSlotKey).toBe("model a::mmlu");
+  });
+
+  test("导入文本未提供 benchmarkType 时退回到 model::benchmark 名称级查重（库内为其他类型也能命中）", async () => {
+    const existingDbRows = [
+      {
+        valueRaw: "85.0",
+        valueNum: "85.000000",
+        valueNum2: null,
+        source: "text:paper-src",
+        modelName: "Model A",
+        modelAlias: null,
+        benchmarkName: "MMLU",
+        benchmarkType: "Agentic"
+      }
+    ];
+
+    vi.spyOn(db, "select").mockImplementation(() => mockDbQuery(existingDbRows));
+
+    const inputText = [
+      "Benchmark,Model A",
+      "MMLU,85.0"
+    ].join("\n");
+
+    const result = await previewBenchmarkTextImport(inputText, "paper-src", null, { checkDuplicates: true });
+
+    expect(result.previewRows[0].benchmarkType).toBe("General");
+    expect(result.previewRows[0].benchmarkTypeProvided).toBe(false);
+    expect(result.duplicateCount).toBe(1);
+    expect(result.total).toBe(0);
+    expect(result.previewRows[0].isDuplicate).toBe(true);
+    expect(result.previewRows[0].duplicateSlotKey).toBe("model a::mmlu");
+  });
+
+  test("导入文本显式提供 benchmarkType 时同样忽略类型，只按 model::benchmark 判重", async () => {
+    const existingDbRows = [
+      {
+        valueRaw: "85.0",
+        valueNum: "85.000000",
+        valueNum2: null,
+        source: "text:paper-src",
+        modelName: "Model A",
+        modelAlias: null,
+        benchmarkName: "MMLU",
+        benchmarkType: "Agentic"
+      }
+    ];
+
+    vi.spyOn(db, "select").mockImplementation(() => mockDbQuery(existingDbRows));
+
+    const inputText = [
+      "Benchmark,Category,Model A",
+      "MMLU,Reasoning,85.0"
+    ].join("\n");
+
+    const result = await previewBenchmarkTextImport(inputText, "paper-src", null, { checkDuplicates: true });
+
+    expect(result.previewRows[0].benchmarkType).toBe("Reasoning");
+    expect(result.previewRows[0].benchmarkTypeProvided).toBe(true);
+    expect(result.duplicateCount).toBe(1);
+    expect(result.previewRows[0].isDuplicate).toBe(true);
+    expect(result.previewRows[0].duplicateSlotKey).toBe("model a::mmlu");
   });
 });
 
