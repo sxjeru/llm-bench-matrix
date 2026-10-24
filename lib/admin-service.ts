@@ -4980,6 +4980,37 @@ function inferMatrixModelCountFromDataLines(lines: string[], startLineIndex: num
   return bestCount >= 2 ? bestCount : null;
 }
 
+/**
+ * 校验「模型列起点」是否被数据行支持：每条含完整尾部数值的数据行，其值列之前都必须有至少 `startIndex` 个标签单元格。
+ * 这样既能修正 benchmark 列名不含关键词时起点偏移的问题，也不会被表头里未加引号的逗号带偏。
+ */
+function hasMatrixDataRowsSupportingModelStart(
+  lines: string[],
+  startLineIndex: number,
+  expectedModelCount: number,
+  startIndex: number
+): boolean {
+  if (startIndex <= 0 || expectedModelCount < 2) {
+    return false;
+  }
+
+  let matchedRowCount = 0;
+
+  for (let index = startLineIndex; index < lines.length; index += 1) {
+    const cells = splitTableLine(lines[index] ?? "");
+    if (getTrailingMatrixValueCellCount(cells) !== expectedModelCount) {
+      continue;
+    }
+
+    matchedRowCount += 1;
+    if (cells.length - expectedModelCount < startIndex) {
+      return false;
+    }
+  }
+
+  return matchedRowCount > 0;
+}
+
 function hasImplicitMatrixBenchmarkColumn(
   lines: string[],
   startLineIndex: number,
@@ -5215,10 +5246,23 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
     : (hasExplicitBenchmarkColumn
       ? benchmarkColumnIndex + 1
       : (startsWithBenchmarkLabel ? 1 : 0));
-  const modelValueStartIndex = hasImplicitBenchmarkColumn ? 1 : modelHeaderStartIndex;
+  // 表头只认出分类列（如 `Category,Name,...`）时，基于关键词的起点会落在 benchmark 列上，
+  // 让 benchmark 名被未加引号的逗号截断、数值列整体左移；此时改以数据行尾部数值列数推定的起点为准。
+  const resolvedModelHeaderStartIndex = inferredModelHeaderStartIndex !== null
+    && inferredModelCountFromData !== null
+    && inferredModelHeaderStartIndex > modelHeaderStartIndex
+    && hasMatrixDataRowsSupportingModelStart(
+      rawLines,
+      headerLineIndex + 1,
+      inferredModelCountFromData,
+      inferredModelHeaderStartIndex
+    )
+    ? inferredModelHeaderStartIndex
+    : modelHeaderStartIndex;
+  const modelValueStartIndex = hasImplicitBenchmarkColumn ? 1 : resolvedModelHeaderStartIndex;
 
   const modelNames = headerCells
-    .slice(modelHeaderStartIndex)
+    .slice(resolvedModelHeaderStartIndex)
     .map((cell) => normalizeNameParenthesisSpacing(cell))
     .filter(Boolean);
 

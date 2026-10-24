@@ -930,6 +930,29 @@ describe("paper-table 文本解析", () => {
     expect(valueByModel.get("M11")).toBe("63.2*");
   });
 
+  test("benchmark 列名不含关键词时，未加引号的逗号同样不会截断 benchmark 名", async () => {
+    const inputText = [
+      "Category,Name,Model A,Model B,Model C,Model D,Model E,Model F",
+      "Agentic,DECK-Arena (Internal, Elo-score),1456,—,1423,1253,1231,1119"
+    ].join("\n");
+
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+
+    expect(parsed.format).toBe("matrix-table");
+    expect(parsed.rows).toHaveLength(5);
+    expect(new Set(parsed.rows.map((row) => row.benchmarkName))).toEqual(
+      new Set(["DECK-Arena (Internal, Elo-score)"])
+    );
+    expect(new Set(parsed.rows.map((row) => row.benchmarkType))).toEqual(new Set(["Agentic"]));
+    expect(parsed.rows.some((row) => row.benchmarkName === "DECK-Arena (Internal")).toBe(false);
+    expect(parsed.rows.some((row) => row.valueRaw === "Elo-score)")).toBe(false);
+
+    const valueByModel = new Map(parsed.rows.map((row) => [row.modelName, row.valueRaw]));
+    expect(valueByModel.get("Model A")).toBe("1456");
+    expect(valueByModel.get("Model C")).toBe("1423");
+    expect(valueByModel.get("Model F")).toBe("1119");
+  });
+
   test("文本导入预览会对模型值列中的非数值内容返回错误提示所需 warning", async () => {
     const inputText = [
       "Benchmark,M1,M2",
