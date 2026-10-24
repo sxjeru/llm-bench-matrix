@@ -443,6 +443,8 @@ type ImportTabProps = {
     skipped: number;
     duplicateCount?: number;
   } | null;
+  textImportPreviewSource?: string | null;
+  isImportSourceChangedAfterPreview?: boolean;
   textImportDraftRows: TextImportPreviewRow[];
   finalizedTextImportRows: StructuredCsvImportRow[];
   skippedDuplicateRowIndices?: Set<number>;
@@ -566,6 +568,8 @@ export function ImportTab({
   textImportProgress,
   textImportStatusText,
   textImportPreviewMeta,
+  textImportPreviewSource,
+  isImportSourceChangedAfterPreview,
   textImportDraftRows,
   finalizedTextImportRows,
   skippedDuplicateRowIndices,
@@ -962,6 +966,27 @@ export function ImportTab({
                 </div>
               ) : null}
             </div>
+          </div>
+        ) : null}
+
+        {textImportPreviewMeta && isImportSourceChangedAfterPreview ? (
+          <div className="alert alert-warning mt-3 flex items-center justify-between gap-3 text-xs shadow-sm">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="h-4 w-4 shrink-0 text-warning" />
+              <div>
+                <span className="font-semibold">数据来源已变更：</span>
+                来源已从「<strong>{textImportPreviewSource?.trim() || "未指定"}</strong>」修改为「<strong>{csvSource.trim() || "未指定"}</strong>」。
+                先前预览的库内重复检查是基于旧来源进行的，已自动失效（旧重复行不再跳过）。建议重新点击“重新预览”重新校验新来源下的库内数据。
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn btn-warning btn-xs shrink-0 font-semibold"
+              onClick={onPreviewCsvImport}
+              disabled={isPreviewingTextImport || isImportingTextCsv}
+            >
+              重新预览
+            </button>
           </div>
         ) : null}
 

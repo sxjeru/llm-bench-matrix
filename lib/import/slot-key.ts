@@ -10,9 +10,30 @@ export function normalizeNameParenthesisSpacing(rawName: string): string {
     .replace(/\s+([（(])/g, " $1");
 }
 
-export function buildDuplicateSlotKey(modelName: string, benchmarkName: string): string {
+export function buildDuplicateSlotKey(
+  modelName: string,
+  benchmarkName: string,
+  benchmarkType?: string | null
+): string {
   const normModel = normalizeNameParenthesisSpacing(modelName).trim().toLowerCase();
   const normBench = normalizeNameParenthesisSpacing(benchmarkName).trim().toLowerCase();
-  return `${normModel}::${normBench}`;
+  const normType = normalizeNameParenthesisSpacing(benchmarkType ?? "").trim().toLowerCase() || "general";
+  return `${normModel}::${normBench}::${normType}`;
+}
+
+export function normalizeImportSourceKey(source: string | null | undefined): string {
+  if (!source) return "";
+  const trimmed = source.trim().toLowerCase();
+  if (trimmed.startsWith("text:")) {
+    return trimmed.slice(5).trim();
+  }
+  return trimmed;
+}
+
+export function isSameImportSource(
+  sourceA: string | null | undefined,
+  sourceB: string | null | undefined
+): boolean {
+  return normalizeImportSourceKey(sourceA) === normalizeImportSourceKey(sourceB);
 }
 

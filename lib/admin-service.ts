@@ -112,7 +112,16 @@ type NonNumericImportValueWarning = {
   action: string;
 };
 
-type TextParseWarning = UnsupportedSpecialSymbolWarning | NonNumericImportValueWarning;
+export type DuplicateCheckSkippedWarning = {
+  type: "duplicate-check-skipped";
+  reason: string;
+  action: string;
+};
+
+type TextParseWarning =
+  | UnsupportedSpecialSymbolWarning
+  | NonNumericImportValueWarning
+  | DuplicateCheckSkippedWarning;
 
 /** Structural type covering the Drizzle methods used by entity-ensure helpers. */
 type DbExecutor = Pick<typeof db, "select" | "insert" | "update" | "delete" | "execute">;
@@ -5694,63 +5703,67 @@ async function collectBenchmarkDirectionWarnings(rows: NormalizedTextImportRow[]
     return [];
   }
 
-  const dedupeRule = await getModelDedupeRule();
+  try {
+    const dedupeRule = await getModelDedupeRule();
 
-  const grouped = new Map<string, {
-    benchmarkName: string;
-    benchmarkType: string;
-    rowNumbers: Set<number>;
-  }>();
+    const grouped = new Map<string, {
+      benchmarkName: string;
+      benchmarkType: string;
+      rowNumbers: Set<number>;
+    }>();
 
-  lowerIsBetterRows.forEach((row) => {
-    const benchmarkType = row.benchmarkType.trim() || "general";
-    const key = buildBenchmarkCanonicalKey(row.benchmarkName, benchmarkType, dedupeRule);
+    lowerIsBetterRows.forEach((row) => {
+      const benchmarkType = row.benchmarkType.trim() || "general";
+      const key = buildBenchmarkCanonicalKey(row.benchmarkName, benchmarkType, dedupeRule);
 
-    if (!grouped.has(key)) {
-      grouped.set(key, {
-        benchmarkName: row.benchmarkName,
-        benchmarkType,
-        rowNumbers: new Set<number>()
-      });
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          benchmarkName: row.benchmarkName,
+          benchmarkType,
+          rowNumbers: new Set<number>()
+        });
+      }
+
+      grouped.get(key)?.rowNumbers.add(row.rowNumber);
+    });
+
+    const canonicalKeys = Array.from(grouped.keys());
+    if (canonicalKeys.length === 0) {
+      return [];
     }
 
-    grouped.get(key)?.rowNumbers.add(row.rowNumber);
-  });
+    const existingBenchmarks = await db
+      .select({
+        canonicalKey: benchmarks.canonicalKey,
+        benchmarkName: benchmarks.benchmarkName,
+        benchmarkType: benchmarks.benchmarkType,
+        higherIsBetter: benchmarks.higherIsBetter
+      })
+      .from(benchmarks)
+      .where(inArray(benchmarks.canonicalKey, canonicalKeys));
 
-  const canonicalKeys = Array.from(grouped.keys());
-  if (canonicalKeys.length === 0) {
+    return existingBenchmarks
+      .filter((item) => item.higherIsBetter)
+      .map((item) => {
+        const group = grouped.get(item.canonicalKey);
+        const rowNumbers = group ? Array.from(group.rowNumbers).sort((a, b) => a - b) : [];
+
+        return {
+          benchmarkName: item.benchmarkName,
+          benchmarkType: item.benchmarkType,
+          rowNumbers,
+          reason: "检测到 benchmark 名包含 ↓，应为 low-is-better，但数据库当前为 high-is-better",
+          action: "导入时将自动把 higherIsBetter 修正为 false"
+        };
+      })
+      .sort((a, b) => {
+        const nameCompare = a.benchmarkName.localeCompare(b.benchmarkName, "zh-Hans-CN", { sensitivity: "base" });
+        if (nameCompare !== 0) return nameCompare;
+        return a.benchmarkType.localeCompare(b.benchmarkType, "zh-Hans-CN", { sensitivity: "base" });
+      });
+  } catch {
     return [];
   }
-
-  const existingBenchmarks = await db
-    .select({
-      canonicalKey: benchmarks.canonicalKey,
-      benchmarkName: benchmarks.benchmarkName,
-      benchmarkType: benchmarks.benchmarkType,
-      higherIsBetter: benchmarks.higherIsBetter
-    })
-    .from(benchmarks)
-    .where(inArray(benchmarks.canonicalKey, canonicalKeys));
-
-  return existingBenchmarks
-    .filter((item) => item.higherIsBetter)
-    .map((item) => {
-      const group = grouped.get(item.canonicalKey);
-      const rowNumbers = group ? Array.from(group.rowNumbers).sort((a, b) => a - b) : [];
-
-      return {
-        benchmarkName: item.benchmarkName,
-        benchmarkType: item.benchmarkType,
-        rowNumbers,
-        reason: "检测到 benchmark 名包含 ↓，应为 low-is-better，但数据库当前为 high-is-better",
-        action: "导入时将自动把 higherIsBetter 修正为 false"
-      };
-    })
-    .sort((a, b) => {
-      const nameCompare = a.benchmarkName.localeCompare(b.benchmarkName, "zh-Hans-CN", { sensitivity: "base" });
-      if (nameCompare !== 0) return nameCompare;
-      return a.benchmarkType.localeCompare(b.benchmarkType, "zh-Hans-CN", { sensitivity: "base" });
-    });
 }
 
 function isSameScore(
@@ -5781,12 +5794,47 @@ function isSameScore(
   return importedRawClean.length > 0 && importedRawClean === existingRawClean;
 }
 
-export async function previewBenchmarkTextImport(inputText: string, sourceInput?: string | null, htmlInput?: string | null) {
+export type PreviewBenchmarkTextImportOptions = {
+  checkDuplicates?: boolean;
+  duplicateTimeoutMs?: number;
+  db?: typeof db;
+};
+
+const DEFAULT_PREVIEW_DUPLICATE_CHECK_TIMEOUT_MS = 10000;
+
+async function runWithTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage = "Operation timed out"
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+export async function previewBenchmarkTextImport(
+  inputText: string,
+  sourceInput?: string | null,
+  htmlInput?: string | null,
+  options?: PreviewBenchmarkTextImportOptions
+) {
   const parsed = await parseBenchmarkTextRows(inputText, sourceInput, htmlInput);
   const directionWarnings = await collectBenchmarkDirectionWarnings(parsed.rows);
   const parseWarnings = parsed.warnings ?? [];
   const allWarnings = [...parseWarnings, ...directionWarnings];
 
+  const shouldCheckDuplicates = options?.checkDuplicates ?? false;
   const rawSource = sourceInput?.trim();
   const existingValuesBySlot = new Map<
     string,
@@ -5798,36 +5846,53 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
   >();
   let hasExistingSource = false;
 
-  if (rawSource) {
+  if (shouldCheckDuplicates && rawSource) {
     const sourceCandidates = buildSourceLookupCandidates(rawSource);
     const lowerCandidates = Array.from(new Set(sourceCandidates.map((c) => c.toLowerCase())));
+    const dbClient = options?.db ?? db;
+    const timeoutMs = options?.duplicateTimeoutMs ?? DEFAULT_PREVIEW_DUPLICATE_CHECK_TIMEOUT_MS;
 
     try {
-      const existingRows = await db
-        .select({
-          valueRaw: benchmarkValues.valueRaw,
-          valueNum: benchmarkValues.valueNum,
-          valueNum2: benchmarkValues.valueNum2,
-          source: benchmarkValues.source,
-          modelName: models.modelName,
-          modelAlias: models.modelAlias,
-          benchmarkName: benchmarks.benchmarkName,
-          benchmarkType: benchmarks.benchmarkType
-        })
-        .from(benchmarkValues)
-        .innerJoin(models, eq(benchmarkValues.modelId, models.id))
-        .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-        .where(
-          or(
-            inArray(benchmarkValues.source, sourceCandidates),
-            inArray(sql<string>`lower(${benchmarkValues.source})`, lowerCandidates)
+      const queryPromise = Promise.resolve(
+        dbClient
+          .select({
+            valueRaw: benchmarkValues.valueRaw,
+            valueNum: benchmarkValues.valueNum,
+            valueNum2: benchmarkValues.valueNum2,
+            source: benchmarkValues.source,
+            modelName: models.modelName,
+            modelAlias: models.modelAlias,
+            benchmarkName: benchmarks.benchmarkName,
+            benchmarkType: benchmarks.benchmarkType
+          })
+          .from(benchmarkValues)
+          .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+          .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+          .where(
+            and(
+              isNull(models.mergedIntoModelId),
+              isNull(benchmarks.mergedIntoBenchmarkId),
+              or(
+                inArray(benchmarkValues.source, sourceCandidates),
+                inArray(sql<string>`lower(${benchmarkValues.source})`, lowerCandidates)
+              )
+            )
           )
-        );
+      );
+
+      // Attach catch handler to queryPromise to prevent unhandled rejection if timeout triggers before query finishes
+      queryPromise.catch(() => {});
+
+      const existingRows = await runWithTimeout(
+        queryPromise,
+        timeoutMs,
+        `Duplicate check timed out after ${timeoutMs}ms`
+      );
 
       if (existingRows.length > 0) {
         hasExistingSource = true;
         for (const row of existingRows) {
-          const slotKey = buildDuplicateSlotKey(row.modelName, row.benchmarkName);
+          const slotKey = buildDuplicateSlotKey(row.modelName, row.benchmarkName, row.benchmarkType);
           const list = existingValuesBySlot.get(slotKey) ?? [];
           list.push({
             valueRaw: row.valueRaw,
@@ -5837,7 +5902,7 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
           existingValuesBySlot.set(slotKey, list);
 
           if (row.modelAlias?.trim()) {
-            const aliasKey = buildDuplicateSlotKey(row.modelAlias, row.benchmarkName);
+            const aliasKey = buildDuplicateSlotKey(row.modelAlias, row.benchmarkName, row.benchmarkType);
             const aliasList = existingValuesBySlot.get(aliasKey) ?? [];
             aliasList.push({
               valueRaw: row.valueRaw,
@@ -5848,8 +5913,14 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
           }
         }
       }
-    } catch {
-      // Ignored for environments without DB connection
+    } catch (error) {
+      // Ignored / fail-open for environments without DB connection or when DB query times out / jitters
+      const message = error instanceof Error ? error.message : String(error);
+      allWarnings.push({
+        type: "duplicate-check-skipped",
+        reason: `查重检查跳过: ${message}`,
+        action: "已自动容错降级（fail-open），本次预览未剔除库内已有重复记录"
+      });
     }
   }
 
@@ -5860,7 +5931,7 @@ export async function previewBenchmarkTextImport(inputText: string, sourceInput?
     let isDuplicate = false;
     let duplicateSlotKey: string | undefined = undefined;
     if (hasExistingSource) {
-      const slotKey = buildDuplicateSlotKey(row.modelName, row.benchmarkName);
+      const slotKey = buildDuplicateSlotKey(row.modelName, row.benchmarkName, row.benchmarkType);
       const candidates = existingValuesBySlot.get(slotKey);
       if (candidates && candidates.length > 0) {
         for (const existing of candidates) {

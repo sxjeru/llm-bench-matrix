@@ -27,6 +27,8 @@ import {
   buildDuplicateSlotKey,
   composePairRawValue,
   composeStarRawValue,
+  isSameImportSource,
+  normalizeNameParenthesisSpacing,
   parsePairRawValue,
   parseSingleRawValue,
   parseStarSingleRawValue
@@ -901,14 +903,24 @@ export function useImportPreviewState({
         const target = benchmarkById.get(mergeTargetId);
         if (target) {
           benchmarkName = target.benchmarkName;
+          benchmarkType = target.benchmarkType;
         }
       }
 
-      const currentSlotKey = buildDuplicateSlotKey(modelName, benchmarkName);
+      const currentSlotKey = buildDuplicateSlotKey(modelName, benchmarkName, benchmarkType);
+      const legacySlotKey = `${normalizeNameParenthesisSpacing(modelName).trim().toLowerCase()}::${normalizeNameParenthesisSpacing(benchmarkName).trim().toLowerCase()}`;
+      const isSlotMatched = !row.duplicateSlotKey
+        || currentSlotKey === row.duplicateSlotKey
+        || (row.duplicateSlotKey.split("::").length === 2 && row.duplicateSlotKey === legacySlotKey);
+
+      const targetSource = latestSourceInput.length > 0 ? latestSourceInput : (row.source?.trim() || null);
+      const isSourceMatched = isSameImportSource(row.source, targetSource);
+
       if (
         row.isDuplicate &&
+        isSourceMatched &&
         rawValueInput === (row.originalRawValue ?? row.rawValue).trim() &&
-        (!row.duplicateSlotKey || currentSlotKey === row.duplicateSlotKey)
+        isSlotMatched
       ) {
         skippedIndices.add(rowIndex);
         return;
@@ -932,7 +944,7 @@ export function useImportPreviewState({
         modalities: normalizedModalities,
         rawValue,
         valueNote,
-        source: latestSourceInput.length > 0 ? latestSourceInput : (row.source?.trim() || null)
+        source: targetSource
       });
     });
 

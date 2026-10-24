@@ -49,6 +49,7 @@ import {
 import { buildStructuredCsvText } from "./admin-console/utils/csv";
 import {
   composePairRawValue,
+  isSameImportSource,
   parseSingleRawValue,
   parsePairRawValue,
   parseStarSingleRawValue
@@ -80,6 +81,7 @@ import {
 import { extractTextImportWarningDetails } from "./admin-console/utils/warnings";
 import {
   ClearDatabaseConfirmDialog,
+  ConfirmImportSourceChangedDialog,
   ConfirmImportWithoutPreviewDialog,
   ConfirmImportWithoutSourceDialog,
   DeleteSourceConfirmDialog,
@@ -189,8 +191,10 @@ export function AdminConsole({
   const [csvHtmlText, setCsvHtmlText] = useState("");
   const [hasParsedHtmlTable, setHasParsedHtmlTable] = useState(false);
   const [csvSource, setCsvSource] = useState("");
+  const [textImportPreviewSource, setTextImportPreviewSource] = useState<string | null>(null);
   const [confirmImportWithoutPreviewOpen, setConfirmImportWithoutPreviewOpen] = useState(false);
   const [confirmImportWithoutSourceOpen, setConfirmImportWithoutSourceOpen] = useState(false);
+  const [confirmImportSourceChangedOpen, setConfirmImportSourceChangedOpen] = useState(false);
   const [clearDatabaseConfirmOpen, setClearDatabaseConfirmOpen] = useState(false);
   const [isClearingDatabase, setIsClearingDatabase] = useState(false);
   const [isPreviewingTextImport, setIsPreviewingTextImport] = useState(false);
@@ -223,6 +227,13 @@ export function AdminConsole({
     duplicateCount?: number;
   } | null>(null);
   const [textImportPreviewVisibleCount, setTextImportPreviewVisibleCount] = useState(200);
+
+  const isImportSourceChangedAfterPreview = useMemo(() => {
+    if (!textImportPreviewMeta || textImportPreviewSource === null) {
+      return false;
+    }
+    return !isSameImportSource(csvSource, textImportPreviewSource);
+  }, [textImportPreviewMeta, textImportPreviewSource, csvSource]);
 
   const [workbookFile, setWorkbookFile] = useState<File | null>(null);
   const [sheetNames, setSheetNames] = useState<string[]>([]);
@@ -1712,6 +1723,7 @@ export function AdminConsole({
         skipped: result.skipped ?? 0,
         duplicateCount: result.duplicateCount ?? 0
       });
+      setTextImportPreviewSource(csvSource.trim());
       setTextImportPreviewVisibleCount(200);
 
       const directionWarningCount = Number(result.warningCount ?? 0);
@@ -1879,6 +1891,11 @@ export function AdminConsole({
       return;
     }
 
+    if (isImportSourceChangedAfterPreview) {
+      setConfirmImportSourceChangedOpen(true);
+      return;
+    }
+
     await executeImportCsv();
   }
 
@@ -1890,6 +1907,16 @@ export function AdminConsole({
   async function onConfirmImportWithoutPreview() {
     setConfirmImportWithoutPreviewOpen(false);
     await executeImportCsv();
+  }
+
+  async function onConfirmImportSourceChanged() {
+    setConfirmImportSourceChangedOpen(false);
+    await executeImportCsv();
+  }
+
+  async function onRePreviewFromSourceChanged() {
+    setConfirmImportSourceChangedOpen(false);
+    await onPreviewCsvImport();
   }
 
   function duplicateConfidenceBadgeClass(confidence: DuplicateConfidence): string {
@@ -3146,6 +3173,16 @@ export function AdminConsole({
         onConfirm={onConfirmImportWithoutSource}
       />
 
+      <ConfirmImportSourceChangedDialog
+        open={confirmImportSourceChangedOpen}
+        isImportingTextCsv={isImportingTextCsv}
+        previewSource={textImportPreviewSource}
+        currentSource={csvSource}
+        onClose={() => setConfirmImportSourceChangedOpen(false)}
+        onConfirm={onConfirmImportSourceChanged}
+        onRePreview={onRePreviewFromSourceChanged}
+      />
+
       <ClearDatabaseConfirmDialog
         open={clearDatabaseConfirmOpen}
         isClearingDatabase={isClearingDatabase}
@@ -3210,6 +3247,8 @@ export function AdminConsole({
             textImportProgress={textImportProgress}
             textImportStatusText={textImportStatusText}
             textImportPreviewMeta={textImportPreviewMeta}
+            textImportPreviewSource={textImportPreviewSource}
+            isImportSourceChangedAfterPreview={isImportSourceChangedAfterPreview}
             textImportDraftRows={textImportDraftRows}
             finalizedTextImportRows={finalizedTextImportRows}
             skippedDuplicateRowIndices={skippedDuplicateRowIndices}

@@ -968,5 +968,52 @@ describe("useImportPreviewState Hook - duplicate row filtering and slot key inva
     expect(result.current.finalizedTextImportRows[0].benchmarkName).toBe("MMLU Redux");
     expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(false);
   });
+
+  test("当通过 matrixBenchmarkTypeDrafts 改写 benchmark 类别时，槽位变化不再跳过（解除重复锁定）", () => {
+    const benchmarkKey = "MMLU@@General";
+    const rowWithSlotKey: TextImportPreviewRow = {
+      ...baseDuplicateRow,
+      duplicateSlotKey: "model a::mmlu::general"
+    };
+    const options = createMockOptions({
+      textImportDraftRows: [rowWithSlotKey],
+      matrixBenchmarkTypeDrafts: {
+        [benchmarkKey]: "5-shot"
+      }
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    expect(result.current.finalizedTextImportRows).toHaveLength(1);
+    expect(result.current.finalizedTextImportRows[0].benchmarkType).toBe("5-shot");
+    expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(false);
+  });
+
+  test("当预览后修改了 csvSource 且与 row.source 不一致时，旧来源的重复标记失效，正常进入提交列表", () => {
+    const options = createMockOptions({
+      textImportDraftRows: [baseDuplicateRow],
+      csvSource: "arXiv:2026.9999"
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    expect(result.current.finalizedTextImportRows).toHaveLength(1);
+    expect(result.current.finalizedTextImportRows[0].source).toBe("arXiv:2026.9999");
+    expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(false);
+  });
+
+  test("当 csvSource 与 row.source 来源相同时（包括 text: 前缀格式归一化），正常识别重复并跳过", () => {
+    const rowWithTextPrefix: TextImportPreviewRow = {
+      ...baseDuplicateRow,
+      source: "text:arXiv:2026.0001"
+    };
+
+    const options = createMockOptions({
+      textImportDraftRows: [rowWithTextPrefix],
+      csvSource: "arXiv:2026.0001"
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    expect(result.current.finalizedTextImportRows).toHaveLength(0);
+    expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(true);
+  });
 });
 
