@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, test, vi } from "vitest";
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 
 process.env.DATABASE_URL ??= "postgres://test:test@127.0.0.1:5432/test";
@@ -172,7 +172,8 @@ describe("import-batch-service", () => {
         deleted: 2,
         prunedSourceMeta: 1,
         batchTime: "2026-10-23T15:10:25.000Z",
-        source: "text:test"
+        source: "text:test",
+        cacheInvalidated: true
       });
     });
 
@@ -200,15 +201,54 @@ describe("import-batch-service", () => {
         deleted: 0,
         prunedSourceMeta: 0,
         batchTime: "2026-10-23T15:10:25.000Z",
-        source: "text:test"
+        source: "text:test",
+        cacheInvalidated: true
       });
+    });
+
+    test("当事务已提交但缓存失效或版本写入失败时，不应抛出异常，仍返回删除成功并附带 warning 与 cacheInvalidated=false", async () => {
+      const { invalidateAllCaches } = await import("@/lib/db/queries");
+      vi.mocked(invalidateAllCaches).mockRejectedValueOnce(new Error("Redis connection timed out"));
+
+      const mockReturningValues = vi.fn().mockResolvedValue([{ id: 101 }]);
+      const mockDeleteWhere = vi.fn(() => ({ returning: mockReturningValues }));
+      const mockSelectWhere = vi.fn();
+      mockSelectWhere.mockResolvedValueOnce([{ id: 101, benchmarkId: 1, source: "text:test" }]);
+      mockSelectWhere.mockResolvedValueOnce([{ count: 1 }]);
+
+      const mockTx = {
+        select: vi.fn(() => ({
+          from: vi.fn(() => ({
+            where: mockSelectWhere
+          }))
+        })),
+        delete: vi.fn(() => ({
+          where: mockDeleteWhere
+        }))
+      };
+
+      const mockDb = {
+        transaction: vi.fn(async (cb) => cb(mockTx))
+      };
+
+      const result = await deleteImportBatch({
+        batchTime: "2026-10-23T15:10:25.000Z",
+        source: "text:test",
+        executor: mockDb as unknown as DbClient
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.deleted).toBe(1);
+      expect(result.cacheInvalidated).toBe(false);
+      expect(result.warning).toContain("缓存刷新失败");
+      expect(result.warning).toContain("Redis connection timed out");
     });
   });
 
   describe("listImportBatches", () => {
     test("使用 nullif(trim(source), '') 归一化未标注来源，确保同一批次的 NULL 与空字符串记录聚合为单一批次", async () => {
-      let capturedGroupBy: unknown[] = [];
-      let capturedSelect: unknown = null;
+      let capturedGroupBy: SQL[] = [];
+      let capturedSelect: Record<string, SQL> | null = null;
 
       const mockLimit = vi.fn().mockResolvedValue([
         {
@@ -225,12 +265,12 @@ describe("import-batch-service", () => {
       ]);
 
       const mockOrderBy = vi.fn(() => ({ limit: mockLimit }));
-      const mockGroupBy = vi.fn((...args: unknown[]) => {
+      const mockGroupBy = vi.fn((...args: SQL[]) => {
         capturedGroupBy = args;
         return { orderBy: mockOrderBy };
       });
       const mockFrom = vi.fn(() => ({ groupBy: mockGroupBy }));
-      const mockSelect = vi.fn((fields: unknown) => {
+      const mockSelect = vi.fn((fields: Record<string, SQL>) => {
         capturedSelect = fields;
         return { from: mockFrom };
       });
@@ -254,10 +294,16 @@ describe("import-batch-service", () => {
 
       // 验证 groupBy 与 select 中包含对 source 的 nullif(trim(...), '') 归一化表达式
       expect(capturedGroupBy).toHaveLength(2);
-      const groupByCompiled = dialect.sqlToQuery(sql`${capturedGroupBy[1] as any}`);
+      const groupByCompiled = dialect.sqlToQuery(capturedGroupBy[1]);
       expect(groupByCompiled.sql.toLowerCase()).toContain("nullif");
       expect(groupByCompiled.sql.toLowerCase()).toContain("trim");
       expect(groupByCompiled.sql).toContain('"benchmark_values"."source"');
+
+      expect(capturedSelect).not.toBeNull();
+      const selectSourceCompiled = dialect.sqlToQuery(capturedSelect!.source);
+      expect(selectSourceCompiled.sql.toLowerCase()).toContain("nullif");
+      expect(selectSourceCompiled.sql.toLowerCase()).toContain("trim");
+      expect(selectSourceCompiled.sql).toContain('"benchmark_values"."source"');
 
       // 验证此批次对应的 buildBatchWhereClause 与汇总生成的 source: null 严格一致，且覆盖 NULL 与空字符串
       const whereClause = buildBatchWhereClause(summaries[0].batchTime, summaries[0].source);
@@ -269,6 +315,13 @@ describe("import-batch-service", () => {
   });
 
   describe("previewImportBatch", () => {
+    interface MockQueryBuilder {
+      innerJoin: ReturnType<typeof vi.fn>;
+      where: ReturnType<typeof vi.fn>;
+      orderBy: ReturnType<typeof vi.fn>;
+      limit: ReturnType<typeof vi.fn>;
+    }
+
     test("按数据库 ID 统计并区分同名模型与基准实体，避免低估计数与漏显实体", async () => {
       const mockRows = [
         {
@@ -333,8 +386,8 @@ describe("import-batch-service", () => {
         }
       ];
 
-      const createQueryBuilder = () => {
-        const qb: any = {
+      const createQueryBuilder = (): MockQueryBuilder => {
+        const qb: MockQueryBuilder = {
           innerJoin: vi.fn(() => qb),
           where: vi.fn(() => qb),
           orderBy: vi.fn().mockResolvedValue(mockRows),
@@ -418,8 +471,8 @@ describe("import-batch-service", () => {
         }
       ];
 
-      const createQueryBuilder = () => {
-        const qb: any = {
+      const createQueryBuilder = (): MockQueryBuilder => {
+        const qb: MockQueryBuilder = {
           innerJoin: vi.fn(() => qb),
           where: vi.fn(() => qb),
           orderBy: vi.fn().mockResolvedValue(mockRows),

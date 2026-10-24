@@ -53,6 +53,8 @@ export type DeleteImportBatchResult = {
   prunedSourceMeta: number;
   batchTime: string;
   source: string | null;
+  cacheInvalidated: boolean;
+  warning?: string;
 };
 
 export type DbClient = typeof db;
@@ -479,14 +481,29 @@ export async function deleteImportBatch(input: {
   });
 
   // 4. 级联刷新所有缓存
-  await invalidateAllCaches();
+  // 事务已成功提交，删除记录已持久化。缓存失效失败不应导致删除操作被误报为失败。
+  let cacheInvalidated = true;
+  let warning: string | undefined;
+
+  if (result.deleted > 0 || result.prunedSourceMeta > 0) {
+    try {
+      await invalidateAllCaches();
+    } catch (cacheError) {
+      cacheInvalidated = false;
+      const errorMsg = cacheError instanceof Error ? cacheError.message : String(cacheError);
+      warning = `批次数据已成功删除，但缓存刷新失败: ${errorMsg}`;
+      console.error("[deleteImportBatch] 批次数据删除成功，但缓存失效失败:", cacheError);
+    }
+  }
 
   return {
     ok: true,
     deleted: result.deleted,
     prunedSourceMeta: result.prunedSourceMeta,
     batchTime: isoString,
-    source: input.matchAllSources ? null : (input.source ?? null)
+    source: input.matchAllSources ? null : (input.source ?? null),
+    cacheInvalidated,
+    ...(warning ? { warning } : {})
   };
 }
 

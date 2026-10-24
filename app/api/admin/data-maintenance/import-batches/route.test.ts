@@ -143,7 +143,8 @@ describe("import-batches routes", () => {
         deleted: 42,
         prunedSourceMeta: 2,
         batchTime: "2026-10-23T15:10:25.000Z",
-        source: "text:test"
+        source: "text:test",
+        cacheInvalidated: true
       });
 
       const response = await POST(new Request("https://example.com/api/admin/data-maintenance/import-batches", {
@@ -163,6 +164,50 @@ describe("import-batches routes", () => {
       const data = await response.json();
       expect(data.deleted).toBe(42);
       expect(data.prunedSourceMeta).toBe(2);
+      expect(data.cacheInvalidated).toBe(true);
+    });
+
+    test("删除批次成功但缓存失效失败时，返回 200 且包含 warning 与 cacheInvalidated=false，而不是 500 错误", async () => {
+      vi.mocked(deleteImportBatch).mockResolvedValue({
+        ok: true,
+        deleted: 15,
+        prunedSourceMeta: 1,
+        batchTime: "2026-10-23T15:10:25.000Z",
+        source: "text:test",
+        cacheInvalidated: false,
+        warning: "批次数据已成功删除，但缓存刷新失败: Redis connection error"
+      });
+
+      const response = await POST(new Request("https://example.com/api/admin/data-maintenance/import-batches", {
+        method: "POST",
+        body: JSON.stringify({
+          batchTime: "2026-10-23T15:10:25.000Z",
+          source: "text:test"
+        })
+      }));
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.ok).toBe(true);
+      expect(data.deleted).toBe(15);
+      expect(data.cacheInvalidated).toBe(false);
+      expect(data.warning).toContain("缓存刷新失败");
+    });
+
+    test("底层删除失败（事务未提交）时，返回 500 错误", async () => {
+      vi.mocked(deleteImportBatch).mockRejectedValue(new Error("数据库连接超时"));
+
+      const response = await POST(new Request("https://example.com/api/admin/data-maintenance/import-batches", {
+        method: "POST",
+        body: JSON.stringify({
+          batchTime: "2026-10-23T15:10:25.000Z",
+          source: "text:test"
+        })
+      }));
+
+      expect(response.status).toBe(500);
+      const data = await response.json();
+      expect(data.error).toBe("数据库连接超时");
     });
   });
 });

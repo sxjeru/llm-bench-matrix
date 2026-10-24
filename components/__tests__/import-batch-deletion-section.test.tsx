@@ -172,5 +172,106 @@ describe("ImportBatchDeletionSection", () => {
 
     expect(parsedUrl.searchParams.get("source")).toBe("text:report");
   });
+
+  test("如果在预览请求完成前切换选中批次，旧批次的响应不会覆盖或保存为预览结果", async () => {
+    const user = userEvent.setup();
+
+    const mockBatches = [
+      {
+        batchKey: "batch-1",
+        batchTime: "2026-10-24T10:00:00.000Z",
+        displayTime: "2026-10-24 10:00:00",
+        source: "src-1",
+        sourceLabel: "来源1",
+        recordCount: 10,
+        modelCount: 1,
+        benchmarkCount: 1,
+        minBenchTime: null,
+        maxBenchTime: null,
+        minCreatedAt: "2026-10-24T10:00:00.000Z",
+        maxCreatedAt: "2026-10-24T10:00:00.000Z"
+      },
+      {
+        batchKey: "batch-2",
+        batchTime: "2026-10-24T11:00:00.000Z",
+        displayTime: "2026-10-24 11:00:00",
+        source: "src-2",
+        sourceLabel: "来源2",
+        recordCount: 20,
+        modelCount: 2,
+        benchmarkCount: 2,
+        minBenchTime: null,
+        maxBenchTime: null,
+        minCreatedAt: "2026-10-24T11:00:00.000Z",
+        maxCreatedAt: "2026-10-24T11:00:00.000Z"
+      }
+    ];
+
+    let resolveBatch1Preview!: (value: any) => void;
+    const batch1PreviewPromise = new Promise((resolve) => {
+      resolveBatch1Preview = resolve;
+    });
+
+    vi.spyOn(api, "getJson").mockImplementation(async (url: string) => {
+      if (url.includes("/api/admin/data-maintenance/import-batches?")) {
+        return { ok: true, batches: mockBatches };
+      }
+      if (url.includes("/api/admin/data-maintenance/import-batches/preview?")) {
+        if (url.includes("batchTime=2026-10-24T10%3A00%3A00.000Z")) {
+          return batch1PreviewPromise;
+        }
+      }
+      return {};
+    });
+
+    render(
+      <ImportBatchDeletionSection
+        notifySuccess={notifySuccess}
+        notifyError={notifyError}
+        onRefreshCaches={onRefreshCaches}
+      />
+    );
+
+    // 等待批次列表加载完成
+    expect(await screen.findByText(/来源1/)).toBeInTheDocument();
+
+    // 点击批次 1 的预览
+    const previewBtn = screen.getByRole("button", { name: /预览待删除数据/ });
+    await user.click(previewBtn);
+
+    // 此时预览正在加载中
+    expect(screen.getByRole("button", { name: /解析预览中\.\.\./ })).toBeInTheDocument();
+
+    // 管理员切换到了批次 2
+    const select = screen.getByRole("combobox");
+    await user.selectOptions(select, "batch-2");
+
+    // 切换后，加载状态应已被重置
+    expect(screen.getByRole("button", { name: /预览待删除数据/ })).toBeInTheDocument();
+
+    // 批次 1 的旧预览响应返回
+    resolveBatch1Preview({
+      ok: true,
+      preview: {
+        batchKey: "batch-1",
+        batchTime: "2026-10-24T10:00:00.000Z",
+        displayTime: "2026-10-24 10:00:00",
+        source: "src-1",
+        sourceLabel: "来源1",
+        totalRecords: 10,
+        modelCount: 1,
+        benchmarkCount: 1,
+        models: ["Model 1"],
+        benchmarks: ["Bench 1"],
+        orphanSourceMetaCount: 0,
+        sampleRecords: []
+      }
+    });
+
+    // 等待所有微任务执行完毕，确认页面上绝不会展示旧批次 1 的预览卡片
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText("待删除批次数据概览")).not.toBeInTheDocument();
+    expect(screen.queryByText(/共 10 条记录/)).not.toBeInTheDocument();
+  });
 });
 

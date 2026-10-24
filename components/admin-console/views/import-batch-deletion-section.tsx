@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   History,
   Eye,
@@ -33,6 +33,22 @@ export function ImportBatchDeletionSection({
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  const previewAbortControllerRef = useRef<AbortController | null>(null);
+  const selectedBatchKeyRef = useRef(selectedBatchKey);
+
+  useEffect(() => {
+    selectedBatchKeyRef.current = selectedBatchKey;
+  }, [selectedBatchKey]);
+
+  useEffect(() => {
+    return () => {
+      if (previewAbortControllerRef.current) {
+        previewAbortControllerRef.current.abort();
+        previewAbortControllerRef.current = null;
+      }
+    };
+  }, []);
+
   async function loadBatches(autoSelectFirst = false) {
     setIsLoadingBatches(true);
     try {
@@ -42,9 +58,20 @@ export function ImportBatchDeletionSection({
 
       if (list.length > 0) {
         if (autoSelectFirst || !selectedBatchKey || !list.some((b) => b.batchKey === selectedBatchKey)) {
+          if (previewAbortControllerRef.current) {
+            previewAbortControllerRef.current.abort();
+            previewAbortControllerRef.current = null;
+          }
+          setIsLoadingPreview(false);
           setSelectedBatchKey(list[0].batchKey);
+          setPreview(null);
         }
       } else {
+        if (previewAbortControllerRef.current) {
+          previewAbortControllerRef.current.abort();
+          previewAbortControllerRef.current = null;
+        }
+        setIsLoadingPreview(false);
         setSelectedBatchKey("");
         setPreview(null);
       }
@@ -92,6 +119,13 @@ export function ImportBatchDeletionSection({
   async function onLoadPreview() {
     if (!selectedBatch) return;
 
+    if (previewAbortControllerRef.current) {
+      previewAbortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    previewAbortControllerRef.current = abortController;
+
+    const targetBatchKey = selectedBatch.batchKey;
     setIsLoadingPreview(true);
     try {
       const params = new URLSearchParams({
@@ -101,32 +135,55 @@ export function ImportBatchDeletionSection({
         source: selectedBatch.source ?? ""
       });
 
-      const res = await getJson(`/api/admin/data-maintenance/import-batches/preview?${params.toString()}`);
-      if (res?.preview) {
-        setPreview(res.preview);
+      const res = await getJson(
+        `/api/admin/data-maintenance/import-batches/preview?${params.toString()}`,
+        { signal: abortController.signal }
+      );
+
+      // 只有当该请求未被中止，且当前选中的批次仍然与发起请求时的批次完全一致时才保存预览结果
+      if (!abortController.signal.aborted && selectedBatchKeyRef.current === targetBatchKey) {
+        if (res?.preview) {
+          setPreview(res.preview);
+        }
       }
     } catch (error) {
-      notifyError(error instanceof Error ? error.message : "获取批次预览失败");
+      if (abortController.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
+        return;
+      }
+      if (selectedBatchKeyRef.current === targetBatchKey) {
+        notifyError(error instanceof Error ? error.message : "获取批次预览失败");
+      }
     } finally {
-      setIsLoadingPreview(false);
+      if (previewAbortControllerRef.current === abortController) {
+        setIsLoadingPreview(false);
+        previewAbortControllerRef.current = null;
+      }
     }
   }
 
   async function onExecuteDelete() {
     if (!selectedBatch || isDeleting) return;
 
+    const targetBatch = selectedBatch;
+
+    if (previewAbortControllerRef.current) {
+      previewAbortControllerRef.current.abort();
+      previewAbortControllerRef.current = null;
+    }
+    setIsLoadingPreview(false);
+
     setIsDeleting(true);
     try {
       const res = await postJson("/api/admin/data-maintenance/import-batches", {
-        batchTime: selectedBatch.batchTime,
-        source: selectedBatch.source
+        batchTime: targetBatch.batchTime,
+        source: targetBatch.source
       });
 
-      const deletedCount = res?.deleted ?? selectedBatch.recordCount;
+      const deletedCount = res?.deleted ?? targetBatch.recordCount;
       const prunedMetaCount = res?.prunedSourceMeta ?? 0;
 
       notifySuccess(
-        `成功删除 [${selectedBatch.displayTime}] 导入批次共 ${deletedCount} 条数据！${
+        `成功删除 [${targetBatch.displayTime}] 导入批次共 ${deletedCount} 条数据！${
           prunedMetaCount > 0 ? `（级联清理孤儿 source 元数据 ${prunedMetaCount} 项）` : ""
         }`
       );
@@ -181,10 +238,16 @@ export function ImportBatchDeletionSection({
               className="select select-bordered w-full font-mono text-sm text-base-content bg-base-100"
               value={selectedBatchKey}
               onChange={(e) => {
-                setSelectedBatchKey(e.target.value);
+                const nextKey = e.target.value;
+                if (previewAbortControllerRef.current) {
+                  previewAbortControllerRef.current.abort();
+                  previewAbortControllerRef.current = null;
+                }
+                setIsLoadingPreview(false);
+                setSelectedBatchKey(nextKey);
                 setPreview(null);
               }}
-              disabled={isLoadingBatches || batches.length === 0}
+              disabled={isLoadingBatches || batches.length === 0 || isDeleting || isConfirmModalOpen}
             >
               {batches.length === 0 ? (
                 <option value="">{isLoadingBatches ? "加载批次中..." : "暂无导入记录"}</option>
@@ -202,7 +265,7 @@ export function ImportBatchDeletionSection({
             type="button"
             className="btn btn-outline text-base-content"
             onClick={() => loadBatches(false)}
-            disabled={isLoadingBatches}
+            disabled={isLoadingBatches || isDeleting || isConfirmModalOpen}
             title="刷新导入批次列表"
           >
             <RefreshCw className={`h-4 w-4 ${isLoadingBatches ? "animate-spin" : ""}`} />
@@ -214,7 +277,7 @@ export function ImportBatchDeletionSection({
               type="button"
               className="btn btn-outline btn-info gap-1.5"
               onClick={onLoadPreview}
-              disabled={!selectedBatch || isLoadingPreview}
+              disabled={!selectedBatch || isLoadingPreview || isDeleting || isConfirmModalOpen}
             >
               <Eye className="h-4 w-4" />
               {isLoadingPreview ? "解析预览中..." : "预览待删除数据"}
@@ -224,7 +287,7 @@ export function ImportBatchDeletionSection({
               type="button"
               className="btn btn-outline btn-error gap-1.5"
               onClick={() => setIsConfirmModalOpen(true)}
-              disabled={!selectedBatch || isDeleting}
+              disabled={!selectedBatch || isDeleting || isConfirmModalOpen}
             >
               <Trash2 className="h-4 w-4" />
               删除此批次
@@ -233,7 +296,7 @@ export function ImportBatchDeletionSection({
         </div>
 
         {/* 预览数据展示面板 */}
-        {preview ? (
+        {preview && preview.batchKey === selectedBatchKey ? (
           <div className="mt-4 rounded-xl border border-warning/60 bg-base-100 p-4 shadow-sm space-y-4">
             {/* 顶栏信息与高对比度徽章 */}
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-base-300 pb-3">
