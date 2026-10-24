@@ -627,6 +627,63 @@ function isEmptyImportValue(rawInput: string | undefined): boolean {
   return isImportValueEmptyMarker(normalized) || isEmptyImportPairValue(normalized);
 }
 
+const PAIRED_DELIMITER_OPEN_CHARS = new Set(["(", "（", "[", "【", "{", "｛"]);
+const PAIRED_DELIMITER_CLOSE_CHARS = new Set([")", "）", "]", "】", "}", "｝"]);
+
+function getPairedDelimiterDepthDelta(input: string): number {
+  let delta = 0;
+
+  for (const char of input) {
+    if (PAIRED_DELIMITER_OPEN_CHARS.has(char)) {
+      delta += 1;
+    } else if (PAIRED_DELIMITER_CLOSE_CHARS.has(char)) {
+      delta -= 1;
+    }
+  }
+
+  return delta;
+}
+
+/**
+ * 逗号分隔的矩阵行里，括号内的逗号（如 `Claude Fable 5.1 (max, with fallback)`）属于单元格内容而非分隔符。
+ * csv-parse 只处理引号，这里按括号配对把被切开的片段合回同一个单元格。
+ * 括号未闭合时保持原样，避免把后续数值列吞进标签单元格。
+ */
+function mergeCommaCellsInsidePairedDelimiters(cells: string[]): string[] {
+  const merged: string[] = [];
+  let pendingCells: string[] | null = null;
+  let pendingDepth = 0;
+
+  for (const cell of cells) {
+    if (!pendingCells) {
+      const depthDelta = getPairedDelimiterDepthDelta(cell);
+      if (depthDelta > 0) {
+        pendingCells = [cell];
+        pendingDepth = depthDelta;
+        continue;
+      }
+
+      merged.push(cell);
+      continue;
+    }
+
+    pendingCells.push(cell);
+    pendingDepth += getPairedDelimiterDepthDelta(cell);
+
+    if (pendingDepth <= 0) {
+      merged.push(pendingCells.join(", "));
+      pendingCells = null;
+      pendingDepth = 0;
+    }
+  }
+
+  if (pendingCells) {
+    return cells;
+  }
+
+  return merged;
+}
+
 function splitCommaSeparatedLine(line: string): string[] | null {
   if (!line.includes(",")) {
     return null;
@@ -644,7 +701,7 @@ function splitCommaSeparatedLine(line: string): string[] | null {
       return null;
     }
 
-    return firstRow.map((item) => item.trim());
+    return mergeCommaCellsInsidePairedDelimiters(firstRow.map((item) => item.trim()));
   } catch {
     return null;
   }

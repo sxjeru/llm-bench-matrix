@@ -930,6 +930,42 @@ describe("paper-table 文本解析", () => {
     expect(valueByModel.get("M11")).toBe("63.2*");
   });
 
+  test("逗号分隔表头不会在模型名的括号内断开", async () => {
+    const inputText = [
+      "Category,Benchmark,Kimi K3.1 Pro,"
+        + "Claude Fable 5.1 (max, with fallback),"
+        + "GPT-6 Astra (max, with fallback),"
+        + "Claude Opus 5.5 (max, with fallback),"
+        + "DeepSeek-V4.1-Flash-1017 (max),"
+        + "GLM-5.3 (max)",
+      "Agentic,DECK-Arena (Internal, Elo-score),1456,—,1423,1253,1231,1119"
+    ].join("\n");
+
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+
+    expect(parsed.format).toBe("matrix-table");
+    expect(parsed.modelColumns).toEqual([
+      "Kimi K3.1 Pro",
+      "Claude Fable 5.1 (max, with fallback)",
+      "GPT-6 Astra (max, with fallback)",
+      "Claude Opus 5.5 (max, with fallback)",
+      "DeepSeek-V4.1-Flash-1017 (max)",
+      "GLM-5.3 (max)"
+    ]);
+    expect(new Set(parsed.rows.map((row) => row.benchmarkName))).toEqual(
+      new Set(["DECK-Arena (Internal, Elo-score)"])
+    );
+    expect(new Set(parsed.rows.map((row) => row.benchmarkType))).toEqual(new Set(["Agentic"]));
+
+    const valueByModel = new Map(parsed.rows.map((row) => [row.modelName, row.valueRaw]));
+    expect(valueByModel.get("Kimi K3.1 Pro")).toBe("1456");
+    expect(valueByModel.has("Claude Fable 5.1 (max, with fallback)")).toBe(false);
+    expect(valueByModel.get("GPT-6 Astra (max, with fallback)")).toBe("1423");
+    expect(valueByModel.get("Claude Opus 5.5 (max, with fallback)")).toBe("1253");
+    expect(valueByModel.get("DeepSeek-V4.1-Flash-1017 (max)")).toBe("1231");
+    expect(valueByModel.get("GLM-5.3 (max)")).toBe("1119");
+  });
+
   test("benchmark 列名不含关键词时，未加引号的逗号同样不会截断 benchmark 名", async () => {
     const inputText = [
       "Category,Name,Model A,Model B,Model C,Model D,Model E,Model F",
