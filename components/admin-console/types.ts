@@ -77,11 +77,15 @@ export type TextImportPreviewRow = {
   higherIsBetter?: boolean;
   modalities?: string[];
   rawValue: string;
+  originalRawValue?: string;
   valueNum: number | null;
   valueNum2: number | null;
   valueNote: string | null;
   source: string | null;
   valid: boolean;
+  isDuplicate?: boolean;
+  duplicateReason?: string;
+  duplicateSlotKey?: string;
 };
 
 export type Props = {

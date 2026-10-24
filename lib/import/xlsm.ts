@@ -1,5 +1,6 @@
 import { parseBenchmarkValue } from "@/lib/db/parse-value";
 import { isEmptyImportPairValue } from "@/lib/import/pair-value";
+import { normalizeNameParenthesisSpacing } from "@/lib/import/slot-key";
 import {
   IMPORT_VALUE_PAIR_REGEX,
   IMPORT_VALUE_RANK_PREFIX_REGEX,
@@ -50,16 +51,6 @@ function normalizeCell(value: unknown): string {
 
 function normalizeHeader(value: string): string {
   return value.trim().toLowerCase();
-}
-
-function normalizeNameParenthesisSpacing(rawName: string): string {
-  const trimmed = rawName.trim();
-  if (!trimmed) return "";
-
-  return trimmed
-    .replace(HYPHEN_VARIANT_REGEX, "-")
-    .replace(/([^\s（(])([（(])/g, "$1 $2")
-    .replace(/\s+([（(])/g, " $1");
 }
 
 function mergeValueNotes(primary: string | null | undefined, secondary: string | null | undefined): string | null {

@@ -847,3 +847,198 @@ describe("useImportPreviewState Hook - matrixPreview column order", () => {
   });
 });
 
+describe("useImportPreviewState Hook - duplicate row filtering and slot key invalidation", () => {
+  const baseDuplicateRow: TextImportPreviewRow = {
+    rowNumber: 1,
+    providerName: "OpenAI",
+    modelName: "Model A",
+    benchmarkName: "MMLU",
+    benchmarkType: "General",
+    rawValue: "85.5",
+    originalRawValue: "85.5",
+    valueNum: 85.5,
+    valueNum2: null,
+    valueNote: null,
+    source: "arXiv:2026.0001",
+    valid: true,
+    isDuplicate: true,
+    duplicateReason: "与现有记录重复：Model A 在 MMLU 下的分数已存在相同值 (85.5)",
+    duplicateSlotKey: "model a::mmlu"
+  };
+
+  test("当未修改数值且槽位匹配 duplicateSlotKey 时，finalizedTextImportRows 跳过该行且记录到 skippedDuplicateRowIndices", () => {
+    const options = createMockOptions({
+      textImportDraftRows: [baseDuplicateRow]
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    expect(result.current.finalizedTextImportRows).toEqual([]);
+    expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(true);
+  });
+
+  test("当修改了数值时，即使是重复标记行也不再跳过，正常进入提交列表", () => {
+    const editedRow: TextImportPreviewRow = {
+      ...baseDuplicateRow,
+      rawValue: "89.0"
+    };
+
+    const options = createMockOptions({
+      textImportDraftRows: [editedRow]
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    expect(result.current.finalizedTextImportRows).toHaveLength(1);
+    expect(result.current.finalizedTextImportRows[0].rawValue).toBe("89.0");
+    expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(false);
+  });
+
+  test("当通过 modelMergeTargets 将模型合并为另一模型时，槽位变化不再跳过，导入目标模型", () => {
+    const targetModel: ModelOption = {
+      id: 201,
+      providerId: 1,
+      modelName: "Model B",
+      canonicalKey: "model b"
+    };
+
+    const options = createMockOptions({
+      textImportDraftRows: [baseDuplicateRow],
+      modelMergeTargets: {
+        "Model A": "201"
+      },
+      modelById: new Map([[201, targetModel]])
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    expect(result.current.finalizedTextImportRows).toHaveLength(1);
+    expect(result.current.finalizedTextImportRows[0].modelName).toBe("Model B");
+    expect(result.current.finalizedTextImportRows[0].benchmarkName).toBe("MMLU");
+    expect(result.current.finalizedTextImportRows[0].rawValue).toBe("85.5");
+    expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(false);
+  });
+
+  test("当通过 matrixModelNameDrafts 改写模型名时，槽位变化不再跳过", () => {
+    const options = createMockOptions({
+      textImportDraftRows: [baseDuplicateRow],
+      matrixModelNameDrafts: {
+        "Model A": "Model C"
+      }
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    expect(result.current.finalizedTextImportRows).toHaveLength(1);
+    expect(result.current.finalizedTextImportRows[0].modelName).toBe("Model C");
+    expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(false);
+  });
+
+  test("当通过 benchmarkMergeTargets 合并 benchmark 时，槽位变化不再跳过，导入目标 benchmark", () => {
+    const targetBenchmark: BenchmarkOption = {
+      id: 301,
+      benchmarkName: "MMLU-Pro",
+      benchmarkType: "General",
+      modalities: ["Text"]
+    };
+
+    const benchmarkKey = "MMLU@@General";
+    const options = createMockOptions({
+      textImportDraftRows: [baseDuplicateRow],
+      benchmarkMergeTargets: {
+        [benchmarkKey]: "301"
+      },
+      benchmarkById: new Map([[301, targetBenchmark]]),
+      benchmarks: [targetBenchmark]
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    expect(result.current.finalizedTextImportRows).toHaveLength(1);
+    expect(result.current.finalizedTextImportRows[0].benchmarkName).toBe("MMLU-Pro");
+    expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(false);
+  });
+
+  test("当通过 matrixBenchmarkNameDrafts 改写 benchmark 名时，槽位变化不再跳过", () => {
+    const benchmarkKey = "MMLU@@General";
+    const options = createMockOptions({
+      textImportDraftRows: [baseDuplicateRow],
+      matrixBenchmarkNameDrafts: {
+        [benchmarkKey]: "MMLU Redux"
+      }
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    expect(result.current.finalizedTextImportRows).toHaveLength(1);
+    expect(result.current.finalizedTextImportRows[0].benchmarkName).toBe("MMLU Redux");
+    expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(false);
+  });
+
+  test("当通过 matrixBenchmarkTypeDrafts 改写 benchmark 类别时，槽位变化不再跳过（解除重复锁定）", () => {
+    const benchmarkKey = "MMLU@@General";
+    const rowWithSlotKey: TextImportPreviewRow = {
+      ...baseDuplicateRow,
+      duplicateSlotKey: "model a::mmlu::general"
+    };
+    const options = createMockOptions({
+      textImportDraftRows: [rowWithSlotKey],
+      matrixBenchmarkTypeDrafts: {
+        [benchmarkKey]: "5-shot"
+      }
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    expect(result.current.finalizedTextImportRows).toHaveLength(1);
+    expect(result.current.finalizedTextImportRows[0].benchmarkType).toBe("5-shot");
+    expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(false);
+  });
+
+  test("当预览后修改了 csvSource 且与 row.source 不一致时，旧来源的重复标记失效，正常进入提交列表", () => {
+    const options = createMockOptions({
+      textImportDraftRows: [baseDuplicateRow],
+      csvSource: "arXiv:2026.9999"
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    expect(result.current.finalizedTextImportRows).toHaveLength(1);
+    expect(result.current.finalizedTextImportRows[0].source).toBe("arXiv:2026.9999");
+    expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(false);
+  });
+
+  test("当 csvSource 与 row.source 来源相同时（包括 text: 前缀格式归一化），正常识别重复并跳过", () => {
+    const rowWithTextPrefix: TextImportPreviewRow = {
+      ...baseDuplicateRow,
+      source: "text:arXiv:2026.0001"
+    };
+
+    const options = createMockOptions({
+      textImportDraftRows: [rowWithTextPrefix],
+      csvSource: "arXiv:2026.0001"
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    expect(result.current.finalizedTextImportRows).toHaveLength(0);
+    expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(true);
+  });
+
+  test("当预览时有来源，预览后显式清空 csvSource 时，解除重复忽略并以 null 来源提交", () => {
+    const options = createMockOptions({
+      textImportDraftRows: [baseDuplicateRow],
+      textImportPreviewSource: "arXiv:2026.0001",
+      csvSource: ""
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    expect(result.current.finalizedTextImportRows).toHaveLength(1);
+    expect(result.current.finalizedTextImportRows[0].source).toBeNull();
+    expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(false);
+  });
+
+  test("当预览时无全局来源，保持 csvSource 为空时正常回退保留逐行来源并执行重复跳过", () => {
+    const options = createMockOptions({
+      textImportDraftRows: [baseDuplicateRow],
+      textImportPreviewSource: "",
+      csvSource: ""
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    expect(result.current.finalizedTextImportRows).toHaveLength(0);
+    expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(true);
+  });
+});
+

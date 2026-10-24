@@ -24,8 +24,11 @@ import {
   getBenchmarkSearchCandidateIds
 } from "../utils/benchmark";
 import {
+  buildDuplicateSlotKey,
   composePairRawValue,
   composeStarRawValue,
+  isSameImportSource,
+  normalizeNameParenthesisSpacing,
   parsePairRawValue,
   parseSingleRawValue,
   parseStarSingleRawValue
@@ -45,6 +48,7 @@ type UseImportPreviewStateOptions = {
   textImportPreviewRows: TextImportPreviewRow[];
   textImportPreviewVisibleCount: number;
   csvSource: string;
+  textImportPreviewSource?: string | null;
   ignoredBenchmarkKeys: Record<string, boolean>;
   parenthesesModes: Record<string, "keep" | "remove" | "custom">;
   parenthesesCustomNames: Record<string, string>;
@@ -79,9 +83,14 @@ type UseImportPreviewStateOptions = {
 function applyPendingMatrixDraftsToRows(
   rows: TextImportPreviewRow[],
   nameDrafts: Record<string, string>,
-  typeDrafts: Record<string, string>
+  typeDrafts: Record<string, string>,
+  modelDrafts: Record<string, string> = {}
 ): TextImportPreviewRow[] {
-  if (Object.keys(nameDrafts).length === 0 && Object.keys(typeDrafts).length === 0) {
+  if (
+    Object.keys(nameDrafts).length === 0
+    && Object.keys(typeDrafts).length === 0
+    && Object.keys(modelDrafts).length === 0
+  ) {
     return rows;
   }
 
@@ -92,10 +101,12 @@ function applyPendingMatrixDraftsToRows(
     const key = getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType);
     const nameDraft = nameDrafts[key];
     const typeDraft = typeDrafts[key];
+    const modelDraft = modelDrafts[row.modelName];
 
     let benchmarkName = row.benchmarkName;
     let benchmarkType = row.benchmarkType;
     let benchmarkTypeProvided = row.benchmarkTypeProvided;
+    let modelName = row.modelName;
 
     if (typeof nameDraft === "string") {
       const nextName = nameDraft.trim();
@@ -112,10 +123,18 @@ function applyPendingMatrixDraftsToRows(
       }
     }
 
+    if (typeof modelDraft === "string") {
+      const nextModel = modelDraft.trim();
+      if (nextModel) {
+        modelName = nextModel;
+      }
+    }
+
     if (
       benchmarkName === row.benchmarkName
       && benchmarkType === row.benchmarkType
       && benchmarkTypeProvided === row.benchmarkTypeProvided
+      && modelName === row.modelName
     ) {
       return row;
     }
@@ -124,7 +143,8 @@ function applyPendingMatrixDraftsToRows(
       ...row,
       benchmarkName,
       benchmarkType,
-      benchmarkTypeProvided
+      benchmarkTypeProvided,
+      modelName
     };
   });
 }
@@ -149,6 +169,7 @@ export function useImportPreviewState({
   textImportPreviewRows,
   textImportPreviewVisibleCount,
   csvSource,
+  textImportPreviewSource,
   ignoredBenchmarkKeys,
   parenthesesModes,
   parenthesesCustomNames,
@@ -739,176 +760,215 @@ export function useImportPreviewState({
     [starValueRows]
   );
 
-  const finalizedTextImportRows = useMemo(() => {
+  const { finalizedTextImportRows, skippedDuplicateRowIndices } = useMemo(() => {
+    const skippedIndices = new Set<number>();
     const latestSourceInput = csvSource.trim();
-    // 导入路径必须包含尚未 blur 的矩阵 type/name 草稿，否则点导入时会丢修改
+    // 导入路径必须包含尚未 blur 的矩阵 type/name/model 草稿，否则点导入时会丢修改
     const rowsForFinalize = applyPendingMatrixDraftsToRows(
       textImportDraftRows,
       matrixBenchmarkNameDrafts,
-      matrixBenchmarkTypeDrafts
+      matrixBenchmarkTypeDrafts,
+      matrixModelNameDrafts
     );
 
-    return rowsForFinalize
-      .map<StructuredCsvImportRow | null>((row) => {
-        const benchmarkKey = getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType);
-        const originalModelKey = row.modelName;
-        if (ignoredBenchmarkKeys[benchmarkKey]) {
-          return null;
-        }
+    const finalizedRows: StructuredCsvImportRow[] = [];
 
-        const rawValueInput = row.rawValue.trim();
-        if (!rawValueInput) {
-          return null;
-        }
+    rowsForFinalize.forEach((row, rowIndex) => {
+      const benchmarkKey = getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType);
+      const originalModelKey = row.modelName;
+      if (ignoredBenchmarkKeys[benchmarkKey]) {
+        return;
+      }
 
-        const pairValue = parsePairRawValue(rawValueInput);
-        const starSingleValue = pairValue ? null : parseStarSingleRawValue(rawValueInput);
+      const rawValueInput = row.rawValue.trim();
+      if (!rawValueInput) {
+        return;
+      }
 
-        let rawValue = rawValueInput;
-        let valueNote: string | null = row.valueNote?.trim() || null;
+      const pairValue = parsePairRawValue(rawValueInput);
+      const starSingleValue = pairValue ? null : parseStarSingleRawValue(rawValueInput);
 
-        if (pairValue) {
-          const normalizedNote = row.valueNote?.trim() || pairValue.note || null;
-          rawValue = composePairRawValue(pairValue.first, pairValue.second, normalizedNote);
-          valueNote = normalizedNote;
-        } else if (starSingleValue) {
-          const starNote = row.valueNote?.trim() || starSingleValue.note || null;
-          rawValue = composeStarRawValue(starSingleValue.value, starNote);
-          valueNote = starNote;
-        } else {
-          const singleValue = parseSingleRawValue(rawValueInput);
-          if (singleValue) {
-            const singleTail = singleValue.tail.trim();
-            if (singleTail.length > 0 && !singleTail.startsWith("*")) {
-              rawValue = singleValue.value;
-              valueNote = row.valueNote?.trim() || singleTail || null;
-            }
+      let rawValue = rawValueInput;
+      let valueNote: string | null = row.valueNote?.trim() || null;
+
+      if (pairValue) {
+        const normalizedNote = row.valueNote?.trim() || pairValue.note || null;
+        rawValue = composePairRawValue(pairValue.first, pairValue.second, normalizedNote);
+        valueNote = normalizedNote;
+      } else if (starSingleValue) {
+        const starNote = row.valueNote?.trim() || starSingleValue.note || null;
+        rawValue = composeStarRawValue(starSingleValue.value, starNote);
+        valueNote = starNote;
+      } else {
+        const singleValue = parseSingleRawValue(rawValueInput);
+        if (singleValue) {
+          const singleTail = singleValue.tail.trim();
+          if (singleTail.length > 0 && !singleTail.startsWith("*")) {
+            rawValue = singleValue.value;
+            valueNote = row.valueNote?.trim() || singleTail || null;
           }
         }
+      }
 
-        let benchmarkName = row.benchmarkName;
-        let benchmarkType = row.benchmarkType;
-        let modelName = row.modelName;
-        let providerName = row.providerName.trim() || "Unknown";
-        let providerDisplayName = row.providerDisplayName?.trim() || providerName;
+      let benchmarkName = row.benchmarkName;
+      let benchmarkType = row.benchmarkType;
+      let modelName = row.modelName;
+      let providerName = row.providerName.trim() || "Unknown";
+      let providerDisplayName = row.providerDisplayName?.trim() || providerName;
 
-        const modelParenthesesMode = modelParenthesesModes[originalModelKey] ?? "keep";
-        if (modelParenthesesMode === "remove") {
-          const noParentheses = removeParenthesesContent(modelName);
-          if (noParentheses) {
-            modelName = noParentheses;
-          }
-        } else if (modelParenthesesMode === "custom") {
-          const customName = (modelParenthesesCustomNames[originalModelKey] ?? "").trim();
-          if (customName) {
-            modelName = customName;
-          }
+      const modelParenthesesMode = modelParenthesesModes[originalModelKey] ?? "keep";
+      if (modelParenthesesMode === "remove") {
+        const noParentheses = removeParenthesesContent(modelName);
+        if (noParentheses) {
+          modelName = noParentheses;
         }
+      } else if (modelParenthesesMode === "custom") {
+        const customName = (modelParenthesesCustomNames[originalModelKey] ?? "").trim();
+        if (customName) {
+          modelName = customName;
+        }
+      }
 
-        const modelMergeTargetId = Number(modelMergeTargets[originalModelKey]);
-        if (Number.isFinite(modelMergeTargetId) && modelMergeTargetId > 0) {
-          const target = modelById.get(modelMergeTargetId);
+      const modelMergeTargetId = Number(modelMergeTargets[originalModelKey]);
+      if (Number.isFinite(modelMergeTargetId) && modelMergeTargetId > 0) {
+        const target = modelById.get(modelMergeTargetId);
+        if (target) {
+          modelName = target.modelName;
+        }
+      } else {
+        const mergedRecordsForModel = getMergedModelRecordsForSourceName(modelName, mergedRecords);
+        if (mergedRecordsForModel.length > 0) {
+          const target = modelById.get(mergedRecordsForModel[0].targetId);
           if (target) {
             modelName = target.modelName;
           }
+        }
+      }
+
+      modelName = modelName.trim();
+
+      const exactModel = existingModelExactMap.get(modelName.toLowerCase());
+      if (exactModel) {
+        modelName = exactModel.modelName;
+        providerName = providerById.get(exactModel.providerId)?.name || providerName;
+        providerDisplayName = getProviderDisplayNameById(exactModel.providerId, providerById) || providerName;
+      } else {
+        const canonicalKey = normalizeModelNameByDedupeRule(modelName, modelDedupeRule);
+        const canonicalMatchedModel = existingModelByCanonicalKey.get(canonicalKey);
+
+        if (canonicalMatchedModel) {
+          modelName = canonicalMatchedModel.modelName;
+          providerName = providerById.get(canonicalMatchedModel.providerId)?.name || providerName;
+          providerDisplayName = getProviderDisplayNameById(canonicalMatchedModel.providerId, providerById) || providerName;
         } else {
-          const mergedRecordsForModel = getMergedModelRecordsForSourceName(modelName, mergedRecords);
-          if (mergedRecordsForModel.length > 0) {
-            const target = modelById.get(mergedRecordsForModel[0].targetId);
-            if (target) {
-              modelName = target.modelName;
-            }
+          const sameNameModels = existingModelByNameMap.get(modelName.toLowerCase()) ?? [];
+          if (sameNameModels.length > 0) {
+            modelName = sameNameModels[0].modelName;
+            providerName = providerById.get(sameNameModels[0].providerId)?.name || providerName;
+            providerDisplayName = getProviderDisplayNameById(sameNameModels[0].providerId, providerById) || providerName;
           }
         }
+      }
 
-        modelName = modelName.trim();
+      if (!modelName) {
+        return;
+      }
 
-        const exactModel = existingModelExactMap.get(modelName.toLowerCase());
-        if (exactModel) {
-          modelName = exactModel.modelName;
-          providerName = providerById.get(exactModel.providerId)?.name || providerName;
-          providerDisplayName = getProviderDisplayNameById(exactModel.providerId, providerById) || providerName;
-        } else {
-          const canonicalKey = normalizeModelNameByDedupeRule(modelName, modelDedupeRule);
-          const canonicalMatchedModel = existingModelByCanonicalKey.get(canonicalKey);
-
-          if (canonicalMatchedModel) {
-            modelName = canonicalMatchedModel.modelName;
-            providerName = providerById.get(canonicalMatchedModel.providerId)?.name || providerName;
-            providerDisplayName = getProviderDisplayNameById(canonicalMatchedModel.providerId, providerById) || providerName;
-          } else {
-            const sameNameModels = existingModelByNameMap.get(modelName.toLowerCase()) ?? [];
-            if (sameNameModels.length > 0) {
-              modelName = sameNameModels[0].modelName;
-              providerName = providerById.get(sameNameModels[0].providerId)?.name || providerName;
-              providerDisplayName = getProviderDisplayNameById(sameNameModels[0].providerId, providerById) || providerName;
-            }
-          }
+      const parenthesesMode = parenthesesModes[benchmarkKey] ?? "keep";
+      if (parenthesesMode === "remove") {
+        const noParentheses = removeParenthesesContent(benchmarkName);
+        if (noParentheses) {
+          benchmarkName = noParentheses;
         }
-
-        if (!modelName) {
-          return null;
+      } else if (parenthesesMode === "custom") {
+        const customName = (parenthesesCustomNames[benchmarkKey] ?? "").trim();
+        if (customName) {
+          benchmarkName = customName;
         }
+      }
 
-        const parenthesesMode = parenthesesModes[benchmarkKey] ?? "keep";
-        if (parenthesesMode === "remove") {
-          const noParentheses = removeParenthesesContent(benchmarkName);
-          if (noParentheses) {
-            benchmarkName = noParentheses;
-          }
-        } else if (parenthesesMode === "custom") {
-          const customName = (parenthesesCustomNames[benchmarkKey] ?? "").trim();
-          if (customName) {
-            benchmarkName = customName;
-          }
+      benchmarkName = benchmarkName.trim();
+      benchmarkType = benchmarkType.trim() || "general";
+
+      if (!benchmarkName) {
+        return;
+      }
+
+      const exactExisting = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(benchmarkName, benchmarkType));
+      if (exactExisting) {
+        benchmarkName = exactExisting.benchmarkName;
+        benchmarkType = exactExisting.benchmarkType;
+      }
+
+      const mergeTargetId = Number(benchmarkMergeTargets[benchmarkKey]);
+      if (Number.isFinite(mergeTargetId) && mergeTargetId > 0) {
+        const target = benchmarkById.get(mergeTargetId);
+        if (target) {
+          benchmarkName = target.benchmarkName;
+          benchmarkType = target.benchmarkType;
         }
+      }
 
-        benchmarkName = benchmarkName.trim();
-        benchmarkType = benchmarkType.trim() || "general";
+      const currentSlotKey = buildDuplicateSlotKey(modelName, benchmarkName, benchmarkType);
+      const legacySlotKey = `${normalizeNameParenthesisSpacing(modelName).trim().toLowerCase()}::${normalizeNameParenthesisSpacing(benchmarkName).trim().toLowerCase()}`;
+      const isSlotMatched = !row.duplicateSlotKey
+        || currentSlotKey === row.duplicateSlotKey
+        || (row.duplicateSlotKey.split("::").length === 2 && row.duplicateSlotKey === legacySlotKey);
 
-        if (!benchmarkName) {
-          return null;
-        }
+      const isSourceClearedAfterPreview = Boolean(
+        textImportPreviewSource &&
+        textImportPreviewSource.trim().length > 0 &&
+        latestSourceInput.length === 0
+      );
 
-        const exactExisting = existingBenchmarkExactMap.get(getBenchmarkExactLookupKey(benchmarkName, benchmarkType));
-        if (exactExisting) {
-          benchmarkName = exactExisting.benchmarkName;
-          benchmarkType = exactExisting.benchmarkType;
-        }
+      const targetSource = latestSourceInput.length > 0
+        ? latestSourceInput
+        : isSourceClearedAfterPreview && (row.source ? isSameImportSource(row.source, textImportPreviewSource) : true)
+          ? null
+          : (row.source?.trim() || null);
+      const isSourceMatched = isSameImportSource(row.source, targetSource);
 
-        const mergeTargetId = Number(benchmarkMergeTargets[benchmarkKey]);
-        if (Number.isFinite(mergeTargetId) && mergeTargetId > 0) {
-          const target = benchmarkById.get(mergeTargetId);
-          if (target) {
-            benchmarkName = target.benchmarkName;
-          }
-        }
+      if (
+        row.isDuplicate &&
+        isSourceMatched &&
+        rawValueInput === (row.originalRawValue ?? row.rawValue).trim() &&
+        isSlotMatched
+      ) {
+        skippedIndices.add(rowIndex);
+        return;
+      }
 
-        const normalizedModalities = normalizeModalityList(
-          row.modalities?.length ? row.modalities : [benchmarkType]
-        );
-        const inferredHigherIsBetter = typeof row.higherIsBetter === "boolean"
-          ? row.higherIsBetter
-          : !isLowerBetterPreviewBenchmark(benchmarkName, benchmarkType);
+      const normalizedModalities = normalizeModalityList(
+        row.modalities?.length ? row.modalities : [benchmarkType]
+      );
+      const inferredHigherIsBetter = typeof row.higherIsBetter === "boolean"
+        ? row.higherIsBetter
+        : !isLowerBetterPreviewBenchmark(benchmarkName, benchmarkType);
 
-        return {
-          providerName,
-          providerDisplayName,
-          modelName,
-          benchmarkName,
-          benchmarkType,
-          benchmarkTypeProvided: row.benchmarkTypeProvided ?? true,
-          higherIsBetter: inferredHigherIsBetter,
-          modalities: normalizedModalities,
-          rawValue,
-          valueNote,
-          source: latestSourceInput.length > 0 ? latestSourceInput : (row.source?.trim() || null)
-        };
-      })
-      .filter((item): item is StructuredCsvImportRow => item !== null);
+      finalizedRows.push({
+        providerName,
+        providerDisplayName,
+        modelName,
+        benchmarkName,
+        benchmarkType,
+        benchmarkTypeProvided: row.benchmarkTypeProvided ?? true,
+        higherIsBetter: inferredHigherIsBetter,
+        modalities: normalizedModalities,
+        rawValue,
+        valueNote,
+        source: targetSource
+      });
+    });
+
+    return {
+      finalizedTextImportRows: finalizedRows,
+      skippedDuplicateRowIndices: skippedIndices
+    };
   }, [
     csvSource,
+    textImportPreviewSource,
     textImportDraftRows,
+    matrixModelNameDrafts,
     matrixBenchmarkNameDrafts,
     matrixBenchmarkTypeDrafts,
     ignoredBenchmarkKeys,
@@ -981,6 +1041,7 @@ export function useImportPreviewState({
     starValueRows,
     starRowsMissingSupplementCount,
     finalizedTextImportRows,
+    skippedDuplicateRowIndices,
     ignoredTextImportCount,
     textImportPreviewTableRows,
     visibleResolvedTextImportPreviewRows

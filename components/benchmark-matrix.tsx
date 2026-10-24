@@ -16,8 +16,12 @@ import {
   Check,
   TriangleAlert
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import { BenchmarkRankingPanel } from "./benchmark-matrix/benchmark-ranking-panel";
-import { CellTrendPanel } from "./benchmark-matrix/cell-trend-panel";
+const CellTrendPanel = dynamic(
+  () => import("./benchmark-matrix/cell-trend-panel").then((mod) => mod.CellTrendPanel),
+  { ssr: false }
+);
 import {
   buildCellTrendData,
   getCellTrendPopoverPosition,

@@ -6,7 +6,8 @@ import { previewBenchmarkTextImport } from "../../../../../lib/admin-service";
 const schema = z.object({
   csvText: z.string().min(1),
   htmlText: z.string().optional(),
-  source: z.string().optional()
+  source: z.string().optional(),
+  checkDuplicates: z.boolean().optional()
 });
 
 export async function POST(request: Request) {
@@ -20,6 +21,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const result = await previewBenchmarkTextImport(parsed.data.csvText, parsed.data.source, parsed.data.htmlText);
+  const checkDuplicates = parsed.data.checkDuplicates ?? true;
+  const result = await previewBenchmarkTextImport(
+    parsed.data.csvText,
+    parsed.data.source,
+    parsed.data.htmlText,
+    { checkDuplicates }
+  );
   return NextResponse.json(result);
 }

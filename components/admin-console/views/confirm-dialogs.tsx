@@ -363,3 +363,85 @@ export function ProviderDeleteConfirmDialog({
     </div>
   );
 }
+
+type ConfirmImportSourceChangedDialogProps = {
+  open: boolean;
+  isImportingTextCsv: boolean;
+  previewSource: string | null;
+  currentSource: string;
+  onClose: () => void;
+  onConfirm: () => void;
+  onRePreview: () => void;
+};
+
+export function ConfirmImportSourceChangedDialog({
+  open,
+  isImportingTextCsv,
+  previewSource,
+  currentSource,
+  onClose,
+  onConfirm,
+  onRePreview
+}: ConfirmImportSourceChangedDialogProps) {
+  if (!open) {
+    return null;
+  }
+
+  const oldSourceDisplay = previewSource?.trim() ? previewSource.trim() : "（未指定来源）";
+  const newSourceDisplay = currentSource.trim() ? currentSource.trim() : "（未指定来源）";
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-import-source-changed-title"
+      className="fixed inset-0 z-[170] flex items-center justify-center bg-black/45 p-4"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div className="w-full max-w-xl rounded-2xl border border-warning/50 bg-base-100/95 p-6 shadow-2xl backdrop-blur">
+        <h3 id="confirm-import-source-changed-title" className="text-lg font-bold text-warning">数据来源已变更，确认导入？</h3>
+        <p className="mt-2 text-sm opacity-80">
+          数据来源已从 <strong className="font-semibold text-base-content">「{oldSourceDisplay}」</strong> 修改为{" "}
+          <strong className="font-semibold text-base-content">「{newSourceDisplay}」</strong>。
+        </p>
+        <p className="mt-2 text-sm opacity-80">
+          原预览中的“库内重复”标记是基于旧来源比对生成的，新来源尚未重新比对库内数据。原先被标记为重复的行将不再自动跳过；新来源下如果库内已存在相同数据，也无法提前识别。
+        </p>
+        <p className="mt-2 text-xs text-warning/90 font-medium">
+          建议点击“重新预览”以针对新来源重新校验库内重复数据后再导入。
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={onClose}
+            disabled={isImportingTextCsv}
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            className="btn btn-warning btn-outline"
+            onClick={onRePreview}
+            disabled={isImportingTextCsv}
+          >
+            重新预览
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={onConfirm}
+            disabled={isImportingTextCsv}
+          >
+            {isImportingTextCsv ? "导入中..." : "仍然按新来源导入"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+

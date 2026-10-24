@@ -49,6 +49,7 @@ import {
 import { buildStructuredCsvText } from "./admin-console/utils/csv";
 import {
   composePairRawValue,
+  isSameImportSource,
   parseSingleRawValue,
   parsePairRawValue,
   parseStarSingleRawValue
@@ -80,6 +81,7 @@ import {
 import { extractTextImportWarningDetails } from "./admin-console/utils/warnings";
 import {
   ClearDatabaseConfirmDialog,
+  ConfirmImportSourceChangedDialog,
   ConfirmImportWithoutPreviewDialog,
   ConfirmImportWithoutSourceDialog,
   DeleteSourceConfirmDialog,
@@ -189,8 +191,10 @@ export function AdminConsole({
   const [csvHtmlText, setCsvHtmlText] = useState("");
   const [hasParsedHtmlTable, setHasParsedHtmlTable] = useState(false);
   const [csvSource, setCsvSource] = useState("");
+  const [textImportPreviewSource, setTextImportPreviewSource] = useState<string | null>(null);
   const [confirmImportWithoutPreviewOpen, setConfirmImportWithoutPreviewOpen] = useState(false);
   const [confirmImportWithoutSourceOpen, setConfirmImportWithoutSourceOpen] = useState(false);
+  const [confirmImportSourceChangedOpen, setConfirmImportSourceChangedOpen] = useState(false);
   const [clearDatabaseConfirmOpen, setClearDatabaseConfirmOpen] = useState(false);
   const [isClearingDatabase, setIsClearingDatabase] = useState(false);
   const [isPreviewingTextImport, setIsPreviewingTextImport] = useState(false);
@@ -220,8 +224,16 @@ export function AdminConsole({
     format: string;
     total: number;
     skipped: number;
+    duplicateCount?: number;
   } | null>(null);
   const [textImportPreviewVisibleCount, setTextImportPreviewVisibleCount] = useState(200);
+
+  const isImportSourceChangedAfterPreview = useMemo(() => {
+    if (!textImportPreviewMeta || textImportPreviewSource === null) {
+      return false;
+    }
+    return !isSameImportSource(csvSource, textImportPreviewSource);
+  }, [textImportPreviewMeta, textImportPreviewSource, csvSource]);
 
   const [workbookFile, setWorkbookFile] = useState<File | null>(null);
   const [sheetNames, setSheetNames] = useState<string[]>([]);
@@ -382,6 +394,7 @@ export function AdminConsole({
     starValueRows,
     starRowsMissingSupplementCount,
     finalizedTextImportRows,
+    skippedDuplicateRowIndices,
     ignoredTextImportCount,
     textImportPreviewTableRows,
     visibleResolvedTextImportPreviewRows
@@ -391,6 +404,7 @@ export function AdminConsole({
     textImportPreviewRows,
     textImportPreviewVisibleCount,
     csvSource,
+    textImportPreviewSource,
     ignoredBenchmarkKeys,
     parenthesesModes,
     parenthesesCustomNames,
@@ -1685,7 +1699,7 @@ export function AdminConsole({
       setHasParsedHtmlTable(result.parseSource === "html");
       const previewRows = applyExistingEloBenchmarkToPreviewRows((result.previewRows ?? []) as TextImportPreviewRow[]);
       setTextImportPreviewRows(previewRows);
-      setTextImportDraftRows(previewRows.map((row) => ({ ...row })));
+      setTextImportDraftRows(previewRows.map((row) => ({ ...row, originalRawValue: row.originalRawValue ?? row.rawValue })));
       setTextImportModelColumns((result.modelColumns ?? []) as string[]);
       setGlobalStarSupplement("");
       setBenchmarkMergeTargets({});
@@ -1707,19 +1721,23 @@ export function AdminConsole({
       setTextImportPreviewMeta({
         format: result.format ?? "matrix-table",
         total: result.total ?? 0,
-        skipped: result.skipped ?? 0
+        skipped: result.skipped ?? 0,
+        duplicateCount: result.duplicateCount ?? 0
       });
+      setTextImportPreviewSource(csvSource.trim());
       setTextImportPreviewVisibleCount(200);
 
       const directionWarningCount = Number(result.warningCount ?? 0);
+      const duplicateCount = Number(result.duplicateCount ?? 0);
+      const duplicateMsg = duplicateCount > 0 ? `（库内重复 ${duplicateCount} 条已忽略）` : "";
       const warningDetails = extractTextImportWarningDetails(result.warnings);
       if (directionWarningCount > 0) {
         notifyError(
-          `文本预览完成：可导入 ${result.total ?? 0} 条，跳过 ${result.skipped ?? 0} 条；检测到 ${directionWarningCount} 条解析警告（导入时会自动清洗/修正）`,
+          `文本预览完成：可导入 ${result.total ?? 0} 条，跳过 ${result.skipped ?? 0} 条${duplicateMsg}；检测到 ${directionWarningCount} 条解析警告（导入时会自动清洗/修正）`,
           warningDetails
         );
       } else {
-        notifySuccess(`文本预览完成：可导入 ${result.total ?? 0} 条，跳过 ${result.skipped ?? 0} 条`);
+        notifySuccess(`文本预览完成：可导入 ${result.total ?? 0} 条，跳过 ${result.skipped ?? 0} 条${duplicateMsg}`);
       }
     } catch (error) {
       setHasParsedHtmlTable(false);
@@ -1850,6 +1868,11 @@ export function AdminConsole({
       return;
     }
 
+    if (isImportSourceChangedAfterPreview) {
+      setConfirmImportSourceChangedOpen(true);
+      return;
+    }
+
     const latestSourceInput = csvSource.trim();
     const hasAnySource = latestSourceInput.length > 0
       || (textImportDraftRows.length > 0
@@ -1874,6 +1897,11 @@ export function AdminConsole({
       return;
     }
 
+    if (isImportSourceChangedAfterPreview) {
+      setConfirmImportSourceChangedOpen(true);
+      return;
+    }
+
     await executeImportCsv();
   }
 
@@ -1885,6 +1913,16 @@ export function AdminConsole({
   async function onConfirmImportWithoutPreview() {
     setConfirmImportWithoutPreviewOpen(false);
     await executeImportCsv();
+  }
+
+  async function onConfirmImportSourceChanged() {
+    setConfirmImportSourceChangedOpen(false);
+    await executeImportCsv();
+  }
+
+  async function onRePreviewFromSourceChanged() {
+    setConfirmImportSourceChangedOpen(false);
+    await onPreviewCsvImport();
   }
 
   function duplicateConfidenceBadgeClass(confidence: DuplicateConfidence): string {
@@ -2609,16 +2647,27 @@ export function AdminConsole({
     setClearDatabaseConfirmOpen(true);
   }
 
-  async function onRefreshCaches() {
-    if (isRefreshingCaches) return;
+  /**
+   * 刷新缓存，并返回是否成功。
+   * silent 为 true 时由调用方自行决定提示文案（用于“删除后补偿重试”等需要合并提示的场景）。
+   */
+  async function onRefreshCaches(options?: { silent?: boolean }): Promise<boolean> {
+    // 已有刷新任务在执行，其结果由该任务负责提示，此处不重复触发
+    if (isRefreshingCaches) return true;
 
     setIsRefreshingCaches(true);
     try {
       await postJson("/api/admin/cache/refresh", {});
-      notifySuccess("缓存已更新，前台数据会在下次请求时重新读取。");
+      if (!options?.silent) {
+        notifySuccess("缓存已更新，前台数据会在下次请求时重新读取。");
+      }
       router.refresh();
+      return true;
     } catch (error) {
-      notifyError(error instanceof Error ? error.message : "更新缓存失败");
+      if (!options?.silent) {
+        notifyError(error instanceof Error ? error.message : "更新缓存失败");
+      }
+      return false;
     } finally {
       setIsRefreshingCaches(false);
     }
@@ -3130,6 +3179,16 @@ export function AdminConsole({
         onConfirm={onConfirmImportWithoutSource}
       />
 
+      <ConfirmImportSourceChangedDialog
+        open={confirmImportSourceChangedOpen}
+        isImportingTextCsv={isImportingTextCsv}
+        previewSource={textImportPreviewSource}
+        currentSource={csvSource}
+        onClose={() => setConfirmImportSourceChangedOpen(false)}
+        onConfirm={onConfirmImportSourceChanged}
+        onRePreview={onRePreviewFromSourceChanged}
+      />
+
       <ClearDatabaseConfirmDialog
         open={clearDatabaseConfirmOpen}
         isClearingDatabase={isClearingDatabase}
@@ -3194,8 +3253,11 @@ export function AdminConsole({
             textImportProgress={textImportProgress}
             textImportStatusText={textImportStatusText}
             textImportPreviewMeta={textImportPreviewMeta}
+            textImportPreviewSource={textImportPreviewSource}
+            isImportSourceChangedAfterPreview={isImportSourceChangedAfterPreview}
             textImportDraftRows={textImportDraftRows}
             finalizedTextImportRows={finalizedTextImportRows}
+            skippedDuplicateRowIndices={skippedDuplicateRowIndices}
             ignoredTextImportCount={ignoredTextImportCount}
             pairValueRows={pairValueRows}
             pairRowsMissingNoteCount={pairRowsMissingNoteCount}
