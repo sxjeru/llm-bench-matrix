@@ -1015,5 +1015,30 @@ describe("useImportPreviewState Hook - duplicate row filtering and slot key inva
     expect(result.current.finalizedTextImportRows).toHaveLength(0);
     expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(true);
   });
+
+  test("当预览时有来源，预览后显式清空 csvSource 时，解除重复忽略并以 null 来源提交", () => {
+    const options = createMockOptions({
+      textImportDraftRows: [baseDuplicateRow],
+      textImportPreviewSource: "arXiv:2026.0001",
+      csvSource: ""
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    expect(result.current.finalizedTextImportRows).toHaveLength(1);
+    expect(result.current.finalizedTextImportRows[0].source).toBeNull();
+    expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(false);
+  });
+
+  test("当预览时无全局来源，保持 csvSource 为空时正常回退保留逐行来源并执行重复跳过", () => {
+    const options = createMockOptions({
+      textImportDraftRows: [baseDuplicateRow],
+      textImportPreviewSource: "",
+      csvSource: ""
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    expect(result.current.finalizedTextImportRows).toHaveLength(0);
+    expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(true);
+  });
 });
 

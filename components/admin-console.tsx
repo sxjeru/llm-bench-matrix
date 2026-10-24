@@ -404,6 +404,7 @@ export function AdminConsole({
     textImportPreviewRows,
     textImportPreviewVisibleCount,
     csvSource,
+    textImportPreviewSource,
     ignoredBenchmarkKeys,
     parenthesesModes,
     parenthesesCustomNames,
@@ -1864,6 +1865,11 @@ export function AdminConsole({
     event.preventDefault();
 
     if (isImportingTextCsv) {
+      return;
+    }
+
+    if (isImportSourceChangedAfterPreview) {
+      setConfirmImportSourceChangedOpen(true);
       return;
     }
 

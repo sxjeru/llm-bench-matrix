@@ -48,6 +48,7 @@ type UseImportPreviewStateOptions = {
   textImportPreviewRows: TextImportPreviewRow[];
   textImportPreviewVisibleCount: number;
   csvSource: string;
+  textImportPreviewSource?: string | null;
   ignoredBenchmarkKeys: Record<string, boolean>;
   parenthesesModes: Record<string, "keep" | "remove" | "custom">;
   parenthesesCustomNames: Record<string, string>;
@@ -168,6 +169,7 @@ export function useImportPreviewState({
   textImportPreviewRows,
   textImportPreviewVisibleCount,
   csvSource,
+  textImportPreviewSource,
   ignoredBenchmarkKeys,
   parenthesesModes,
   parenthesesCustomNames,
@@ -913,7 +915,17 @@ export function useImportPreviewState({
         || currentSlotKey === row.duplicateSlotKey
         || (row.duplicateSlotKey.split("::").length === 2 && row.duplicateSlotKey === legacySlotKey);
 
-      const targetSource = latestSourceInput.length > 0 ? latestSourceInput : (row.source?.trim() || null);
+      const isSourceClearedAfterPreview = Boolean(
+        textImportPreviewSource &&
+        textImportPreviewSource.trim().length > 0 &&
+        latestSourceInput.length === 0
+      );
+
+      const targetSource = latestSourceInput.length > 0
+        ? latestSourceInput
+        : isSourceClearedAfterPreview && (row.source ? isSameImportSource(row.source, textImportPreviewSource) : true)
+          ? null
+          : (row.source?.trim() || null);
       const isSourceMatched = isSameImportSource(row.source, targetSource);
 
       if (
@@ -954,6 +966,7 @@ export function useImportPreviewState({
     };
   }, [
     csvSource,
+    textImportPreviewSource,
     textImportDraftRows,
     matrixModelNameDrafts,
     matrixBenchmarkNameDrafts,
