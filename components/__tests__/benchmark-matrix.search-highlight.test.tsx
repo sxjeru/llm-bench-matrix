@@ -4,10 +4,50 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
 import { HighlightText } from "@/components/benchmark-matrix/highlight-text";
 import {
+  createSearchMatcher,
   escapeRegExp,
+  extractSearchTerms,
   extractSearchTokens
 } from "@/components/benchmark-matrix/search-match";
 import { renderReady } from "@/tests/flush-microtasks";
+
+describe("search-match 交集匹配口径", () => {
+  test("空格分隔的检索词必须全部命中（交集），顺序无关且忽略大小写", () => {
+    const matcher = createSearchMatcher("Harvey Legal Agent");
+    expect(matcher).not.toBeNull();
+
+    expect(matcher?.("Harvey Legal Agent")).toBe(true);
+    expect(matcher?.("Harvey-Legal Agent (All Pass)")).toBe(true);
+    // 顺序无关：词按交集判断，不要求与输入顺序一致
+    expect(matcher?.("Agent Legal Harvey")).toBe(true);
+    // 缺任一词即不命中，不再因为 "agent" 这类常见词单独命中而入选
+    expect(matcher?.("Legal Agent")).toBe(false);
+    expect(matcher?.("AgentBench")).toBe(false);
+    expect(matcher?.(null)).toBe(false);
+  });
+
+  test("单个检索词仍是子串匹配，空白检索词不做过滤", () => {
+    expect(createSearchMatcher("   ")).toBeNull();
+
+    const matcher = createSearchMatcher("agent");
+    expect(matcher?.("SWE-Agent")).toBe(true);
+    expect(matcher?.("AgentBench")).toBe(true);
+    expect(matcher?.("MMLU")).toBe(false);
+  });
+
+  test("extractSearchTerms 只取单词交集，extractSearchTokens 仍保留整句供高亮", () => {
+    expect(extractSearchTerms("Harvey Legal Agent")).toEqual(["harvey", "legal", "agent"]);
+    expect(extractSearchTerms("  Math   MATH 500 ")).toEqual(["math", "500"]);
+    expect(extractSearchTerms("")).toEqual([]);
+
+    expect(extractSearchTokens("Harvey Legal Agent")).toEqual([
+      "Harvey Legal Agent",
+      "Harvey",
+      "Legal",
+      "Agent"
+    ]);
+  });
+});
 
 describe("HighlightText 核心高亮逻辑与无障碍测试", () => {
   test("搜索词为空或未提供时，返回纯文本，不创建 mark", () => {

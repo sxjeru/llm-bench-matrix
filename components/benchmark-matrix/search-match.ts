@@ -15,7 +15,7 @@ export function escapeRegExp(value: string): string {
  * 拆分搜索关键词：整句 + 按空白切分的单词，去重后按长度倒序。
  *
  * 长词优先，保证搜索 "math 500" 时 "Math 500" 整句会先作为一个整体命中，
- * 而不是被拆成 "math" 和 "500" 两段。
+ * 而不是被拆成 "math" 和 "500" 两段。仅供高亮使用：筛选不要求整句命中。
  */
 export function extractSearchTokens(query: string): string[] {
   const trimmed = query.trim();
@@ -26,19 +26,47 @@ export function extractSearchTokens(query: string): string[] {
 }
 
 /**
- * 生成搜索匹配器：命中条件为「文本包含任一关键词」（忽略大小写）。
+ * 提取必须同时命中的检索词：按空白切分的单词，忽略大小写并去重。
+ *
+ * 这里刻意不包含整句：搜索 "Harvey Legal Agent" 要的是三个词的交集，
+ * 而不是「整句原样出现」或「任一单词出现」。
+ */
+export function extractSearchTerms(query: string): string[] {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  const terms = new Set<string>();
+  trimmed.split(/\s+/).forEach((word) => {
+    if (word) terms.add(word.toLowerCase());
+  });
+  return Array.from(terms);
+}
+
+/**
+ * 生成搜索匹配器：命中条件为「文本同时包含全部检索词」（交集，忽略大小写）。
+ *
+ * 搜索 "Harvey Legal Agent" 时，只有同时含 harvey / legal / agent 的文本才算命中；
+ * 若按「任一关键词」取并集，"agent" 这类常见词会把大量无关行一起筛出来。
  *
  * 搜索词为空时返回 null，表示不做任何过滤。
  */
 export function createSearchMatcher(query: string): ((text: string | null | undefined) => boolean) | null {
-  const normalizedTokens = extractSearchTokens(query).map((token) => token.toLowerCase());
-  if (normalizedTokens.length === 0) return null;
+  const terms = extractSearchTerms(query);
+  if (terms.length === 0) return null;
+
+  if (terms.length === 1) {
+    const term = terms[0]!;
+    return (text) => {
+      if (!text) return false;
+      return text.toLowerCase().includes(term);
+    };
+  }
 
   return (text) => {
     if (!text) return false;
 
     const normalized = text.toLowerCase();
-    return normalizedTokens.some((token) => normalized.includes(token));
+    return terms.every((term) => normalized.includes(term));
   };
 }
 

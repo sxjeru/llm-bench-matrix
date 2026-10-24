@@ -155,6 +155,7 @@ export {
 export {
   escapeRegExp,
   extractSearchTokens,
+  extractSearchTerms,
   createSearchMatcher,
   getSearchHighlightPlan,
   type SearchHighlightPlan

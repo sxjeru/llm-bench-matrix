@@ -188,6 +188,45 @@ describe("BenchmarkMatrix 搜索筛选与低覆盖率状态恢复", () => {
     expect(screen.getByText("Bench-High")).toBeInTheDocument();
   });
 
+  test("空格分隔的关键词按交集筛选：Harvey Legal Agent 不再命中仅含 agent 的行", async () => {
+    const searchRows = [
+      { providerName: "Harvey", modelName: "Model A", benchmarkName: "Harvey Legal Agent", benchmarkType: "Legal", benchmarkCanonicalKey: "harvey-legal-agent:legal", benchTime: "2026-04-06T00:00:00.000Z", valueRaw: "80", valueNum: 80, valueNote: null, source: "text:S1" },
+      { providerName: "OpenAI", modelName: "Model A", benchmarkName: "Legal Agent", benchmarkType: "Legal", benchmarkCanonicalKey: "legal-agent:legal", benchTime: "2026-04-06T00:00:00.000Z", valueRaw: "70", valueNum: 70, valueNote: null, source: "text:S1" },
+      { providerName: "OpenAI", modelName: "Model A", benchmarkName: "AgentBench", benchmarkType: "General", benchmarkCanonicalKey: "agentbench:general", benchTime: "2026-04-06T00:00:00.000Z", valueRaw: "60", valueNum: 60, valueNote: null, source: "text:S1" }
+    ] as const;
+
+    await renderReady(
+      <BenchmarkMatrix
+        sourceOptions={["text:S1"]}
+        rows={[...searchRows]}
+      />
+    );
+
+    const searchInput = screen.getByPlaceholderText("筛选 Benchmark");
+    fireEvent.change(searchInput, { target: { value: "Harvey Legal Agent" } });
+    act(() => {
+      vi.advanceTimersByTime(300);
+      vi.runAllTicks();
+    });
+
+    // 三个词全部命中的行才保留
+    expect(screen.getByText("Harvey Legal Agent")).toBeInTheDocument();
+    expect(screen.queryByText("Legal Agent")).not.toBeInTheDocument();
+    expect(screen.queryByText("AgentBench")).not.toBeInTheDocument();
+
+    // 少打一个词，交集随之放宽
+    fireEvent.change(searchInput, { target: { value: "Legal Agent" } });
+    act(() => {
+      vi.advanceTimersByTime(300);
+      vi.runAllTicks();
+    });
+
+    expect(screen.getByText("Harvey Legal Agent")).toBeInTheDocument();
+    // 两行都含 "Legal Agent"：独立行本身，以及 Harvey 行中被高亮的那一段
+    expect(screen.getAllByText("Legal Agent")).toHaveLength(2);
+    expect(screen.queryByText("AgentBench")).not.toBeInTheDocument();
+  });
+
   test("脚注占位符替换：当前日期 {time} 格式为 YYYY-MM-DD，source 最后更新日期 {source_time} 正确计算并替换", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-06-06T12:00:00.000Z"));

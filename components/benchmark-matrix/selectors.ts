@@ -554,7 +554,8 @@ export function buildFilteredRows(
   }
 
   const result: MatrixInputRow[] = [];
-  // 筛选与单元格高亮共用 search-match 的分词规则：命中任一关键词即算命中。
+  // 筛选与单元格高亮共用 search-match 的分词规则：空格切开的词必须全部命中（交集），
+  // 名称与分类合并成同一个检索域，避免多个词被拆到两列时漏召回。
   const searchMatcher = createSearchMatcher(benchmarkSearchQuery);
 
   selectedModels.forEach((modelName) => {
@@ -565,12 +566,8 @@ export function buildFilteredRows(
 
     indexedRows.forEach((indexed) => {
       if (baseBenchmarkKeySet.has(indexed.matrixKey)) {
-        if (searchMatcher) {
-          const matchName = searchMatcher(indexed.row.benchmarkName);
-          const matchType = searchMatcher(indexed.row.benchmarkType);
-          if (!matchName && !matchType) {
-            return;
-          }
+        if (searchMatcher && !searchMatcher(`${indexed.row.benchmarkName} ${indexed.row.benchmarkType}`)) {
+          return;
         }
         result.push(indexed.row);
       }
