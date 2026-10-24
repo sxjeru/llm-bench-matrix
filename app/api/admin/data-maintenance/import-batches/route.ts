@@ -5,7 +5,8 @@ import { deleteImportBatch, listImportBatches } from "@/lib/import-batch-service
 
 const deleteBatchSchema = z.object({
   batchTime: z.string().min(1, "batchTime 不能为空"),
-  source: z.string().nullable().optional()
+  source: z.string().nullable().optional(),
+  matchAllSources: z.boolean().optional()
 });
 
 export async function GET(request: Request) {
@@ -40,7 +41,8 @@ export async function POST(request: Request) {
   try {
     const result = await deleteImportBatch({
       batchTime: parsed.data.batchTime,
-      source: parsed.data.source
+      source: parsed.data.source,
+      matchAllSources: parsed.data.matchAllSources
     });
     return NextResponse.json(result);
   } catch (error) {

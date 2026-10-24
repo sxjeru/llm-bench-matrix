@@ -6,6 +6,7 @@ import { previewImportBatch } from "@/lib/import-batch-service";
 const previewBatchSchema = z.object({
   batchTime: z.string().min(1, "batchTime 不能为空"),
   source: z.string().nullable().optional(),
+  matchAllSources: z.boolean().optional(),
   sampleLimit: z.coerce.number().int().min(1).max(2000).optional().default(1000)
 });
 
@@ -17,6 +18,9 @@ export async function GET(request: Request) {
   const parsed = previewBatchSchema.safeParse({
     batchTime: url.searchParams.get("batchTime"),
     source: url.searchParams.get("source"),
+    matchAllSources: url.searchParams.has("matchAllSources")
+      ? url.searchParams.get("matchAllSources") === "true"
+      : undefined,
     sampleLimit: url.searchParams.get("sampleLimit") ?? undefined
   });
 
@@ -28,6 +32,7 @@ export async function GET(request: Request) {
     const preview = await previewImportBatch({
       batchTime: parsed.data.batchTime,
       source: parsed.data.source,
+      matchAllSources: parsed.data.matchAllSources,
       sampleLimit: parsed.data.sampleLimit
     });
     return NextResponse.json({ ok: true, preview });

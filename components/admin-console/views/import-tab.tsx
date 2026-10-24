@@ -951,7 +951,7 @@ export function ImportTab({
               <div>
                 可导入：{textImportPreviewMeta.total} 条，跳过：{textImportPreviewMeta.skipped} 条
                 {(skippedDuplicateRowIndices ? skippedDuplicateRowIndices.size : textImportPreviewMeta.duplicateCount) ? (
-                  <span className="ml-1 text-warning font-medium">
+                  <span className="badge badge-warning badge-sm font-semibold text-warning-content ml-1.5 align-middle shadow-xs">
                     （库内重复已忽略：{skippedDuplicateRowIndices ? skippedDuplicateRowIndices.size : textImportPreviewMeta.duplicateCount} 条）
                   </span>
                 ) : null}
@@ -1360,14 +1360,14 @@ export function ImportTab({
                                   </div>
                                   {isDuplicate ? (
                                     <div
-                                      className="flex items-center gap-1 text-[10px] font-medium text-warning"
+                                      className="flex items-center gap-1 text-[10px] font-medium text-amber-700 dark:text-amber-400"
                                       title="库内现有相同 source 已存在相同模型名、benchmark 与分数的值，默认忽略不导入"
                                     >
-                                      <span className="badge badge-warning badge-xs px-1 py-0 text-[9px] font-bold">重复</span>
+                                      <span className="badge badge-warning badge-xs px-1 py-0 text-[9px] font-bold text-warning-content">重复</span>
                                       <span>已忽略不导入</span>
                                     </div>
                                   ) : normalizedHint ? (
-                                    <div className="text-[10px] text-warning">入库校对 → {normalizedHint}</div>
+                                    <div className="text-[10px] font-medium text-amber-700 dark:text-amber-400">入库校对 → {normalizedHint}</div>
                                   ) : null}
                                 </div>
                               )}

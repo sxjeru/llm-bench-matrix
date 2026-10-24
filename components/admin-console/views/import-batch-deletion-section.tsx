@@ -96,11 +96,10 @@ export function ImportBatchDeletionSection({
     try {
       const params = new URLSearchParams({
         batchTime: selectedBatch.batchTime,
-        sampleLimit: "1000"
+        sampleLimit: "1000",
+        // 显式传入 source 参数（即使为 null/undefined 也传入空字符串），保证未标注来源的批次在预览和删除时使用相同的筛选条件
+        source: selectedBatch.source ?? ""
       });
-      if (selectedBatch.source !== null && selectedBatch.source !== undefined) {
-        params.set("source", selectedBatch.source);
-      }
 
       const res = await getJson(`/api/admin/data-maintenance/import-batches/preview?${params.toString()}`);
       if (res?.preview) {

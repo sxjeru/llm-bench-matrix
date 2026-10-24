@@ -51,6 +51,7 @@ describe("import-batches routes", () => {
 
       const response = await GET(new Request("https://example.com/api/admin/data-maintenance/import-batches?limit=10"));
       expect(response.status).toBe(200);
+      expect(listImportBatches).toHaveBeenCalledWith({ limit: 10 });
       const data = await response.json();
       expect(data.ok).toBe(true);
       expect(data.batches).toHaveLength(1);
@@ -83,9 +84,47 @@ describe("import-batches routes", () => {
         new Request("https://example.com/api/admin/data-maintenance/import-batches/preview?batchTime=2026-10-23T15:10:25.000Z&source=text:test")
       );
       expect(response.status).toBe(200);
+      expect(previewImportBatch).toHaveBeenCalledWith({
+        batchTime: "2026-10-23T15:10:25.000Z",
+        source: "text:test",
+        matchAllSources: undefined,
+        sampleLimit: 1000
+      });
       const data = await response.json();
       expect(data.ok).toBe(true);
       expect(data.preview.totalRecords).toBe(1);
+    });
+
+    test("预览未标注来源批次（显式传入空 source 参数）成功", async () => {
+      vi.mocked(previewImportBatch).mockResolvedValue({
+        batchKey: "2026-10-23T15:10:25.000Z::__EMPTY__",
+        batchTime: "2026-10-23T15:10:25.000Z",
+        displayTime: "2026-10-23 15:10:25",
+        source: null,
+        sourceLabel: "未标注",
+        totalRecords: 2,
+        modelCount: 2,
+        benchmarkCount: 2,
+        models: ["Model A", "Model B"],
+        benchmarks: ["Bench A", "Bench B"],
+        orphanSourceMetaCount: 0,
+        sampleRecords: []
+      });
+
+      const response = await GET_PREVIEW(
+        new Request("https://example.com/api/admin/data-maintenance/import-batches/preview?batchTime=2026-10-23T15:10:25.000Z&sampleLimit=1000&source=")
+      );
+      expect(response.status).toBe(200);
+      expect(previewImportBatch).toHaveBeenCalledWith({
+        batchTime: "2026-10-23T15:10:25.000Z",
+        source: "",
+        matchAllSources: undefined,
+        sampleLimit: 1000
+      });
+      const data = await response.json();
+      expect(data.ok).toBe(true);
+      expect(data.preview.totalRecords).toBe(2);
+      expect(data.preview.sourceLabel).toBe("未标注");
     });
   });
 
@@ -116,6 +155,11 @@ describe("import-batches routes", () => {
       }));
 
       expect(response.status).toBe(200);
+      expect(deleteImportBatch).toHaveBeenCalledWith({
+        batchTime: "2026-10-23T15:10:25.000Z",
+        source: "text:test",
+        matchAllSources: undefined
+      });
       const data = await response.json();
       expect(data.deleted).toBe(42);
       expect(data.prunedSourceMeta).toBe(2);
