@@ -207,7 +207,7 @@ describe("ImportBatchDeletionSection", () => {
       }
     ];
 
-    let resolveBatch1Preview!: (value: any) => void;
+    let resolveBatch1Preview!: (value: unknown) => void;
     const batch1PreviewPromise = new Promise((resolve) => {
       resolveBatch1Preview = resolve;
     });
@@ -272,6 +272,99 @@ describe("ImportBatchDeletionSection", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(screen.queryByText("待删除批次数据概览")).not.toBeInTheDocument();
     expect(screen.queryByText(/共 10 条记录/)).not.toBeInTheDocument();
+  });
+
+  describe("删除成功但服务端缓存失效失败", () => {
+    const createMockBatches = () => [
+      {
+        batchKey: "batch-cache",
+        batchTime: "2026-10-24T10:00:00.000Z",
+        displayTime: "2026-10-24 10:00:00",
+        source: "src-cache",
+        sourceLabel: "来源缓存",
+        recordCount: 15,
+        modelCount: 1,
+        benchmarkCount: 1,
+        minBenchTime: null,
+        maxBenchTime: null,
+        minCreatedAt: "2026-10-24T10:00:00.000Z",
+        maxCreatedAt: "2026-10-24T10:00:00.000Z"
+      }
+    ];
+
+    function mockApis() {
+      vi.spyOn(api, "getJson").mockImplementation(async (url: string) => {
+        if (url.includes("/api/admin/data-maintenance/import-batches?")) {
+          return { ok: true, batches: createMockBatches() };
+        }
+        return {};
+      });
+
+      vi.spyOn(api, "postJson").mockResolvedValue({
+        ok: true,
+        deleted: 15,
+        prunedSourceMeta: 2,
+        batchTime: "2026-10-24T10:00:00.000Z",
+        source: "src-cache",
+        cacheInvalidated: false,
+        warning: "批次数据已成功删除，但缓存刷新失败: Redis connection timeout"
+      });
+    }
+
+    async function deleteSelectedBatch() {
+      const user = userEvent.setup();
+
+      render(
+        <ImportBatchDeletionSection
+          notifySuccess={notifySuccess}
+          notifyError={notifyError}
+          onRefreshCaches={onRefreshCaches}
+        />
+      );
+
+      expect(await screen.findByText(/来源缓存/)).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /删除此批次/ }));
+      await user.click(screen.getByRole("button", { name: "确认删除" }));
+    }
+
+    test("先静默重试刷新缓存，重试成功时只提示删除成功，不报缓存错误", async () => {
+      mockApis();
+      onRefreshCaches.mockResolvedValue(true);
+
+      await deleteSelectedBatch();
+
+      await waitFor(() => {
+        expect(onRefreshCaches).toHaveBeenCalledWith({ silent: true });
+      });
+
+      expect(notifySuccess).toHaveBeenCalledTimes(1);
+      expect(notifySuccess).toHaveBeenCalledWith(
+        "成功删除 [2026-10-24 10:00:00] 导入批次共 15 条数据！（级联清理孤儿 source 元数据 2 项）"
+      );
+      expect(notifyError).not.toHaveBeenCalled();
+    });
+
+    test("重试仍失败时才告警，且只产生一条包含删除结果与缓存原因的提示", async () => {
+      mockApis();
+      onRefreshCaches.mockResolvedValue(false);
+
+      await deleteSelectedBatch();
+
+      await waitFor(() => {
+        expect(notifyError).toHaveBeenCalledTimes(1);
+      });
+
+      expect(notifySuccess).not.toHaveBeenCalled();
+      expect(notifyError).toHaveBeenCalledWith(
+        "批次数据已删除（15 条），但前台缓存仍未刷新",
+        [
+          "级联清理孤儿 source 元数据 2 项",
+          "批次数据已成功删除，但缓存刷新失败: Redis connection timeout",
+          "前台公开矩阵可能仍展示已删除的旧数据，请稍后在维护面板手动执行「刷新缓存」。"
+        ]
+      );
+      expect(screen.queryByText("确认删除该导入批次？")).not.toBeInTheDocument();
+    });
   });
 });
 

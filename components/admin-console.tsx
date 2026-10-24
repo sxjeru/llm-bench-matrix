@@ -2614,16 +2614,27 @@ export function AdminConsole({
     setClearDatabaseConfirmOpen(true);
   }
 
-  async function onRefreshCaches() {
-    if (isRefreshingCaches) return;
+  /**
+   * 刷新缓存，并返回是否成功。
+   * silent 为 true 时由调用方自行决定提示文案（用于“删除后补偿重试”等需要合并提示的场景）。
+   */
+  async function onRefreshCaches(options?: { silent?: boolean }): Promise<boolean> {
+    // 已有刷新任务在执行，其结果由该任务负责提示，此处不重复触发
+    if (isRefreshingCaches) return true;
 
     setIsRefreshingCaches(true);
     try {
       await postJson("/api/admin/cache/refresh", {});
-      notifySuccess("缓存已更新，前台数据会在下次请求时重新读取。");
+      if (!options?.silent) {
+        notifySuccess("缓存已更新，前台数据会在下次请求时重新读取。");
+      }
       router.refresh();
+      return true;
     } catch (error) {
-      notifyError(error instanceof Error ? error.message : "更新缓存失败");
+      if (!options?.silent) {
+        notifyError(error instanceof Error ? error.message : "更新缓存失败");
+      }
+      return false;
     } finally {
       setIsRefreshingCaches(false);
     }

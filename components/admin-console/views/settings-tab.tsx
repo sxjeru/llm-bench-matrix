@@ -29,7 +29,7 @@ type SettingsTabProps = {
   settingNote: string;
   setSettingNote: Dispatch<SetStateAction<string>>;
   onSaveSetting: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
-  onRefreshCaches: () => void | Promise<void>;
+  onRefreshCaches: (options?: { silent?: boolean }) => Promise<boolean>;
   isRefreshingCaches: boolean;
   onClearDatabase: () => void;
   sortedSettings: [string, unknown][];
@@ -129,7 +129,9 @@ export function SettingsTab({
           <button
             type="button"
             className="btn btn-primary md:w-auto"
-            onClick={onRefreshCaches}
+            onClick={() => {
+              void onRefreshCaches();
+            }}
             disabled={isRefreshingCaches}
           >
             <RefreshCw size={16} className={isRefreshingCaches ? "animate-spin" : undefined} />

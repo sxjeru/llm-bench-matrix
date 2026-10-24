@@ -15,7 +15,8 @@ import type { ImportBatchPreview, ImportBatchSummary } from "@/lib/import-batch-
 type ImportBatchDeletionSectionProps = {
   notifySuccess: (message: string, details?: string[]) => void;
   notifyError: (message: string, details?: string[]) => void;
-  onRefreshCaches: () => void | Promise<void>;
+  /** silent 为 true 时由本组件负责提示缓存刷新结果；返回 false 表示确定失败 */
+  onRefreshCaches: (options?: { silent?: boolean }) => Promise<boolean | void> | boolean | void;
 };
 
 export function ImportBatchDeletionSection({
@@ -181,17 +182,48 @@ export function ImportBatchDeletionSection({
 
       const deletedCount = res?.deleted ?? targetBatch.recordCount;
       const prunedMetaCount = res?.prunedSourceMeta ?? 0;
+      const serverCacheInvalidated = res?.cacheInvalidated !== false;
+      const serverWarning = typeof res?.warning === "string" ? res.warning : undefined;
 
-      notifySuccess(
-        `成功删除 [${targetBatch.displayTime}] 导入批次共 ${deletedCount} 条数据！${
-          prunedMetaCount > 0 ? `（级联清理孤儿 source 元数据 ${prunedMetaCount} 项）` : ""
-        }`
-      );
+      const notifyDeleted = () => {
+        notifySuccess(
+          `成功删除 [${targetBatch.displayTime}] 导入批次共 ${deletedCount} 条数据！${
+            prunedMetaCount > 0 ? `（级联清理孤儿 source 元数据 ${prunedMetaCount} 项）` : ""
+          }`
+        );
+      };
 
       setIsConfirmModalOpen(false);
       setPreview(null);
-      await loadBatches(true);
-      await onRefreshCaches();
+
+      if (serverCacheInvalidated) {
+        notifyDeleted();
+        await loadBatches(true);
+        await onRefreshCaches();
+      } else {
+        // 服务端缓存失效失败时，先静默补偿重试，避免出现“先报失败、又自动恢复”的自相矛盾提示
+        await loadBatches(true);
+
+        let cacheRecovered = false;
+        try {
+          cacheRecovered = (await onRefreshCaches({ silent: true })) !== false;
+        } catch {
+          cacheRecovered = false;
+        }
+
+        if (cacheRecovered) {
+          notifyDeleted();
+        } else {
+          const details = [
+            serverWarning ?? "服务端缓存失效失败，重试后仍未恢复。",
+            "前台公开矩阵可能仍展示已删除的旧数据，请稍后在维护面板手动执行「刷新缓存」。"
+          ];
+          if (prunedMetaCount > 0) {
+            details.unshift(`级联清理孤儿 source 元数据 ${prunedMetaCount} 项`);
+          }
+          notifyError(`批次数据已删除（${deletedCount} 条），但前台缓存仍未刷新`, details);
+        }
+      }
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "删除导入批次数据失败");
     } finally {
