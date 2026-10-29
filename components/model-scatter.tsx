@@ -474,6 +474,20 @@ export function ModelScatter({
     );
   }, [allMetrics, primaryMatrixRows]);
 
+  /**
+   * 矩阵默认视图的指标集合：关闭「含低覆盖指标」时只有这些 benchmark 参与绘制。
+   * 不能用 primaryMetricKeys —— 它为了散点常用轴补回了 Cost/Performance（alwaysKeep），
+   * 这些行即使覆盖率不足也会被当成主要指标，导致开关对它们（含默认的 AA Cost 轴）失效。
+   */
+  const defaultViewMetricKeys = useMemo(() => {
+    const rowKeys = new Set(overallMatrixRows.map((row) => row.rowKey));
+    return new Set(
+      allMetrics
+        .filter((metric) => metric.kind !== "benchmark" || rowKeys.has(metric.rowKey))
+        .map((metric) => metric.key)
+    );
+  }, [allMetrics, overallMatrixRows]);
+
   // 首帧统一水合：localStorage 提供基线，URL 参数覆盖其上，分享链接因此永远优先
   useEffect(() => {
     if (hydratedRef.current) return;
@@ -484,12 +498,12 @@ export function ModelScatter({
       ...parseScatterSearchParams(searchParams)
     };
 
-    // 恢复的轴依赖低覆盖行时（分享链接或上次停留的轴），把对应模式的记忆打开，
-    // 否则开关按默认值关闭会让该轴在校验时被回落，链接无法原样复现
+    // 恢复的轴在矩阵默认视图之外时（分享链接或上次停留的轴），把对应模式的记忆打开，
+    // 否则开关按默认值关闭会让该轴没有数据，链接无法原样复现
     const restoredKeys = [restored.xKey, restored.yKey].filter(
       (key): key is string => Boolean(key)
     );
-    if (restoredKeys.some((key) => !primaryMetricKeys.has(key))) {
+    if (restoredKeys.some((key) => !defaultViewMetricKeys.has(key))) {
       const mode = restoredKeys.includes(OVERALL_METRIC_SLUG) ? "overall" : "other";
       // 首帧水合的一次性初始化，与下方 setViewState 同属挂载期同步
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -504,10 +518,10 @@ export function ModelScatter({
     // 用 state 而非 ref 放行 URL 同步：ref 会在同一轮 effect 里就被置真，
     // 导致同步逻辑拿着尚未水合的默认状态把链接里的参数冲掉
     setIsHydrated(true);
-  }, [searchParams, primaryMetricKeys]);
+  }, [searchParams, defaultViewMetricKeys]);
 
   /**
-   * 实际参与绘制的指标：关闭「含低覆盖指标」时，非主要 benchmark 仍保留在轴里，
+   * 实际参与绘制的指标：关闭「含低覆盖指标」时，低覆盖 benchmark 仍保留在轴里，
    * 但清空取值与历史快照，让散点直接消失；重新勾选后数据恢复。
    * 轴 key 不再因开关而失效，避免用户看到「点了开关但图没变」。
    * 搜索框仍使用 allMetrics，因此「能否搜到」与「是否绘制」相互独立。
@@ -516,11 +530,11 @@ export function ModelScatter({
     if (showLowCoverageRows) return allMetrics;
 
     return allMetrics.map((metric) =>
-      metric.kind === "benchmark" && !primaryMetricKeys.has(metric.key)
+      metric.kind === "benchmark" && !defaultViewMetricKeys.has(metric.key)
         ? { ...metric, valueByModel: new Map(), historyByModel: new Map(), snapshots: [] }
         : metric
     );
-  }, [allMetrics, primaryMetricKeys, showLowCoverageRows]);
+  }, [allMetrics, defaultViewMetricKeys, showLowCoverageRows]);
 
   /** 轴下拉使用全量指标分组：搜索始终覆盖低覆盖指标，不受开关影响。 */
   const metricGroups = useMemo(() => groupScatterMetrics(allMetrics), [allMetrics]);
@@ -859,7 +873,7 @@ export function ModelScatter({
       const hiddenAxes = (["x", "y"] as const).filter((axis) => {
         const key = axis === "x" ? viewState.xKey : viewState.yKey;
         if (!key) return false;
-        return !primaryMetricKeys.has(key);
+        return !defaultViewMetricKeys.has(key);
       });
       if (hiddenAxes.length === 0) return;
 
@@ -869,7 +883,7 @@ export function ModelScatter({
         message: `已关闭低覆盖指标：${axisNames}的低覆盖数据已隐藏，重新勾选即可恢复`
       });
     },
-    [primaryMetricKeys, setNotice, setShowLowCoverageRows, viewState.xKey, viewState.yKey]
+    [defaultViewMetricKeys, setNotice, setShowLowCoverageRows, viewState.xKey, viewState.yKey]
   );
 
   const handleChangeAxis = useCallback(
@@ -888,7 +902,7 @@ export function ModelScatter({
       // 选中低覆盖指标时，不纳入低覆盖行就无法绘制：把目标模式的记忆改为开启。
       // 其余情况交给模式记忆：离开 Overall 自动恢复 other 偏好，切到 Overall 恢复 overall 偏好。
       const selectsLowCoverageMetric = Boolean(
-        metric && metric.kind !== "overall" && !primaryMetricKeys.has(metric.key)
+        metric && metric.kind !== "overall" && !defaultViewMetricKeys.has(metric.key)
       );
       if (selectsLowCoverageMetric) applyLowCoveragePref(nextMode, true);
 
@@ -902,7 +916,7 @@ export function ModelScatter({
       if (nextMode === "overall" && !nextIncludesLowCoverage) {
         const otherAxis = axis === "x" ? "y" : "x";
         const otherKey = otherAxis === "x" ? viewState.xKey : viewState.yKey;
-        if (otherKey && !primaryMetricKeys.has(otherKey)) {
+        if (otherKey && !defaultViewMetricKeys.has(otherKey)) {
           const axisName = otherAxis === "x" ? "X 轴" : "Y 轴";
           setNotice({
             type: "success",
@@ -934,9 +948,9 @@ export function ModelScatter({
     [
       allMetrics,
       applyLowCoveragePref,
+      defaultViewMetricKeys,
       lowCoveragePrefs.overall,
       lowCoveragePrefs.other,
-      primaryMetricKeys,
       setNotice,
       viewState.xKey,
       viewState.yKey
@@ -1071,7 +1085,7 @@ export function ModelScatter({
       <div className="card scatter-card">
         <ScatterControls
           metricGroups={metricGroups}
-          primaryMetricKeys={showLowCoverageRows ? undefined : primaryMetricKeys}
+          primaryMetricKeys={primaryMetricKeys}
           xMetric={xMetric}
           yMetric={yMetric}
           xSnapshot={viewState.xSnapshot}

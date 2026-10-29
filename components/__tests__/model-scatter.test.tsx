@@ -1029,7 +1029,68 @@ describe("轴选择器（可输入下拉）", () => {
     expect(container.querySelectorAll(".recharts-scatter-symbol").length).toBe(4);
   });
 
-  test("勾选时默认下拉展示全部指标，取消后只展示主要指标", async () => {
+  test("低覆盖 Cost 轴关闭开关后散点隐藏、重新勾选恢复", async () => {
+    stubScatterChartHostSize();
+
+    const lowCoverageCostRows: MatrixInputRow[] = MODEL_SPECS.map((spec, index) => ({
+      recordId: 9400 + index,
+      providerName: spec.provider,
+      providerDisplayName: spec.provider,
+      providerBrandColor: null,
+      modelName: spec.modelName,
+      benchmarkName: "AA Intelligence Index Cost per Task",
+      benchmarkType: "Cost",
+      sourceBenchmarkType: null,
+      higherIsBetter: false,
+      benchmarkCanonicalKey: "aa-intelligence-index-cost-per-task",
+      modalities: ["Text"],
+      sourceModalities: null,
+      benchTime: "2026-04-06T00:00:00.000Z",
+      // 只有 Alpha 有值 → 行覆盖率不足，属于低覆盖；Cost 又会被 alwaysKeep 补进主要指标
+      valueRaw: index === 0 ? "1.2" : "",
+      valueNum: index === 0 ? 1.2 : null,
+      valueNum2: null,
+      valueNote: null,
+      source: "text:demo",
+      updatedAt: "2026-04-06T00:00:00.000Z"
+    }));
+
+    const { container } = await renderReady(
+      <ModelScatter
+        rows={[...rows, ...lowCoverageCostRows]}
+        allRows={[...rows, ...lowCoverageCostRows]}
+        sourceOptions={["text:demo"]}
+        modelPrices={modelPrices}
+        modelParams={modelParams}
+      />
+    );
+    const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
+
+    // 该 Cost 指标因 alwaysKeep 出现在默认下拉里，选中后自动勾选
+    pickAxisOption(container, "x", "AA Intelligence Index Cost per Task");
+    expect(axisLabel(container, "x")).toBe("AA Intelligence Index Cost per Task");
+    expect(toggle.checked).toBe(true);
+    expect(container.querySelectorAll(".recharts-scatter-symbol").length).toBe(1);
+
+    // 关闭开关：它不在矩阵默认视图里，散点应清空但轴保留
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+
+    expect(toggle.checked).toBe(false);
+    expect(axisLabel(container, "x")).toBe("AA Intelligence Index Cost per Task");
+    expect(container.querySelectorAll(".recharts-scatter-symbol").length).toBe(0);
+
+    // 重新勾选恢复
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+
+    expect(toggle.checked).toBe(true);
+    expect(container.querySelectorAll(".recharts-scatter-symbol").length).toBe(1);
+  });
+
+  test("勾选开关不会改动轴下拉的默认列表", async () => {
     const { container } = await renderReady(
       <ModelScatter
         rows={[...rows, ...sparseRows]}
@@ -1044,14 +1105,9 @@ describe("轴选择器（可输入下拉）", () => {
     // 默认 Overall 视图未勾选：低覆盖指标不在默认列表
     expect(openAxisOptions(container, "y")).not.toContain("Sparse Bench");
 
-    // 勾选后默认列表放开全部指标
+    // 勾选后默认列表仍只显示主要指标，搜索才放开全部
     fireEvent.click(toggle);
     expect(toggle.checked).toBe(true);
-    expect(openAxisOptions(container, "y")).toContain("Sparse Bench");
-
-    // 取消勾选后收回
-    fireEvent.click(toggle);
-    expect(toggle.checked).toBe(false);
     expect(openAxisOptions(container, "y")).not.toContain("Sparse Bench");
 
     // 搜索始终能查到，与勾选无关
