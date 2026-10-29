@@ -11,6 +11,10 @@ import { toScatterMetric } from "@/components/model-scatter/metrics";
 import { buildScatterDataset, computeAxisDomain } from "@/components/model-scatter/dataset";
 import { buildPointProjections, computePlotArea } from "@/components/model-scatter/projection";
 import {
+  PARAMS_ROWS_IN_OVERALL_STORAGE_KEY,
+  PRICE_ROWS_IN_OVERALL_STORAGE_KEY
+} from "@/components/benchmark-matrix/constants";
+import {
   SCATTER_CHART_MARGIN,
   SCATTER_CURSOR_STROKE,
   SCATTER_DIMMED_OPACITY,
@@ -86,6 +90,31 @@ const modelParams = MODEL_SPECS.map((spec, index) => ({
   isEstimated: false,
   note: null
 }));
+
+/** 只有 Alpha 有值的低覆盖 benchmark，用于验证低覆盖行的展示与开关行为 */
+const sparseRows: MatrixInputRow[] = [
+  {
+    recordId: 9200,
+    providerName: "OpenAI",
+    providerDisplayName: "OpenAI",
+    providerBrandColor: null,
+    modelName: "Alpha",
+    benchmarkName: "Sparse Bench",
+    benchmarkType: "Reasoning",
+    sourceBenchmarkType: null,
+    higherIsBetter: true,
+    benchmarkCanonicalKey: "sparse-bench",
+    modalities: ["Text"],
+    sourceModalities: null,
+    benchTime: "2026-04-06T00:00:00.000Z",
+    valueRaw: "10",
+    valueNum: 10,
+    valueNum2: null,
+    valueNote: null,
+    source: "text:demo",
+    updatedAt: "2026-04-06T00:00:00.000Z"
+  }
+];
 
 async function renderScatter() {
   return renderReady(
@@ -625,6 +654,18 @@ describe("ModelScatter", () => {
     ) as HTMLElement | undefined;
   }
 
+  /** 悬浮指定模型的散点，从提示卡里读出 Overall Score 文本 */
+  function readOverallValue(container: HTMLElement, modelName = "Alpha"): string {
+    const symbol = findScatterSymbol(container, modelName);
+    if (!symbol) throw new Error(`未找到 ${modelName} 的散点`);
+    fireEvent.mouseEnter(symbol);
+
+    const yRow = Array.from(container.querySelectorAll(".scatter-tooltip-row")).find(
+      (row) => row.querySelector("dt")?.textContent === "Overall Score"
+    );
+    return yRow?.querySelector("dd")?.textContent?.trim() ?? "";
+  }
+
   test("Overall 始终按矩阵默认视图计算，低覆盖与 Performance 行不参与", async () => {
     stubScatterChartHostSize();
 
@@ -651,42 +692,7 @@ describe("ModelScatter", () => {
       updatedAt: "2026-04-06T00:00:00.000Z"
     }));
 
-    // 只有 Alpha 有值的低覆盖指标：默认会进入坐标轴候选，但不能混进 Overall
-    const sparseRows: MatrixInputRow[] = [
-      {
-        recordId: 9200,
-        providerName: "OpenAI",
-        providerDisplayName: "OpenAI",
-        providerBrandColor: null,
-        modelName: "Alpha",
-        benchmarkName: "Sparse Bench",
-        benchmarkType: "Reasoning",
-        sourceBenchmarkType: null,
-        higherIsBetter: true,
-        benchmarkCanonicalKey: "sparse-bench",
-        modalities: ["Text"],
-        sourceModalities: null,
-        benchTime: "2026-04-06T00:00:00.000Z",
-        valueRaw: "1",
-        valueNum: 1,
-        valueNum2: null,
-        valueNote: null,
-        source: "text:demo",
-        updatedAt: "2026-04-06T00:00:00.000Z"
-      }
-    ];
-
-    const readOverallValue = (container: HTMLElement): string => {
-      const symbol = findScatterSymbol(container, "Alpha");
-      if (!symbol) throw new Error("未找到 Alpha 的散点");
-      fireEvent.mouseEnter(symbol);
-
-      const yRow = Array.from(container.querySelectorAll(".scatter-tooltip-row")).find(
-        (row) => row.querySelector("dt")?.textContent === "Overall Score"
-      );
-      return yRow?.querySelector("dd")?.textContent?.trim() ?? "";
-    };
-
+    // 低覆盖指标默认会进入坐标轴候选，但不能混进 Overall
     const baseline = await renderScatter();
     const baselineValue = readOverallValue(baseline.container);
     baseline.unmount();
@@ -705,6 +711,23 @@ describe("ModelScatter", () => {
     // Alpha 在两个能力项上都是第一 → 100；Performance / 低覆盖行一旦参与都会把它压低
     expect(baselineValue).toBe("100");
     expect(readOverallValue(withNoise.container)).toBe(baselineValue);
+  });
+
+  test("价格与参数量不计入 Overall，无视矩阵页开关", async () => {
+    stubScatterChartHostSize();
+
+    const baseline = await renderScatter();
+    const baselineValue = readOverallValue(baseline.container);
+    baseline.unmount();
+
+    // 矩阵页 Ctrl+点击开启过「合成行计入总评」时，散点图也不应改变 Overall
+    window.localStorage.setItem(PRICE_ROWS_IN_OVERALL_STORAGE_KEY, "1");
+    window.localStorage.setItem(PARAMS_ROWS_IN_OVERALL_STORAGE_KEY, "1");
+
+    const withSharedToggles = await renderScatter();
+
+    expect(baselineValue).not.toBe("");
+    expect(readOverallValue(withSharedToggles.container)).toBe(baselineValue);
   });
 
   test("价格轴 Alt 点击只提示不支持，不钉住模型", async () => {
@@ -924,30 +947,6 @@ describe("轴选择器（可输入下拉）", () => {
   });
 
   test("低覆盖指标默认不出现在下拉里，输入搜索后才显示", async () => {
-    const sparseRows: MatrixInputRow[] = [
-      {
-        recordId: 9200,
-        providerName: "OpenAI",
-        providerDisplayName: "OpenAI",
-        providerBrandColor: null,
-        modelName: "Alpha",
-        benchmarkName: "Sparse Bench",
-        benchmarkType: "Reasoning",
-        sourceBenchmarkType: null,
-        higherIsBetter: true,
-        benchmarkCanonicalKey: "sparse-bench",
-        modalities: ["Text"],
-        sourceModalities: null,
-        benchTime: "2026-04-06T00:00:00.000Z",
-        valueRaw: "10",
-        valueNum: 10,
-        valueNum2: null,
-        valueNote: null,
-        source: "text:demo",
-        updatedAt: "2026-04-06T00:00:00.000Z"
-      }
-    ];
-
     const { container } = await renderReady(
       <ModelScatter
         rows={[...rows, ...sparseRows]}
@@ -975,6 +974,28 @@ describe("轴选择器（可输入下拉）", () => {
 
     fireEvent.change(axisInput(container, "x"), { target: { value: "" } });
     expect(toggle.checked).toBe(false);
+  });
+
+  test("关闭含低覆盖指标时提示轴已回落", async () => {
+    const { container } = await renderReady(
+      <ModelScatter
+        rows={[...rows, ...sparseRows]}
+        allRows={[...rows, ...sparseRows]}
+        sourceOptions={["text:demo"]}
+        modelPrices={modelPrices}
+        modelParams={modelParams}
+      />
+    );
+
+    pickAxisOption(container, "y", "Sparse Bench");
+    expect(axisLabel(container, "y")).toBe("Sparse Bench");
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("checkbox", { name: /含低覆盖指标/ }));
+    });
+
+    expect(screen.getByText(/已关闭低覆盖指标/)).toBeInTheDocument();
+    expect(axisLabel(container, "y")).not.toBe("Sparse Bench");
   });
 });
 

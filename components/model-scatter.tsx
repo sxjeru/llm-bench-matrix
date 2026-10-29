@@ -8,8 +8,6 @@ import {
   EMPTY_MODEL_PRICES,
   EMPTY_SOURCE_OPTIONS,
   EXPORT_PRESET_MAP,
-  PARAMS_ROWS_IN_OVERALL_STORAGE_KEY,
-  PRICE_ROWS_IN_OVERALL_STORAGE_KEY,
   SOURCE_ALL
 } from "@/components/benchmark-matrix/constants";
 import { canEncodeCanvasMimeType } from "@/components/benchmark-matrix/export-image";
@@ -85,14 +83,6 @@ import type {
 /** 散点图不做重复行拆分：合并同名 benchmark 才能得到干净的轴列表。 */
 const SHOW_DUPLICATE_ROWS = false;
 
-function readStoredBoolean(storageKey: string): boolean {
-  try {
-    return window.localStorage.getItem(storageKey) === "1";
-  } catch {
-    return false;
-  }
-}
-
 export function ModelScatter({
   rows,
   allRows: allRowsProp,
@@ -135,9 +125,6 @@ export function ModelScatter({
   const [syncedDatasetPoints, setSyncedDatasetPoints] = useState<
     readonly { modelName: string; providerName: string }[]
   >([]);
-  // 与矩阵页共用的「合成行是否计入总评」开关，保证两页 Overall Score 对得上
-  const [priceRowsInOverall, setPriceRowsInOverall] = useState(false);
-  const [paramsRowsInOverall, setParamsRowsInOverall] = useState(false);
 
   const hydratedRef = useRef(false);
   const searchParamsRef = useRef(searchParams);
@@ -159,8 +146,6 @@ export function ModelScatter({
       ...loadScatterPreferences(),
       ...parseScatterSearchParams(searchParams)
     }));
-    setPriceRowsInOverall(readStoredBoolean(PRICE_ROWS_IN_OVERALL_STORAGE_KEY));
-    setParamsRowsInOverall(readStoredBoolean(PARAMS_ROWS_IN_OVERALL_STORAGE_KEY));
 
     // 用 state 而非 ref 放行 URL 同步：ref 会在同一轮 effect 里就被置真，
     // 导致同步逻辑拿着尚未水合的默认状态把链接里的参数冲掉
@@ -428,19 +413,14 @@ export function ModelScatter({
     [releaseDateMatrixRow, paramsMatrixRows]
   );
 
-  // 与矩阵页 summaryMatrixRows 同一条组装规则：总评只吃矩阵默认视图那批行
-  const summaryMatrixRows = useMemo(
-    () => [
-      ...(paramsRowsInOverall ? paramsMatrixRows : []),
-      ...(priceRowsInOverall ? priceMatrixRows : []),
-      ...overallMatrixRows
-    ],
-    [paramsRowsInOverall, paramsMatrixRows, priceRowsInOverall, priceMatrixRows, overallMatrixRows]
-  );
-
+  /**
+   * Overall 只吃矩阵默认视图的 benchmark 行：价格与参数量不计入。
+   * 成本维度已由 AA 的 Cost 类指标覆盖，无需再叠一层合成行，
+   * 这样也不再受矩阵页「合成行是否计入总评」开关影响。
+   */
   const overallSummaryByModel = useMemo(
-    () => buildOverallSummaryByModel(summaryMatrixRows, baseModelColumns),
-    [summaryMatrixRows, baseModelColumns]
+    () => buildOverallSummaryByModel(overallMatrixRows, baseModelColumns),
+    [overallMatrixRows, baseModelColumns]
   );
 
   const overallScoreByModel = useMemo(() => {
@@ -801,6 +781,31 @@ export function ModelScatter({
     return () => window.clearTimeout(timer);
   }, [notice, setNotice]);
 
+  /**
+   * 关闭「含低覆盖指标」时，若当前轴依赖低覆盖行，轴会在 metrics 收缩后
+   * 被回落逻辑换成默认指标。这里提前给出提示，避免坐标轴悄然变化。
+   */
+  const handleToggleLowCoverageRows = useCallback(
+    (next: boolean) => {
+      setShowLowCoverageRows(next);
+      if (next) return;
+
+      const droppedAxes = (["x", "y"] as const).filter((axis) => {
+        const key = axis === "x" ? viewState.xKey : viewState.yKey;
+        if (!key) return false;
+        return !primaryMetricKeys.has(key);
+      });
+      if (droppedAxes.length === 0) return;
+
+      const axisNames = droppedAxes.map((axis) => (axis === "x" ? "X 轴" : "Y 轴")).join("、");
+      setNotice({
+        type: "success",
+        message: `已关闭低覆盖指标：${axisNames} 的低覆盖指标已回落到默认轴`
+      });
+    },
+    [primaryMetricKeys, setNotice, viewState.xKey, viewState.yKey]
+  );
+
   const handleChangeAxis = useCallback(
     (axis: "x" | "y", key: string, snapshotId?: string | null) => {
       const metric = findScatterMetric(metrics, key);
@@ -1158,7 +1163,7 @@ export function ModelScatter({
                 type="checkbox"
                 className="checkbox checkbox-xs"
                 checked={showLowCoverageRows}
-                onChange={(event) => setShowLowCoverageRows(event.target.checked)}
+                onChange={(event) => handleToggleLowCoverageRows(event.target.checked)}
               />
               含低覆盖指标
             </label>

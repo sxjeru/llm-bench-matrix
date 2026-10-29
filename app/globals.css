@@ -1147,9 +1147,14 @@ input.heatmap-alpha-range::-moz-range-track {
 }
 
 .scatter-combobox-hint {
-  margin-top: 4px;
-  padding: 8px 9px 4px;
+  /* 列表超过 max-height 时固定在底部，保证用户始终看得到「可搜索全部指标」 */
+  position: sticky;
+  bottom: -4px;
+  z-index: 1;
+  margin: 4px -4px -4px;
+  padding: 8px 13px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(13, 20, 37, 0.98);
   font-size: 11px;
   color: var(--subtext);
   text-align: center;
