@@ -401,6 +401,33 @@ describe("AA 三大指数主要变动自适应与版本合并", () => {
     expect(oldTooltip?.textContent).toContain("65");
   }, 15000);
 
+  test("UI 渲染: AA 指数行首展示版本 chip，表格上方展示版本图例", async () => {
+    const rows: MatrixInputRow[] = [];
+    let id = 1;
+
+    for (let i = 0; i < 10; i += 1) {
+      rows.push(makeRow(`m_0806_${i}`, benchmark, "60", 60, "2026-08-06T00:00:00.000Z", id++));
+    }
+    for (let i = 0; i < 5; i += 1) {
+      rows.push(makeRow(`m_v5_${i}`, benchmark, "85", 85, "2026-10-28T08:00:00.000Z", id++));
+    }
+
+    const { container } = await renderReady(
+      <BenchmarkMatrix rows={[...rows]} allRows={[...rows]} />
+    );
+
+    const rowChip = container.querySelector("td .matrix-version-chip");
+    expect(rowChip).not.toBeNull();
+    expect(rowChip?.textContent?.trim()).toBe("v5");
+
+    const legend = container.querySelector(".matrix-version-legend");
+    expect(legend).not.toBeNull();
+    expect(legend?.textContent).toContain("数据版本");
+    expect(legend?.textContent).toContain("AA Intelligence Index");
+    expect(legend?.textContent).toContain("v5");
+    expect(legend?.textContent).toContain("跨版本分数不可直接比较");
+  }, 15000);
+
   test("问题 1: 模型筛选只选两个模型时，不会误把单模型补丁当成主要变动，保留完整版本判定", () => {
     const allRows: MatrixInputRow[] = [];
     let id = 1;

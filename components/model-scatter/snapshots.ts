@@ -174,7 +174,8 @@ export function extractMetricSnapshots(
       isLatest,
       isBatchSnapshot: modelCount >= 3 || (totalModels > 0 && modelCount / totalModels >= 0.25),
       isMajorRevision,
-      version: meta.group.version ?? null,
+      // 只有主要变动的组长才代表一个完整版本；补丁批次不继承组版本，避免误标为全量快照
+      version: isMajorRevision ? meta.group.version ?? null : null,
       sampleByModel
     };
   });

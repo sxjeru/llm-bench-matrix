@@ -442,8 +442,8 @@ export function MetricCombobox({
                         {isSelected ? (
                           <span className="scatter-combobox-badge-new">当前</span>
                         ) : null}
-                        {snapshot.version ? (
-                          <span className="scatter-combobox-badge-count font-mono font-medium text-sky-400">
+                        {snapshot.isMajorRevision && snapshot.version ? (
+                          <span className="scatter-combobox-badge-version">
                             {snapshot.version}
                           </span>
                         ) : null}

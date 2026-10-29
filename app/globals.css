@@ -1407,6 +1407,75 @@ input.heatmap-alpha-range::-moz-range-track {
   flex-shrink: 0;
 }
 
+/* 版本标识统一使用项目 primary 色，避免散落硬编码 sky-400 */
+.scatter-combobox-badge-version {
+  display: inline-flex;
+  align-items: center;
+  font-size: 9.5px;
+  line-height: 1;
+  padding: 1.5px 4.5px;
+  border-radius: 3.5px;
+  background: rgba(93, 167, 255, 0.14);
+  border: 1px solid rgba(93, 167, 255, 0.34);
+  color: #9ecbff;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* 矩阵行首的版本 chip：窄列只占 ~28px，名称仍由省略号截断 */
+.matrix-version-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 16px;
+  min-width: 22px;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid rgba(93, 167, 255, 0.34);
+  background: rgba(93, 167, 255, 0.14);
+  color: #9ecbff;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* 表格上方的版本图例 */
+.matrix-version-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 6px;
+  font-size: 11px;
+  color: var(--subtext);
+}
+
+.matrix-version-legend-label {
+  font-weight: 600;
+  color: var(--text);
+  opacity: 0.82;
+}
+
+.matrix-version-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.matrix-version-legend-name {
+  opacity: 0.75;
+}
+
+.matrix-version-legend-note {
+  opacity: 0.55;
+}
+
 .scatter-combobox-badge-overlay {
   display: inline-flex;
   align-items: center;

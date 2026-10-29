@@ -193,6 +193,8 @@ describe("extractMetricSnapshots", () => {
     // 10-24 快照模型数仅 4 个且同属于旧版本，未被作为主要变动
     const snap1024 = snapshots.find((s) => s.label === "2026-10-24");
     expect(snap1024?.isMajorRevision).toBe(false);
+    // 补丁批次不继承 group 版本，避免在菜单里被误标为 v5 全量快照
+    expect(snap1024?.version ?? null).toBeNull();
   });
 
   test("非 AA 指标不会被 AA 版本切分点误标为 v5 主要变动", () => {
