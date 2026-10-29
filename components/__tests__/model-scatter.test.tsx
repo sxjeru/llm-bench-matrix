@@ -972,6 +972,92 @@ describe("轴选择器（可输入下拉）", () => {
     expect(openAxisOptions(container, "y", "sparse")).toContain("Sparse Bench");
   });
 
+  test("开关控制只在低覆盖行出现的模型是否进入散点图", async () => {
+    stubScatterChartHostSize();
+
+    // Epsilon 只有低覆盖的 Sparse Bench 成绩，但有价格与参数量
+    const epsilonRows: MatrixInputRow[] = [
+      {
+        ...sparseRows[0],
+        recordId: 9300,
+        modelName: "Epsilon",
+        providerName: "OpenAI",
+        providerDisplayName: "OpenAI"
+      }
+    ];
+    const epsilonPrice = {
+      modelId: 99,
+      modelName: "Epsilon",
+      inputCost: 1,
+      outputCost: 2,
+      cacheReadCost: null,
+      lastSyncedAt: null,
+      updatedAt: null
+    };
+    const epsilonParams = {
+      modelId: 99,
+      modelName: "Epsilon",
+      totalParamsB: 500,
+      activatedParamsB: null,
+      isEstimated: false,
+      note: null
+    };
+
+    mockSearchParams = new URLSearchParams("x=price-output&y=params");
+
+    const { container } = await renderReady(
+      <ModelScatter
+        rows={[...rows, ...sparseRows, ...epsilonRows]}
+        allRows={[...rows, ...sparseRows, ...epsilonRows]}
+        sourceOptions={["text:demo"]}
+        modelPrices={[...modelPrices, epsilonPrice]}
+        modelParams={[...modelParams, epsilonParams]}
+      />
+    );
+    const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
+
+    // 非 Overall 视图默认勾选：Epsilon 进入价格 × 参数量图
+    expect(toggle.checked).toBe(true);
+    expect(container.querySelectorAll(".recharts-scatter-symbol").length).toBe(5);
+
+    // 取消勾选：只在低覆盖行出现的模型被裁掉
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+
+    expect(toggle.checked).toBe(false);
+    expect(container.querySelectorAll(".recharts-scatter-symbol").length).toBe(4);
+  });
+
+  test("勾选时默认下拉展示全部指标，取消后只展示主要指标", async () => {
+    const { container } = await renderReady(
+      <ModelScatter
+        rows={[...rows, ...sparseRows]}
+        allRows={[...rows, ...sparseRows]}
+        sourceOptions={["text:demo"]}
+        modelPrices={modelPrices}
+        modelParams={modelParams}
+      />
+    );
+    const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
+
+    // 默认 Overall 视图未勾选：低覆盖指标不在默认列表
+    expect(openAxisOptions(container, "y")).not.toContain("Sparse Bench");
+
+    // 勾选后默认列表放开全部指标
+    fireEvent.click(toggle);
+    expect(toggle.checked).toBe(true);
+    expect(openAxisOptions(container, "y")).toContain("Sparse Bench");
+
+    // 取消勾选后收回
+    fireEvent.click(toggle);
+    expect(toggle.checked).toBe(false);
+    expect(openAxisOptions(container, "y")).not.toContain("Sparse Bench");
+
+    // 搜索始终能查到，与勾选无关
+    expect(openAxisOptions(container, "y", "sparse")).toContain("Sparse Bench");
+  });
+
   test("输入搜索不会改动低覆盖开关", async () => {
     const { container } = await renderScatter();
     const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;

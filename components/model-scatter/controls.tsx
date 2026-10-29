@@ -28,8 +28,8 @@ import type {
 
 type ScatterControlsProps = {
   metricGroups: ScatterMetricGroup[];
-  /** 未输入搜索词时默认展示的主要指标 key */
-  primaryMetricKeys: ReadonlySet<string>;
+  /** 未输入搜索词时默认展示的主要指标 key；缺省时展示全部指标 */
+  primaryMetricKeys?: ReadonlySet<string>;
   xMetric: ScatterMetric | null;
   yMetric: ScatterMetric | null;
   xSnapshot?: string | null;
@@ -96,7 +96,7 @@ function AxisSelect({
   axis: "x" | "y";
   metric: ScatterMetric | null;
   metricGroups: ScatterMetricGroup[];
-  primaryMetricKeys: ReadonlySet<string>;
+  primaryMetricKeys?: ReadonlySet<string>;
   scale: ScatterAxisScale;
   selectedSnapshotId?: string | null;
   overlaySnapshotId?: string | null;

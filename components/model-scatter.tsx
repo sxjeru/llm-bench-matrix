@@ -1071,7 +1071,7 @@ export function ModelScatter({
       <div className="card scatter-card">
         <ScatterControls
           metricGroups={metricGroups}
-          primaryMetricKeys={primaryMetricKeys}
+          primaryMetricKeys={showLowCoverageRows ? undefined : primaryMetricKeys}
           xMetric={xMetric}
           yMetric={yMetric}
           xSnapshot={viewState.xSnapshot}
@@ -1268,7 +1268,7 @@ export function ModelScatter({
           {activeSource === SOURCE_ALL ? (
             <label
               className="scatter-note scatter-note-toggle"
-              title="控制坐标轴与模型列是否包含低覆盖 benchmark；Overall 与其他指标分别记忆开关状态，Overall 始终按矩阵默认视图计算"
+              title="控制低覆盖 benchmark 是否纳入坐标轴与模型列；Overall 与其他指标分别记忆开关状态，当前轴不含低覆盖指标时散点不变"
             >
               <input
                 type="checkbox"
