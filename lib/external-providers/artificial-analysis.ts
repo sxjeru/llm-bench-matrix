@@ -4,6 +4,7 @@ import {
   invalidateTimedCacheStore,
   withTimedCache
 } from "@/lib/server-cache";
+import { findAaVersionSeed, type AaVersionCutoff } from "@/lib/aa-index-version";
 import {
   getReasoningEffortRank,
   parseModelReasoningEffort,
@@ -1040,9 +1041,24 @@ export type MetricOverride = {
   valueScale?: MetricValueScale;
 };
 
+export type IntelligenceIndexVersionCutoff = {
+  version: number;
+  effectiveFrom: string;
+  note?: string;
+  /**
+   * 这条生效时间的来源：
+   * - manual：人工回溯，永不被自动流程覆盖；
+   * - seed：来自代码里的冷启动种子（如 v5 @ 2026-10-28）；
+   * - inferred：导入时推断（首次观测到该版本的时间），只允许往早里修正。
+   */
+  source?: "manual" | "seed" | "inferred";
+};
+
 export type ArtificialAnalysisImportConfig = {
   selectedMetrics: string[];
   metricOverrides: Record<string, MetricOverride>;
+  intelligenceIndexVersion?: number | null;
+  intelligenceIndexVersionHistory?: IntelligenceIndexVersionCutoff[];
   lastImportedAt?: string;
 };
 
@@ -1050,6 +1066,21 @@ export const EMPTY_IMPORT_CONFIG: ArtificialAnalysisImportConfig = {
   selectedMetrics: [],
   metricOverrides: {}
 };
+
+/**
+ * 版本号兼容 number 与字符串（`5` / `"5"` / `"v5"`）。
+ *
+ * 上游一直返回 number，但对外契约并不保证；之前只认 number，遇到字符串会静默
+ * 丢成 null，整批数据因此不带版本标记。
+ */
+function coerceIndexVersion(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value.trim().replace(/^v/i, ""));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
 
 /** settings 里存的是任意 JSON，读出来要先收窄 */
 export function normalizeImportConfig(raw: unknown): ArtificialAnalysisImportConfig {
@@ -1097,9 +1128,33 @@ export function normalizeImportConfig(raw: unknown): ArtificialAnalysisImportCon
     }
   }
 
+  const intelligenceIndexVersion = coerceIndexVersion(source.intelligenceIndexVersion);
+
+  const rawHistory = source.intelligenceIndexVersionHistory;
+  const intelligenceIndexVersionHistory: IntelligenceIndexVersionCutoff[] = [];
+  if (Array.isArray(rawHistory)) {
+    rawHistory.forEach((item) => {
+      if (!item || typeof item !== "object") return;
+      const obj = item as Record<string, unknown>;
+      const version = coerceIndexVersion(obj.version);
+      if (version === null || typeof obj.effectiveFrom !== "string") return;
+      intelligenceIndexVersionHistory.push({
+        version,
+        effectiveFrom: obj.effectiveFrom,
+        ...(typeof obj.note === "string" && obj.note.trim() ? { note: obj.note.trim() } : {}),
+        ...(obj.source === "manual" || obj.source === "seed" || obj.source === "inferred"
+          ? { source: obj.source }
+          : {})
+      });
+    });
+  }
+
   return {
     selectedMetrics,
     metricOverrides,
+    intelligenceIndexVersion,
+    intelligenceIndexVersionHistory:
+      intelligenceIndexVersionHistory.length > 0 ? intelligenceIndexVersionHistory : undefined,
     lastImportedAt: typeof source.lastImportedAt === "string" ? source.lastImportedAt : undefined
   };
 }
@@ -1115,6 +1170,9 @@ export type ExternalImportRow = {
   modalities: string[];
   unit: string;
   rawValue: string;
+  valueNote?: string | null;
+  /** 该行分数所属的指数版本（如 "v5"），只有会随版本重标定的指标才有 */
+  indexVersion?: string | null;
   source: string;
   sourceModelId: string | null;
   sourceBenchmarkId: string;
@@ -1127,7 +1185,86 @@ export type BuildImportRowsInput = {
   /** 只有 matched / manual 的映射会产出行 */
   matches: ModelMatchResult[];
   localModelsById: Map<number, { modelName: string; providerName: string }>;
+  intelligenceIndexVersion?: number | null;
 };
+
+/**
+ * 把版本历史投影为时间切分点，供前端版本判定与导入时的既有行版本识别共用。
+ *
+ * 没有可信切分点时返回空数组（历史缺失、为空或日期非法），调用方应视为「不知道
+ * 版本时间轴」并略过该配置，让冷启动种子接管，而不是把它当成「明确不做版本切分」。
+ */
+export function toAaVersionCutoffs(
+  history: readonly IntelligenceIndexVersionCutoff[] | undefined
+): AaVersionCutoff[] {
+  const cutoffs: AaVersionCutoff[] = [];
+  history?.forEach((item) => {
+    const timestampMs = new Date(item.effectiveFrom).getTime();
+    if (!Number.isFinite(timestampMs)) return;
+    cutoffs.push({
+      version: `v${item.version}`,
+      timestampMs,
+      benchmarkName: "AA Intelligence Index",
+      note: item.note
+    });
+  });
+  return cutoffs;
+}
+
+/**
+ * 把「本次导入观测到的版本」合并进版本历史。
+ *
+ * 两条关键规则：
+ * 1. 首次观测时间 ≠ 版本生效时间：有种子（如 v5@2026-10-28）时取更早的那个，
+ *    否则整个切换前的数据区间都会被判成上一代；
+ * 2. 自动推断只能往早里修，人工回溯点（source: "manual"）永不覆盖。
+ */
+export function mergeIntelligenceIndexVersionHistory(
+  history: readonly IntelligenceIndexVersionCutoff[],
+  currentVersion: number | null | undefined,
+  observedAt: string
+): { history: IntelligenceIndexVersionCutoff[]; changed: boolean } {
+  const next = history.map((item) => ({ ...item }));
+  if (currentVersion === null || currentVersion === undefined) {
+    return { history: next, changed: false };
+  }
+
+  const seed = findAaVersionSeed(currentVersion);
+  const observedMs = new Date(observedAt).getTime();
+  const effectiveMs = Number.isFinite(observedMs)
+    ? seed
+      ? Math.min(seed.timestampMs, observedMs)
+      : observedMs
+    : seed?.timestampMs ?? Number.NaN;
+
+  if (!Number.isFinite(effectiveMs)) {
+    return { history: next, changed: false };
+  }
+  const effectiveFrom = new Date(effectiveMs).toISOString();
+
+  const existing = next.find((item) => item.version === currentVersion);
+  if (!existing) {
+    next.push({
+      version: currentVersion,
+      effectiveFrom,
+      note: `Intelligence Index v${currentVersion}`,
+      source: "inferred"
+    });
+    return { history: next, changed: true };
+  }
+
+  if (existing.source === "manual") {
+    return { history: next, changed: false };
+  }
+
+  const existingMs = new Date(existing.effectiveFrom).getTime();
+  if (!Number.isFinite(existingMs) || effectiveMs >= existingMs) {
+    return { history: next, changed: false };
+  }
+
+  existing.effectiveFrom = effectiveFrom;
+  return { history: next, changed: true };
+}
 
 export function buildImportRows(input: BuildImportRowsInput): ExternalImportRow[] {
   const upstreamById = new Map(input.upstreamModels.map((model) => [model.id, model]));
@@ -1151,6 +1288,20 @@ export function buildImportRows(input: BuildImportRowsInput): ExternalImportRow[
       const override = input.config.metricOverrides[metricKey] ?? {};
       const valueScale = override.valueScale ?? entry.valueScale;
 
+      // 版本只对会随 Intelligence Index 重标定的指标有意义，
+      // 逐项 benchmark（GPQA、MMLU-Pro 等）的分数不因版本变化而变化。
+      const isIntelligenceIndex =
+        metricKey === "evaluations.artificial_analysis_intelligence_index" ||
+        override.benchmarkName === "AA Intelligence Index" ||
+        entry.label === "AA Intelligence Index";
+      const indexVersion =
+        isIntelligenceIndex
+        && input.intelligenceIndexVersion !== null
+        && input.intelligenceIndexVersion !== undefined
+          ? `v${input.intelligenceIndexVersion}`
+          : null;
+      const valueNote: string | null = indexVersion;
+
       rows.push({
         rowNumber: rows.length + 1,
         providerName: local.providerName,
@@ -1162,6 +1313,8 @@ export function buildImportRows(input: BuildImportRowsInput): ExternalImportRow[
         modalities: override.modalities ?? entry.modalities,
         unit: entry.unit,
         rawValue: formatMetricValue(value, valueScale),
+        valueNote,
+        indexVersion,
         source: ARTIFICIAL_ANALYSIS_SOURCE_LABEL,
         sourceModelId: match.externalModelId,
         sourceBenchmarkId: metricKey

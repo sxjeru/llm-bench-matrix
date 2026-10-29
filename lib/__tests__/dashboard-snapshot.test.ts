@@ -125,6 +125,48 @@ describe("loadPublicDashboardSnapshot", () => {
     expect(getCacheVersion).toHaveBeenCalledWith("settings");
   });
 
+  test("把 AA 导入配置里的版本历史投影为前端切分点，并过滤非法时间", async () => {
+    vi.mocked(getSettings).mockResolvedValueOnce({
+      "external_import:artificial-analysis": {
+        selectedMetrics: [],
+        metricOverrides: {},
+        intelligenceIndexVersion: 5,
+        intelligenceIndexVersionHistory: [
+          { version: 5, effectiveFrom: "2026-10-28T00:00:00.000Z", note: "v5" },
+          { version: 6, effectiveFrom: "not-a-date" }
+        ]
+      }
+    });
+
+    const snapshot = await loadPublicDashboardSnapshot();
+
+    expect(snapshot.aaVersionCutoffs).toEqual([
+      {
+        version: "v5",
+        timestampMs: Date.parse("2026-10-28T00:00:00.000Z"),
+        benchmarkName: "AA Intelligence Index",
+        note: "v5"
+      }
+    ]);
+  });
+
+  test("AA 配置存在但没有版本历史时不下发该字段，老配置仍用冷启动种子", async () => {
+    vi.mocked(getSettings).mockResolvedValueOnce({
+      "external_import:artificial-analysis": { selectedMetrics: [], metricOverrides: {} }
+    });
+
+    const snapshot = await loadPublicDashboardSnapshot();
+
+    // 没有历史不是「明确关闭版本切分」：字段缺省才会退回冷启动种子
+    expect(snapshot.aaVersionCutoffs).toBeUndefined();
+  });
+
+  test("settings 里没有 AA 配置时不下发该字段，前端退回冷启动种子", async () => {
+    const snapshot = await loadPublicDashboardSnapshot();
+
+    expect(snapshot.aaVersionCutoffs).toBeUndefined();
+  });
+
   test("调用方传入 versions 时不再探测缓存版本", async () => {
     await loadPublicDashboardSnapshot({
       dashboard: "forced-dashboard",

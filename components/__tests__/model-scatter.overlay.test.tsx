@@ -260,6 +260,52 @@ describe("MetricCombobox with Snapshots & Submenu", () => {
     vi.useRealTimers();
   });
 
+  test("主要变动合并了后续补丁模型时，模型数展示为 39+1", () => {
+    vi.useFakeTimers();
+
+    const metricWithMergedPatch: ScatterMetric = {
+      ...metricWithSnapshots,
+      snapshots: [
+        {
+          id: "2026-10-28T08:00:00.000Z",
+          timestamp: new Date("2026-10-28T08:00:00.000Z").getTime(),
+          label: "2026-10-28",
+          modelCount: 39,
+          mergedModelCount: 1,
+          isLatest: false,
+          isBatchSnapshot: true,
+          isMajorRevision: true,
+          version: "v5"
+        },
+        ...metricWithSnapshots.snapshots
+      ]
+    };
+
+    const { container } = render(
+      <MetricCombobox
+        id="test-combobox"
+        axisName="Y 轴"
+        metric={metricWithMergedPatch}
+        metricGroups={[{ category: "Overall", metrics: [metricWithMergedPatch] }]}
+        onChange={vi.fn()}
+      />
+    );
+
+    const input = container.querySelector("input")!;
+    fireEvent.focus(input);
+    fireEvent.mouseEnter(container.querySelector(".scatter-combobox-option")!);
+
+    act(() => {
+      vi.advanceTimersByTime(150);
+    });
+
+    const items = document.querySelectorAll(".scatter-combobox-submenu-item");
+    // items[0] 是最新数据，items[1] 是主要变动 2026-10-28
+    expect(items[1]?.textContent).toContain("39+1 模型");
+
+    vi.useRealTimers();
+  });
+
   test("仅在被选中的快照项或默认最新项上展示「当前」tag，无「当前主选」", async () => {
     vi.useFakeTimers();
 

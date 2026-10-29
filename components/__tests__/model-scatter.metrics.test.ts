@@ -8,8 +8,7 @@ import {
   PRICE_CATEGORY_LABEL,
   PRICE_INPUT_ROW_KEY,
   PRICE_OUTPUT_ROW_KEY,
-  RELEASE_DATE_ROW_KEY,
-  SOURCE_ALL
+  RELEASE_DATE_ROW_KEY
 } from "@/components/benchmark-matrix/constants";
 import {
   buildParamsMatrixRows,
@@ -22,12 +21,13 @@ import {
   hasPublicModelPriceCost,
   hasPublicModelPriceData,
   type MatrixCell,
+  type MatrixCellEntry,
   type MatrixRow
 } from "@/components/benchmark-matrix/types";
+import type { LatestAaRevisionResolution } from "@/lib/aa-index-revisions";
 import {
   buildScatterMetrics,
   describeMetricDirection,
-  filterMatrixRowsForScatterOverall,
   findScatterMetric,
   formatScatterAxisTick,
   formatScatterDate,
@@ -297,36 +297,47 @@ describe("toScatterMetric", () => {
       ).category
     ).toBe("Knowledge");
   });
-});
 
-describe("filterMatrixRowsForScatterOverall", () => {
-  const codingRow = createBenchmarkRow(
-    { rowKey: "merged::coding", benchmark: "Bench-One", category: "Coding" },
-    { Alpha: 90 }
-  );
-  const costRow = createBenchmarkRow(
-    {
-      rowKey: "merged::cost-per-task",
-      benchmark: "AA Intelligence Index Cost per Task",
-      category: "Cost",
-      higherIsBetter: false
-    },
-    { Alpha: 0.4 }
-  );
+  test("AA 指标取值以最新主要变动为准，不受低覆盖裁剪掉的 cells 影响", () => {
+    // 关闭「含低覆盖指标」时，新模型的普通行会被覆盖率裁剪，只剩 Cost/Performance 这类
+    // alwaysKeep 行：模型仍在模型列里，cells 却没有 AA 格子。若这里再按 cells 过滤，
+    // 默认「最新数据」就会比「主要变动」快照（直接用 entryByModel）少点。
+    const makeEntry = (recordId: number, valueNum: number): MatrixCellEntry => ({
+      recordId,
+      valueRaw: String(valueNum),
+      valueNum,
+      valueNum2: null,
+      valueNote: null,
+      source: "test",
+      benchTime: "2026-10-28T08:00:00.000Z"
+    });
 
-  test("All 且未勾选低覆盖时剔除 Cost 分类", () => {
-    const filtered = filterMatrixRowsForScatterOverall([codingRow, costRow], false, SOURCE_ALL);
-    expect(filtered.map((row) => row.category)).toEqual(["Coding"]);
-  });
+    const aaRevision: LatestAaRevisionResolution = {
+      latestEntriesByModel: new Map<string, MatrixCellEntry>([
+        ["Alpha", makeEntry(1, 80)],
+        ["NewModel", makeEntry(2, 85)]
+      ]),
+      batches: [],
+      groups: [],
+      adaptiveThreshold: 3,
+      latestVersion: "v5"
+    };
 
-  test("勾选含低覆盖指标后保留 Cost", () => {
-    const filtered = filterMatrixRowsForScatterOverall([codingRow, costRow], true, SOURCE_ALL);
-    expect(filtered.some((row) => row.category === "Cost")).toBe(true);
-  });
+    const metric = toScatterMetric(
+      createBenchmarkRow(
+        {
+          rowKey: "merged::aaintelligenceindex",
+          benchmark: "AA Intelligence Index",
+          category: "Overall",
+          aaRevision
+        },
+        { Alpha: 80 }
+      )
+    );
 
-  test("非 All 来源时不剔除 Cost", () => {
-    const filtered = filterMatrixRowsForScatterOverall([codingRow, costRow], false, "text:demo");
-    expect(filtered.some((row) => row.category === "Cost")).toBe(true);
+    expect(metric.valueByModel.get("Alpha")).toBe(80);
+    // NewModel 的 AA 行被覆盖率裁剪掉了（cells 里没有），但它属于最新主要变动
+    expect(metric.valueByModel.get("NewModel")).toBe(85);
   });
 });
 

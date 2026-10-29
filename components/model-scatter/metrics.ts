@@ -1,8 +1,7 @@
 import {
   OVERALL_ROW_KEY,
   PARAMS_ACTIVE_RATIO_ROW_KEY,
-  RELEASE_DATE_ROW_KEY,
-  SOURCE_ALL
+  RELEASE_DATE_ROW_KEY
 } from "@/components/benchmark-matrix/constants";
 import {
   formatParamsBillions,
@@ -24,7 +23,8 @@ import {
 import { isArtificialAnalysisSource } from "@/lib/source-utils";
 import {
   isAaMajorIndexBenchmark,
-  resolveLatestAaRevisionValues
+  resolveLatestAaRevisionValues,
+  type AaVersionCutoff
 } from "@/lib/aa-index-revisions";
 import { extractMetricSnapshots } from "./snapshots";
 import type { MatrixCell, MatrixCellEntry } from "@/components/benchmark-matrix/types";
@@ -101,8 +101,13 @@ function buildValueByModel(row: MatrixRow): Map<string, number> {
   const valueByModel = new Map<string, number>();
 
   if (row.aaRevision) {
+    // 取值集合以「最新主要变动」为准，不能再按 cells 过滤一次：
+    // 关掉「含低覆盖指标」时，覆盖率裁剪会把新模型的普通行整体裁掉，
+    // 只留下 Cost/Performance 这类 alwaysKeep 行，于是这些模型仍出现在模型列里，
+    // 却没有 AA 格子 —— 默认视图因此比「主要变动」快照（直接用 entryByModel）少点。
+    // 是否绘制仍由 modelNames（当前可见模型列）把关，不会画出筛选外的模型。
     row.aaRevision.latestEntriesByModel.forEach((entry, modelName) => {
-      if (row.cells.has(modelName) && entry.valueNum !== null && Number.isFinite(entry.valueNum)) {
+      if (entry.valueNum !== null && Number.isFinite(entry.valueNum)) {
         valueByModel.set(modelName, entry.valueNum);
       }
     });
@@ -208,11 +213,19 @@ function checkIsArtificialAnalysis(row: MatrixRow): boolean {
   return false;
 }
 
-export function toScatterMetric(row: MatrixRow): ScatterMetric {
+export function toScatterMetric(
+  row: MatrixRow,
+  versionCutoffs?: readonly AaVersionCutoff[]
+): ScatterMetric {
   const unit = resolveMetricUnit(row);
   const category = resolveScatterMetricCategory(row);
   const historyByModel = buildHistoryByModel(row);
-  const snapshots = extractMetricSnapshots(historyByModel, row.aaRevision);
+  // 非 AA 指标没有 aaRevision，会走 extractMetricSnapshots 的兜底分支；
+  // 必须带上 benchmarkName，否则切分点无法判断适用范围。
+  const snapshots = extractMetricSnapshots(historyByModel, row.aaRevision, {
+    benchmarkName: row.benchmark,
+    versionCutoffs
+  });
   const isArtificialAnalysis = checkIsArtificialAnalysis(row);
 
   return {
@@ -239,6 +252,8 @@ export type BuildScatterMetricsInput = {
   paramsRows: readonly MatrixRow[];
   /** 矩阵总评分（rawScore）。传 null 表示不提供总评轴。 */
   overallScoreByModel?: ReadonlyMap<string, number | null> | null;
+  /** AA 指数版本切分点；只对 AA Intelligence Index 生效。 */
+  versionCutoffs?: readonly AaVersionCutoff[];
 };
 
 function compareMetricsForSelector(left: ScatterMetric, right: ScatterMetric): number {
@@ -251,24 +266,6 @@ function compareMetricsForSelector(left: ScatterMetric, right: ScatterMetric): n
   }
 
   return left.label.localeCompare(right.label, "en", { numeric: true, sensitivity: "base" });
-}
-
-/**
- * 散点 Overall 用的 benchmark 行。
- *
- * All 且未勾选「含低覆盖指标」时，Cost 仍会因 alwaysKeep 留在轴下拉里，
- * 但不计入 Overall（与矩阵默认不把成本类指标混进能力总评一致）。
- */
-export function filterMatrixRowsForScatterOverall(
-  matrixRows: readonly MatrixRow[],
-  showLowCoverageRows: boolean,
-  activeSource: string
-): MatrixRow[] {
-  if (showLowCoverageRows || activeSource !== SOURCE_ALL) {
-    return matrixRows as MatrixRow[];
-  }
-
-  return matrixRows.filter((row) => row.category !== "Cost");
 }
 
 /**
@@ -305,7 +302,7 @@ export function buildScatterMetrics(input: BuildScatterMetricsInput): ScatterMet
   }
 
   const rowMetrics = [...input.paramsRows, ...input.priceRows, ...input.benchmarkRows]
-    .map(toScatterMetric)
+    .map((row) => toScatterMetric(row, input.versionCutoffs))
     .filter((metric) => metric.valueByModel.size > 0);
 
   // slug 理论上唯一，但源数据异常时宁可丢重复项也不要让轴选择器出现两个同 key 项

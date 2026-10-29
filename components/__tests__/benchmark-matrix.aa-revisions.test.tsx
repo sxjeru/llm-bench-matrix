@@ -248,6 +248,97 @@ describe("AA 三大指数主要变动自适应与版本合并", () => {
     expect(majorCounts).toContain(110);
   });
 
+  test("AA Intelligence Index 在 2026-10-28 迎来 v5（39 个模型）：矩阵只取 v5 的 39 个模型为有效值，老模型不混淆", () => {
+    const rows: MatrixInputRow[] = [];
+    let id = 1;
+
+    // 08-06: 128 个模型 (v4 早期)
+    for (let i = 0; i < 128; i += 1) {
+      rows.push(makeRow(`m_0806_${i}`, benchmark, "60", 60, "2026-08-06T00:00:00.000Z", id++));
+    }
+    // 09-20: 81 个模型
+    for (let i = 0; i < 81; i += 1) {
+      rows.push(makeRow(`m_0920_${i}`, benchmark, "70", 70, "2026-09-20T00:00:00.000Z", id++));
+    }
+    // 10-24: 4 个模型
+    for (let i = 0; i < 4; i += 1) {
+      rows.push(makeRow(`m_1024_${i}`, benchmark, "72", 72, "2026-10-24T00:00:00.000Z", id++));
+    }
+    // 10-28: 39 个模型 (v5)
+    for (let i = 0; i < 39; i += 1) {
+      rows.push(makeRow(`m_v5_${i}`, benchmark, "85", 85, "2026-10-28T08:00:00.000Z", id++));
+    }
+    // shared model: 在 09-20 是 70，在 10-28 是 92
+    rows.push(makeRow("shared_model", benchmark, "70", 70, "2026-09-20T00:00:00.000Z", id++));
+    rows.push(makeRow("shared_model", benchmark, "92", 92, "2026-10-28T08:00:00.000Z", id++));
+
+    const aaRevisions = buildAaIndexRevisionsByRow(rows, false);
+    const aaGroupingKey = getMatrixGroupingKey(rows[0]!, false);
+    const revision = aaRevisions.get(aaGroupingKey)!;
+
+    expect(revision).toBeDefined();
+    expect(revision.latestVersion).toBe("v5");
+    // 最新版本只包含 10-28 的 39 个模型 + shared_model = 40 个有效模型
+    expect(revision.latestEntriesByModel.size).toBe(40);
+    expect(revision.latestEntriesByModel.get("shared_model")?.valueNum).toBe(92);
+    expect(revision.latestEntriesByModel.has("m_v5_0")).toBe(true);
+    // 09-20 特有的模型绝不污染进 v5 的最新映射中
+    expect(revision.latestEntriesByModel.has("m_0920_0")).toBe(false);
+  });
+
+  test("配置只回溯了 v4 时自动补上更高的 v5 种子，10-28 不会被并回 09-20", () => {
+    const rows: MatrixInputRow[] = [];
+    let id = 1;
+
+    for (let i = 0; i < 128; i += 1) {
+      rows.push(makeRow(`m_0806_${i}`, benchmark, "60", 60, "2026-08-06T00:00:00.000Z", id++));
+    }
+    for (let i = 0; i < 81; i += 1) {
+      rows.push(makeRow(`m_0920_${i}`, benchmark, "70", 70, "2026-09-20T00:00:00.000Z", id++));
+    }
+    for (let i = 0; i < 39; i += 1) {
+      rows.push(makeRow(`m_v5_${i}`, benchmark, "85", 85, "2026-10-28T08:00:00.000Z", id++));
+    }
+
+    const revision = buildAaIndexRevisionsByRow(rows, false, {
+      // 人工只回溯了 v4，还没导入过 v5：10-28 仍是 v5，必须独立成代
+      versionCutoffs: [
+        {
+          version: "v4",
+          timestampMs: new Date("2026-08-01T00:00:00.000Z").getTime(),
+          benchmarkName: "AA Intelligence Index"
+        }
+      ]
+    }).get(getMatrixGroupingKey(rows[0]!, false))!;
+
+    expect(revision.latestVersion).toBe("v5");
+    expect(revision.latestEntriesByModel.size).toBe(39);
+    expect(revision.latestEntriesByModel.has("m_0806_0")).toBe(false);
+  });
+
+  test("显式传空切分点表示关闭版本切分，不再套用任何种子", () => {
+    const rows: MatrixInputRow[] = [];
+    let id = 1;
+
+    for (let i = 0; i < 128; i += 1) {
+      rows.push(makeRow(`m_0806_${i}`, benchmark, "60", 60, "2026-08-06T00:00:00.000Z", id++));
+    }
+    for (let i = 0; i < 81; i += 1) {
+      rows.push(makeRow(`m_0920_${i}`, benchmark, "70", 70, "2026-09-20T00:00:00.000Z", id++));
+    }
+    for (let i = 0; i < 39; i += 1) {
+      rows.push(makeRow(`m_v5_${i}`, benchmark, "85", 85, "2026-10-28T08:00:00.000Z", id++));
+    }
+
+    const revision = buildAaIndexRevisionsByRow(rows, false, {
+      versionCutoffs: []
+    }).get(getMatrixGroupingKey(rows[0]!, false))!;
+
+    expect(revision.latestVersion).toBeNull();
+    expect(revision.groups).toHaveLength(1);
+    expect(revision.latestEntriesByModel.has("m_0806_0")).toBe(true);
+  });
+
   test("UI 渲染: AA三大指数在矩阵表格中显示最新主要变动值，老模型显示 -- 且带问号，悬浮显示历史值，点击禁止展开折线图", async () => {
     const rows: MatrixInputRow[] = [];
     let id = 1;
@@ -308,7 +399,31 @@ describe("AA 三大指数主要变动自适应与版本合并", () => {
     fireEvent.mouseEnter(oldQuestionMark!);
     const oldTooltip = document.querySelector('[data-cell-tooltip="1"]');
     expect(oldTooltip?.textContent).toContain("65");
-  });
+  }, 15000);
+
+  test("UI 渲染: AA 指数行首展示版本 chip，表格上方不再展示版本图例", async () => {
+    const rows: MatrixInputRow[] = [];
+    let id = 1;
+
+    for (let i = 0; i < 10; i += 1) {
+      rows.push(makeRow(`m_0806_${i}`, benchmark, "60", 60, "2026-08-06T00:00:00.000Z", id++));
+    }
+    for (let i = 0; i < 5; i += 1) {
+      rows.push(makeRow(`m_v5_${i}`, benchmark, "85", 85, "2026-10-28T08:00:00.000Z", id++));
+    }
+
+    const { container } = await renderReady(
+      <BenchmarkMatrix rows={[...rows]} allRows={[...rows]} />
+    );
+
+    const rowChip = container.querySelector("td .matrix-version-chip");
+    expect(rowChip).not.toBeNull();
+    expect(rowChip?.textContent?.trim()).toBe("v5");
+
+    // 顶部的数据版本图例已移除，仅保留行内 chip
+    expect(container.querySelector(".matrix-version-legend")).toBeNull();
+    expect(container.textContent).not.toContain("跨版本分数不可直接比较");
+  }, 15000);
 
   test("问题 1: 模型筛选只选两个模型时，不会误把单模型补丁当成主要变动，保留完整版本判定", () => {
     const allRows: MatrixInputRow[] = [];

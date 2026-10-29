@@ -1,10 +1,27 @@
 import { compareMatrixCellEntryRecency, parseTimestampMs } from "@/components/benchmark-matrix/utils";
+import {
+  AA_INDEX_VERSION_SEEDS,
+  compareAaVersions,
+  DEFAULT_AA_INDEX_VERSION_CUTOFFS,
+  extractAaVersionFromNote,
+  findAaVersionSeed,
+  resolveCutoffVersionAt,
+  type AaVersionCutoff
+} from "@/lib/aa-index-version";
 import { isArtificialAnalysisSource } from "@/lib/source-utils";
 import { AA_SUMMARY_INDEX_LABEL_REGEX } from "@/components/model-scatter/constants";
 import type { MatrixCellEntry } from "@/components/benchmark-matrix/types";
 
 /** 4 小时批次聚类窗口 */
 export const SNAPSHOT_CLUSTER_WINDOW_MS = 4 * 60 * 60 * 1000;
+
+/**
+ * 版本断代的最小批次规模。
+ *
+ * 低于这个数的「新版本批次」更可能是单模型补录、上游抖动，或一条被误改的注释；
+ * 给它开一个主要变动桶会让矩阵只剩 1 个有效模型，其余全部显示 --。
+ */
+export const MIN_VERSION_CUTOFF_MODELS = 3;
 
 /** AA 三大指数显式白名单 */
 export const AA_MAJOR_INDEX_NAMES = new Set([
@@ -48,6 +65,15 @@ export type RevisionBatch<T> = {
   modelCount: number;
 };
 
+export type ClusterEntriesOptions<T> = {
+  /**
+   * 条目所属的评估版本。版本不同的条目永不并入同一批次：
+   * 4 小时窗口跨过版本切换点时，把 v4 补丁和 v5 首批评测揉成一批，
+   * 之后就只剩「按注释众数硬猜整批版本」一条路。
+   */
+  versionOf?: (entry: T) => string | null;
+};
+
 /**
  * 将散落的指标记录按时间聚类为时间批次（4 小时窗口）。
  * 聚类后按时间由旧到新（升序）排列。
@@ -56,11 +82,13 @@ export function clusterEntriesByTime<
   T extends { benchTime?: string | null; modelName?: string }
 >(
   entries: readonly T[],
-  windowMs = SNAPSHOT_CLUSTER_WINDOW_MS
+  windowMs = SNAPSHOT_CLUSTER_WINDOW_MS,
+  options?: ClusterEntriesOptions<T>
 ): RevisionBatch<T>[] {
   type RawItem = {
     timestamp: number;
     modelName: string;
+    version: string | null;
     entry: T;
   };
 
@@ -70,7 +98,12 @@ export function clusterEntriesByTime<
     const timeMs = parseTimestampMs(entry.benchTime);
     if (timeMs === null) return;
     const modelName = entry.modelName ?? "";
-    rawItems.push({ timestamp: timeMs, modelName, entry });
+    rawItems.push({
+      timestamp: timeMs,
+      modelName,
+      version: options?.versionOf?.(entry) ?? null,
+      entry
+    });
   });
 
   if (rawItems.length === 0) return [];
@@ -79,11 +112,21 @@ export function clusterEntriesByTime<
   rawItems.sort((a, b) => a.timestamp - b.timestamp);
 
   const batches: RevisionBatch<T>[] = [];
+  // 窗口锚点固定为批次首条记录的时间。此前拿「当前最大时间」当基准，
+  // 间隔 3 小时的数据点能一路链下去，4 小时窗口形同虚设。
+  const anchors: number[] = [];
+  const batchVersions: (string | null)[] = [];
 
   rawItems.forEach((item) => {
-    const existing = batches.find((batch) => {
-      return Math.abs(item.timestamp - batch.timestamp) <= windowMs;
-    });
+    let targetIndex = -1;
+    for (let index = batches.length - 1; index >= 0; index -= 1) {
+      if (batchVersions[index] !== item.version) continue;
+      if (item.timestamp - (anchors[index] ?? item.timestamp) > windowMs) continue;
+      targetIndex = index;
+      break;
+    }
+
+    const existing = targetIndex >= 0 ? batches[targetIndex] : undefined;
 
     if (existing) {
       existing.entries.push(item.entry);
@@ -99,6 +142,8 @@ export function clusterEntriesByTime<
         entries: [item.entry],
         modelCount: modelNames.size
       });
+      anchors.push(item.timestamp);
+      batchVersions.push(item.version);
     }
   });
 
@@ -185,15 +230,127 @@ export function detectAdaptiveMajorThreshold(counts: readonly number[]): number 
   return minCount;
 }
 
+// 版本解析与断代种子放在 lib/aa-index-version（无前端依赖，服务端也能引用），
+// 这里保持原有对外导出不变。
+export {
+  AA_INDEX_VERSION_SEEDS,
+  DEFAULT_AA_INDEX_VERSION_CUTOFFS,
+  extractAaVersionFromNote,
+  findAaVersionSeed,
+  resolveCutoffVersionAt,
+  type AaVersionCutoff
+};
+
+/** 批次版本判定的证据来源 */
+export type AaBatchVersionSource = "cutoff" | "note" | null;
+
+export type AaBatchVersionResolution = {
+  /** 判定出的批次版本；证据不足时为 null */
+  version: string | null;
+  source: AaBatchVersionSource;
+  /**
+   * high：足以据此切分版本代际（时间切分点命中，或注释在批次内占多数）；
+   * low：证据不足（如整批只有个别条目带版本注释），只能拒绝判定，不能切代。
+   */
+  confidence: "high" | "low";
+  /** 批次内各版本注释的条目数，无论是否被采纳，便于排查数据问题 */
+  noteVersionCounts: Record<string, number>;
+};
+
+/**
+ * 注释要成为批次身份的「多数证据」，至少覆盖这么多比例的条目。
+ *
+ * 不能是「见一条就定整批」：81 个模型的批次里混进 1 条被误改的 v5 注释，
+ * 整批就会被盖成 v5，进而吞掉后续真实的版本跃迁。
+ */
+const NOTE_VERSION_MAJORITY_SHARE = 0.5;
+
+/**
+ * 确定一个时间批次所属的评估版本，并给出该判定的置信度。
+ *
+ * 优先级（与行级注释相比，时间切分点是权威证据）：
+ * 1. 外部传入或内置的 versionCutoffs 时间切分点；
+ * 2. 批次内 entries 自带的 valueNote 版本标注 —— 只有在同一批次内占据多数
+ *    （>= 50% 条目）时才被采纳；只有当它比切分点更新时才允许推翻切分点。
+ *
+ * 两种证据都不足以定性时返回 `version: null` + `confidence: "low"`，
+ * 由调用方决定「拒绝切代」，而不是硬给一个可能错误的版本。
+ */
+export function resolveBatchVersionDetail<T extends { valueNote?: string | null }>(
+  batch: RevisionBatch<T>,
+  benchmarkName?: string,
+  customCutoffs?: readonly AaVersionCutoff[]
+): AaBatchVersionResolution {
+  const counts = new Map<string, number>();
+  batch.entries.forEach((entry) => {
+    const v = extractAaVersionFromNote(entry.valueNote);
+    if (v) {
+      counts.set(v, (counts.get(v) ?? 0) + 1);
+    }
+  });
+
+  const noteVersionCounts: Record<string, number> = {};
+  let dominantVersion: string | null = null;
+  let dominantCount = 0;
+  counts.forEach((count, version) => {
+    noteVersionCounts[version] = count;
+    if (count > dominantCount) {
+      dominantCount = count;
+      dominantVersion = version;
+    }
+  });
+
+  const totalEntries = batch.entries.length;
+  const dominantShare = totalEntries > 0 ? dominantCount / totalEntries : 0;
+  const hasMajorityNote = Boolean(dominantVersion) && dominantShare >= NOTE_VERSION_MAJORITY_SHARE;
+
+  const cutoffVersion = resolveCutoffVersionAt(batch.timestamp, benchmarkName, customCutoffs);
+
+  if (cutoffVersion) {
+    // 注释只有在「多数条目一致标注了更新的版本」时才推翻切分点，
+    // 用于尚未写入配置的新版本（如 v6 首次出现）。
+    if (
+      hasMajorityNote
+      && dominantVersion
+      && (compareAaVersions(dominantVersion, cutoffVersion) ?? 0) > 0
+    ) {
+      return { version: dominantVersion, source: "note", confidence: "high", noteVersionCounts };
+    }
+    return { version: cutoffVersion, source: "cutoff", confidence: "high", noteVersionCounts };
+  }
+
+  if (hasMajorityNote && dominantVersion) {
+    return { version: dominantVersion, source: "note", confidence: "high", noteVersionCounts };
+  }
+
+  return { version: null, source: null, confidence: "low", noteVersionCounts };
+}
+
+/** 只要版本号，不看置信度；需要判断「能不能据此切代」时用 resolveBatchVersionDetail */
+export function resolveBatchVersion<T extends { valueNote?: string | null }>(
+  batch: RevisionBatch<T>,
+  benchmarkName?: string,
+  customCutoffs?: readonly AaVersionCutoff[]
+): string | null {
+  return resolveBatchVersionDetail(batch, benchmarkName, customCutoffs).version;
+}
+
 export type MajorRevisionGroup<T> = {
   /** 该版本桶的代表时间戳（取该版本内最新时间） */
   timestamp: number;
   /** 是否为主要变动批次开启的组 */
   isMajorRevision: boolean;
+  /** 该版本桶的版本标识（如 v5, v4.1 或 null） */
+  version: string | null;
   /** 合并进该版本的所有批次 */
   batches: RevisionBatch<T>[];
   /** 该版本内各模型的最新条目映射（若有重复值，取最新时间的一条） */
   entryByModel: Map<string, T>;
+};
+
+export type GroupBatchesOptions = {
+  benchmarkName?: string;
+  versionCutoffs?: readonly AaVersionCutoff[];
 };
 
 /**
@@ -201,15 +358,19 @@ export type MajorRevisionGroup<T> = {
  *
  * 合并规则：
  * 1. 按时间由旧到新扫描；
- * 2. 模型数 >= adaptiveThreshold 视为主要变动，开启新版本桶；
- * 3. 模型数 < adaptiveThreshold 视为小变动，合并进前一个主要变动桶；
- * 4. 若小变动与主要变动（或之前批次）存在相同模型，后发生的覆盖先发生的（显示最新值）。
+ * 2. 外部版本跃迁优先：批次版本有高置信证据且规模 >= MIN_VERSION_CUTOFF_MODELS 时，
+ *    无视数量阈值直接开启新主要变动桶；
+ * 3. 版本证据成立但规模不足的批次标为「未定版」：只进历史快照，不并进旧版本的桶；
+ * 4. 同版本内：模型数 >= adaptiveThreshold 视为主要变动，开启新版本桶；
+ * 5. 模型数 < adaptiveThreshold 视为小变动，合并进前一个主要变动桶；
+ * 6. 若小变动与主要变动（或之前批次）存在相同模型，后发生的覆盖先发生的（显示最新值）。
  */
 export function groupBatchesIntoMajorRevisions<
-  T extends { benchTime?: string | null; modelName?: string; recordId?: number | null }
+  T extends { benchTime?: string | null; modelName?: string; recordId?: number | null; valueNote?: string | null }
 >(
   batches: readonly RevisionBatch<T>[],
-  adaptiveThreshold?: number
+  adaptiveThreshold?: number,
+  options?: GroupBatchesOptions
 ): MajorRevisionGroup<T>[] {
   if (batches.length === 0) return [];
 
@@ -220,22 +381,62 @@ export function groupBatchesIntoMajorRevisions<
   const groups: MajorRevisionGroup<T>[] = [];
 
   [...batches].sort((a, b) => a.timestamp - b.timestamp).forEach((batch) => {
-    const isMajor = batch.modelCount >= threshold;
+    const batchResolution = resolveBatchVersionDetail(
+      batch,
+      options?.benchmarkName,
+      options?.versionCutoffs
+    );
+    const batchVersion = batchResolution.version;
+    const lastGroup = groups[groups.length - 1];
+
+    // 检测是否为新版本断代：
+    // 1) 当前批次版本有高置信证据（切分点命中，或注释在批次内占多数）
+    // 2) 且上一个组存在，但上一个组版本不同
+    // 3) 且批次规模达到下限 —— 1 个模型的「新版本」更像单模型补录或数据抖动，
+    //    真给它开桶会让界面变成「一个模型有值、其余全是 --」
+    // 低置信的批次（例如整批只有一条被误改的注释）永远是 null 版本，
+    // 既不给自己贴版本，也不允许开启新桶吞掉后续真实跃迁。
+    const isNewVersionCutoff = Boolean(
+      batchVersion
+      && batchResolution.confidence === "high"
+      && lastGroup
+      && lastGroup.version !== batchVersion
+      && batch.modelCount >= MIN_VERSION_CUTOFF_MODELS
+    );
+
+    const isMajor = isNewVersionCutoff || batch.modelCount >= threshold;
+
+    // 版本证据成立（切分点或注释都指向新版本）但规模不够：这批数据属于哪个版本
+    // 属于「未定」。既不能并进旧版本的桶（会把 v5 成绩当 v4 展示），也不能单独开桶
+    // （会变成「1 个模型的主要变动」），所以保留批次供历史快照展示，
+    // 但不参与最新快照的模型映射。
+    const isUndeterminedVersionBatch = Boolean(
+      batchVersion
+      && batchResolution.confidence === "high"
+      && lastGroup
+      && lastGroup.version !== batchVersion
+      && batch.modelCount < MIN_VERSION_CUTOFF_MODELS
+    );
 
     if (isMajor || groups.length === 0) {
       groups.push({
         timestamp: batch.timestamp,
         isMajorRevision: isMajor,
+        version: batchVersion,
         batches: [batch],
         entryByModel: new Map<string, T>()
       });
     } else {
-      // 小变动合并进前一次主要变动桶
-      const lastGroup = groups[groups.length - 1]!;
+      // 小变动合并进前一次主要变动桶。
+      // 这里刻意不回填 lastGroup.version：合并进来的批次版本要么与桶一致，
+      // 要么不足以定性（null），让低置信度的小批次去改写桶的身份正是 P1-1 的扩散路径。
       lastGroup.batches.push(batch);
-      lastGroup.timestamp = Math.max(lastGroup.timestamp, batch.timestamp);
-
+      if (!isUndeterminedVersionBatch) {
+        lastGroup.timestamp = Math.max(lastGroup.timestamp, batch.timestamp);
+      }
     }
+
+    if (isUndeterminedVersionBatch) return;
 
     const latestGroup = groups[groups.length - 1]!;
     batch.entries.forEach((entry) => {
@@ -260,25 +461,40 @@ export type LatestAaRevisionResolution = {
   groups: MajorRevisionGroup<MatrixCellEntry & { modelName: string }>[];
   /** 自适应主要变动阈值 */
   adaptiveThreshold: number;
+  /** 最新主要变动的版本标识（如 v5） */
+  latestVersion?: string | null;
 };
 
 /**
  * 汇总一行 AA 复合指数的所有单元格历史记录，计算出最新主要变动版本及模型映射。
  */
 export function resolveLatestAaRevisionValues(
-  entries: readonly (MatrixCellEntry & { modelName: string })[]
+  entries: readonly (MatrixCellEntry & { modelName: string })[],
+  options?: GroupBatchesOptions
 ): LatestAaRevisionResolution {
-  const batches = clusterEntriesByTime(entries);
+  // 先定版本再聚类：版本不同的记录永不并入同一批次，4 小时窗口因此无法跨代。
+  // 时间切分点优先，取不到时才退回行级版本注释（没有配置切分点的场景）。
+  const batches = clusterEntriesByTime(entries, SNAPSHOT_CLUSTER_WINDOW_MS, {
+    versionOf: (entry) => {
+      const timeMs = parseTimestampMs(entry.benchTime);
+      const byCutoff =
+        timeMs === null
+          ? null
+          : resolveCutoffVersionAt(timeMs, options?.benchmarkName, options?.versionCutoffs);
+      return byCutoff ?? extractAaVersionFromNote(entry.valueNote);
+    }
+  });
   const counts = batches.map((b) => b.modelCount);
   const adaptiveThreshold = detectAdaptiveMajorThreshold(counts);
-  const groups = groupBatchesIntoMajorRevisions(batches, adaptiveThreshold);
+  const groups = groupBatchesIntoMajorRevisions(batches, adaptiveThreshold, options);
 
   if (groups.length === 0) {
     return {
       latestEntriesByModel: new Map(),
       batches: [],
       groups: [],
-      adaptiveThreshold
+      adaptiveThreshold,
+      latestVersion: null
     };
   }
 
@@ -289,6 +505,7 @@ export function resolveLatestAaRevisionValues(
     latestEntriesByModel: latestGroup.entryByModel,
     batches,
     groups,
-    adaptiveThreshold
+    adaptiveThreshold,
+    latestVersion: latestGroup.version ?? null
   };
 }

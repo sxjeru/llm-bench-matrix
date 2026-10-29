@@ -30,6 +30,7 @@ type ExistingValueRow = {
   valueRaw: string;
   valueNum: string | null;
   valueNum2: string | null;
+  valueNote?: string | null;
   source: string | null;
 };
 
@@ -442,6 +443,183 @@ describe("importExternalBenchmarkRows", () => {
     expect(mock.captured.insertedValues).toHaveLength(1);
     expect(mock.captured.touchedIds).not.toContain(501);
     expect(result.preview[0]).toMatchObject({ outcome: "appended", previousValue: "75" });
+  });
+
+  test("跨版本数值相同时追加新行，绝不把新版本标签回写到旧行", async () => {
+    // 09-20（v4）Qwen-Plus 是 80.0；10-28（v5）重标定后恰好还是 80.0。
+    // 这是两次评测，不是重复同步：必须留下 10-28 的新行。
+    const { mock, importExternalBenchmarkRows } = await setup({
+      existingBenchmark: makeBenchmarkRow(),
+      existingValues: [
+        existingValue({
+          benchTime: new Date("2026-09-20T00:00:00.000Z"),
+          valueRaw: "80.0",
+          valueNum: "80.000000",
+          valueNote: null
+        })
+      ]
+    });
+
+    const result = await importExternalBenchmarkRows(
+      [{ ...BASE_ROW, rawValue: "80.0", valueNote: "v5", indexVersion: "v5" }],
+      { source: "Artificial Analysis", benchTime: new Date("2026-10-28T00:00:00.000Z") }
+    );
+
+    expect(result.appended).toBe(1);
+    expect(result.unchanged).toBe(0);
+    expect(mock.captured.rewrites).toEqual([]);
+    expect(mock.captured.insertedValues).toHaveLength(1);
+    expect(mock.captured.insertedValues[0]).toMatchObject({
+      valueRaw: "80.0",
+      valueNote: "v5",
+      benchTime: new Date("2026-10-28T00:00:00.000Z")
+    });
+  });
+
+  test("旧行没有版本注释、但时间已在 v5 区间内时，只补写版本标记，不再追加新行", async () => {
+    // 10-28 那批是「上游还没上报版本号」时导入的：数值已经是 v5，只是没标签。
+    // 只看 value_note 会判成跨版本，于是每个模型都被重复追加一行（10-29 冒出 40 行）。
+    const { mock, importExternalBenchmarkRows } = await setup({
+      existingBenchmark: makeBenchmarkRow({
+        benchmarkName: "AA Intelligence Index",
+        benchmarkType: "Overall",
+        canonicalKey: "aa-intelligence-index::overall"
+      }),
+      existingValues: [
+        existingValue({
+          benchTime: new Date("2026-10-28T00:00:00.000Z"),
+          valueRaw: "80.0",
+          valueNum: "80.000000",
+          valueNote: null
+        })
+      ]
+    });
+
+    const result = await importExternalBenchmarkRows(
+      [{
+        ...BASE_ROW,
+        benchmarkName: "AA Intelligence Index",
+        benchmarkType: "Overall",
+        rawValue: "80.0",
+        valueNote: "v5",
+        indexVersion: "v5"
+      }],
+      { source: "Artificial Analysis", benchTime: new Date("2026-10-29T00:00:00.000Z") }
+    );
+
+    expect(result.unchanged).toBe(1);
+    expect(result.appended).toBe(0);
+    expect(mock.captured.insertedValues).toHaveLength(0);
+    // 只回填版本标记，历史行仍留在 10-28
+    expect(mock.captured.rewrites).toEqual([{ valueRaw: "80.0", valueNote: "v5" }]);
+  });
+
+  test("旧行在 v5 区间之前且没有版本注释时，仍然追加新行", async () => {
+    const { mock, importExternalBenchmarkRows } = await setup({
+      existingBenchmark: makeBenchmarkRow({
+        benchmarkName: "AA Intelligence Index",
+        benchmarkType: "Overall",
+        canonicalKey: "aa-intelligence-index::overall"
+      }),
+      existingValues: [
+        existingValue({
+          benchTime: new Date("2026-09-20T00:00:00.000Z"),
+          valueRaw: "80.0",
+          valueNum: "80.000000",
+          valueNote: null
+        })
+      ]
+    });
+
+    const result = await importExternalBenchmarkRows(
+      [{
+        ...BASE_ROW,
+        benchmarkName: "AA Intelligence Index",
+        benchmarkType: "Overall",
+        rawValue: "80.0",
+        valueNote: "v5",
+        indexVersion: "v5"
+      }],
+      { source: "Artificial Analysis", benchTime: new Date("2026-10-29T00:00:00.000Z") }
+    );
+
+    expect(result.appended).toBe(1);
+    expect(mock.captured.insertedValues).toHaveLength(1);
+    expect(mock.captured.rewrites).toEqual([]);
+  });
+
+  test("同一版本内重复同步相同值仍然原地覆盖，不堆历史行", async () => {
+    const { mock, importExternalBenchmarkRows } = await setup({
+      existingBenchmark: makeBenchmarkRow(),
+      existingValues: [
+        existingValue({
+          benchTime: new Date("2026-10-28T00:00:00.000Z"),
+          valueRaw: "80.0",
+          valueNum: "80.000000",
+          valueNote: "v5"
+        })
+      ],
+      existingSourceMeta: [{
+        benchmarkId: 20,
+        source: "text:Artificial Analysis",
+        benchmarkType: "Knowledge",
+        modalities: ["Text"]
+      }]
+    });
+
+    const result = await importExternalBenchmarkRows(
+      [{ ...BASE_ROW, rawValue: "80.0", valueNote: "v5", indexVersion: "v5" }],
+      { source: "Artificial Analysis", benchTime: new Date("2026-10-29T00:00:00.000Z") }
+    );
+
+    expect(result.unchanged).toBe(1);
+    expect(result.appended).toBe(0);
+    expect(mock.captured.insertedValues).toHaveLength(0);
+    expect(mock.captured.rewrites).toEqual([]);
+  });
+
+  test("补导历史时不改写库里更新的那一行", async () => {
+    const { mock, importExternalBenchmarkRows } = await setup({
+      existingBenchmark: makeBenchmarkRow(),
+      existingValues: [
+        existingValue({
+          benchTime: new Date("2026-10-28T00:00:00.000Z"),
+          valueRaw: "79.100",
+          valueNum: "79.100000"
+        })
+      ]
+    });
+
+    const result = await importExternalBenchmarkRows(
+      [{ ...BASE_ROW, rawValue: "79.1" }],
+      { source: "Artificial Analysis", benchTime: new Date("2026-09-20T00:00:00.000Z") }
+    );
+
+    expect(result.unchanged).toBe(1);
+    expect(mock.captured.insertedValues).toHaveLength(0);
+    // 用更早的数据去改写更晚的记录，等于用旧值覆盖新值
+    expect(mock.captured.rewrites).toEqual([]);
+  });
+
+  test("仅展示文本变化时不抹掉已有备注", async () => {
+    const { mock, importExternalBenchmarkRows } = await setup({
+      existingBenchmark: makeBenchmarkRow(),
+      existingValues: [
+        existingValue({
+          valueRaw: "79.100",
+          valueNum: "79.100000",
+          valueNote: "人工校正"
+        })
+      ]
+    });
+
+    const result = await importExternalBenchmarkRows([{ ...BASE_ROW, rawValue: "79.1" }], {
+      source: "Artificial Analysis",
+      benchTime: new Date("2026-08-17T00:00:00.000Z")
+    });
+
+    expect(result.unchanged).toBe(1);
+    expect(mock.captured.rewrites).toEqual([{ valueRaw: "79.1", valueNote: "人工校正" }]);
   });
 
   test("首次导入会写 benchmark_source_meta，source 带 text: 前缀", async () => {

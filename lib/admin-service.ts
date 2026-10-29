@@ -10,6 +10,12 @@ import {
 } from "@/lib/db/normalize";
 import { parseBenchmarkValue, type ParsedBenchmarkValue } from "@/lib/db/parse-value";
 import {
+  extractAaVersionFromNote,
+  normalizeAaVersion,
+  resolveCutoffVersionAt,
+  type AaVersionCutoff
+} from "@/lib/aa-index-version";
+import {
   IMPORT_VALUE_RANK_PREFIX_REGEX,
   IMPORT_VALUE_SINGLE_REGEX,
   isImportValueEmptyMarker
@@ -4376,6 +4382,15 @@ export type ExternalImportRowInput = {
   modalities?: string[];
   unit?: string;
   rawValue: string;
+  valueNote?: string | null;
+  /**
+   * 该行数值所属的指数版本（如 "v5"）。
+   *
+   * 只有「分数会随版本重新标定」的指标才传（如 AA Intelligence Index）。
+   * 版本变了就是一次新的评测事件：即使数值恰好相同，也必须追加当天的新行，
+   * 不能把新版本的标签回写到旧版本的历史行上。
+   */
+  indexVersion?: string | null;
   sourceModelId?: string | null;
   sourceBenchmarkId?: string | null;
 };
@@ -4383,9 +4398,9 @@ export type ExternalImportRowInput = {
 export type ExternalImportOutcome =
   /** 该 (模型, benchmark) 在这个 source 下还没有值 */
   | "inserted"
-  /** 同源已有值但数值不同 —— 追加一行，旧行保留成历史 */
+  /** 同源已有值，但数值不同或评估版本变了 —— 追加一行，旧行保留成历史 */
   | "appended"
-  /** 同源已有值且数值相同 —— 原地覆盖，不新增行 */
+  /** 同源已有值、同一评估版本且数值相同 —— 原地覆盖，不新增行 */
   | "unchanged"
   | "skipped";
 
@@ -4430,6 +4445,7 @@ type ExistingExternalValue = {
   valueRaw: string;
   valueNum: number | null;
   valueNum2: number | null;
+  valueNote?: string | null;
   source: string;
 };
 
@@ -4479,14 +4495,25 @@ function buildSourceLookupCandidates(source: string): string[] {
  * 这里按 (model, benchmark, source) 找同源最新值：
  *
  * - 没有 → 插入
- * - 有且数值相同 → 仅在展示文本变化时原地改写，不新增行
+ * - 有、同一评估版本、数值相同 → 仅在展示文本变化时原地改写，不新增行
+ * - 有但评估版本不同 → 即使数值相同也追加一行：跨版本的同分是重标定后的新成绩，
+ *   不是重复观测；把新版本标签回写到旧行会篡改历史
  * - 有且数值不同 → 追加一行，旧行留作历史
  *
  * `dryRun` 走完全相同的判定逻辑后回滚，保证「预览」和「执行」不会走出两套结果。
  */
 export async function importExternalBenchmarkRows(
   rows: ExternalImportRowInput[],
-  options: { source: string; benchTime?: Date; dryRun?: boolean }
+  options: {
+    source: string;
+    benchTime?: Date;
+    dryRun?: boolean;
+    /**
+     * 该指标族的版本断代切分点（AA Intelligence Index）。
+     * 用来判断「库里那行旧记录属于哪个版本」；不传则用冷启动种子。
+     */
+    versionCutoffs?: readonly AaVersionCutoff[];
+  }
 ): Promise<ExternalImportResult> {
   const source = options.source.trim();
   if (!source) {
@@ -4568,6 +4595,7 @@ export async function importExternalBenchmarkRows(
           valueRaw: benchmarkValues.valueRaw,
           valueNum: benchmarkValues.valueNum,
           valueNum2: benchmarkValues.valueNum2,
+          valueNote: benchmarkValues.valueNote,
           source: benchmarkValues.source
         })
         .from(benchmarkValues)
@@ -4585,6 +4613,7 @@ export async function importExternalBenchmarkRows(
           valueRaw: row.valueRaw,
           valueNum: toComparableNumber(row.valueNum),
           valueNum2: toComparableNumber(row.valueNum2),
+          valueNote: row.valueNote ?? null,
           source: row.source ?? normalizedSource
         });
       }
@@ -4710,13 +4739,39 @@ export async function importExternalBenchmarkRows(
           publicChanged = true;
         }
 
-        if (existing && sameValue) {
+        const finalValueNote = row.valueNote?.trim() || parsedValue.valueNote || null;
+
+        // 版本是一等语义：同一个 (模型, 指标) 换了评估版本，即使数值恰好相同，
+        // 那也是「碰巧同分」，不是同一份数据被重复同步，必须留下当天的新行。
+        const incomingVersion = normalizeAaVersion(row.indexVersion);
+        // 既有行的版本优先按时间切分点判断，再看 value_note：
+        // 老行可能压根没写版本注释（当时上游还没上报版本号），若只看注释，
+        // 会把「没标记但确实属于 v5 的行」误判成跨版本，下次同步就给每个模型
+        // 都追加一份重复记录。
+        const existingVersion = existing
+          ? resolveCutoffVersionAt(
+              existing.benchTime.getTime(),
+              benchmark.benchmarkName,
+              options.versionCutoffs
+            ) ?? extractAaVersionFromNote(existing.valueNote)
+          : null;
+        const versionChanged = Boolean(incomingVersion) && existingVersion !== incomingVersion;
+        // 补导历史时库里那行可能比本次导入更晚，改写它等于用旧数据覆盖新数据
+        const existingIsNotNewer = existing ? existing.benchTime.getTime() <= benchTime.getTime() : false;
+        // 新数据没带备注时保留原备注，不要用 null 抹掉人工标注
+        const mergedValueNote = finalValueNote ?? existing?.valueNote ?? null;
+
+        if (existing && sameValue && !versionChanged) {
           unchanged += 1;
-          if (existing.valueRaw !== parsedValue.valueRaw) {
+          if (
+            existingIsNotNewer
+            && (existing.valueRaw !== parsedValue.valueRaw
+              || (Boolean(finalValueNote) && finalValueNote !== existing.valueNote))
+          ) {
             rewriteRows.push({
               id: existing.id,
               valueRaw: parsedValue.valueRaw,
-              valueNote: parsedValue.valueNote
+              valueNote: mergedValueNote
             });
             publicChanged = true;
           }
@@ -4727,6 +4782,7 @@ export async function importExternalBenchmarkRows(
             valueRaw: parsedValue.valueRaw,
             valueNum: parsedValue.valueNum,
             valueNum2: parsedValue.valueNum2,
+            valueNote: mergedValueNote,
             source: existing.source
           });
           pushUnchangedPreview({
@@ -4747,7 +4803,7 @@ export async function importExternalBenchmarkRows(
           valueRaw: parsedValue.valueRaw,
           valueNum: parsedValue.valueNum !== null ? String(parsedValue.valueNum) : null,
           valueNum2: parsedValue.valueNum2 !== null ? String(parsedValue.valueNum2) : null,
-          valueNote: parsedValue.valueNote,
+          valueNote: finalValueNote,
           source: normalizedSource
         });
 
@@ -4780,6 +4836,8 @@ export async function importExternalBenchmarkRows(
           valueRaw: parsedValue.valueRaw,
           valueNum: parsedValue.valueNum,
           valueNum2: parsedValue.valueNum2,
+          // 同一批里后面的行要跟这一行比版本，漏掉 note 会让它们再追加一遍
+          valueNote: finalValueNote,
           source: normalizedSource
         });
       }

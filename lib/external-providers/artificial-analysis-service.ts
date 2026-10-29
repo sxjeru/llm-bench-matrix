@@ -18,8 +18,10 @@ import {
   buildImportRows,
   getArtificialAnalysisSnapshot,
   hasArtificialAnalysisApiKey,
+  mergeIntelligenceIndexVersionHistory,
   normalizeImportConfig,
   resolveModelMatches,
+  toAaVersionCutoffs,
   type ArtificialAnalysisImportConfig,
   type ArtificialAnalysisModel,
   type ExternalMatchStatus,
@@ -406,15 +408,22 @@ export async function saveArtificialAnalysisMappings(inputs: unknown) {
 }
 
 export async function saveArtificialAnalysisConfig(input: unknown) {
+  const existingConfig = await getArtificialAnalysisConfig();
   const config = normalizeImportConfig(input);
+  const mergedConfig = {
+    ...config,
+    intelligenceIndexVersion: config.intelligenceIndexVersion ?? existingConfig.intelligenceIndexVersion ?? null,
+    intelligenceIndexVersionHistory:
+      config.intelligenceIndexVersionHistory ?? existingConfig.intelligenceIndexVersionHistory
+  };
   await saveSetting({
     key: ARTIFICIAL_ANALYSIS_SETTINGS_KEY,
-    valueJson: config,
+    valueJson: mergedConfig,
     updatedBy: "admin",
     note: "Artificial Analysis 导入配置"
   });
   await invalidateAllCaches();
-  return config;
+  return mergedConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -532,12 +541,18 @@ export async function runArtificialAnalysisImport(options: {
     catalog: snapshot.catalog,
     config,
     matches,
-    localModelsById
+    localModelsById,
+    intelligenceIndexVersion: snapshot.intelligenceIndexVersion
   });
 
   const result = await importExternalBenchmarkRows(rows, {
     source: ARTIFICIAL_ANALYSIS_SOURCE_LABEL,
-    dryRun
+    dryRun,
+    // 导入时用同一份时间轴识别「库里那行属于哪个版本」，
+    // 否则没有版本注释的老行会被全部误判成跨版本，重复追加一遍。
+    versionCutoffs: config.intelligenceIndexVersionHistory === undefined
+      ? undefined
+      : toAaVersionCutoffs(config.intelligenceIndexVersionHistory)
   });
 
   const publicChanged = result.publicChanged || createdModels.length > 0;
@@ -546,12 +561,30 @@ export async function runArtificialAnalysisImport(options: {
   }
 
   if (!dryRun) {
+    const currentVersion = snapshot.intelligenceIndexVersion;
+    const merged = mergeIntelligenceIndexVersionHistory(
+      config.intelligenceIndexVersionHistory ?? [],
+      currentVersion,
+      result.benchTime
+    );
+    const nextVersionHistory = merged.history;
+    const versionHistoryChanged = merged.changed;
+
     await saveSetting({
       key: ARTIFICIAL_ANALYSIS_SETTINGS_KEY,
-      valueJson: { ...config, lastImportedAt: new Date().toISOString() },
+      valueJson: {
+        ...config,
+        intelligenceIndexVersion: currentVersion ?? config.intelligenceIndexVersion ?? null,
+        intelligenceIndexVersionHistory: nextVersionHistory.length > 0 ? nextVersionHistory : undefined,
+        lastImportedAt: new Date().toISOString()
+      },
       updatedBy: "admin",
       note: "Artificial Analysis 导入配置"
     });
+
+    if (versionHistoryChanged) {
+      await invalidateAllCaches();
+    }
   }
 
   return {

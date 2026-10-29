@@ -227,6 +227,7 @@ export function BenchmarkMatrix({
   modelParams = EMPTY_MODEL_PARAMS,
   exportFootnoteText,
   exportFootnoteAlign,
+  aaVersionCutoffs,
   urlSyncEnabled = true
 }: Props) {
   const sectionRef = useRef<HTMLElement | null>(null);
@@ -809,8 +810,10 @@ export function BenchmarkMatrix({
   );
 
   const aaRevisionsByRow = useMemo(
-    () => buildAaIndexRevisionsByRow(indexedSourceRows, showDuplicateRows),
-    [indexedSourceRows, showDuplicateRows]
+    () => buildAaIndexRevisionsByRow(indexedSourceRows, showDuplicateRows, {
+      versionCutoffs: aaVersionCutoffs
+    }),
+    [indexedSourceRows, showDuplicateRows, aaVersionCutoffs]
   );
 
   const baseSourceRows = useMemo(
@@ -1024,14 +1027,24 @@ export function BenchmarkMatrix({
       showDuplicateRows,
       modelOrderBySource,
       activeSource,
-      aaRevisionsByRow
+      aaRevisionsByRow,
+      { versionCutoffs: aaVersionCutoffs }
     ),
-    [coveragePrunedRows, sourceModelHint, columnSortBenchmarkKey, isSyntheticRowSortKey, showDuplicateRows, modelOrderBySource, activeSource, aaRevisionsByRow]
+    [coveragePrunedRows, sourceModelHint, columnSortBenchmarkKey, isSyntheticRowSortKey, showDuplicateRows, modelOrderBySource, activeSource, aaRevisionsByRow, aaVersionCutoffs]
   );
 
   const matrixRows = useMemo(
-    () => buildMatrixRows(baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource, sourceValueMode, aaRevisionsByRow),
-    [baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource, sourceValueMode, aaRevisionsByRow]
+    () => buildMatrixRows(
+      baseSourceRows,
+      coveragePrunedRows,
+      showDuplicateRows,
+      displaySourceValuesInCells,
+      activeSource,
+      sourceValueMode,
+      aaRevisionsByRow,
+      { versionCutoffs: aaVersionCutoffs }
+    ),
+    [baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource, sourceValueMode, aaRevisionsByRow, aaVersionCutoffs]
   );
 
   function getRowSortCycle(): RowSortMode[] {
@@ -1311,7 +1324,8 @@ export function BenchmarkMatrix({
       candidateModelNames,
       modelColumns,
       showDuplicateRows,
-      rankingScaleMode
+      rankingScaleMode,
+      { versionCutoffs: aaVersionCutoffs }
     );
   }, [
     allRankingModelNames,
@@ -1325,7 +1339,8 @@ export function BenchmarkMatrix({
     modelParams,
     rankingScaleMode,
     rankingScope,
-    showDuplicateRows
+    showDuplicateRows,
+    aaVersionCutoffs
   ]);
 
   useLayoutEffect(() => {
@@ -2396,6 +2411,7 @@ export function BenchmarkMatrix({
               const rowRightEdgeStyle = isSelectedRow
                 ? { borderRight: `1px solid ${selectedRowColor}` }
                 : undefined;
+              const aaVersion = matrixRow.aaRevision?.latestVersion ?? null;
 
               const baselineCellForRow = compareBaselineModelName
                 ? matrixRow.cells.get(compareBaselineModelName)
@@ -2513,6 +2529,16 @@ export function BenchmarkMatrix({
                       >
                         <HighlightText text={matrixRow.benchmark} query={benchmarkSearchQuery} />
                       </span>
+                      {aaVersion ? (
+                        <span
+                          className="matrix-version-chip"
+                          title={`${matrixRow.benchmark} ${aaVersion}（跨版本分数不可直接比较）`}
+                          aria-label={`数据版本 ${aaVersion}`}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          {aaVersion}
+                        </span>
+                      ) : null}
                       {isRowLowerBetter ? (
                         <span
                           className="inline-flex h-4 w-4 shrink-0 cursor-help items-center justify-center rounded-full border border-base-content/30 text-[10px] font-bold leading-none opacity-85"

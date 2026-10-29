@@ -1146,6 +1146,20 @@ input.heatmap-alpha-range::-moz-range-track {
   text-align: center;
 }
 
+.scatter-combobox-hint {
+  /* 列表超过 max-height 时固定在底部，保证用户始终看得到「可搜索全部指标」 */
+  position: sticky;
+  bottom: -4px;
+  z-index: 1;
+  margin: 4px -4px -4px;
+  padding: 8px 13px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(13, 20, 37, 0.98);
+  font-size: 11px;
+  color: var(--subtext);
+  text-align: center;
+}
+
 .scatter-combobox-option-label-wrapper {
   display: flex;
   align-items: center;
@@ -1403,6 +1417,44 @@ input.heatmap-alpha-range::-moz-range-track {
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: #cbd5e1;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* 版本标识统一使用项目 primary 色，避免散落硬编码 sky-400 */
+.scatter-combobox-badge-version {
+  display: inline-flex;
+  align-items: center;
+  font-size: 9.5px;
+  line-height: 1;
+  padding: 1.5px 4.5px;
+  border-radius: 3.5px;
+  background: rgba(93, 167, 255, 0.14);
+  border: 1px solid rgba(93, 167, 255, 0.34);
+  color: #9ecbff;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* 矩阵行首的版本 chip：窄列只占 ~28px，名称仍由省略号截断 */
+.matrix-version-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 16px;
+  min-width: 22px;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid rgba(93, 167, 255, 0.34);
+  background: rgba(93, 167, 255, 0.14);
+  color: #9ecbff;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.01em;
   white-space: nowrap;
   flex-shrink: 0;
 }

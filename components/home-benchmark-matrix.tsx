@@ -14,7 +14,15 @@ export function HomeBenchmarkMatrix({ urlSyncEnabled = true }: { urlSyncEnabled?
     );
   }
 
-  const { rows, sourceOptions, modelPrices, modelParams, exportFootnoteText, exportFootnoteAlign } = snapshot;
+  const {
+    rows,
+    sourceOptions,
+    modelPrices,
+    modelParams,
+    exportFootnoteText,
+    exportFootnoteAlign,
+    aaVersionCutoffs
+  } = snapshot;
 
   return (
     <BenchmarkMatrix
@@ -24,6 +32,7 @@ export function HomeBenchmarkMatrix({ urlSyncEnabled = true }: { urlSyncEnabled?
       modelParams={modelParams}
       exportFootnoteText={exportFootnoteText}
       exportFootnoteAlign={exportFootnoteAlign}
+      aaVersionCutoffs={aaVersionCutoffs}
       urlSyncEnabled={urlSyncEnabled}
     />
   );

@@ -5,6 +5,7 @@ import {
   fetchArtificialAnalysisModels,
   formatMetricValue,
   invalidateArtificialAnalysisSnapshotCache,
+  mergeIntelligenceIndexVersionHistory,
   normalizeImportConfig,
   resolveModelMatches,
   type ArtificialAnalysisModel,
@@ -314,6 +315,101 @@ describe("normalizeImportConfig", () => {
     });
     expect(config.metricOverrides.gpqa).toBeUndefined();
   });
+
+  test("解析并保留 intelligenceIndexVersion 与 versionHistory", () => {
+    const config = normalizeImportConfig({
+      selectedMetrics: ["evaluations.artificial_analysis_intelligence_index"],
+      intelligenceIndexVersion: 5,
+      intelligenceIndexVersionHistory: [
+        { version: 4, effectiveFrom: "2026-08-01T00:00:00.000Z", note: "v4" },
+        { version: 5, effectiveFrom: "2026-10-28T00:00:00.000Z", note: "v5" },
+        { invalid: true }
+      ]
+    });
+
+    expect(config.intelligenceIndexVersion).toBe(5);
+    expect(config.intelligenceIndexVersionHistory).toEqual([
+      { version: 4, effectiveFrom: "2026-08-01T00:00:00.000Z", note: "v4" },
+      { version: 5, effectiveFrom: "2026-10-28T00:00:00.000Z", note: "v5" }
+    ]);
+  });
+
+  test("版本号兼容字符串写法，并保留生效时间来源", () => {
+    const config = normalizeImportConfig({
+      selectedMetrics: [],
+      intelligenceIndexVersion: "v5",
+      intelligenceIndexVersionHistory: [
+        { version: "5", effectiveFrom: "2026-10-28T00:00:00.000Z", source: "manual" },
+        { version: "4.1", effectiveFrom: "2026-08-01T00:00:00.000Z" },
+        { version: "not-a-version", effectiveFrom: "2026-01-01T00:00:00.000Z" }
+      ]
+    });
+
+    expect(config.intelligenceIndexVersion).toBe(5);
+    expect(config.intelligenceIndexVersionHistory).toEqual([
+      { version: 5, effectiveFrom: "2026-10-28T00:00:00.000Z", source: "manual" },
+      { version: 4.1, effectiveFrom: "2026-08-01T00:00:00.000Z" }
+    ]);
+  });
+});
+
+describe("mergeIntelligenceIndexVersionHistory", () => {
+  test("首次观测到 v5 时采用种子的真实生效日，而不是导入当天", () => {
+    const { history, changed } = mergeIntelligenceIndexVersionHistory(
+      [{ version: 4, effectiveFrom: "2026-08-01T00:00:00.000Z" }],
+      5,
+      // 10-29 才第一次拉到 v5，但 v5 从 10-28 起生效
+      "2026-10-29T08:00:00.000Z"
+    );
+
+    expect(changed).toBe(true);
+    expect(history).toEqual([
+      { version: 4, effectiveFrom: "2026-08-01T00:00:00.000Z" },
+      {
+        version: 5,
+        effectiveFrom: "2026-10-28T00:00:00.000Z",
+        note: "Intelligence Index v5",
+        source: "inferred"
+      }
+    ]);
+  });
+
+  test("自动推断只能往早里修，已有更早的人工回溯点不动", () => {
+    const manual = mergeIntelligenceIndexVersionHistory(
+      [{ version: 5, effectiveFrom: "2026-10-20T00:00:00.000Z", source: "manual" }],
+      5,
+      "2026-10-29T08:00:00.000Z"
+    );
+    expect(manual.changed).toBe(false);
+    expect(manual.history[0]!.effectiveFrom).toBe("2026-10-20T00:00:00.000Z");
+
+    // inferred 记录可以被往早里纠正
+    const inferred = mergeIntelligenceIndexVersionHistory(
+      [{ version: 5, effectiveFrom: "2026-10-29T08:00:00.000Z", source: "inferred" }],
+      5,
+      "2026-10-29T08:00:00.000Z"
+    );
+    expect(inferred.changed).toBe(true);
+    expect(inferred.history[0]!.effectiveFrom).toBe("2026-10-28T00:00:00.000Z");
+
+    // 已经更早的记录不会被往后推
+    const alreadyEarlier = mergeIntelligenceIndexVersionHistory(
+      [{ version: 5, effectiveFrom: "2026-10-20T00:00:00.000Z", source: "inferred" }],
+      5,
+      "2026-10-29T08:00:00.000Z"
+    );
+    expect(alreadyEarlier.changed).toBe(false);
+  });
+
+  test("没有版本信息时不改动历史", () => {
+    const { history, changed } = mergeIntelligenceIndexVersionHistory(
+      [{ version: 4, effectiveFrom: "2026-08-01T00:00:00.000Z" }],
+      null,
+      "2026-10-29T08:00:00.000Z"
+    );
+    expect(changed).toBe(false);
+    expect(history).toHaveLength(1);
+  });
 });
 
 describe("buildImportRows", () => {
@@ -417,6 +513,65 @@ describe("buildImportRows", () => {
     });
 
     expect(rows).toHaveLength(0);
+  });
+
+  test("为 AA Intelligence Index 自动打上版本标识 valueNote", () => {
+    const models = [
+      upstream("aa-1", "GPT 5.4", "OpenAI", {
+        "evaluations.artificial_analysis_intelligence_index": 85.5
+      })
+    ];
+    const cat = buildMetricCatalog(models);
+    const rows = buildImportRows({
+      upstreamModels: models,
+      catalog: cat,
+      config: {
+        selectedMetrics: ["evaluations.artificial_analysis_intelligence_index"],
+        metricOverrides: {}
+      },
+      matches: [match(1, "aa-1", "matched")],
+      localModelsById,
+      intelligenceIndexVersion: 5
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      modelName: "GPT 5.4",
+      benchmarkName: "AA Intelligence Index",
+      rawValue: "85.5",
+      valueNote: "v5",
+      // 结构化版本用于导入时区分「重复同步」与「跨版本重测」
+      indexVersion: "v5"
+    });
+  });
+
+  test("不随版本重标定的指标不带 indexVersion", () => {
+    const rows = buildImportRows({
+      upstreamModels: [
+        upstream("aa-1", "GPT 5.4", "OpenAI", {
+          "evaluations.artificial_analysis_intelligence_index": 85.5,
+          "evaluations.mmlu_pro": 0.791
+        })
+      ],
+      catalog: buildMetricCatalog([
+        upstream("aa-1", "GPT 5.4", "OpenAI", {
+          "evaluations.artificial_analysis_intelligence_index": 85.5,
+          "evaluations.mmlu_pro": 0.791
+        })
+      ]),
+      config: {
+        selectedMetrics: ["evaluations.artificial_analysis_intelligence_index", "evaluations.mmlu_pro"],
+        metricOverrides: {}
+      },
+      matches: [match(1, "aa-1", "matched")],
+      localModelsById,
+      intelligenceIndexVersion: 5
+    });
+
+    const mmluRow = rows.find((row) => row.benchmarkName === "MMLU-Pro")!;
+    expect(mmluRow.indexVersion).toBeNull();
+    expect(mmluRow.valueNote).toBeNull();
+    expect(rows.find((row) => row.benchmarkName === "AA Intelligence Index")?.indexVersion).toBe("v5");
   });
 });
 

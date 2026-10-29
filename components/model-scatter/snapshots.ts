@@ -3,6 +3,7 @@ import {
   clusterEntriesByTime,
   detectAdaptiveMajorThreshold,
   groupBatchesIntoMajorRevisions,
+  type GroupBatchesOptions,
   type LatestAaRevisionResolution,
   type MajorRevisionGroup,
   type RevisionBatch
@@ -81,6 +82,31 @@ function buildBatchSampleMap(
   return map;
 }
 
+/** 主要变动组里不属于组长批次的模型数（即后续小补丁带进来的模型） */
+function countModelsOutsideBatch(
+  group: MajorRevisionGroup<SnapshotRevisionEntry>,
+  leaderBatch: RevisionBatch<SnapshotRevisionEntry>
+): number {
+  let count = 0;
+  group.entryByModel.forEach((_entry, modelName) => {
+    if (!leaderBatch.modelNames.has(modelName)) count += 1;
+  });
+  return count;
+}
+
+/**
+ * 快照徽章的模型数文案。
+ *
+ * `39 模型` = 该批次本身；`39+1 模型` = 组长批次 39 个，后面又合并进 1 个补丁模型。
+ * 直接写成 40 会掩盖「这些模型不在同一批评测」的事实。
+ */
+export function formatSnapshotModelCount(
+  snapshot: Pick<ScatterMetricSnapshot, "modelCount" | "mergedModelCount">
+): string {
+  const merged = snapshot.mergedModelCount ?? 0;
+  return merged > 0 ? `${snapshot.modelCount}+${merged} 模型` : `${snapshot.modelCount} 模型`;
+}
+
 /**
  * 从指标的历史记录中提取并聚类出历史时间快照（公共时间片段）。
  *
@@ -92,7 +118,8 @@ function buildBatchSampleMap(
  */
 export function extractMetricSnapshots(
   historyByModel: ReadonlyMap<string, readonly ScatterHistorySample[]>,
-  aaRevision?: LatestAaRevisionResolution
+  aaRevision?: LatestAaRevisionResolution,
+  options?: GroupBatchesOptions
 ): ScatterMetricSnapshot[] {
   let batches: RevisionBatch<SnapshotRevisionEntry>[];
   let majorGroups: MajorRevisionGroup<SnapshotRevisionEntry>[];
@@ -116,7 +143,7 @@ export function extractMetricSnapshots(
     if (batches.length <= 1) return [];
 
     const adaptiveThreshold = detectAdaptiveMajorThreshold(batches.map((b) => b.modelCount));
-    majorGroups = groupBatchesIntoMajorRevisions(batches, adaptiveThreshold);
+    majorGroups = groupBatchesIntoMajorRevisions(batches, adaptiveThreshold, options);
   }
 
   if (batches.length <= 1) {
@@ -164,14 +191,23 @@ export function extractMetricSnapshots(
       ? buildGroupSampleMap(meta.group.entryByModel)
       : buildBatchSampleMap(meta.batch.entries);
 
+    // 组长批次之后合并进来的补丁模型数：徽章展示成 `39+1 模型`，
+    // 而不是把补丁模型直接加进批次规模里
+    const mergedModelCount = isMajorRevision
+      ? countModelsOutsideBatch(meta.group, meta.batch)
+      : 0;
+
     return {
       id: new Date(repTime).toISOString(),
       timestamp: repTime,
       label,
       modelCount,
+      ...(mergedModelCount > 0 ? { mergedModelCount } : {}),
       isLatest,
       isBatchSnapshot: modelCount >= 3 || (totalModels > 0 && modelCount / totalModels >= 0.25),
       isMajorRevision,
+      // 只有主要变动的组长才代表一个完整版本；补丁批次不继承组版本，避免误标为全量快照
+      version: isMajorRevision ? meta.group.version ?? null : null,
       sampleByModel
     };
   });

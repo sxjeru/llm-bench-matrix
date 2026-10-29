@@ -12,6 +12,8 @@ export type BuildMatrixMarkdownTableOptions = {
   shouldShowOverallSummary?: boolean;
   overallSummaryByModel?: ReadonlyMap<string, OverallModelSummary>;
   overallScoreDisplayDecimalsByModel?: ReadonlyMap<string, number>;
+  /** 是否在行名和表格末尾标注 AA 指数版本；默认 true */
+  includeVersionLegend?: boolean;
 };
 
 export function escapeMarkdownTableCell(value: string): string {
@@ -74,6 +76,18 @@ function formatOverallScoreText(
   return `${summary.rawScore.toFixed(decimals)} (${summary.rawRank})`;
 }
 
+function buildMarkdownVersionLegend(rows: readonly MatrixRow[]): string | null {
+  const versions = new Map<string, string>();
+  rows.forEach((row) => {
+    const version = row.aaRevision?.latestVersion;
+    if (version) versions.set(row.benchmark, version);
+  });
+  if (versions.size === 0) return null;
+
+  const parts = Array.from(versions, ([benchmark, version]) => `${benchmark} ${version}`);
+  return `> 数据版本：${parts.join("；")}。跨版本分数不可直接比较。`;
+}
+
 export function buildMatrixMarkdownTable({
   rows,
   modelColumns,
@@ -83,7 +97,8 @@ export function buildMatrixMarkdownTable({
   sourceValueMode = "latest",
   shouldShowOverallSummary = false,
   overallSummaryByModel,
-  overallScoreDisplayDecimalsByModel
+  overallScoreDisplayDecimalsByModel,
+  includeVersionLegend = true
 }: BuildMatrixMarkdownTableOptions): string {
   const header = [
     "Modality",
@@ -93,10 +108,11 @@ export function buildMatrixMarkdownTable({
   ];
   const separator = header.map(() => "---");
   const bodyRows = rows.map((row) => {
+    const version = includeVersionLegend ? row.aaRevision?.latestVersion : null;
     const cells = [
       row.modalities.join(", "),
       ...(showCategory ? [row.category] : []),
-      row.benchmark,
+      version ? `${row.benchmark} (${version})` : row.benchmark,
       ...modelColumns.map((modelName) => getMatrixMarkdownCellText(row, modelName, {
         displaySourceValuesInCells,
         activeSource,
@@ -117,10 +133,16 @@ export function buildMatrixMarkdownTable({
     ])
     : null;
 
-  return [
+  const tableLines = [
     formatMarkdownTableRow(header),
     formatMarkdownTableRow(separator),
     ...bodyRows,
     ...(overallRow ? [overallRow] : [])
+  ];
+  const versionLegend = includeVersionLegend ? buildMarkdownVersionLegend(rows) : null;
+
+  return [
+    ...tableLines,
+    ...(versionLegend ? ["", versionLegend] : [])
   ].join("\n");
 }
