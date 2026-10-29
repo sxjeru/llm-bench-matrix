@@ -100,8 +100,9 @@ export function ModelScatter({
   const [viewState, setViewState] = useState<ScatterViewState>(DEFAULT_SCATTER_VIEW_STATE);
   const [isHydrated, setIsHydrated] = useState(false);
   /**
-   * 默认包含低覆盖指标：坐标轴可搜索/选择全部 benchmark。
+   * 默认包含低覆盖指标：坐标轴数据与模型列默认纳入低覆盖 benchmark。
    * Overall 是例外，始终按矩阵默认视图（剔除低覆盖）计算，见下方 overallMatrixRows。
+   * 该开关只控制是否纳入绘制，不控制轴下拉的搜索范围（搜索始终可查全部指标）。
    */
   const [showLowCoverageRows, setShowLowCoverageRows] = useState(true);
   const [hiddenProviders, setHiddenProviders] = useState<string[]>([]);
@@ -372,23 +373,34 @@ export function ModelScatter({
     [baseSourceRows, primaryCoverageRows, activeSource, aaRevisionsByRow, aaVersionCutoffs]
   );
 
-  /** 坐标轴实际使用的 MatrixRow：默认全量，取消勾选后与主要指标一致。 */
-  const axisMatrixRows = useMemo(() => {
-    if (!showLowCoverageRows || activeSource !== SOURCE_ALL) {
-      return primaryMatrixRows;
-    }
-
-    return buildMatrixRows(
+  /**
+   * 全量坐标轴行集：始终包含低覆盖行，专供指标搜索使用。
+   * 是否把低覆盖点实际画进图里由下方 metrics 决定，搜索可见性不再依赖开关。
+   */
+  const allAxisMatrixRows = useMemo(
+    () =>
+      activeSource !== SOURCE_ALL
+        ? // 非 All 来源本来就不做覆盖率裁剪，primaryMatrixRows 已是全量
+          primaryMatrixRows
+        : buildMatrixRows(
+            baseSourceRows,
+            filteredRows,
+            SHOW_DUPLICATE_ROWS,
+            false,
+            activeSource,
+            "latest",
+            aaRevisionsByRow,
+            { versionCutoffs: aaVersionCutoffs }
+          ),
+    [
+      activeSource,
+      primaryMatrixRows,
       baseSourceRows,
       filteredRows,
-      SHOW_DUPLICATE_ROWS,
-      false,
-      activeSource,
-      "latest",
       aaRevisionsByRow,
-      { versionCutoffs: aaVersionCutoffs }
-    );
-  }, [baseSourceRows, filteredRows, primaryMatrixRows, showLowCoverageRows, activeSource, aaRevisionsByRow, aaVersionCutoffs]);
+      aaVersionCutoffs
+    ]
+  );
 
   const priceMatrixRows = useMemo(
     () => (modelPrices.some(hasPublicModelPriceCost) ? buildPriceMatrixRows(baseModelColumns, modelPrices) : []),
@@ -431,33 +443,50 @@ export function ModelScatter({
     return scoreMap;
   }, [overallSummaryByModel]);
 
-  const metrics = useMemo(
+  /**
+   * 全量指标：始终包含低覆盖 benchmark，专供轴下拉搜索。
+   * 不用它直接绘制，避免取消勾选后仍能画出低覆盖点。
+   */
+  const allMetrics = useMemo(
     () =>
       buildScatterMetrics({
-        // 坐标轴默认包含低覆盖指标；Overall 已经在 overallMatrixRows 里单独按矩阵默认视图计算
-        benchmarkRows: axisMatrixRows,
+        benchmarkRows: allAxisMatrixRows,
         priceRows: priceMatrixRows,
         paramsRows: modelInfoMatrixRows,
         overallScoreByModel,
         versionCutoffs: aaVersionCutoffs
       }),
-    [axisMatrixRows, priceMatrixRows, modelInfoMatrixRows, overallScoreByModel, aaVersionCutoffs]
+    [allAxisMatrixRows, priceMatrixRows, modelInfoMatrixRows, overallScoreByModel, aaVersionCutoffs]
   );
 
-  const metricGroups = useMemo(() => groupScatterMetrics(metrics), [metrics]);
-
   /**
-   * 轴下拉默认只展示主要指标；输入搜索词后才放开全部指标。
+   * 轴下拉默认只展示主要指标；输入搜索词后放开全部指标。
    * 价格、参数量与 Overall 始终属于主要指标，benchmark 则以矩阵默认视图的行集为准。
+   * 该集合只用于默认列表，与「含低覆盖指标」开关无关。
    */
   const primaryMetricKeys = useMemo(() => {
     const primaryBenchmarkRowKeys = new Set(primaryMatrixRows.map((row) => row.rowKey));
     return new Set(
-      metrics
+      allMetrics
         .filter((metric) => metric.kind !== "benchmark" || primaryBenchmarkRowKeys.has(metric.rowKey))
         .map((metric) => metric.key)
     );
-  }, [metrics, primaryMatrixRows]);
+  }, [allMetrics, primaryMatrixRows]);
+
+  /**
+   * 实际参与绘制与轴校验的指标：取消勾选后退回主要指标。
+   * 搜索框仍使用 allMetrics，因此「能否搜到」与「是否包含低覆盖」相互独立。
+   */
+  const metrics = useMemo(
+    () =>
+      showLowCoverageRows
+        ? allMetrics
+        : allMetrics.filter((metric) => primaryMetricKeys.has(metric.key)),
+    [allMetrics, primaryMetricKeys, showLowCoverageRows]
+  );
+
+  /** 轴下拉使用全量指标分组：搜索始终覆盖低覆盖指标，不受开关影响。 */
+  const metricGroups = useMemo(() => groupScatterMetrics(allMetrics), [allMetrics]);
 
   // 存档或链接里的轴失效时回落到默认，并顺带套用该指标建议的刻度；同时校验快照有效性
   useEffect(() => {
@@ -808,20 +837,26 @@ export function ModelScatter({
 
   const handleChangeAxis = useCallback(
     (axis: "x" | "y", key: string, snapshotId?: string | null) => {
-      const metric = findScatterMetric(metrics, key);
+      // 下拉里是全量指标，可能包含当前开关未纳入绘制的低覆盖指标
+      const metric = findScatterMetric(allMetrics, key);
       const previousKey = axis === "x" ? viewState.xKey : viewState.yKey;
-      const previousMetric = findScatterMetric(metrics, previousKey);
+      const previousMetric = findScatterMetric(allMetrics, previousKey);
 
-      // 离开 Overall 后，其他指标默认包含低覆盖指标。
-      // 若用户此前在看 Overall 时手动关掉了开关，这里自动恢复勾选。
-      if (previousMetric?.kind === "overall" && metric && metric.kind !== "overall") {
+      // 两种情况需要重新纳入低覆盖行：
+      // 1. 离开 Overall：其他指标默认包含低覆盖指标；
+      // 2. 直接选中了低覆盖指标：不勾选就无法绘制，顺带把开关打开。
+      if (
+        metric &&
+        metric.kind !== "overall" &&
+        (previousMetric?.kind === "overall" || !primaryMetricKeys.has(metric.key))
+      ) {
         setShowLowCoverageRows(true);
       }
 
       setHistorySelections([]);
       setViewState((prev) => {
         const otherKey = axis === "x" ? prev.yKey : prev.xKey;
-        const otherMetric = otherKey ? findScatterMetric(metrics, otherKey) : null;
+        const otherMetric = otherKey ? findScatterMetric(allMetrics, otherKey) : null;
         const retainsOverlay = Boolean(
           prev.overlaySnapshot &&
             (metric?.snapshots.some((s) => s.id === prev.overlaySnapshot) ||
@@ -838,7 +873,7 @@ export function ModelScatter({
         };
       });
     },
-    [metrics, viewState.xKey, viewState.yKey]
+    [allMetrics, primaryMetricKeys, viewState.xKey, viewState.yKey]
   );
 
   const handleSwapAxes = useCallback(() => {

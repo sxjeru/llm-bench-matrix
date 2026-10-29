@@ -976,6 +976,31 @@ describe("轴选择器（可输入下拉）", () => {
     expect(toggle.checked).toBe(false);
   });
 
+  test("取消勾选后搜索仍能搜到低覆盖指标，选中时自动恢复勾选", async () => {
+    const { container } = await renderReady(
+      <ModelScatter
+        rows={[...rows, ...sparseRows]}
+        allRows={[...rows, ...sparseRows]}
+        sourceOptions={["text:demo"]}
+        modelPrices={modelPrices}
+        modelParams={modelParams}
+      />
+    );
+    const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
+
+    fireEvent.click(toggle);
+    expect(toggle.checked).toBe(false);
+
+    // 搜索能力与开关互不影响：关掉开关后输入关键词仍能看到低覆盖指标
+    expect(openAxisOptions(container, "y", "sparse")).toContain("Sparse Bench");
+
+    // 真正选中低覆盖指标时才需要数据，开关顺带恢复勾选
+    pickAxisOption(container, "y", "Sparse Bench");
+
+    expect(axisLabel(container, "y")).toBe("Sparse Bench");
+    expect(toggle.checked).toBe(true);
+  });
+
   test("从 Overall 切到其他指标时自动重新勾选含低覆盖指标", async () => {
     const { container } = await renderScatter();
     const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
