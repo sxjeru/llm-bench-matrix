@@ -507,16 +507,20 @@ export function ModelScatter({
   }, [searchParams, primaryMetricKeys]);
 
   /**
-   * 实际参与绘制与轴校验的指标：取消勾选后退回主要指标。
-   * 搜索框仍使用 allMetrics，因此「能否搜到」与「是否包含低覆盖」相互独立。
+   * 实际参与绘制的指标：关闭「含低覆盖指标」时，非主要 benchmark 仍保留在轴里，
+   * 但清空取值与历史快照，让散点直接消失；重新勾选后数据恢复。
+   * 轴 key 不再因开关而失效，避免用户看到「点了开关但图没变」。
+   * 搜索框仍使用 allMetrics，因此「能否搜到」与「是否绘制」相互独立。
    */
-  const metrics = useMemo(
-    () =>
-      showLowCoverageRows
-        ? allMetrics
-        : allMetrics.filter((metric) => primaryMetricKeys.has(metric.key)),
-    [allMetrics, primaryMetricKeys, showLowCoverageRows]
-  );
+  const metrics = useMemo(() => {
+    if (showLowCoverageRows) return allMetrics;
+
+    return allMetrics.map((metric) =>
+      metric.kind === "benchmark" && !primaryMetricKeys.has(metric.key)
+        ? { ...metric, valueByModel: new Map(), historyByModel: new Map(), snapshots: [] }
+        : metric
+    );
+  }, [allMetrics, primaryMetricKeys, showLowCoverageRows]);
 
   /** 轴下拉使用全量指标分组：搜索始终覆盖低覆盖指标，不受开关影响。 */
   const metricGroups = useMemo(() => groupScatterMetrics(allMetrics), [allMetrics]);
@@ -844,25 +848,25 @@ export function ModelScatter({
   }, [notice, setNotice]);
 
   /**
-   * 关闭「含低覆盖指标」时，若当前轴依赖低覆盖行，轴会在 metrics 收缩后
-   * 被回落逻辑换成默认指标。这里提前给出提示，避免坐标轴悄然变化。
+   * 关闭「含低覆盖指标」时，若当前轴本身就是低覆盖指标，散点会被清空但轴保留。
+   * 这里给出提示，避免用户以为图坏了。
    */
   const handleToggleLowCoverageRows = useCallback(
     (next: boolean) => {
       setShowLowCoverageRows(next);
       if (next) return;
 
-      const droppedAxes = (["x", "y"] as const).filter((axis) => {
+      const hiddenAxes = (["x", "y"] as const).filter((axis) => {
         const key = axis === "x" ? viewState.xKey : viewState.yKey;
         if (!key) return false;
         return !primaryMetricKeys.has(key);
       });
-      if (droppedAxes.length === 0) return;
+      if (hiddenAxes.length === 0) return;
 
-      const axisNames = droppedAxes.map((axis) => (axis === "x" ? "X 轴" : "Y 轴")).join("、");
+      const axisNames = hiddenAxes.map((axis) => (axis === "x" ? "X 轴" : "Y 轴")).join("、");
       setNotice({
         type: "success",
-        message: `已关闭低覆盖指标：${axisNames} 的低覆盖指标已回落到默认轴`
+        message: `已关闭低覆盖指标：${axisNames}的低覆盖数据已隐藏，重新勾选即可恢复`
       });
     },
     [primaryMetricKeys, setNotice, setShowLowCoverageRows, viewState.xKey, viewState.yKey]
@@ -894,7 +898,7 @@ export function ModelScatter({
           ? lowCoveragePrefs.overall
           : lowCoveragePrefs.other;
 
-      // 切到 Overall 会按 overall 记忆关掉低覆盖，另一轴的低覆盖指标随后会回落，这里提前提示
+      // 切到 Overall 会按 overall 记忆关掉低覆盖，另一轴的低覆盖数据会随之隐藏，这里提前提示
       if (nextMode === "overall" && !nextIncludesLowCoverage) {
         const otherAxis = axis === "x" ? "y" : "x";
         const otherKey = otherAxis === "x" ? viewState.xKey : viewState.yKey;
@@ -902,7 +906,7 @@ export function ModelScatter({
           const axisName = otherAxis === "x" ? "X 轴" : "Y 轴";
           setNotice({
             type: "success",
-            message: `已切换到 Overall 视图：${axisName}的低覆盖指标已回落到默认轴`
+            message: `已切换到 Overall 视图：${axisName}的低覆盖数据已隐藏，重新勾选即可恢复`
           });
         }
       }

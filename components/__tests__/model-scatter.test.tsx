@@ -946,6 +946,12 @@ describe("轴选择器（可输入下拉）", () => {
     // 默认视图 Y 轴是 Overall，读取 overall 记忆（默认关闭）
     expect(toggle.checked).toBe(false);
 
+    // 手动点击能立即切换 overall 记忆
+    fireEvent.click(toggle);
+    expect(toggle.checked).toBe(true);
+    fireEvent.click(toggle);
+    expect(toggle.checked).toBe(false);
+
     // 切到普通指标后读取 other 记忆（默认开启）
     pickAxisOption(container, "y", "Bench-One");
     expect(toggle.checked).toBe(true);
@@ -1078,7 +1084,8 @@ describe("轴选择器（可输入下拉）", () => {
     expect(toggle.checked).toBe(true);
   });
 
-  test("切到 Overall 时按 overall 记忆关闭低覆盖，并提示另一轴回落", async () => {
+  test("切到 Overall 时按 overall 记忆隐藏另一轴的低覆盖数据", async () => {
+    stubScatterChartHostSize();
     const { container } = await renderReady(
       <ModelScatter
         rows={[...rows, ...sparseRows]}
@@ -1094,16 +1101,19 @@ describe("轴选择器（可输入下拉）", () => {
     pickAxisOption(container, "x", "Sparse Bench");
     expect(axisLabel(container, "x")).toBe("Sparse Bench");
     expect(toggle.checked).toBe(true);
+    expect(container.querySelectorAll(".recharts-scatter-symbol").length).toBe(1);
 
-    // overall 记忆默认关闭：切到 Overall 后另一轴的低覆盖指标回落并提示
+    // overall 记忆默认关闭：切到 Overall 后轴保留，但低覆盖散点被清空
     pickAxisOption(container, "y", "Overall Score");
 
     expect(toggle.checked).toBe(false);
-    expect(axisLabel(container, "x")).not.toBe("Sparse Bench");
+    expect(axisLabel(container, "x")).toBe("Sparse Bench");
+    expect(container.querySelectorAll(".recharts-scatter-symbol").length).toBe(0);
     expect(screen.getByText(/已切换到 Overall 视图/)).toBeInTheDocument();
   });
 
-  test("关闭含低覆盖指标时提示轴已回落", async () => {
+  test("关闭含低覆盖指标时保留轴并隐藏低覆盖散点，重新勾选后恢复", async () => {
+    stubScatterChartHostSize();
     const { container } = await renderReady(
       <ModelScatter
         rows={[...rows, ...sparseRows]}
@@ -1113,16 +1123,29 @@ describe("轴选择器（可输入下拉）", () => {
         modelParams={modelParams}
       />
     );
+    const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
 
     pickAxisOption(container, "y", "Sparse Bench");
     expect(axisLabel(container, "y")).toBe("Sparse Bench");
+    expect(toggle.checked).toBe(true);
+    expect(container.querySelectorAll(".recharts-scatter-symbol").length).toBe(1);
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("checkbox", { name: /含低覆盖指标/ }));
+      fireEvent.click(toggle);
     });
 
     expect(screen.getByText(/已关闭低覆盖指标/)).toBeInTheDocument();
-    expect(axisLabel(container, "y")).not.toBe("Sparse Bench");
+    // 轴保留，但低覆盖散点消失
+    expect(axisLabel(container, "y")).toBe("Sparse Bench");
+    expect(container.querySelectorAll(".recharts-scatter-symbol").length).toBe(0);
+
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+
+    // 重新勾选后散点恢复
+    expect(toggle.checked).toBe(true);
+    expect(container.querySelectorAll(".recharts-scatter-symbol").length).toBe(1);
   });
 });
 
