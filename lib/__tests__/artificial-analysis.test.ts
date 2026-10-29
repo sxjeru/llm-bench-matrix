@@ -461,8 +461,39 @@ describe("buildImportRows", () => {
       modelName: "GPT 5.4",
       benchmarkName: "AA Intelligence Index",
       rawValue: "85.5",
-      valueNote: "v5"
+      valueNote: "v5",
+      // 结构化版本用于导入时区分「重复同步」与「跨版本重测」
+      indexVersion: "v5"
     });
+  });
+
+  test("不随版本重标定的指标不带 indexVersion", () => {
+    const rows = buildImportRows({
+      upstreamModels: [
+        upstream("aa-1", "GPT 5.4", "OpenAI", {
+          "evaluations.artificial_analysis_intelligence_index": 85.5,
+          "evaluations.mmlu_pro": 0.791
+        })
+      ],
+      catalog: buildMetricCatalog([
+        upstream("aa-1", "GPT 5.4", "OpenAI", {
+          "evaluations.artificial_analysis_intelligence_index": 85.5,
+          "evaluations.mmlu_pro": 0.791
+        })
+      ]),
+      config: {
+        selectedMetrics: ["evaluations.artificial_analysis_intelligence_index", "evaluations.mmlu_pro"],
+        metricOverrides: {}
+      },
+      matches: [match(1, "aa-1", "matched")],
+      localModelsById,
+      intelligenceIndexVersion: 5
+    });
+
+    const mmluRow = rows.find((row) => row.benchmarkName === "MMLU-Pro")!;
+    expect(mmluRow.indexVersion).toBeNull();
+    expect(mmluRow.valueNote).toBeNull();
+    expect(rows.find((row) => row.benchmarkName === "AA Intelligence Index")?.indexVersion).toBe("v5");
   });
 });
 

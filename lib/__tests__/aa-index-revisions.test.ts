@@ -6,6 +6,7 @@ import {
   groupBatchesIntoMajorRevisions,
   isAaMajorIndexBenchmark,
   resolveBatchVersion,
+  resolveBatchVersionDetail,
   resolveLatestAaRevisionValues
 } from "@/lib/aa-index-revisions";
 import type { MatrixCellEntry } from "@/components/benchmark-matrix/types";
@@ -244,6 +245,62 @@ describe("lib/aa-index-revisions", () => {
       expect(prevGroup.batches.some((b) => b.modelCount === 4)).toBe(true);
       expect(prevGroup.batches.some((b) => b.modelCount === 1)).toBe(true);
     });
+
+    test("单条被污染的版本注释不会把旧批次升级成新版，10-28 仍然独立成组", () => {
+      const makeBatch = (
+        timeStr: string,
+        count: number,
+        prefix: string,
+        noteFor?: (index: number) => string | null
+      ) => {
+        const modelNames = new Set<string>();
+        const entries: {
+          modelName: string;
+          benchTime: string;
+          value: number;
+          valueNote: string | null;
+        }[] = [];
+        for (let i = 0; i < count; i += 1) {
+          const modelName = `${prefix}_m${i}`;
+          modelNames.add(modelName);
+          entries.push({
+            modelName,
+            benchTime: timeStr,
+            value: 50 + i,
+            valueNote: noteFor ? noteFor(i) : null
+          });
+        }
+        return {
+          timestamp: new Date(timeStr).getTime(),
+          modelNames,
+          entries,
+          modelCount: count
+        };
+      };
+
+      const b0916 = makeBatch("2026-09-16T00:00:00.000Z", 140, "b_0916");
+      // 09-20 全批 81 个模型都没有版本注释，只有 1 条被跨版本导入原地改写成了 v5
+      const b0920 = makeBatch("2026-09-20T00:00:00.000Z", 81, "b_0920", (i) => (i === 0 ? "v5" : null));
+      const b1024 = makeBatch("2026-10-24T00:00:00.000Z", 4, "b_1024");
+      const b1028 = makeBatch("2026-10-28T08:00:00.000Z", 39, "b_1028", () => "v5");
+
+      const groups = groupBatchesIntoMajorRevisions([b0916, b0920, b1024, b1028], undefined, {
+        benchmarkName: "AA Intelligence Index"
+      });
+
+      // 80 条无注释 + 1 条 v5 的批次不能被定性成 v5
+      const pollutedGroup = groups.find((group) =>
+        group.batches.some((batch) => batch.modelCount === 81)
+      )!;
+      expect(pollutedGroup.version).toBeNull();
+
+      // 09-20 被污染后仍不能吞掉 10-28：后者靠切分点拿到高置信 v5，独立成组
+      const latestGroup = groups[groups.length - 1]!;
+      expect(latestGroup.isMajorRevision).toBe(true);
+      expect(latestGroup.version).toBe("v5");
+      expect(latestGroup.batches.map((batch) => batch.modelCount)).toEqual([39]);
+      expect(latestGroup.entryByModel.size).toBe(39);
+    });
   });
 
   describe("extractAaVersionFromNote & resolveBatchVersion", () => {
@@ -322,6 +379,65 @@ describe("lib/aa-index-revisions", () => {
         modelCount: 1
       };
       expect(resolveBatchVersion(earlyBatch, "AA Intelligence Index")).toBeNull();
+    });
+
+    test("批次内只有个别条目带版本注释时拒绝判定整批版本", () => {
+      const entries = Array.from({ length: 81 }, (_, index) => ({
+        modelName: `m${index}`,
+        valueNote: index === 0 ? "v5" : null
+      }));
+      const batch = {
+        timestamp: new Date("2026-09-20T00:00:00.000Z").getTime(),
+        modelNames: new Set(entries.map((entry) => entry.modelName)),
+        entries,
+        modelCount: entries.length
+      };
+
+      expect(resolveBatchVersion(batch, "AA Intelligence Index")).toBeNull();
+
+      const resolution = resolveBatchVersionDetail(batch, "AA Intelligence Index");
+      expect(resolution.confidence).toBe("low");
+      expect(resolution.source).toBeNull();
+      expect(resolution.noteVersionCounts).toEqual({ v5: 1 });
+    });
+
+    test("时间切分点是权威证据，零散的旧版本注释不能推翻它", () => {
+      const entries = Array.from({ length: 40 }, (_, index) => ({
+        modelName: `m${index}`,
+        valueNote: index === 0 ? "v4" : null
+      }));
+      const batch = {
+        timestamp: new Date("2026-10-28T08:00:00.000Z").getTime(),
+        modelNames: new Set(entries.map((entry) => entry.modelName)),
+        entries,
+        modelCount: entries.length
+      };
+
+      expect(resolveBatchVersionDetail(batch, "AA Intelligence Index")).toEqual({
+        version: "v5",
+        source: "cutoff",
+        confidence: "high",
+        noteVersionCounts: { v4: 1 }
+      });
+    });
+
+    test("尚未写入配置的新版本可以由批次内多数注释推翻切分点", () => {
+      const entries = Array.from({ length: 20 }, (_, index) => ({
+        modelName: `m${index}`,
+        valueNote: "v6"
+      }));
+      const batch = {
+        timestamp: new Date("2026-11-05T00:00:00.000Z").getTime(),
+        modelNames: new Set(entries.map((entry) => entry.modelName)),
+        entries,
+        modelCount: entries.length
+      };
+
+      expect(resolveBatchVersionDetail(batch, "AA Intelligence Index")).toMatchObject({
+        version: "v6",
+        source: "note",
+        confidence: "high"
+      });
     });
   });
 

@@ -1,4 +1,9 @@
 import { compareMatrixCellEntryRecency, parseTimestampMs } from "@/components/benchmark-matrix/utils";
+import {
+  compareAaVersions,
+  extractAaVersionFromNote,
+  normalizeAaVersion
+} from "@/lib/aa-index-version";
 import { isArtificialAnalysisSource } from "@/lib/source-utils";
 import { AA_SUMMARY_INDEX_LABEL_REGEX } from "@/components/model-scatter/constants";
 import type { MatrixCellEntry } from "@/components/benchmark-matrix/types";
@@ -202,17 +207,8 @@ export const DEFAULT_AA_INDEX_VERSION_CUTOFFS: AaVersionCutoff[] = [
   }
 ];
 
-/**
- * 从 valueNote 中提取显式的版本标记（v5 / v4.1 / Intelligence Index v5）。
- *
- * 必须带 `v` 前缀：valueNote 同时承载人工备注，像 "2026-10-28 更新" 或
- * "GPT-5.5 数据" 这类文本里的数字并不是版本号，不能据此切断版本。
- */
-export function extractAaVersionFromNote(note: string | null | undefined): string | null {
-  if (!note) return null;
-  const match = note.trim().match(/\bv(\d+(?:\.\d+)*)\b/i);
-  return match ? `v${match[1]}` : null;
-}
+// 版本解析放在 lib/aa-index-version，服务端导入流程也要用，这里保持对外导出不变
+export { extractAaVersionFromNote };
 
 /**
  * 合并自定义与内置切分点。
@@ -239,39 +235,38 @@ function mergeVersionCutoffs(customCutoffs?: readonly AaVersionCutoff[]): AaVers
   return merged;
 }
 
+/** 批次版本判定的证据来源 */
+export type AaBatchVersionSource = "cutoff" | "note" | null;
+
+export type AaBatchVersionResolution = {
+  /** 判定出的批次版本；证据不足时为 null */
+  version: string | null;
+  source: AaBatchVersionSource;
+  /**
+   * high：足以据此切分版本代际（时间切分点命中，或注释在批次内占多数）；
+   * low：证据不足（如整批只有个别条目带版本注释），只能拒绝判定，不能切代。
+   */
+  confidence: "high" | "low";
+  /** 批次内各版本注释的条目数，无论是否被采纳，便于排查数据问题 */
+  noteVersionCounts: Record<string, number>;
+};
+
 /**
- * 确定一个时间批次所属的评估版本。
- * 优先级：
- * 1. 批次内 entries 自带的 valueNote 版本标注；
- * 2. 匹配外部传入或内置的 versionCutoffs 时间切分点。
+ * 注释要成为批次身份的「多数证据」，至少覆盖这么多比例的条目。
+ *
+ * 不能是「见一条就定整批」：81 个模型的批次里混进 1 条被误改的 v5 注释，
+ * 整批就会被盖成 v5，进而吞掉后续真实的版本跃迁。
  */
-export function resolveBatchVersion<T extends { valueNote?: string | null }>(
+const NOTE_VERSION_MAJORITY_SHARE = 0.5;
+
+/** 匹配最近一次命中的断代切分点；无 benchmark 名时不套用任何切分点 */
+function resolveCutoffVersion<T>(
   batch: RevisionBatch<T>,
   benchmarkName?: string,
   customCutoffs?: readonly AaVersionCutoff[]
 ): string | null {
-  const noteVersionCounts = new Map<string, number>();
-  batch.entries.forEach((entry) => {
-    const v = extractAaVersionFromNote(entry.valueNote);
-    if (v) {
-      noteVersionCounts.set(v, (noteVersionCounts.get(v) ?? 0) + 1);
-    }
-  });
-
-  if (noteVersionCounts.size > 0) {
-    let topVersion: string | null = null;
-    let maxCount = -1;
-    noteVersionCounts.forEach((count, version) => {
-      if (count > maxCount) {
-        maxCount = count;
-        topVersion = version;
-      }
-    });
-    if (topVersion) return topVersion;
-  }
-
   // 没有 benchmark 名时无法判断这批切分点是否适用于当前指标。
-  // 此前这里返回 true，导致所有指标都套用 AA Intelligence Index 的切分点。
+  // 此前这里直接放行，导致所有指标都套用 AA Intelligence Index 的切分点。
   if (!benchmarkName) return null;
 
   const cutoffs = mergeVersionCutoffs(customCutoffs);
@@ -290,12 +285,80 @@ export function resolveBatchVersion<T extends { valueNote?: string | null }>(
     }
   }
 
-  if (matchedCutoff) {
-    const vStr = String(matchedCutoff.version);
-    return vStr.startsWith("v") ? vStr : `v${vStr}`;
+  if (!matchedCutoff) return null;
+
+  const rawVersion = String(matchedCutoff.version);
+  return normalizeAaVersion(rawVersion) ?? (rawVersion.startsWith("v") ? rawVersion : `v${rawVersion}`);
+}
+
+/**
+ * 确定一个时间批次所属的评估版本，并给出该判定的置信度。
+ *
+ * 优先级（与行级注释相比，时间切分点是权威证据）：
+ * 1. 外部传入或内置的 versionCutoffs 时间切分点；
+ * 2. 批次内 entries 自带的 valueNote 版本标注 —— 只有在同一批次内占据多数
+ *    （>= 50% 条目）时才被采纳；只有当它比切分点更新时才允许推翻切分点。
+ *
+ * 两种证据都不足以定性时返回 `version: null` + `confidence: "low"`，
+ * 由调用方决定「拒绝切代」，而不是硬给一个可能错误的版本。
+ */
+export function resolveBatchVersionDetail<T extends { valueNote?: string | null }>(
+  batch: RevisionBatch<T>,
+  benchmarkName?: string,
+  customCutoffs?: readonly AaVersionCutoff[]
+): AaBatchVersionResolution {
+  const counts = new Map<string, number>();
+  batch.entries.forEach((entry) => {
+    const v = extractAaVersionFromNote(entry.valueNote);
+    if (v) {
+      counts.set(v, (counts.get(v) ?? 0) + 1);
+    }
+  });
+
+  const noteVersionCounts: Record<string, number> = {};
+  let dominantVersion: string | null = null;
+  let dominantCount = 0;
+  counts.forEach((count, version) => {
+    noteVersionCounts[version] = count;
+    if (count > dominantCount) {
+      dominantCount = count;
+      dominantVersion = version;
+    }
+  });
+
+  const totalEntries = batch.entries.length;
+  const dominantShare = totalEntries > 0 ? dominantCount / totalEntries : 0;
+  const hasMajorityNote = Boolean(dominantVersion) && dominantShare >= NOTE_VERSION_MAJORITY_SHARE;
+
+  const cutoffVersion = resolveCutoffVersion(batch, benchmarkName, customCutoffs);
+
+  if (cutoffVersion) {
+    // 注释只有在「多数条目一致标注了更新的版本」时才推翻切分点，
+    // 用于尚未写入配置的新版本（如 v6 首次出现）。
+    if (
+      hasMajorityNote
+      && dominantVersion
+      && (compareAaVersions(dominantVersion, cutoffVersion) ?? 0) > 0
+    ) {
+      return { version: dominantVersion, source: "note", confidence: "high", noteVersionCounts };
+    }
+    return { version: cutoffVersion, source: "cutoff", confidence: "high", noteVersionCounts };
   }
 
-  return null;
+  if (hasMajorityNote && dominantVersion) {
+    return { version: dominantVersion, source: "note", confidence: "high", noteVersionCounts };
+  }
+
+  return { version: null, source: null, confidence: "low", noteVersionCounts };
+}
+
+/** 只要版本号，不看置信度；需要判断「能不能据此切代」时用 resolveBatchVersionDetail */
+export function resolveBatchVersion<T extends { valueNote?: string | null }>(
+  batch: RevisionBatch<T>,
+  benchmarkName?: string,
+  customCutoffs?: readonly AaVersionCutoff[]
+): string | null {
+  return resolveBatchVersionDetail(batch, benchmarkName, customCutoffs).version;
 }
 
 export type MajorRevisionGroup<T> = {
@@ -342,14 +405,24 @@ export function groupBatchesIntoMajorRevisions<
   const groups: MajorRevisionGroup<T>[] = [];
 
   [...batches].sort((a, b) => a.timestamp - b.timestamp).forEach((batch) => {
-    const batchVersion = resolveBatchVersion(batch, options?.benchmarkName, options?.versionCutoffs);
+    const batchResolution = resolveBatchVersionDetail(
+      batch,
+      options?.benchmarkName,
+      options?.versionCutoffs
+    );
+    const batchVersion = batchResolution.version;
     const lastGroup = groups[groups.length - 1];
 
     // 检测是否为新版本断代：
-    // 1) 当前批次有明确版本 batchVersion
+    // 1) 当前批次版本有高置信证据（切分点命中，或注释在批次内占多数）
     // 2) 且上一个组存在，但上一个组版本不同
+    // 低置信的批次（例如整批只有一条被误改的注释）永远是 null 版本，
+    // 既不给自己贴版本，也不允许开启新桶吞掉后续真实跃迁。
     const isNewVersionCutoff = Boolean(
-      batchVersion && lastGroup && lastGroup.version !== batchVersion
+      batchVersion
+      && batchResolution.confidence === "high"
+      && lastGroup
+      && lastGroup.version !== batchVersion
     );
 
     const isMajor = isNewVersionCutoff || batch.modelCount >= threshold;
@@ -363,12 +436,11 @@ export function groupBatchesIntoMajorRevisions<
         entryByModel: new Map<string, T>()
       });
     } else {
-      // 小变动合并进前一次主要变动桶
+      // 小变动合并进前一次主要变动桶。
+      // 这里刻意不回填 lastGroup.version：合并进来的批次版本要么与桶一致，
+      // 要么不足以定性（null），让低置信度的小批次去改写桶的身份正是 P1-1 的扩散路径。
       lastGroup.batches.push(batch);
       lastGroup.timestamp = Math.max(lastGroup.timestamp, batch.timestamp);
-      if (!lastGroup.version && batchVersion) {
-        lastGroup.version = batchVersion;
-      }
     }
 
     const latestGroup = groups[groups.length - 1]!;

@@ -1148,6 +1148,8 @@ export type ExternalImportRow = {
   unit: string;
   rawValue: string;
   valueNote?: string | null;
+  /** 该行分数所属的指数版本（如 "v5"），只有会随版本重标定的指标才有 */
+  indexVersion?: string | null;
   source: string;
   sourceModelId: string | null;
   sourceBenchmarkId: string;
@@ -1185,16 +1187,19 @@ export function buildImportRows(input: BuildImportRowsInput): ExternalImportRow[
       const override = input.config.metricOverrides[metricKey] ?? {};
       const valueScale = override.valueScale ?? entry.valueScale;
 
-      let valueNote: string | null = null;
-      if (
-        input.intelligenceIndexVersion !== null &&
-        input.intelligenceIndexVersion !== undefined &&
-        (metricKey === "evaluations.artificial_analysis_intelligence_index" ||
-          override.benchmarkName === "AA Intelligence Index" ||
-          entry.label === "AA Intelligence Index")
-      ) {
-        valueNote = `v${input.intelligenceIndexVersion}`;
-      }
+      // 版本只对会随 Intelligence Index 重标定的指标有意义，
+      // 逐项 benchmark（GPQA、MMLU-Pro 等）的分数不因版本变化而变化。
+      const isIntelligenceIndex =
+        metricKey === "evaluations.artificial_analysis_intelligence_index" ||
+        override.benchmarkName === "AA Intelligence Index" ||
+        entry.label === "AA Intelligence Index";
+      const indexVersion =
+        isIntelligenceIndex
+        && input.intelligenceIndexVersion !== null
+        && input.intelligenceIndexVersion !== undefined
+          ? `v${input.intelligenceIndexVersion}`
+          : null;
+      const valueNote: string | null = indexVersion;
 
       rows.push({
         rowNumber: rows.length + 1,
@@ -1208,6 +1213,7 @@ export function buildImportRows(input: BuildImportRowsInput): ExternalImportRow[
         unit: entry.unit,
         rawValue: formatMetricValue(value, valueScale),
         valueNote,
+        indexVersion,
         source: ARTIFICIAL_ANALYSIS_SOURCE_LABEL,
         sourceModelId: match.externalModelId,
         sourceBenchmarkId: metricKey
