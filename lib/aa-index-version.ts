@@ -86,3 +86,80 @@ export function compareAaVersions(
   }
   return 0;
 }
+
+/**
+ * 合并自定义与内置切分点。
+ *
+ * - 完全没传：冷启动/预览环境，用代码里的种子兜底；
+ * - 传空数组：明确关闭版本切分，一个切分点都不留；
+ * - 传了非空配置：以配置为基准，但**补全比配置最高版本更新的种子**。
+ *
+ * 第三条是为了兜住「人工只回溯了 v4、还没导入过 v5」：此时 10-28 的数据
+ * 会因为「最高已知版本是 v4」而被判回 v4，39 个模型的批次又并回 09-20。
+ * 只补更高版本，不覆盖也不降级配置里的任何条目；要彻底关掉切分请传空数组。
+ */
+function mergeVersionCutoffs(customCutoffs?: readonly AaVersionCutoff[]): AaVersionCutoff[] {
+  if (customCutoffs === undefined) {
+    return AA_INDEX_VERSION_SEEDS.filter((cutoff) => Number.isFinite(cutoff.timestampMs));
+  }
+
+  const configured = customCutoffs.filter((cutoff) => Number.isFinite(cutoff.timestampMs));
+  if (configured.length === 0) return [];
+
+  let highestVersion: string | null = null;
+  configured.forEach((cutoff) => {
+    const version = normalizeAaVersion(String(cutoff.version));
+    if (!version) return;
+    if (!highestVersion || (compareAaVersions(version, highestVersion) ?? 0) > 0) {
+      highestVersion = version;
+    }
+  });
+
+  if (!highestVersion) return configured;
+
+  const supplements = AA_INDEX_VERSION_SEEDS.filter((seed) => {
+    if (!Number.isFinite(seed.timestampMs)) return false;
+    const seedVersion = normalizeAaVersion(String(seed.version));
+    if (!seedVersion) return false;
+    return (compareAaVersions(seedVersion, highestVersion as string) ?? 0) > 0;
+  });
+
+  return supplements.length > 0 ? [...configured, ...supplements] : configured;
+}
+
+/**
+ * 取 timestampMs 时刻生效的版本。
+ *
+ * 语义是半开区间 [cutoff(V), cutoff(next))：严格 `<=`，**不再向前放宽 4 小时**。
+ * 之前用 `batch + 4h` 兜「批次时间早于切分点」，代价是把切换前 4 小时的 v4 补丁
+ * 也标成了 v5。真正提前发布的新版本由批次内多数版本注释纠正。
+ */
+export function resolveCutoffVersionAt(
+  timestampMs: number,
+  benchmarkName?: string,
+  customCutoffs?: readonly AaVersionCutoff[]
+): string | null {
+  // 没有 benchmark 名时无法判断这批切分点是否适用于当前指标。
+  // 此前这里直接放行，导致所有指标都套用 AA Intelligence Index 的切分点。
+  if (!benchmarkName || !Number.isFinite(timestampMs)) return null;
+
+  const cutoffs = mergeVersionCutoffs(customCutoffs);
+  const relevant = cutoffs.filter((c) => {
+    if (!c.benchmarkName) return true;
+    return c.benchmarkName.trim().toLowerCase() === benchmarkName.trim().toLowerCase();
+  });
+
+  let matchedCutoff: AaVersionCutoff | null = null;
+  for (const c of relevant) {
+    if (c.timestampMs <= timestampMs) {
+      if (!matchedCutoff || c.timestampMs > matchedCutoff.timestampMs) {
+        matchedCutoff = c;
+      }
+    }
+  }
+
+  if (!matchedCutoff) return null;
+
+  const rawVersion = String(matchedCutoff.version);
+  return normalizeAaVersion(rawVersion) ?? (rawVersion.startsWith("v") ? rawVersion : `v${rawVersion}`);
+}

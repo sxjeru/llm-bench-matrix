@@ -17,9 +17,9 @@ import {
 } from "@/lib/dashboard-snapshot-cache";
 import {
   ARTIFICIAL_ANALYSIS_SETTINGS_KEY,
-  normalizeImportConfig
+  normalizeImportConfig,
+  toAaVersionCutoffs
 } from "@/lib/external-providers/artificial-analysis";
-import type { AaVersionCutoff } from "@/lib/aa-index-revisions";
 
 type ParsedExportFootnote = {
   exportFootnoteText?: string;
@@ -107,20 +107,7 @@ export async function loadPublicDashboardSnapshot(
 
   const rawAaConfig = settings[ARTIFICIAL_ANALYSIS_SETTINGS_KEY];
   const aaConfig = normalizeImportConfig(rawAaConfig);
-  const aaVersionCutoffs: AaVersionCutoff[] = [];
-
-  if (aaConfig.intelligenceIndexVersionHistory && aaConfig.intelligenceIndexVersionHistory.length > 0) {
-    aaConfig.intelligenceIndexVersionHistory.forEach((h) => {
-      const timestampMs = new Date(h.effectiveFrom).getTime();
-      if (!Number.isFinite(timestampMs)) return;
-      aaVersionCutoffs.push({
-        version: `v${h.version}`,
-        timestampMs,
-        benchmarkName: "AA Intelligence Index",
-        note: h.note
-      });
-    });
-  }
+  const aaVersionCutoffs = toAaVersionCutoffs(aaConfig.intelligenceIndexVersionHistory);
 
   return {
     versions: resolved,

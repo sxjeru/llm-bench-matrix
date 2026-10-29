@@ -9,7 +9,12 @@ import {
   toProviderSlug
 } from "@/lib/db/normalize";
 import { parseBenchmarkValue, type ParsedBenchmarkValue } from "@/lib/db/parse-value";
-import { extractAaVersionFromNote, normalizeAaVersion } from "@/lib/aa-index-version";
+import {
+  extractAaVersionFromNote,
+  normalizeAaVersion,
+  resolveCutoffVersionAt,
+  type AaVersionCutoff
+} from "@/lib/aa-index-version";
 import {
   IMPORT_VALUE_RANK_PREFIX_REGEX,
   IMPORT_VALUE_SINGLE_REGEX,
@@ -4499,7 +4504,16 @@ function buildSourceLookupCandidates(source: string): string[] {
  */
 export async function importExternalBenchmarkRows(
   rows: ExternalImportRowInput[],
-  options: { source: string; benchTime?: Date; dryRun?: boolean }
+  options: {
+    source: string;
+    benchTime?: Date;
+    dryRun?: boolean;
+    /**
+     * 该指标族的版本断代切分点（AA Intelligence Index）。
+     * 用来判断「库里那行旧记录属于哪个版本」；不传则用冷启动种子。
+     */
+    versionCutoffs?: readonly AaVersionCutoff[];
+  }
 ): Promise<ExternalImportResult> {
   const source = options.source.trim();
   if (!source) {
@@ -4730,7 +4744,17 @@ export async function importExternalBenchmarkRows(
         // 版本是一等语义：同一个 (模型, 指标) 换了评估版本，即使数值恰好相同，
         // 那也是「碰巧同分」，不是同一份数据被重复同步，必须留下当天的新行。
         const incomingVersion = normalizeAaVersion(row.indexVersion);
-        const existingVersion = existing ? extractAaVersionFromNote(existing.valueNote) : null;
+        // 既有行的版本优先按时间切分点判断，再看 value_note：
+        // 老行可能压根没写版本注释（当时上游还没上报版本号），若只看注释，
+        // 会把「没标记但确实属于 v5 的行」误判成跨版本，下次同步就给每个模型
+        // 都追加一份重复记录。
+        const existingVersion = existing
+          ? resolveCutoffVersionAt(
+              existing.benchTime.getTime(),
+              benchmark.benchmarkName,
+              options.versionCutoffs
+            ) ?? extractAaVersionFromNote(existing.valueNote)
+          : null;
         const versionChanged = Boolean(incomingVersion) && existingVersion !== incomingVersion;
         // 补导历史时库里那行可能比本次导入更晚，改写它等于用旧数据覆盖新数据
         const existingIsNotNewer = existing ? existing.benchTime.getTime() <= benchTime.getTime() : false;

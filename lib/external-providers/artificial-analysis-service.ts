@@ -21,6 +21,7 @@ import {
   mergeIntelligenceIndexVersionHistory,
   normalizeImportConfig,
   resolveModelMatches,
+  toAaVersionCutoffs,
   type ArtificialAnalysisImportConfig,
   type ArtificialAnalysisModel,
   type ExternalMatchStatus,
@@ -546,7 +547,12 @@ export async function runArtificialAnalysisImport(options: {
 
   const result = await importExternalBenchmarkRows(rows, {
     source: ARTIFICIAL_ANALYSIS_SOURCE_LABEL,
-    dryRun
+    dryRun,
+    // 导入时用同一份时间轴识别「库里那行属于哪个版本」，
+    // 否则没有版本注释的老行会被全部误判成跨版本，重复追加一遍。
+    versionCutoffs: config.intelligenceIndexVersionHistory === undefined
+      ? undefined
+      : toAaVersionCutoffs(config.intelligenceIndexVersionHistory)
   });
 
   const publicChanged = result.publicChanged || createdModels.length > 0;

@@ -4,7 +4,7 @@ import {
   invalidateTimedCacheStore,
   withTimedCache
 } from "@/lib/server-cache";
-import { findAaVersionSeed } from "@/lib/aa-index-version";
+import { findAaVersionSeed, type AaVersionCutoff } from "@/lib/aa-index-version";
 import {
   getReasoningEffortRank,
   parseModelReasoningEffort,
@@ -1187,6 +1187,29 @@ export type BuildImportRowsInput = {
   localModelsById: Map<number, { modelName: string; providerName: string }>;
   intelligenceIndexVersion?: number | null;
 };
+
+/**
+ * 把版本历史投影为时间切分点，供前端版本判定与导入时的既有行版本识别共用。
+ *
+ * 返回 undefined 与返回空数组含义不同：undefined 表示「从未配置过」，
+ * 调用方会退回冷启动种子；空数组表示「明确不做版本切分」。
+ */
+export function toAaVersionCutoffs(
+  history: readonly IntelligenceIndexVersionCutoff[] | undefined
+): AaVersionCutoff[] {
+  const cutoffs: AaVersionCutoff[] = [];
+  history?.forEach((item) => {
+    const timestampMs = new Date(item.effectiveFrom).getTime();
+    if (!Number.isFinite(timestampMs)) return;
+    cutoffs.push({
+      version: `v${item.version}`,
+      timestampMs,
+      benchmarkName: "AA Intelligence Index",
+      note: item.note
+    });
+  });
+  return cutoffs;
+}
 
 /**
  * 把「本次导入观测到的版本」合并进版本历史。
