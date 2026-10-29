@@ -367,9 +367,10 @@ describe("lib/aa-index-revisions", () => {
 
       expect(groups).toHaveLength(2);
       expect(groups.every((group) => group.version !== "v5")).toBe(true);
-      // 该模型仍在最新桶里可见，只是不单独构成一次版本断代
+      // 批次本身保留（散点的历史快照仍能看到它），但它的模型不能混进旧版本桶的
+      // 最新值映射：那是 v5 的成绩，标成 v4 展示等于跨版本串数据
       expect(groups[groups.length - 1]!.batches).toHaveLength(2);
-      expect(groups[groups.length - 1]!.entryByModel.has("b_1028_m0")).toBe(true);
+      expect(groups[groups.length - 1]!.entryByModel.has("b_1028_m0")).toBe(false);
     });
 
     test("达到最小规模的版本批次照常断代", () => {
@@ -449,6 +450,35 @@ describe("lib/aa-index-revisions", () => {
       // 完全不传（冷启动）才用种子；显式传空数组表示「彻底关闭版本切分」
       expect(resolveBatchVersion(batch, "AA Intelligence Index")).toBe("v5");
       expect(resolveBatchVersion(batch, "AA Intelligence Index", [])).toBeNull();
+    });
+
+    test("配置只回溯了旧版本时，自动补上更高的种子", () => {
+      const batch = {
+        timestamp: new Date("2026-10-28T12:00:00.000Z").getTime(),
+        modelNames: new Set(["m1"]),
+        entries: [{ modelName: "m1", valueNote: null }],
+        modelCount: 1
+      };
+      // 人工只回溯了 v4，还没导入过 v5：不能因为「最高已知版本是 v4」
+      // 就把 10-28 的数据判回 v4
+      const onlyV4 = [
+        {
+          version: "v4",
+          timestampMs: new Date("2026-08-01T00:00:00.000Z").getTime(),
+          benchmarkName: "AA Intelligence Index"
+        }
+      ];
+      expect(resolveBatchVersion(batch, "AA Intelligence Index", onlyV4)).toBe("v5");
+
+      // 配置里已经有更高的版本时不再补种子
+      const withV6 = [
+        {
+          version: "v6",
+          timestampMs: new Date("2026-11-05T00:00:00.000Z").getTime(),
+          benchmarkName: "AA Intelligence Index"
+        }
+      ];
+      expect(resolveBatchVersion(batch, "AA Intelligence Index", withV6)).toBeNull();
     });
 
     test("切分点严格生效，不再向前放宽 4 小时", () => {

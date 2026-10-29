@@ -243,17 +243,41 @@ export {
 /**
  * 合并自定义与内置切分点。
  *
- * - 传了数组（哪怕是空数组）：配置就是唯一事实来源，内置种子完全不参与；
- *   空数组表示「明确不做版本切分」，用于彻底关掉断代。
- * - 完全没传：视为冷启动/预览环境，用代码里的种子兜底。
+ * - 完全没传：冷启动/预览环境，用代码里的种子兜底；
+ * - 传空数组：明确关闭版本切分，一个切分点都不留；
+ * - 传了非空配置：以配置为基准，但**补全比配置最高版本更新的种子**。
  *
- * 之前是无条件合并，导致「删了切分点也会被内置点加回来」，配置形同虚设。
+ * 第三条是为了兜住「人工只回溯了 v4、还没导入过 v5」：此时 10-28 的数据
+ * 会因为「最高已知版本是 v4」而被判回 v4，39 个模型的批次又并回 09-20。
+ * 只补更高版本，不覆盖也不降级配置里的任何条目；要彻底关掉切分请传空数组。
  */
 function mergeVersionCutoffs(customCutoffs?: readonly AaVersionCutoff[]): AaVersionCutoff[] {
-  if (customCutoffs !== undefined) {
-    return customCutoffs.filter((cutoff) => Number.isFinite(cutoff.timestampMs));
+  if (customCutoffs === undefined) {
+    return AA_INDEX_VERSION_SEEDS.filter((cutoff) => Number.isFinite(cutoff.timestampMs));
   }
-  return AA_INDEX_VERSION_SEEDS.filter((cutoff) => Number.isFinite(cutoff.timestampMs));
+
+  const configured = customCutoffs.filter((cutoff) => Number.isFinite(cutoff.timestampMs));
+  if (configured.length === 0) return [];
+
+  let highestVersion: string | null = null;
+  configured.forEach((cutoff) => {
+    const version = normalizeAaVersion(String(cutoff.version));
+    if (!version) return;
+    if (!highestVersion || (compareAaVersions(version, highestVersion) ?? 0) > 0) {
+      highestVersion = version;
+    }
+  });
+
+  if (!highestVersion) return configured;
+
+  const supplements = AA_INDEX_VERSION_SEEDS.filter((seed) => {
+    if (!Number.isFinite(seed.timestampMs)) return false;
+    const seedVersion = normalizeAaVersion(String(seed.version));
+    if (!seedVersion) return false;
+    return (compareAaVersions(seedVersion, highestVersion as string) ?? 0) > 0;
+  });
+
+  return supplements.length > 0 ? [...configured, ...supplements] : configured;
 }
 
 /** 批次版本判定的证据来源 */
@@ -419,10 +443,12 @@ export type GroupBatchesOptions = {
  *
  * 合并规则：
  * 1. 按时间由旧到新扫描；
- * 2. 外部版本跃迁优先：若批次版本发生变更（如 v4 -> v5），不论数量多少均开启新主要变动桶；
- * 3. 同版本内：模型数 >= adaptiveThreshold 视为主要变动，开启新版本桶；
- * 4. 模型数 < adaptiveThreshold 视为小变动，合并进前一个主要变动桶；
- * 5. 若小变动与主要变动（或之前批次）存在相同模型，后发生的覆盖先发生的（显示最新值）。
+ * 2. 外部版本跃迁优先：批次版本有高置信证据且规模 >= MIN_VERSION_CUTOFF_MODELS 时，
+ *    无视数量阈值直接开启新主要变动桶；
+ * 3. 版本证据成立但规模不足的批次标为「未定版」：只进历史快照，不并进旧版本的桶；
+ * 4. 同版本内：模型数 >= adaptiveThreshold 视为主要变动，开启新版本桶；
+ * 5. 模型数 < adaptiveThreshold 视为小变动，合并进前一个主要变动桶；
+ * 6. 若小变动与主要变动（或之前批次）存在相同模型，后发生的覆盖先发生的（显示最新值）。
  */
 export function groupBatchesIntoMajorRevisions<
   T extends { benchTime?: string | null; modelName?: string; recordId?: number | null; valueNote?: string | null }
@@ -465,6 +491,18 @@ export function groupBatchesIntoMajorRevisions<
 
     const isMajor = isNewVersionCutoff || batch.modelCount >= threshold;
 
+    // 版本证据成立（切分点或注释都指向新版本）但规模不够：这批数据属于哪个版本
+    // 属于「未定」。既不能并进旧版本的桶（会把 v5 成绩当 v4 展示），也不能单独开桶
+    // （会变成「1 个模型的主要变动」），所以保留批次供历史快照展示，
+    // 但不参与最新快照的模型映射。
+    const isUndeterminedVersionBatch = Boolean(
+      batchVersion
+      && batchResolution.confidence === "high"
+      && lastGroup
+      && lastGroup.version !== batchVersion
+      && batch.modelCount < MIN_VERSION_CUTOFF_MODELS
+    );
+
     if (isMajor || groups.length === 0) {
       groups.push({
         timestamp: batch.timestamp,
@@ -478,8 +516,12 @@ export function groupBatchesIntoMajorRevisions<
       // 这里刻意不回填 lastGroup.version：合并进来的批次版本要么与桶一致，
       // 要么不足以定性（null），让低置信度的小批次去改写桶的身份正是 P1-1 的扩散路径。
       lastGroup.batches.push(batch);
-      lastGroup.timestamp = Math.max(lastGroup.timestamp, batch.timestamp);
+      if (!isUndeterminedVersionBatch) {
+        lastGroup.timestamp = Math.max(lastGroup.timestamp, batch.timestamp);
+      }
     }
+
+    if (isUndeterminedVersionBatch) return;
 
     const latestGroup = groups[groups.length - 1]!;
     batch.entries.forEach((entry) => {

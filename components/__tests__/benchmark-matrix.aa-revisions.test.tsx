@@ -286,7 +286,7 @@ describe("AA 三大指数主要变动自适应与版本合并", () => {
     expect(revision.latestEntriesByModel.has("m_0920_0")).toBe(false);
   });
 
-  test("配置里没有 v5 时，代码里的种子不再把 10-28 强行切成新版本", () => {
+  test("配置只回溯了 v4 时自动补上更高的 v5 种子，10-28 不会被并回 09-20", () => {
     const rows: MatrixInputRow[] = [];
     let id = 1;
 
@@ -301,7 +301,7 @@ describe("AA 三大指数主要变动自适应与版本合并", () => {
     }
 
     const revision = buildAaIndexRevisionsByRow(rows, false, {
-      // 只有 v4：删掉 v5 切分点后，内置种子必须失效，否则配置形同虚设
+      // 人工只回溯了 v4，还没导入过 v5：10-28 仍是 v5，必须独立成代
       versionCutoffs: [
         {
           version: "v4",
@@ -311,9 +311,32 @@ describe("AA 三大指数主要变动自适应与版本合并", () => {
       ]
     }).get(getMatrixGroupingKey(rows[0]!, false))!;
 
-    expect(revision.latestVersion).toBe("v4");
-    // 10-28 的 39 个模型按数量阈值并入 v4 桶，不再凭空出现 v5 快照
-    expect(revision.latestEntriesByModel.has("m_v5_0")).toBe(true);
+    expect(revision.latestVersion).toBe("v5");
+    expect(revision.latestEntriesByModel.size).toBe(39);
+    expect(revision.latestEntriesByModel.has("m_0806_0")).toBe(false);
+  });
+
+  test("显式传空切分点表示关闭版本切分，不再套用任何种子", () => {
+    const rows: MatrixInputRow[] = [];
+    let id = 1;
+
+    for (let i = 0; i < 128; i += 1) {
+      rows.push(makeRow(`m_0806_${i}`, benchmark, "60", 60, "2026-08-06T00:00:00.000Z", id++));
+    }
+    for (let i = 0; i < 81; i += 1) {
+      rows.push(makeRow(`m_0920_${i}`, benchmark, "70", 70, "2026-09-20T00:00:00.000Z", id++));
+    }
+    for (let i = 0; i < 39; i += 1) {
+      rows.push(makeRow(`m_v5_${i}`, benchmark, "85", 85, "2026-10-28T08:00:00.000Z", id++));
+    }
+
+    const revision = buildAaIndexRevisionsByRow(rows, false, {
+      versionCutoffs: []
+    }).get(getMatrixGroupingKey(rows[0]!, false))!;
+
+    expect(revision.latestVersion).toBeNull();
+    expect(revision.groups).toHaveLength(1);
+    expect(revision.latestEntriesByModel.has("m_0806_0")).toBe(true);
   });
 
   test("UI 渲染: AA三大指数在矩阵表格中显示最新主要变动值，老模型显示 -- 且带问号，悬浮显示历史值，点击禁止展开折线图", async () => {
