@@ -1191,8 +1191,8 @@ export type BuildImportRowsInput = {
 /**
  * 把版本历史投影为时间切分点，供前端版本判定与导入时的既有行版本识别共用。
  *
- * 返回 undefined 与返回空数组含义不同：undefined 表示「从未配置过」，
- * 调用方会退回冷启动种子；空数组表示「明确不做版本切分」。
+ * 没有可信切分点时返回空数组（历史缺失、为空或日期非法），调用方应视为「不知道
+ * 版本时间轴」并略过该配置，让冷启动种子接管，而不是把它当成「明确不做版本切分」。
  */
 export function toAaVersionCutoffs(
   history: readonly IntelligenceIndexVersionCutoff[] | undefined

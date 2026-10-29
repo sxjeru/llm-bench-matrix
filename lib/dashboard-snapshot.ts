@@ -116,9 +116,10 @@ export async function loadPublicDashboardSnapshot(
     stats,
     modelPrices: modelPrices.map(toPublicModelPrice).filter(hasPublicModelPriceData),
     modelParams,
-    // settings 里没有 AA 配置时字段缺省 → 前端退回代码里的冷启动种子；
-    // 有配置但历史为空 → 下发空数组，表示「明确不做版本切分」，不能又被种子接管。
-    ...(rawAaConfig === undefined ? {} : { aaVersionCutoffs }),
+    // 只有真拿到切分点才下发。老配置没有版本历史字段、历史为空、历史全是非法日期，
+    // 都属于「不知道版本时间轴」，不能当成「明确关闭版本切分」：字段缺省后前端
+    // 退回代码里的冷启动种子，与导入路径对 undefined 的处理保持一致。
+    ...(aaVersionCutoffs.length > 0 ? { aaVersionCutoffs } : {}),
     ...parseExportFootnote(settings.export_footnote_text)
   };
 }

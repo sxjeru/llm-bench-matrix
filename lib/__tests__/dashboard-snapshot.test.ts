@@ -150,15 +150,15 @@ describe("loadPublicDashboardSnapshot", () => {
     ]);
   });
 
-  test("AA 配置存在但版本历史为空时下发空数组，表示明确关闭版本切分", async () => {
+  test("AA 配置存在但没有版本历史时不下发该字段，老配置仍用冷启动种子", async () => {
     vi.mocked(getSettings).mockResolvedValueOnce({
       "external_import:artificial-analysis": { selectedMetrics: [], metricOverrides: {} }
     });
 
     const snapshot = await loadPublicDashboardSnapshot();
 
-    // 空数组必须能传到前端：字段缺省才会退回代码里的冷启动种子
-    expect(snapshot.aaVersionCutoffs).toEqual([]);
+    // 没有历史不是「明确关闭版本切分」：字段缺省才会退回冷启动种子
+    expect(snapshot.aaVersionCutoffs).toBeUndefined();
   });
 
   test("settings 里没有 AA 配置时不下发该字段，前端退回冷启动种子", async () => {
