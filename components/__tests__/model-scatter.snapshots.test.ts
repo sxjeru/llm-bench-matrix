@@ -4,6 +4,7 @@ import type { MatrixCell, MatrixCellEntry, MatrixRow } from "@/components/benchm
 import { toScatterMetric } from "@/components/model-scatter/metrics";
 import {
   extractMetricSnapshots,
+  formatSnapshotModelCount,
   formatTimeDifferenceDays,
   pickNearestSampleByTime,
   resolveSampleForSnapshot
@@ -195,6 +196,43 @@ describe("extractMetricSnapshots", () => {
     expect(snap1024?.isMajorRevision).toBe(false);
     // 补丁批次不继承 group 版本，避免在菜单里被误标为 v5 全量快照
     expect(snap1024?.version ?? null).toBeNull();
+  });
+
+  test("主要变动之后合并进补丁模型时，模型数标注成 39+1", () => {
+    const history = new Map<string, ScatterHistorySample[]>();
+
+    // 2026-08-06: 128 模型（旧版本主要变动）
+    for (let i = 1; i <= 128; i++) {
+      history.set(`M_0806_${i}`, [{ value: 60, benchTime: "2026-08-06T00:00:00.000Z", recordId: i }]);
+    }
+    // 2026-10-28: 39 模型（v5 主要变动）
+    for (let i = 1; i <= 39; i++) {
+      const existing = history.get(`M_0806_${i}`) ?? [];
+      existing.push({ value: 80, benchTime: "2026-10-28T08:00:00.000Z", recordId: 3000 + i });
+      history.set(`M_0806_${i}`, existing);
+    }
+    // 2026-10-29: 1 个补丁模型（同属 v5，并进主要变动组）
+    history.set("M_patch_new", [
+      { value: 59, benchTime: "2026-10-29T00:46:00.000Z", recordId: 9001 }
+    ]);
+
+    const snapshots = extractMetricSnapshots(history, undefined, {
+      benchmarkName: "AA Intelligence Index"
+    });
+
+    const major = snapshots.find((s) => s.isMajorRevision)!;
+    expect(major.label).toBe("2026-10-28");
+    // 徽章拆成「组长批次 + 补丁新增」，而不是把 1 个补丁模型并进 39 里
+    expect(major.modelCount).toBe(39);
+    expect(major.mergedModelCount).toBe(1);
+    expect(major.sampleByModel?.size).toBe(40);
+    expect(formatSnapshotModelCount(major)).toBe("39+1 模型");
+
+    // 补丁批次自身仍是单批次的 1 模型
+    const patch = snapshots.find((s) => s.label === "2026-10-29")!;
+    expect(patch.isMajorRevision).toBe(false);
+    expect(patch.mergedModelCount).toBeUndefined();
+    expect(formatSnapshotModelCount(patch)).toBe("1 模型");
   });
 
   test("非 AA 指标不会被 AA 版本切分点误标为 v5 主要变动", () => {

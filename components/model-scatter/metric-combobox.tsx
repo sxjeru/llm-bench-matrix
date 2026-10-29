@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, History, Search, Sparkles } from "lucide-react";
 import { describeMetricDirection } from "./metrics";
+import { formatSnapshotModelCount } from "./snapshots";
 import type { ScatterMetric, ScatterMetricGroup, ScatterMetricSnapshot } from "./types";
 
 type MetricComboboxProps = {
@@ -448,7 +449,7 @@ export function MetricCombobox({
                           </span>
                         ) : null}
                         <span className="scatter-combobox-badge-count">
-                          {snapshot.modelCount} 模型
+                          {formatSnapshotModelCount(snapshot)}
                         </span>
                       </div>
                     </div>

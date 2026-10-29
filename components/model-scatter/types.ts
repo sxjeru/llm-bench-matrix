@@ -50,6 +50,13 @@ export type ScatterMetricSnapshot = {
   label: string;
   /** 该快照下覆盖的有效模型数量 */
   modelCount: number;
+  /**
+   * 主要变动之后合并进该版本的小补丁新增模型数。
+   *
+   * 徽章据此展示成 `39+1 模型`：前者是组长批次的规模，后者是补丁带进来的模型；
+   * 直接相加会让人误以为 40 个模型都在同一批重新评测过。无补丁时缺省。
+   */
+  mergedModelCount?: number;
   /** 是否为最新快照 */
   isLatest: boolean;
   /** 是否为多模型批量导入批次 */
