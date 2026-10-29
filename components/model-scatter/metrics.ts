@@ -102,8 +102,13 @@ function buildValueByModel(row: MatrixRow): Map<string, number> {
   const valueByModel = new Map<string, number>();
 
   if (row.aaRevision) {
+    // 取值集合以「最新主要变动」为准，不能再按 cells 过滤一次：
+    // 关掉「含低覆盖指标」时，覆盖率裁剪会把新模型的普通行整体裁掉，
+    // 只留下 Cost/Performance 这类 alwaysKeep 行，于是这些模型仍出现在模型列里，
+    // 却没有 AA 格子 —— 默认视图因此比「主要变动」快照（直接用 entryByModel）少点。
+    // 是否绘制仍由 modelNames（当前可见模型列）把关，不会画出筛选外的模型。
     row.aaRevision.latestEntriesByModel.forEach((entry, modelName) => {
-      if (row.cells.has(modelName) && entry.valueNum !== null && Number.isFinite(entry.valueNum)) {
+      if (entry.valueNum !== null && Number.isFinite(entry.valueNum)) {
         valueByModel.set(modelName, entry.valueNum);
       }
     });

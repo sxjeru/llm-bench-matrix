@@ -22,8 +22,10 @@ import {
   hasPublicModelPriceCost,
   hasPublicModelPriceData,
   type MatrixCell,
+  type MatrixCellEntry,
   type MatrixRow
 } from "@/components/benchmark-matrix/types";
+import type { LatestAaRevisionResolution } from "@/lib/aa-index-revisions";
 import {
   buildScatterMetrics,
   describeMetricDirection,
@@ -296,6 +298,48 @@ describe("toScatterMetric", () => {
         })
       ).category
     ).toBe("Knowledge");
+  });
+
+  test("AA 指标取值以最新主要变动为准，不受低覆盖裁剪掉的 cells 影响", () => {
+    // 关闭「含低覆盖指标」时，新模型的普通行会被覆盖率裁剪，只剩 Cost/Performance 这类
+    // alwaysKeep 行：模型仍在模型列里，cells 却没有 AA 格子。若这里再按 cells 过滤，
+    // 默认「最新数据」就会比「主要变动」快照（直接用 entryByModel）少点。
+    const makeEntry = (recordId: number, valueNum: number): MatrixCellEntry => ({
+      recordId,
+      valueRaw: String(valueNum),
+      valueNum,
+      valueNum2: null,
+      valueNote: null,
+      source: "test",
+      benchTime: "2026-10-28T08:00:00.000Z"
+    });
+
+    const aaRevision: LatestAaRevisionResolution = {
+      latestEntriesByModel: new Map<string, MatrixCellEntry>([
+        ["Alpha", makeEntry(1, 80)],
+        ["NewModel", makeEntry(2, 85)]
+      ]),
+      batches: [],
+      groups: [],
+      adaptiveThreshold: 3,
+      latestVersion: "v5"
+    };
+
+    const metric = toScatterMetric(
+      createBenchmarkRow(
+        {
+          rowKey: "merged::aaintelligenceindex",
+          benchmark: "AA Intelligence Index",
+          category: "Overall",
+          aaRevision
+        },
+        { Alpha: 80 }
+      )
+    );
+
+    expect(metric.valueByModel.get("Alpha")).toBe(80);
+    // NewModel 的 AA 行被覆盖率裁剪掉了（cells 里没有），但它属于最新主要变动
+    expect(metric.valueByModel.get("NewModel")).toBe(85);
   });
 });
 
