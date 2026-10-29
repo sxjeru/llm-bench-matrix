@@ -8,8 +8,7 @@ import {
   PRICE_CATEGORY_LABEL,
   PRICE_INPUT_ROW_KEY,
   PRICE_OUTPUT_ROW_KEY,
-  RELEASE_DATE_ROW_KEY,
-  SOURCE_ALL
+  RELEASE_DATE_ROW_KEY
 } from "@/components/benchmark-matrix/constants";
 import {
   buildParamsMatrixRows,
@@ -35,7 +34,6 @@ import {
   formatScatterValue,
   groupScatterMetrics,
   isMetricHigherBetter,
-  pickScatterAxisOnlyRows,
   resolveDefaultAxisKeys,
   toMetricSlug,
   toScatterMetric
@@ -340,39 +338,6 @@ describe("toScatterMetric", () => {
     expect(metric.valueByModel.get("Alpha")).toBe(80);
     // NewModel 的 AA 行被覆盖率裁剪掉了（cells 里没有），但它属于最新主要变动
     expect(metric.valueByModel.get("NewModel")).toBe(85);
-  });
-});
-
-describe("pickScatterAxisOnlyRows", () => {
-  const createInputRow = (benchmarkName: string, benchmarkType: string) => ({
-    providerName: "OpenAI",
-    modelName: "Alpha",
-    benchmarkName,
-    benchmarkType,
-    benchTime: "2026-04-06T00:00:00.000Z",
-    valueRaw: "1",
-    valueNum: 1,
-    valueNote: null,
-    source: "text:S1"
-  });
-
-  const inputRows = [
-    createInputRow("Bench-One", "Coding"),
-    createInputRow("AA Intelligence Index Cost per Task", "Cost"),
-    createInputRow("Latency", "Performance")
-  ];
-
-  test("All 且未勾选低覆盖时，只补 Cost / Performance 行", () => {
-    const picked = pickScatterAxisOnlyRows(inputRows, false, SOURCE_ALL);
-    expect(picked.map((row) => row.benchmarkType)).toEqual(["Cost", "Performance"]);
-  });
-
-  test("勾选含低覆盖指标后矩阵本身已保留全部行，无需补行", () => {
-    expect(pickScatterAxisOnlyRows(inputRows, true, SOURCE_ALL)).toEqual([]);
-  });
-
-  test("非 All 来源时不做覆盖率裁剪，无需补行", () => {
-    expect(pickScatterAxisOnlyRows(inputRows, false, "text:demo")).toEqual([]);
   });
 });
 

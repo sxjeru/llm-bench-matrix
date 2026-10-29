@@ -625,7 +625,7 @@ describe("ModelScatter", () => {
     ) as HTMLElement | undefined;
   }
 
-  test("关闭低覆盖时 Performance 行不计入 Overall，与首页矩阵一致", async () => {
+  test("Overall 始终按矩阵默认视图计算，低覆盖与 Performance 行不参与", async () => {
     stubScatterChartHostSize();
 
     // 一行 Performance：Alpha 最慢、Delta 最快。若被算进总评，Alpha 的 Overall 会明显掉下来
@@ -651,6 +651,31 @@ describe("ModelScatter", () => {
       updatedAt: "2026-04-06T00:00:00.000Z"
     }));
 
+    // 只有 Alpha 有值的低覆盖指标：默认会进入坐标轴候选，但不能混进 Overall
+    const sparseRows: MatrixInputRow[] = [
+      {
+        recordId: 9200,
+        providerName: "OpenAI",
+        providerDisplayName: "OpenAI",
+        providerBrandColor: null,
+        modelName: "Alpha",
+        benchmarkName: "Sparse Bench",
+        benchmarkType: "Reasoning",
+        sourceBenchmarkType: null,
+        higherIsBetter: true,
+        benchmarkCanonicalKey: "sparse-bench",
+        modalities: ["Text"],
+        sourceModalities: null,
+        benchTime: "2026-04-06T00:00:00.000Z",
+        valueRaw: "1",
+        valueNum: 1,
+        valueNum2: null,
+        valueNote: null,
+        source: "text:demo",
+        updatedAt: "2026-04-06T00:00:00.000Z"
+      }
+    ];
+
     const readOverallValue = (container: HTMLElement): string => {
       const symbol = findScatterSymbol(container, "Alpha");
       if (!symbol) throw new Error("未找到 Alpha 的散点");
@@ -666,20 +691,20 @@ describe("ModelScatter", () => {
     const baselineValue = readOverallValue(baseline.container);
     baseline.unmount();
 
-    const allRowsWithPerformance = [...rows, ...performanceRows];
-    const withPerformance = await renderReady(
+    const allRowsWithNoise = [...rows, ...performanceRows, ...sparseRows];
+    const withNoise = await renderReady(
       <ModelScatter
-        rows={allRowsWithPerformance}
-        allRows={allRowsWithPerformance}
+        rows={allRowsWithNoise}
+        allRows={allRowsWithNoise}
         sourceOptions={["text:demo"]}
         modelPrices={modelPrices}
         modelParams={modelParams}
       />
     );
 
-    // Alpha 在两个能力项上都是第一 → 100；Performance 行一旦参与会把它压到 66.67
+    // Alpha 在两个能力项上都是第一 → 100；Performance / 低覆盖行一旦参与都会把它压低
     expect(baselineValue).toBe("100");
-    expect(readOverallValue(withPerformance.container)).toBe(baselineValue);
+    expect(readOverallValue(withNoise.container)).toBe(baselineValue);
   });
 
   test("价格轴 Alt 点击只提示不支持，不钉住模型", async () => {
@@ -891,38 +916,65 @@ describe("轴选择器（可输入下拉）", () => {
     expect(input.value).toBe("Overall Score");
   });
 
-  test("输入时自动放开低覆盖指标", async () => {
-    const { container } = await renderScatter();
+  test("默认勾选含低覆盖指标", async () => {
+    await renderScatter();
 
     const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+  });
+
+  test("低覆盖指标默认不出现在下拉里，输入搜索后才显示", async () => {
+    const sparseRows: MatrixInputRow[] = [
+      {
+        recordId: 9200,
+        providerName: "OpenAI",
+        providerDisplayName: "OpenAI",
+        providerBrandColor: null,
+        modelName: "Alpha",
+        benchmarkName: "Sparse Bench",
+        benchmarkType: "Reasoning",
+        sourceBenchmarkType: null,
+        higherIsBetter: true,
+        benchmarkCanonicalKey: "sparse-bench",
+        modalities: ["Text"],
+        sourceModalities: null,
+        benchTime: "2026-04-06T00:00:00.000Z",
+        valueRaw: "10",
+        valueNum: 10,
+        valueNum2: null,
+        valueNote: null,
+        source: "text:demo",
+        updatedAt: "2026-04-06T00:00:00.000Z"
+      }
+    ];
+
+    const { container } = await renderReady(
+      <ModelScatter
+        rows={[...rows, ...sparseRows]}
+        allRows={[...rows, ...sparseRows]}
+        sourceOptions={["text:demo"]}
+        modelPrices={modelPrices}
+        modelParams={modelParams}
+      />
+    );
+
+    expect(openAxisOptions(container, "y")).not.toContain("Sparse Bench");
+    expect(openAxisOptions(container, "y", "sparse")).toContain("Sparse Bench");
+  });
+
+  test("输入搜索不会改动低覆盖开关", async () => {
+    const { container } = await renderScatter();
+    const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
+
+    fireEvent.click(toggle);
     expect(toggle.checked).toBe(false);
 
     fireEvent.focus(axisInput(container, "x"));
     fireEvent.change(axisInput(container, "x"), { target: { value: "bench" } });
-
-    expect(toggle.checked).toBe(true);
-  });
-
-  test("仅聚焦不输入时不改动低覆盖开关", async () => {
-    const { container } = await renderScatter();
-    const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
-
-    fireEvent.focus(axisInput(container, "x"));
-
     expect(toggle.checked).toBe(false);
-  });
 
-  test("清空输入不会把低覆盖开关又关回去", async () => {
-    const { container } = await renderScatter();
-    const input = axisInput(container, "x");
-    const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
-
-    fireEvent.focus(input);
-    fireEvent.change(input, { target: { value: "bench" } });
-    fireEvent.change(input, { target: { value: "" } });
-
-    // 开关是可见、可手动撤销的，自动关回去反而会让刚搜到的指标突然消失
-    expect(toggle.checked).toBe(true);
+    fireEvent.change(axisInput(container, "x"), { target: { value: "" } });
+    expect(toggle.checked).toBe(false);
   });
 });
 

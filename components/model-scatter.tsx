@@ -56,7 +56,6 @@ import {
   buildScatterMetrics,
   findScatterMetric,
   groupScatterMetrics,
-  pickScatterAxisOnlyRows,
   resolveDefaultAxisKeys
 } from "./model-scatter/metrics";
 import {
@@ -110,7 +109,11 @@ export function ModelScatter({
 
   const [viewState, setViewState] = useState<ScatterViewState>(DEFAULT_SCATTER_VIEW_STATE);
   const [isHydrated, setIsHydrated] = useState(false);
-  const [showLowCoverageRows, setShowLowCoverageRows] = useState(false);
+  /**
+   * 默认包含低覆盖指标：坐标轴可搜索/选择全部 benchmark。
+   * Overall 是例外，始终按矩阵默认视图（剔除低覆盖）计算，见下方 overallMatrixRows。
+   */
+  const [showLowCoverageRows, setShowLowCoverageRows] = useState(true);
   const [hiddenProviders, setHiddenProviders] = useState<string[]>([]);
   const [hoveredProvider, setHoveredProvider] = useState<string | null>(null);
   const [highlightedModel, setHighlightedModel] = useState<string | null>(null);
@@ -319,19 +322,26 @@ export function ModelScatter({
     [allRowsIndex, selectedModelSet, selectedModels, baseBenchmarkKeySet]
   );
 
-  const coveragePrunedRows = useMemo(
+  /**
+   * 主要指标行集：与首页矩阵默认视图一致（剔除低覆盖），并补回 Cost / Performance
+   * 这两个散点常用轴。它只用于决定轴下拉默认展示哪些指标。
+   */
+  const primaryCoverageRows = useMemo(
     () =>
-      buildCoveragePrunedRows(activeSource, filteredRows, SHOW_DUPLICATE_ROWS, showLowCoverageRows, {
-        // Cost / Performance 是散点最常用的轴：模型列里始终保留它们，
-        // 否则这些模型会在图例与坐标轴取值里凭空消失
+      buildCoveragePrunedRows(activeSource, filteredRows, SHOW_DUPLICATE_ROWS, false, {
+        // Cost / Performance 是散点最常用的轴：按分类裁剪后也要补回，
+        // 否则低覆盖时下拉里会选不到这两个常用轴。
         alwaysKeepBenchmarkTypes: SCATTER_ALWAYS_VISIBLE_BENCHMARK_TYPES
       }),
-    [activeSource, filteredRows, showLowCoverageRows]
+    [activeSource, filteredRows]
   );
+
+  /** 坐标轴与模型列实际使用的行集：默认含低覆盖指标，取消勾选后只剩主要指标。 */
+  const coverageRows = showLowCoverageRows ? filteredRows : primaryCoverageRows;
 
   const baseModelColumns = useMemo(
     () => buildModelColumns(
-      coveragePrunedRows,
+      coverageRows,
       sourceModelHint,
       null,
       SHOW_DUPLICATE_ROWS,
@@ -340,20 +350,18 @@ export function ModelScatter({
       aaRevisionsByRow,
       { versionCutoffs: aaVersionCutoffs }
     ),
-    [coveragePrunedRows, sourceModelHint, activeSource, aaRevisionsByRow, aaVersionCutoffs]
+    [coverageRows, sourceModelHint, activeSource, aaRevisionsByRow, aaVersionCutoffs]
   );
 
   /**
-   * 与首页矩阵默认视图完全同源的行集。
-   *
-   * 不能复用上面带 alwaysKeep 的裁剪结果：矩阵裁剪不带该选项，低覆盖关闭时
-   * Performance 行整类隐藏、Cost 行也要过覆盖率门槛。Overall 必须吃同一批行，
-   * 否则散点里的总评会比表格多算或少算若干行。
+   * Overall 始终吃矩阵默认视图的行集：不带 alwaysKeep，低覆盖关闭时
+   * Performance 行整类隐藏、Cost 行也要过覆盖率门槛，才能与首页矩阵对得上。
+   * 该开关只影响坐标轴指标与模型列，不影响 Overall。
    */
-  const matrixRows = useMemo(
+  const overallMatrixRows = useMemo(
     () => buildMatrixRows(
       baseSourceRows,
-      buildCoveragePrunedRows(activeSource, filteredRows, SHOW_DUPLICATE_ROWS, showLowCoverageRows),
+      buildCoveragePrunedRows(activeSource, filteredRows, SHOW_DUPLICATE_ROWS, false),
       SHOW_DUPLICATE_ROWS,
       false,
       activeSource,
@@ -361,17 +369,33 @@ export function ModelScatter({
       aaRevisionsByRow,
       { versionCutoffs: aaVersionCutoffs }
     ),
-    [baseSourceRows, activeSource, filteredRows, showLowCoverageRows, aaRevisionsByRow, aaVersionCutoffs]
+    [baseSourceRows, activeSource, filteredRows, aaRevisionsByRow, aaVersionCutoffs]
   );
 
-  /** 轴下拉额外补的 Cost / Performance 行：矩阵默认视图裁掉了它们，但散点要能当坐标轴用。 */
-  const axisOnlyMatrixRows = useMemo(() => {
-    const axisOnlyRows = pickScatterAxisOnlyRows(filteredRows, showLowCoverageRows, activeSource);
-    if (axisOnlyRows.length === 0) return [];
+  /** 主要指标对应的 MatrixRow，用于给轴下拉标出默认展示的指标集合。 */
+  const primaryMatrixRows = useMemo(
+    () => buildMatrixRows(
+      baseSourceRows,
+      primaryCoverageRows,
+      SHOW_DUPLICATE_ROWS,
+      false,
+      activeSource,
+      "latest",
+      aaRevisionsByRow,
+      { versionCutoffs: aaVersionCutoffs }
+    ),
+    [baseSourceRows, primaryCoverageRows, activeSource, aaRevisionsByRow, aaVersionCutoffs]
+  );
+
+  /** 坐标轴实际使用的 MatrixRow：默认全量，取消勾选后与主要指标一致。 */
+  const axisMatrixRows = useMemo(() => {
+    if (!showLowCoverageRows || activeSource !== SOURCE_ALL) {
+      return primaryMatrixRows;
+    }
 
     return buildMatrixRows(
-      axisOnlyRows,
-      axisOnlyRows,
+      baseSourceRows,
+      filteredRows,
       SHOW_DUPLICATE_ROWS,
       false,
       activeSource,
@@ -379,7 +403,7 @@ export function ModelScatter({
       aaRevisionsByRow,
       { versionCutoffs: aaVersionCutoffs }
     );
-  }, [activeSource, aaRevisionsByRow, aaVersionCutoffs, filteredRows, showLowCoverageRows]);
+  }, [baseSourceRows, filteredRows, primaryMatrixRows, showLowCoverageRows, activeSource, aaRevisionsByRow, aaVersionCutoffs]);
 
   const priceMatrixRows = useMemo(
     () => (modelPrices.some(hasPublicModelPriceCost) ? buildPriceMatrixRows(baseModelColumns, modelPrices) : []),
@@ -409,9 +433,9 @@ export function ModelScatter({
     () => [
       ...(paramsRowsInOverall ? paramsMatrixRows : []),
       ...(priceRowsInOverall ? priceMatrixRows : []),
-      ...matrixRows
+      ...overallMatrixRows
     ],
-    [paramsRowsInOverall, paramsMatrixRows, priceRowsInOverall, priceMatrixRows, matrixRows]
+    [paramsRowsInOverall, paramsMatrixRows, priceRowsInOverall, priceMatrixRows, overallMatrixRows]
   );
 
   const overallSummaryByModel = useMemo(
@@ -430,17 +454,30 @@ export function ModelScatter({
   const metrics = useMemo(
     () =>
       buildScatterMetrics({
-        // 轴下拉要能选 Cost / Performance，但总评只认 matrixRows
-        benchmarkRows: [...matrixRows, ...axisOnlyMatrixRows],
+        // 坐标轴默认包含低覆盖指标；Overall 已经在 overallMatrixRows 里单独按矩阵默认视图计算
+        benchmarkRows: axisMatrixRows,
         priceRows: priceMatrixRows,
         paramsRows: modelInfoMatrixRows,
         overallScoreByModel,
         versionCutoffs: aaVersionCutoffs
       }),
-    [matrixRows, axisOnlyMatrixRows, priceMatrixRows, modelInfoMatrixRows, overallScoreByModel, aaVersionCutoffs]
+    [axisMatrixRows, priceMatrixRows, modelInfoMatrixRows, overallScoreByModel, aaVersionCutoffs]
   );
 
   const metricGroups = useMemo(() => groupScatterMetrics(metrics), [metrics]);
+
+  /**
+   * 轴下拉默认只展示主要指标；输入搜索词后才放开全部指标。
+   * 价格、参数量与 Overall 始终属于主要指标，benchmark 则以矩阵默认视图的行集为准。
+   */
+  const primaryMetricKeys = useMemo(() => {
+    const primaryBenchmarkRowKeys = new Set(primaryMatrixRows.map((row) => row.rowKey));
+    return new Set(
+      metrics
+        .filter((metric) => metric.kind !== "benchmark" || primaryBenchmarkRowKeys.has(metric.rowKey))
+        .map((metric) => metric.key)
+    );
+  }, [metrics, primaryMatrixRows]);
 
   // 存档或链接里的轴失效时回落到默认，并顺带套用该指标建议的刻度；同时校验快照有效性
   useEffect(() => {
@@ -840,17 +877,6 @@ export function ModelScatter({
     });
   }, []);
 
-  /**
-   * 轴选择器里一开始输入，就顺带放开低覆盖指标。
-   *
-   * 低覆盖指标默认被剪掉，用户搜一个名字却搜不到会以为数据不存在；
-   * 这里主动打开开关，说明行里的复选框也会同步勾上，改动是可见、可撤销的。
-   */
-  const handleAxisQueryChange = useCallback((query: string) => {
-    if (query.trim().length === 0) return;
-    setShowLowCoverageRows((previous) => (previous ? previous : true));
-  }, []);
-
   const toggleFullscreen = useCallback(async () => {
     if (!sectionRef.current) return;
 
@@ -929,6 +955,7 @@ export function ModelScatter({
       <div className="card scatter-card">
         <ScatterControls
           metricGroups={metricGroups}
+          primaryMetricKeys={primaryMetricKeys}
           xMetric={xMetric}
           yMetric={yMetric}
           xSnapshot={viewState.xSnapshot}
@@ -937,7 +964,6 @@ export function ModelScatter({
           onChangeAxis={handleChangeAxis}
           onToggleOverlaySnapshot={handleToggleOverlaySnapshot}
           onSwapAxes={handleSwapAxes}
-          onAxisQueryChange={handleAxisQueryChange}
           xScale={effectiveXScale}
           yScale={effectiveYScale}
           onChangeScale={handleChangeScale}
@@ -1124,7 +1150,10 @@ export function ModelScatter({
           ) : null}
           {/* <span className="scatter-note scatter-note-hint">拖拽平移 · 滚轮以光标为中心放大 · 双击重置</span> */}
           {activeSource === SOURCE_ALL ? (
-            <label className="scatter-note scatter-note-toggle">
+            <label
+              className="scatter-note scatter-note-toggle"
+              title="控制坐标轴与模型列是否包含低覆盖 benchmark；Overall 始终按矩阵默认视图计算，不受此开关影响"
+            >
               <input
                 type="checkbox"
                 className="checkbox checkbox-xs"

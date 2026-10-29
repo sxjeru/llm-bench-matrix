@@ -28,6 +28,8 @@ import type {
 
 type ScatterControlsProps = {
   metricGroups: ScatterMetricGroup[];
+  /** 未输入搜索词时默认展示的主要指标 key */
+  primaryMetricKeys: ReadonlySet<string>;
   xMetric: ScatterMetric | null;
   yMetric: ScatterMetric | null;
   xSnapshot?: string | null;
@@ -36,8 +38,6 @@ type ScatterControlsProps = {
   onChangeAxis: (axis: "x" | "y", key: string, snapshotId?: string | null) => void;
   onToggleOverlaySnapshot?: (snapshotId: string) => void;
   onSwapAxes: () => void;
-  /** 轴选择器里输入了搜索词，供上层顺带放开低覆盖指标 */
-  onAxisQueryChange?: (query: string) => void;
 
   xScale: ScatterAxisScale;
   yScale: ScatterAxisScale;
@@ -85,24 +85,24 @@ function AxisSelect({
   axis,
   metric,
   metricGroups,
+  primaryMetricKeys,
   scale,
   selectedSnapshotId,
   overlaySnapshotId,
   onChangeAxis,
   onToggleOverlaySnapshot,
-  onChangeScale,
-  onAxisQueryChange
+  onChangeScale
 }: {
   axis: "x" | "y";
   metric: ScatterMetric | null;
   metricGroups: ScatterMetricGroup[];
+  primaryMetricKeys: ReadonlySet<string>;
   scale: ScatterAxisScale;
   selectedSnapshotId?: string | null;
   overlaySnapshotId?: string | null;
   onChangeAxis: (axis: "x" | "y", key: string, snapshotId?: string | null) => void;
   onToggleOverlaySnapshot?: (snapshotId: string) => void;
   onChangeScale: (axis: "x" | "y", scale: ScatterAxisScale) => void;
-  onAxisQueryChange?: (query: string) => void;
 }) {
   const axisLabel = axis === "x" ? "X 轴" : "Y 轴";
 
@@ -123,11 +123,11 @@ function AxisSelect({
           axisName={axisLabel}
           metric={metric}
           metricGroups={metricGroups}
+          primaryMetricKeys={primaryMetricKeys}
           selectedSnapshotId={selectedSnapshotId}
           overlaySnapshotId={overlaySnapshotId}
           onChange={(key, snapshotId) => onChangeAxis(axis, key, snapshotId)}
           onToggleOverlaySnapshot={onToggleOverlaySnapshot}
-          onQueryChange={onAxisQueryChange}
         />
 
         <div className="scatter-segment" role="group" aria-label={`${axisLabel}刻度`}>
@@ -157,11 +157,11 @@ function AxisSelect({
 export function ScatterControls(props: ScatterControlsProps) {
   const {
     metricGroups,
+    primaryMetricKeys,
     xMetric,
     yMetric,
     onChangeAxis,
     onSwapAxes,
-    onAxisQueryChange,
     xScale,
     yScale,
     onChangeScale,
@@ -219,13 +219,13 @@ export function ScatterControls(props: ScatterControlsProps) {
           axis="y"
           metric={yMetric}
           metricGroups={metricGroups}
+          primaryMetricKeys={primaryMetricKeys}
           scale={yScale}
           selectedSnapshotId={props.ySnapshot}
           overlaySnapshotId={props.overlaySnapshot}
           onChangeAxis={onChangeAxis}
           onToggleOverlaySnapshot={props.onToggleOverlaySnapshot}
           onChangeScale={onChangeScale}
-          onAxisQueryChange={onAxisQueryChange}
         />
 
         <button
@@ -242,13 +242,13 @@ export function ScatterControls(props: ScatterControlsProps) {
           axis="x"
           metric={xMetric}
           metricGroups={metricGroups}
+          primaryMetricKeys={primaryMetricKeys}
           scale={xScale}
           selectedSnapshotId={props.xSnapshot}
           overlaySnapshotId={props.overlaySnapshot}
           onChangeAxis={onChangeAxis}
           onToggleOverlaySnapshot={props.onToggleOverlaySnapshot}
           onChangeScale={onChangeScale}
-          onAxisQueryChange={onAxisQueryChange}
         />
       </div>
 

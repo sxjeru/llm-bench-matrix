@@ -12,12 +12,12 @@ type MetricComboboxProps = {
   axisName: string;
   metric: ScatterMetric | null;
   metricGroups: ScatterMetricGroup[];
+  /** 未输入搜索词时默认展示的主要指标 key；缺省时展示全部指标 */
+  primaryMetricKeys?: ReadonlySet<string>;
   selectedSnapshotId?: string | null;
   overlaySnapshotId?: string | null;
   onChange: (key: string, snapshotId?: string | null) => void;
   onToggleOverlaySnapshot?: (snapshotId: string) => void;
-  /** 输入内容变化时回传，供上层顺带放开低覆盖指标 */
-  onQueryChange?: (query: string) => void;
 };
 
 function matchesQuery(metric: ScatterMetric, category: string, query: string): boolean {
@@ -32,7 +32,7 @@ function matchesQuery(metric: ScatterMetric, category: string, query: string): b
  * 可输入筛选的指标选择器。
  *
  * 支持：
- * 1. 拼音/关键词输入即筛选；
+ * 1. 默认只列出主要指标，输入关键词后搜索全部指标；
  * 2. 鼠标悬浮到有多批次快照的指标（如 AA 指标）时，在右侧展开级联时间快照列表；
  * 3. 直接点击指标行：默认取最新值；
  * 4. 普通点击时间快照：切换主图表至该时间；
@@ -43,11 +43,11 @@ export function MetricCombobox({
   axisName,
   metric,
   metricGroups,
+  primaryMetricKeys,
   selectedSnapshotId = null,
   overlaySnapshotId = null,
   onChange,
-  onToggleOverlaySnapshot,
-  onQueryChange
+  onToggleOverlaySnapshot
 }: MetricComboboxProps) {
   const listId = useId();
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -70,7 +70,20 @@ export function MetricCombobox({
   const normalizedQuery = query.trim().toLowerCase();
 
   const filteredGroups = useMemo(() => {
-    if (!normalizedQuery) return metricGroups;
+    if (!normalizedQuery) {
+      // 未搜索时只展示主要指标；当前选中的低覆盖指标仍保留，避免列表里看不到已选项
+      return metricGroups
+        .map((group) => ({
+          category: group.category,
+          metrics: group.metrics.filter(
+            (item) =>
+              !primaryMetricKeys ||
+              primaryMetricKeys.has(item.key) ||
+              item.key === metric?.key
+          )
+        }))
+        .filter((group) => group.metrics.length > 0);
+    }
 
     return metricGroups
       .map((group) => ({
@@ -78,7 +91,14 @@ export function MetricCombobox({
         metrics: group.metrics.filter((item) => matchesQuery(item, group.category, normalizedQuery))
       }))
       .filter((group) => group.metrics.length > 0);
-  }, [metricGroups, normalizedQuery]);
+  }, [metricGroups, normalizedQuery, primaryMetricKeys, metric?.key]);
+
+  const hasSecondaryMetrics = useMemo(() => {
+    if (!primaryMetricKeys || normalizedQuery) return false;
+    return metricGroups.some((group) =>
+      group.metrics.some((item) => !primaryMetricKeys.has(item.key))
+    );
+  }, [metricGroups, normalizedQuery, primaryMetricKeys]);
 
   const { renderGroups, flatOptions } = useMemo(() => {
     const flat: ScatterMetric[] = [];
@@ -104,8 +124,7 @@ export function MetricCombobox({
     setIsOpen(false);
     setQuery("");
     closeSubmenu();
-    onQueryChange?.("");
-  }, [closeSubmenu, onQueryChange]);
+  }, [closeSubmenu]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -145,7 +164,6 @@ export function MetricCombobox({
     setActiveIndex(0);
     closeSubmenu();
     if (!isOpen) setIsOpen(true);
-    onQueryChange?.(value);
   };
 
   const scheduleOpenSubmenu = useCallback(
@@ -269,67 +287,74 @@ export function MetricCombobox({
               没有匹配的指标
             </li>
           ) : (
-            renderGroups.map((group) => (
-              <li key={group.category} role="presentation">
-                <div className="scatter-combobox-group">{group.category}</div>
-                <ul role="group" aria-label={group.category}>
-                  {group.metrics.map((item, itemIndex) => {
-                    const optionIndex = group.startIndex + itemIndex;
-                    const isActive = optionIndex === activeOptionIndex;
-                    const isSelected = item.key === metric?.key;
-                    const hasSnapshots = Boolean(item.snapshots && item.snapshots.length > 1);
+            <>
+              {renderGroups.map((group) => (
+                <li key={group.category} role="presentation">
+                  <div className="scatter-combobox-group">{group.category}</div>
+                  <ul role="group" aria-label={group.category}>
+                    {group.metrics.map((item, itemIndex) => {
+                      const optionIndex = group.startIndex + itemIndex;
+                      const isActive = optionIndex === activeOptionIndex;
+                      const isSelected = item.key === metric?.key;
+                      const hasSnapshots = Boolean(item.snapshots && item.snapshots.length > 1);
 
-                    return (
-                      <li
-                        key={item.key}
-                        id={`${listId}-${optionIndex}`}
-                        role="option"
-                        aria-selected={isSelected}
-                        data-option-index={optionIndex}
-                        className={`scatter-combobox-option ${isActive ? "is-active" : ""} ${
-                          isSelected ? "is-selected" : ""
-                        } ${hasSnapshots ? "has-snapshots" : ""}`}
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => selectOption(item.key)}
-                        onMouseEnter={(event) => {
-                          setActiveIndex(optionIndex);
-                          scheduleOpenSubmenu(item, event.currentTarget);
-                        }}
-                        onMouseLeave={() => {
-                          scheduleCloseSubmenu();
-                        }}
-                      >
-                        <span className="scatter-combobox-option-label-wrapper">
-                          <span className="scatter-combobox-option-label">{item.label}</span>
-                          {hasSnapshots ? (
-                            <span
-                              className="scatter-combobox-snapshot-tag"
-                              title={`${item.snapshots.length} 个历史评测快照`}
-                            >
-                              <History size={11} className="inline mr-0.5" />
-                              {item.snapshots.length}
-                            </span>
-                          ) : null}
-                        </span>
-
-                        <span className="scatter-combobox-option-meta">
-                          <span
-                            className={`scatter-combobox-option-direction ${
-                              item.higherIsBetter ? "is-up" : "is-down"
-                            }`}
-                          >
-                            {item.higherIsBetter ? "↑" : "↓"} {describeMetricDirection(item)}
+                      return (
+                        <li
+                          key={item.key}
+                          id={`${listId}-${optionIndex}`}
+                          role="option"
+                          aria-selected={isSelected}
+                          data-option-index={optionIndex}
+                          className={`scatter-combobox-option ${isActive ? "is-active" : ""} ${
+                            isSelected ? "is-selected" : ""
+                          } ${hasSnapshots ? "has-snapshots" : ""}`}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => selectOption(item.key)}
+                          onMouseEnter={(event) => {
+                            setActiveIndex(optionIndex);
+                            scheduleOpenSubmenu(item, event.currentTarget);
+                          }}
+                          onMouseLeave={() => {
+                            scheduleCloseSubmenu();
+                          }}
+                        >
+                          <span className="scatter-combobox-option-label-wrapper">
+                            <span className="scatter-combobox-option-label">{item.label}</span>
+                            {hasSnapshots ? (
+                              <span
+                                className="scatter-combobox-snapshot-tag"
+                                title={`${item.snapshots.length} 个历史评测快照`}
+                              >
+                                <History size={11} className="inline mr-0.5" />
+                                {item.snapshots.length}
+                              </span>
+                            ) : null}
                           </span>
-                          {hasSnapshots ? (
-                            <ChevronRight size={13} className="scatter-combobox-flyout-arrow" />
-                          ) : null}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </li>
-            ))
+
+                          <span className="scatter-combobox-option-meta">
+                            <span
+                              className={`scatter-combobox-option-direction ${
+                                item.higherIsBetter ? "is-up" : "is-down"
+                              }`}
+                            >
+                              {item.higherIsBetter ? "↑" : "↓"} {describeMetricDirection(item)}
+                            </span>
+                            {hasSnapshots ? (
+                              <ChevronRight size={13} className="scatter-combobox-flyout-arrow" />
+                            ) : null}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </li>
+              ))}
+              {hasSecondaryMetrics ? (
+                <li className="scatter-combobox-hint" role="presentation">
+                  输入关键词可搜索全部指标
+                </li>
+              ) : null}
+            </>
           )}
         </ul>
       ) : null}
