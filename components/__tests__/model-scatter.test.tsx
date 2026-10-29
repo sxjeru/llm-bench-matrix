@@ -976,6 +976,19 @@ describe("轴选择器（可输入下拉）", () => {
     expect(toggle.checked).toBe(false);
   });
 
+  test("从 Overall 切到其他指标时自动重新勾选含低覆盖指标", async () => {
+    const { container } = await renderScatter();
+    const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
+
+    fireEvent.click(toggle);
+    expect(toggle.checked).toBe(false);
+
+    pickAxisOption(container, "y", "Bench-One");
+
+    expect(axisLabel(container, "y")).toBe("Bench-One");
+    expect(toggle.checked).toBe(true);
+  });
+
   test("关闭含低覆盖指标时提示轴已回落", async () => {
     const { container } = await renderReady(
       <ModelScatter

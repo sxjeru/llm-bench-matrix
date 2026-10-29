@@ -809,6 +809,15 @@ export function ModelScatter({
   const handleChangeAxis = useCallback(
     (axis: "x" | "y", key: string, snapshotId?: string | null) => {
       const metric = findScatterMetric(metrics, key);
+      const previousKey = axis === "x" ? viewState.xKey : viewState.yKey;
+      const previousMetric = findScatterMetric(metrics, previousKey);
+
+      // 离开 Overall 后，其他指标默认包含低覆盖指标。
+      // 若用户此前在看 Overall 时手动关掉了开关，这里自动恢复勾选。
+      if (previousMetric?.kind === "overall" && metric && metric.kind !== "overall") {
+        setShowLowCoverageRows(true);
+      }
+
       setHistorySelections([]);
       setViewState((prev) => {
         const otherKey = axis === "x" ? prev.yKey : prev.xKey;
@@ -829,7 +838,7 @@ export function ModelScatter({
         };
       });
     },
-    [metrics]
+    [metrics, viewState.xKey, viewState.yKey]
   );
 
   const handleSwapAxes = useCallback(() => {
