@@ -939,10 +939,15 @@ describe("轴选择器（可输入下拉）", () => {
     expect(input.value).toBe("Overall Score");
   });
 
-  test("默认勾选含低覆盖指标", async () => {
-    await renderScatter();
-
+  test("默认 Overall 视图不勾选，切到其他指标后默认勾选", async () => {
+    const { container } = await renderScatter();
     const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
+
+    // 默认视图 Y 轴是 Overall，读取 overall 记忆（默认关闭）
+    expect(toggle.checked).toBe(false);
+
+    // 切到普通指标后读取 other 记忆（默认开启）
+    pickAxisOption(container, "y", "Bench-One");
     expect(toggle.checked).toBe(true);
   });
 
@@ -964,6 +969,10 @@ describe("轴选择器（可输入下拉）", () => {
   test("输入搜索不会改动低覆盖开关", async () => {
     const { container } = await renderScatter();
     const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
+
+    // 先切到普通指标进入 other 模式，默认勾选
+    pickAxisOption(container, "y", "Bench-One");
+    expect(toggle.checked).toBe(true);
 
     fireEvent.click(toggle);
     expect(toggle.checked).toBe(false);
@@ -988,6 +997,9 @@ describe("轴选择器（可输入下拉）", () => {
     );
     const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
 
+    // 进入普通指标的 other 模式后再手动关闭开关
+    pickAxisOption(container, "y", "Bench-One");
+    expect(toggle.checked).toBe(true);
     fireEvent.click(toggle);
     expect(toggle.checked).toBe(false);
 
@@ -1001,17 +1013,94 @@ describe("轴选择器（可输入下拉）", () => {
     expect(toggle.checked).toBe(true);
   });
 
-  test("从 Overall 切到其他指标时自动重新勾选含低覆盖指标", async () => {
+  test("Overall 与其他指标分别记忆低覆盖开关", async () => {
     const { container } = await renderScatter();
     const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
 
+    // 默认视图为 Overall，overall 记忆默认关闭
+    expect(toggle.checked).toBe(false);
+
+    // overall 模式下手动勾选
+    fireEvent.click(toggle);
+    expect(toggle.checked).toBe(true);
+
+    // 切到普通指标：使用 other 记忆（默认开启），overall 记忆保留
+    pickAxisOption(container, "y", "Bench-One");
+    expect(axisLabel(container, "y")).toBe("Bench-One");
+    expect(toggle.checked).toBe(true);
+
+    // other 模式下手动取消
     fireEvent.click(toggle);
     expect(toggle.checked).toBe(false);
 
-    pickAxisOption(container, "y", "Bench-One");
-
-    expect(axisLabel(container, "y")).toBe("Bench-One");
+    // 切回 Overall：恢复 overall 记忆（已勾选）
+    pickAxisOption(container, "y", "Overall Score");
+    expect(axisLabel(container, "y")).toBe("Overall Score");
     expect(toggle.checked).toBe(true);
+
+    // 再切到普通指标：恢复 other 记忆（已取消）
+    pickAxisOption(container, "y", "Bench-Two");
+    expect(toggle.checked).toBe(false);
+  });
+
+  test("分享链接里的低覆盖轴不会被默认关闭的开关回落", async () => {
+    const first = await renderReady(
+      <ModelScatter
+        rows={[...rows, ...sparseRows]}
+        allRows={[...rows, ...sparseRows]}
+        sourceOptions={["text:demo"]}
+        modelPrices={modelPrices}
+        modelParams={modelParams}
+      />
+    );
+
+    // 选一次低覆盖轴，从写回的地址栏拿到它的 key
+    pickAxisOption(first.container, "x", "Sparse Bench");
+    const sparseKey = new URLSearchParams(window.location.search).get("x");
+    expect(sparseKey).toBeTruthy();
+    first.unmount();
+
+    mockSearchParams = new URLSearchParams(`x=${sparseKey}&y=overall`);
+
+    const { container } = await renderReady(
+      <ModelScatter
+        rows={[...rows, ...sparseRows]}
+        allRows={[...rows, ...sparseRows]}
+        sourceOptions={["text:demo"]}
+        modelPrices={modelPrices}
+        modelParams={modelParams}
+      />
+    );
+    const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
+
+    // 恢复的轴依赖低覆盖行时，overall 记忆应被打开，轴不能被回落
+    expect(axisLabel(container, "x")).toBe("Sparse Bench");
+    expect(toggle.checked).toBe(true);
+  });
+
+  test("切到 Overall 时按 overall 记忆关闭低覆盖，并提示另一轴回落", async () => {
+    const { container } = await renderReady(
+      <ModelScatter
+        rows={[...rows, ...sparseRows]}
+        allRows={[...rows, ...sparseRows]}
+        sourceOptions={["text:demo"]}
+        modelPrices={modelPrices}
+        modelParams={modelParams}
+      />
+    );
+    const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
+
+    pickAxisOption(container, "y", "Bench-One");
+    pickAxisOption(container, "x", "Sparse Bench");
+    expect(axisLabel(container, "x")).toBe("Sparse Bench");
+    expect(toggle.checked).toBe(true);
+
+    // overall 记忆默认关闭：切到 Overall 后另一轴的低覆盖指标回落并提示
+    pickAxisOption(container, "y", "Overall Score");
+
+    expect(toggle.checked).toBe(false);
+    expect(axisLabel(container, "x")).not.toBe("Sparse Bench");
+    expect(screen.getByText(/已切换到 Overall 视图/)).toBeInTheDocument();
   });
 
   test("关闭含低覆盖指标时提示轴已回落", async () => {
