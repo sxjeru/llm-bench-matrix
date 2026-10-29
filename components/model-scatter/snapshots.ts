@@ -3,6 +3,7 @@ import {
   clusterEntriesByTime,
   detectAdaptiveMajorThreshold,
   groupBatchesIntoMajorRevisions,
+  type GroupBatchesOptions,
   type LatestAaRevisionResolution,
   type MajorRevisionGroup,
   type RevisionBatch
@@ -92,7 +93,8 @@ function buildBatchSampleMap(
  */
 export function extractMetricSnapshots(
   historyByModel: ReadonlyMap<string, readonly ScatterHistorySample[]>,
-  aaRevision?: LatestAaRevisionResolution
+  aaRevision?: LatestAaRevisionResolution,
+  options?: GroupBatchesOptions
 ): ScatterMetricSnapshot[] {
   let batches: RevisionBatch<SnapshotRevisionEntry>[];
   let majorGroups: MajorRevisionGroup<SnapshotRevisionEntry>[];
@@ -116,7 +118,7 @@ export function extractMetricSnapshots(
     if (batches.length <= 1) return [];
 
     const adaptiveThreshold = detectAdaptiveMajorThreshold(batches.map((b) => b.modelCount));
-    majorGroups = groupBatchesIntoMajorRevisions(batches, adaptiveThreshold);
+    majorGroups = groupBatchesIntoMajorRevisions(batches, adaptiveThreshold, options);
   }
 
   if (batches.length <= 1) {
@@ -172,6 +174,7 @@ export function extractMetricSnapshots(
       isLatest,
       isBatchSnapshot: modelCount >= 3 || (totalModels > 0 && modelCount / totalModels >= 0.25),
       isMajorRevision,
+      version: meta.group.version ?? null,
       sampleByModel
     };
   });

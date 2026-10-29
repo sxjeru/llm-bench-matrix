@@ -314,6 +314,24 @@ describe("normalizeImportConfig", () => {
     });
     expect(config.metricOverrides.gpqa).toBeUndefined();
   });
+
+  test("解析并保留 intelligenceIndexVersion 与 versionHistory", () => {
+    const config = normalizeImportConfig({
+      selectedMetrics: ["evaluations.artificial_analysis_intelligence_index"],
+      intelligenceIndexVersion: 5,
+      intelligenceIndexVersionHistory: [
+        { version: 4, effectiveFrom: "2026-08-01T00:00:00.000Z", note: "v4" },
+        { version: 5, effectiveFrom: "2026-10-28T00:00:00.000Z", note: "v5" },
+        { invalid: true }
+      ]
+    });
+
+    expect(config.intelligenceIndexVersion).toBe(5);
+    expect(config.intelligenceIndexVersionHistory).toEqual([
+      { version: 4, effectiveFrom: "2026-08-01T00:00:00.000Z", note: "v4" },
+      { version: 5, effectiveFrom: "2026-10-28T00:00:00.000Z", note: "v5" }
+    ]);
+  });
 });
 
 describe("buildImportRows", () => {
@@ -417,6 +435,34 @@ describe("buildImportRows", () => {
     });
 
     expect(rows).toHaveLength(0);
+  });
+
+  test("为 AA Intelligence Index 自动打上版本标识 valueNote", () => {
+    const models = [
+      upstream("aa-1", "GPT 5.4", "OpenAI", {
+        "evaluations.artificial_analysis_intelligence_index": 85.5
+      })
+    ];
+    const cat = buildMetricCatalog(models);
+    const rows = buildImportRows({
+      upstreamModels: models,
+      catalog: cat,
+      config: {
+        selectedMetrics: ["evaluations.artificial_analysis_intelligence_index"],
+        metricOverrides: {}
+      },
+      matches: [match(1, "aa-1", "matched")],
+      localModelsById,
+      intelligenceIndexVersion: 5
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      modelName: "GPT 5.4",
+      benchmarkName: "AA Intelligence Index",
+      rawValue: "85.5",
+      valueNote: "v5"
+    });
   });
 });
 

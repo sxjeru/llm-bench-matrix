@@ -55,6 +55,8 @@ export type ScatterMetricSnapshot = {
   isBatchSnapshot: boolean;
   /** 是否为主要变动快照 */
   isMajorRevision?: boolean;
+  /** 快照版本标识，如 "v5" */
+  version?: string | null;
   /** 该版本快照（含合并小补丁）中各模型的样本数据映射 */
   sampleByModel?: Map<string, ScatterHistorySample>;
 };

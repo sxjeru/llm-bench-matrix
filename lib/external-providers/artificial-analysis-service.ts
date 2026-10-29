@@ -406,15 +406,22 @@ export async function saveArtificialAnalysisMappings(inputs: unknown) {
 }
 
 export async function saveArtificialAnalysisConfig(input: unknown) {
+  const existingConfig = await getArtificialAnalysisConfig();
   const config = normalizeImportConfig(input);
+  const mergedConfig = {
+    ...config,
+    intelligenceIndexVersion: config.intelligenceIndexVersion ?? existingConfig.intelligenceIndexVersion ?? null,
+    intelligenceIndexVersionHistory:
+      config.intelligenceIndexVersionHistory ?? existingConfig.intelligenceIndexVersionHistory
+  };
   await saveSetting({
     key: ARTIFICIAL_ANALYSIS_SETTINGS_KEY,
-    valueJson: config,
+    valueJson: mergedConfig,
     updatedBy: "admin",
     note: "Artificial Analysis 导入配置"
   });
   await invalidateAllCaches();
-  return config;
+  return mergedConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -532,7 +539,8 @@ export async function runArtificialAnalysisImport(options: {
     catalog: snapshot.catalog,
     config,
     matches,
-    localModelsById
+    localModelsById,
+    intelligenceIndexVersion: snapshot.intelligenceIndexVersion
   });
 
   const result = await importExternalBenchmarkRows(rows, {
@@ -546,9 +554,27 @@ export async function runArtificialAnalysisImport(options: {
   }
 
   if (!dryRun) {
+    const currentVersion = snapshot.intelligenceIndexVersion;
+    let nextVersionHistory = [...(config.intelligenceIndexVersionHistory ?? [])];
+    if (currentVersion !== null && currentVersion !== undefined) {
+      const alreadyHas = nextVersionHistory.some((item) => item.version === currentVersion);
+      if (!alreadyHas) {
+        nextVersionHistory.push({
+          version: currentVersion,
+          effectiveFrom: new Date().toISOString(),
+          note: `Intelligence Index v${currentVersion}`
+        });
+      }
+    }
+
     await saveSetting({
       key: ARTIFICIAL_ANALYSIS_SETTINGS_KEY,
-      valueJson: { ...config, lastImportedAt: new Date().toISOString() },
+      valueJson: {
+        ...config,
+        intelligenceIndexVersion: currentVersion ?? config.intelligenceIndexVersion ?? null,
+        intelligenceIndexVersionHistory: nextVersionHistory.length > 0 ? nextVersionHistory : undefined,
+        lastImportedAt: new Date().toISOString()
+      },
       updatedBy: "admin",
       note: "Artificial Analysis 导入配置"
     });

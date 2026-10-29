@@ -4376,6 +4376,7 @@ export type ExternalImportRowInput = {
   modalities?: string[];
   unit?: string;
   rawValue: string;
+  valueNote?: string | null;
   sourceModelId?: string | null;
   sourceBenchmarkId?: string | null;
 };
@@ -4430,6 +4431,7 @@ type ExistingExternalValue = {
   valueRaw: string;
   valueNum: number | null;
   valueNum2: number | null;
+  valueNote?: string | null;
   source: string;
 };
 
@@ -4568,6 +4570,7 @@ export async function importExternalBenchmarkRows(
           valueRaw: benchmarkValues.valueRaw,
           valueNum: benchmarkValues.valueNum,
           valueNum2: benchmarkValues.valueNum2,
+          valueNote: benchmarkValues.valueNote,
           source: benchmarkValues.source
         })
         .from(benchmarkValues)
@@ -4585,6 +4588,7 @@ export async function importExternalBenchmarkRows(
           valueRaw: row.valueRaw,
           valueNum: toComparableNumber(row.valueNum),
           valueNum2: toComparableNumber(row.valueNum2),
+          valueNote: row.valueNote ?? null,
           source: row.source ?? normalizedSource
         });
       }
@@ -4710,13 +4714,15 @@ export async function importExternalBenchmarkRows(
           publicChanged = true;
         }
 
+        const finalValueNote = row.valueNote?.trim() || parsedValue.valueNote || null;
+
         if (existing && sameValue) {
           unchanged += 1;
-          if (existing.valueRaw !== parsedValue.valueRaw) {
+          if (existing.valueRaw !== parsedValue.valueRaw || (finalValueNote && finalValueNote !== existing.valueNote)) {
             rewriteRows.push({
               id: existing.id,
               valueRaw: parsedValue.valueRaw,
-              valueNote: parsedValue.valueNote
+              valueNote: finalValueNote
             });
             publicChanged = true;
           }
@@ -4727,6 +4733,7 @@ export async function importExternalBenchmarkRows(
             valueRaw: parsedValue.valueRaw,
             valueNum: parsedValue.valueNum,
             valueNum2: parsedValue.valueNum2,
+            valueNote: finalValueNote,
             source: existing.source
           });
           pushUnchangedPreview({
@@ -4747,7 +4754,7 @@ export async function importExternalBenchmarkRows(
           valueRaw: parsedValue.valueRaw,
           valueNum: parsedValue.valueNum !== null ? String(parsedValue.valueNum) : null,
           valueNum2: parsedValue.valueNum2 !== null ? String(parsedValue.valueNum2) : null,
-          valueNote: parsedValue.valueNote,
+          valueNote: finalValueNote,
           source: normalizedSource
         });
 

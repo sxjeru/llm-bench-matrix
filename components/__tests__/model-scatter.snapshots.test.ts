@@ -152,6 +152,48 @@ describe("extractMetricSnapshots", () => {
     expect(snapshots[1]?.isLatest).toBe(true);
     expect(snapshots[1]?.isMajorRevision).toBe(false);
   });
+
+  test("AA Intelligence Index 2026-10-28 迎来 v5（39 个模型），即使数量小于自适应阈值，依然晋升为主要变动并排在最前", () => {
+    const history = new Map<string, ScatterHistorySample[]>();
+
+    // 2026-08-06: 128 模型
+    for (let i = 1; i <= 128; i++) {
+      history.set(`M_0806_${i}`, [{ value: 60, benchTime: "2026-08-06T00:00:00.000Z", recordId: i }]);
+    }
+    // 2026-09-20: 81 模型
+    for (let i = 1; i <= 81; i++) {
+      const existing = history.get(`M_0806_${i}`) ?? [];
+      existing.push({ value: 70, benchTime: "2026-09-20T00:00:00.000Z", recordId: 1000 + i });
+      history.set(`M_0806_${i}`, existing);
+    }
+    // 2026-10-24: 4 模型补丁
+    for (let i = 1; i <= 4; i++) {
+      const existing = history.get(`M_0806_${i}`) ?? [];
+      existing.push({ value: 72, benchTime: "2026-10-24T00:00:00.000Z", recordId: 2000 + i });
+      history.set(`M_0806_${i}`, existing);
+    }
+    // 2026-10-28: 39 模型（v5 新版本）
+    for (let i = 1; i <= 39; i++) {
+      const existing = history.get(`M_0806_${i}`) ?? [];
+      existing.push({ value: 80, benchTime: "2026-10-28T08:00:00.000Z", recordId: 3000 + i });
+      history.set(`M_0806_${i}`, existing);
+    }
+
+    const snapshots = extractMetricSnapshots(history, undefined, {
+      benchmarkName: "AA Intelligence Index"
+    });
+
+    // 2026-10-28 快照因为属于 v5 主要变动，被提升至列表第一项
+    expect(snapshots[0]?.label).toBe("2026-10-28");
+    expect(snapshots[0]?.modelCount).toBe(39);
+    expect(snapshots[0]?.isMajorRevision).toBe(true);
+    expect(snapshots[0]?.version).toBe("v5");
+    expect(snapshots[0]?.isLatest).toBe(true);
+
+    // 10-24 快照模型数仅 4 个且同属于旧版本，未被作为主要变动
+    const snap1024 = snapshots.find((s) => s.label === "2026-10-24");
+    expect(snap1024?.isMajorRevision).toBe(false);
+  });
 });
 
 describe("pickNearestSampleByTime & resolveSampleForSnapshot", () => {

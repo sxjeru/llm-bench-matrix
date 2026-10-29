@@ -1,4 +1,5 @@
 import type { MatrixInputRow, ModelParamsInfo, ModelPriceInfo } from "@/components/benchmark-matrix/types";
+import type { AaVersionCutoff } from "@/lib/aa-index-revisions";
 
 /**
  * 修改公开快照的字段映射、计算语义或编码格式时递增。
@@ -32,6 +33,7 @@ export type PublicDashboardSnapshot = {
   modelParams: ModelParamsInfo[];
   exportFootnoteText?: string;
   exportFootnoteAlign: ExportFootnoteAlign;
+  aaVersionCutoffs?: AaVersionCutoff[];
 };
 
 export function createPublicDashboardSnapshotEtag(versions: PublicDashboardSnapshotVersions) {

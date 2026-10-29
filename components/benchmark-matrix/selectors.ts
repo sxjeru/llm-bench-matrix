@@ -75,6 +75,7 @@ import type { SourceValueMode } from "./utils";
 import {
   isAaMajorIndexBenchmark,
   resolveLatestAaRevisionValues,
+  type GroupBatchesOptions,
   type LatestAaRevisionResolution
 } from "@/lib/aa-index-revisions";
 
@@ -754,19 +755,24 @@ export function buildCoveragePrunedRows(
 /** 按完整数据划分 AA 版本；模型筛选和覆盖率裁剪只能发生在此之后。 */
 export function buildAaIndexRevisionsByRow(
   rows: readonly MatrixInputRow[],
-  showDuplicateRows: boolean
+  showDuplicateRows: boolean,
+  options?: GroupBatchesOptions
 ): Map<string, LatestAaRevisionResolution> {
   const entriesByRow = new Map<string, (MatrixCellEntry & { modelName: string })[]>();
+  const rowBenchmarkByKey = new Map<string, string>();
   rows.forEach((row) => {
     if (isAaMajorIndexBenchmark(row.benchmarkName)) {
-      entriesByRow.set(getMatrixGroupingKey(row, showDuplicateRows), []);
+      const key = getMatrixGroupingKey(row, showDuplicateRows);
+      entriesByRow.set(key, []);
+      rowBenchmarkByKey.set(key, row.benchmarkName);
     }
   });
   if (entriesByRow.size === 0) return new Map();
 
   // 同一分组可能还包含规范名不同的记录，统一纳入该指标的完整历史。
   rows.forEach((row) => {
-    const entries = entriesByRow.get(getMatrixGroupingKey(row, showDuplicateRows));
+    const key = getMatrixGroupingKey(row, showDuplicateRows);
+    const entries = entriesByRow.get(key);
     if (!entries) return;
     entries.push({
       modelName: row.modelName,
@@ -780,7 +786,15 @@ export function buildAaIndexRevisionsByRow(
     });
   });
 
-  return new Map(Array.from(entriesByRow, ([key, entries]) => [key, resolveLatestAaRevisionValues(entries)]));
+  return new Map(
+    Array.from(entriesByRow, ([key, entries]) => [
+      key,
+      resolveLatestAaRevisionValues(entries, {
+        benchmarkName: rowBenchmarkByKey.get(key),
+        ...options
+      })
+    ])
+  );
 }
 
 export function buildModelColumns(

@@ -248,6 +248,44 @@ describe("AA 三大指数主要变动自适应与版本合并", () => {
     expect(majorCounts).toContain(110);
   });
 
+  test("AA Intelligence Index 在 2026-10-28 迎来 v5（39 个模型）：矩阵只取 v5 的 39 个模型为有效值，老模型不混淆", () => {
+    const rows: MatrixInputRow[] = [];
+    let id = 1;
+
+    // 08-06: 128 个模型 (v4 早期)
+    for (let i = 0; i < 128; i += 1) {
+      rows.push(makeRow(`m_0806_${i}`, benchmark, "60", 60, "2026-08-06T00:00:00.000Z", id++));
+    }
+    // 09-20: 81 个模型
+    for (let i = 0; i < 81; i += 1) {
+      rows.push(makeRow(`m_0920_${i}`, benchmark, "70", 70, "2026-09-20T00:00:00.000Z", id++));
+    }
+    // 10-24: 4 个模型
+    for (let i = 0; i < 4; i += 1) {
+      rows.push(makeRow(`m_1024_${i}`, benchmark, "72", 72, "2026-10-24T00:00:00.000Z", id++));
+    }
+    // 10-28: 39 个模型 (v5)
+    for (let i = 0; i < 39; i += 1) {
+      rows.push(makeRow(`m_v5_${i}`, benchmark, "85", 85, "2026-10-28T08:00:00.000Z", id++));
+    }
+    // shared model: 在 09-20 是 70，在 10-28 是 92
+    rows.push(makeRow("shared_model", benchmark, "70", 70, "2026-09-20T00:00:00.000Z", id++));
+    rows.push(makeRow("shared_model", benchmark, "92", 92, "2026-10-28T08:00:00.000Z", id++));
+
+    const aaRevisions = buildAaIndexRevisionsByRow(rows, false);
+    const aaGroupingKey = getMatrixGroupingKey(rows[0]!, false);
+    const revision = aaRevisions.get(aaGroupingKey)!;
+
+    expect(revision).toBeDefined();
+    expect(revision.latestVersion).toBe("v5");
+    // 最新版本只包含 10-28 的 39 个模型 + shared_model = 40 个有效模型
+    expect(revision.latestEntriesByModel.size).toBe(40);
+    expect(revision.latestEntriesByModel.get("shared_model")?.valueNum).toBe(92);
+    expect(revision.latestEntriesByModel.has("m_v5_0")).toBe(true);
+    // 09-20 特有的模型绝不污染进 v5 的最新映射中
+    expect(revision.latestEntriesByModel.has("m_0920_0")).toBe(false);
+  });
+
   test("UI 渲染: AA三大指数在矩阵表格中显示最新主要变动值，老模型显示 -- 且带问号，悬浮显示历史值，点击禁止展开折线图", async () => {
     const rows: MatrixInputRow[] = [];
     let id = 1;

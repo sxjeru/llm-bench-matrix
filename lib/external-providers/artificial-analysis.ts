@@ -1040,9 +1040,17 @@ export type MetricOverride = {
   valueScale?: MetricValueScale;
 };
 
+export type IntelligenceIndexVersionCutoff = {
+  version: number;
+  effectiveFrom: string;
+  note?: string;
+};
+
 export type ArtificialAnalysisImportConfig = {
   selectedMetrics: string[];
   metricOverrides: Record<string, MetricOverride>;
+  intelligenceIndexVersion?: number | null;
+  intelligenceIndexVersionHistory?: IntelligenceIndexVersionCutoff[];
   lastImportedAt?: string;
 };
 
@@ -1097,9 +1105,33 @@ export function normalizeImportConfig(raw: unknown): ArtificialAnalysisImportCon
     }
   }
 
+  const intelligenceIndexVersion =
+    typeof source.intelligenceIndexVersion === "number" && Number.isFinite(source.intelligenceIndexVersion)
+      ? source.intelligenceIndexVersion
+      : null;
+
+  const rawHistory = source.intelligenceIndexVersionHistory;
+  const intelligenceIndexVersionHistory: IntelligenceIndexVersionCutoff[] = [];
+  if (Array.isArray(rawHistory)) {
+    rawHistory.forEach((item) => {
+      if (!item || typeof item !== "object") return;
+      const obj = item as Record<string, unknown>;
+      if (typeof obj.version === "number" && Number.isFinite(obj.version) && typeof obj.effectiveFrom === "string") {
+        intelligenceIndexVersionHistory.push({
+          version: obj.version,
+          effectiveFrom: obj.effectiveFrom,
+          ...(typeof obj.note === "string" && obj.note.trim() ? { note: obj.note.trim() } : {})
+        });
+      }
+    });
+  }
+
   return {
     selectedMetrics,
     metricOverrides,
+    intelligenceIndexVersion,
+    intelligenceIndexVersionHistory:
+      intelligenceIndexVersionHistory.length > 0 ? intelligenceIndexVersionHistory : undefined,
     lastImportedAt: typeof source.lastImportedAt === "string" ? source.lastImportedAt : undefined
   };
 }
@@ -1115,6 +1147,7 @@ export type ExternalImportRow = {
   modalities: string[];
   unit: string;
   rawValue: string;
+  valueNote?: string | null;
   source: string;
   sourceModelId: string | null;
   sourceBenchmarkId: string;
@@ -1127,6 +1160,7 @@ export type BuildImportRowsInput = {
   /** 只有 matched / manual 的映射会产出行 */
   matches: ModelMatchResult[];
   localModelsById: Map<number, { modelName: string; providerName: string }>;
+  intelligenceIndexVersion?: number | null;
 };
 
 export function buildImportRows(input: BuildImportRowsInput): ExternalImportRow[] {
@@ -1151,6 +1185,17 @@ export function buildImportRows(input: BuildImportRowsInput): ExternalImportRow[
       const override = input.config.metricOverrides[metricKey] ?? {};
       const valueScale = override.valueScale ?? entry.valueScale;
 
+      let valueNote: string | null = null;
+      if (
+        input.intelligenceIndexVersion !== null &&
+        input.intelligenceIndexVersion !== undefined &&
+        (metricKey === "evaluations.artificial_analysis_intelligence_index" ||
+          override.benchmarkName === "AA Intelligence Index" ||
+          entry.label === "AA Intelligence Index")
+      ) {
+        valueNote = `v${input.intelligenceIndexVersion}`;
+      }
+
       rows.push({
         rowNumber: rows.length + 1,
         providerName: local.providerName,
@@ -1162,6 +1207,7 @@ export function buildImportRows(input: BuildImportRowsInput): ExternalImportRow[
         modalities: override.modalities ?? entry.modalities,
         unit: entry.unit,
         rawValue: formatMetricValue(value, valueScale),
+        valueNote,
         source: ARTIFICIAL_ANALYSIS_SOURCE_LABEL,
         sourceModelId: match.externalModelId,
         sourceBenchmarkId: metricKey

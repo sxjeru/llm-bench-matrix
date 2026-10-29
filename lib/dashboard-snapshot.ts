@@ -15,6 +15,11 @@ import {
   type PublicDashboardSnapshot,
   type PublicDashboardSnapshotVersions
 } from "@/lib/dashboard-snapshot-cache";
+import {
+  ARTIFICIAL_ANALYSIS_SETTINGS_KEY,
+  normalizeImportConfig
+} from "@/lib/external-providers/artificial-analysis";
+import type { AaVersionCutoff } from "@/lib/aa-index-revisions";
 
 type ParsedExportFootnote = {
   exportFootnoteText?: string;
@@ -100,6 +105,21 @@ export async function loadPublicDashboardSnapshot(
     getSettings()
   ]);
 
+  const rawAaConfig = settings[ARTIFICIAL_ANALYSIS_SETTINGS_KEY];
+  const aaConfig = normalizeImportConfig(rawAaConfig);
+  const aaVersionCutoffs: AaVersionCutoff[] = [];
+
+  if (aaConfig.intelligenceIndexVersionHistory && aaConfig.intelligenceIndexVersionHistory.length > 0) {
+    aaConfig.intelligenceIndexVersionHistory.forEach((h) => {
+      aaVersionCutoffs.push({
+        version: `v${h.version}`,
+        timestampMs: new Date(h.effectiveFrom).getTime(),
+        benchmarkName: "AA Intelligence Index",
+        note: h.note
+      });
+    });
+  }
+
   return {
     versions: resolved,
     rows: rows.map(toMatrixInputRow),
@@ -107,6 +127,7 @@ export async function loadPublicDashboardSnapshot(
     stats,
     modelPrices: modelPrices.map(toPublicModelPrice).filter(hasPublicModelPriceData),
     modelParams,
+    ...(aaVersionCutoffs.length > 0 ? { aaVersionCutoffs } : {}),
     ...parseExportFootnote(settings.export_footnote_text)
   };
 }

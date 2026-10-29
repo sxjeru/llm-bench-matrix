@@ -2,8 +2,10 @@ import { describe, expect, test } from "vitest";
 import {
   clusterEntriesByTime,
   detectAdaptiveMajorThreshold,
+  extractAaVersionFromNote,
   groupBatchesIntoMajorRevisions,
   isAaMajorIndexBenchmark,
+  resolveBatchVersion,
   resolveLatestAaRevisionValues
 } from "@/lib/aa-index-revisions";
 import type { MatrixCellEntry } from "@/components/benchmark-matrix/types";
@@ -195,6 +197,91 @@ describe("lib/aa-index-revisions", () => {
       const groupsAsc = groupBatchesIntoMajorRevisions([bAsc], 1);
       expect(groupsAsc[0]!.entryByModel.get("modelA")?.value).toBe(95);
       expect(groupsAsc[0]!.entryByModel.get("modelA")?.recordId).toBe(100);
+    });
+
+    test("版本跃迁时（如 10-28 迎来 v5），不论数量多少（即使仅 39 个模型），强制开启新的主要变动组且不与旧版合并", () => {
+      const makeBatch = (timeStr: string, count: number, prefix: string, valueNote?: string | null) => {
+        const modelNames = new Set<string>();
+        const entries: { modelName: string; benchTime: string; value: number; valueNote?: string | null }[] = [];
+        for (let i = 0; i < count; i += 1) {
+          const modelName = `${prefix}_m${i}`;
+          modelNames.add(modelName);
+          entries.push({ modelName, benchTime: timeStr, value: 50 + i, valueNote: valueNote ?? null });
+        }
+        return {
+          timestamp: new Date(timeStr).getTime(),
+          modelNames,
+          entries,
+          modelCount: count
+        };
+      };
+
+      // 真实历史批次序列：前期大量模型，10-24/10-27 为小补丁，10-28 仅有 39 个模型（属于 v5）
+      const b1 = makeBatch("2026-08-06T00:00:00.000Z", 128, "b_0806");
+      const b2 = makeBatch("2026-08-16T00:00:00.000Z", 140, "b_0816");
+      const b3 = makeBatch("2026-09-05T04:48:00.000Z", 162, "b_0905");
+      const b4 = makeBatch("2026-09-09T00:00:00.000Z", 163, "b_0909");
+      const b5 = makeBatch("2026-09-20T00:00:00.000Z", 81, "b_0920");
+      const b6 = makeBatch("2026-10-24T00:00:00.000Z", 4, "b_1024");
+      const b7 = makeBatch("2026-10-27T00:00:00.000Z", 1, "b_1027");
+      const b8 = makeBatch("2026-10-28T08:00:00.000Z", 39, "b_1028", "v5");
+
+      const groups = groupBatchesIntoMajorRevisions([b1, b2, b3, b4, b5, b6, b7, b8], undefined, {
+        benchmarkName: "AA Intelligence Index"
+      });
+
+      // 10-28 因为版本跃迁为 v5，无视数量阈值，独立成为新的主要变动组
+      const latestGroup = groups[groups.length - 1]!;
+      expect(latestGroup.isMajorRevision).toBe(true);
+      expect(latestGroup.version).toBe("v5");
+      expect(latestGroup.entryByModel.size).toBe(39);
+      expect(latestGroup.batches.map((b) => b.modelCount)).toEqual([39]);
+      expect(new Date(latestGroup.timestamp).toISOString().slice(0, 10)).toBe("2026-10-28");
+
+      // 倒数第二个主要变动组包含 10-24 和 10-27，但绝不包含 10-28
+      const prevGroup = groups[groups.length - 2]!;
+      expect(prevGroup.batches.some((b) => b.modelCount === 39)).toBe(false);
+      expect(prevGroup.batches.some((b) => b.modelCount === 4)).toBe(true);
+      expect(prevGroup.batches.some((b) => b.modelCount === 1)).toBe(true);
+    });
+  });
+
+  describe("extractAaVersionFromNote & resolveBatchVersion", () => {
+    test("从各类注释字符串中准确解析版本号", () => {
+      expect(extractAaVersionFromNote("v5")).toBe("v5");
+      expect(extractAaVersionFromNote("v4.1")).toBe("v4.1");
+      expect(extractAaVersionFromNote("Intelligence Index v5")).toBe("v5");
+      expect(extractAaVersionFromNote("AA Intelligence Index v5.0")).toBe("v5.0");
+      expect(extractAaVersionFromNote("random note without version")).toBeNull();
+      expect(extractAaVersionFromNote(null)).toBeNull();
+    });
+
+    test("resolveBatchVersion 优先从条目注释中提取版本，若无则匹配断代切分点", () => {
+      const batchWithNote = {
+        timestamp: new Date("2026-10-28T08:00:00.000Z").getTime(),
+        modelNames: new Set(["m1"]),
+        entries: [{ modelName: "m1", valueNote: "v5" }],
+        modelCount: 1
+      };
+      expect(resolveBatchVersion(batchWithNote, "AA Intelligence Index")).toBe("v5");
+
+      const batchWithoutNote = {
+        timestamp: new Date("2026-10-28T12:00:00.000Z").getTime(),
+        modelNames: new Set(["m1"]),
+        entries: [{ modelName: "m1", valueNote: null }],
+        modelCount: 1
+      };
+      // 命中内置 DEFAULT_AA_INDEX_VERSION_CUTOFFS 中的 2026-10-28
+      expect(resolveBatchVersion(batchWithoutNote, "AA Intelligence Index")).toBe("v5");
+
+      // 早于 2026-10-28 且无注释的批次返回 null
+      const earlyBatch = {
+        timestamp: new Date("2026-09-20T00:00:00.000Z").getTime(),
+        modelNames: new Set(["m1"]),
+        entries: [{ modelName: "m1", valueNote: null }],
+        modelCount: 1
+      };
+      expect(resolveBatchVersion(earlyBatch, "AA Intelligence Index")).toBeNull();
     });
   });
 
