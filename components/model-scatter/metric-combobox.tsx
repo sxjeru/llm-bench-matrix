@@ -93,13 +93,6 @@ export function MetricCombobox({
       .filter((group) => group.metrics.length > 0);
   }, [metricGroups, normalizedQuery, primaryMetricKeys, metric?.key]);
 
-  const hasSecondaryMetrics = useMemo(() => {
-    if (!primaryMetricKeys || normalizedQuery) return false;
-    return metricGroups.some((group) =>
-      group.metrics.some((item) => !primaryMetricKeys.has(item.key))
-    );
-  }, [metricGroups, normalizedQuery, primaryMetricKeys]);
-
   const { renderGroups, flatOptions } = useMemo(() => {
     const flat: ScatterMetric[] = [];
     const groups = filteredGroups.map((group) => {
@@ -349,11 +342,6 @@ export function MetricCombobox({
                   </ul>
                 </li>
               ))}
-              {hasSecondaryMetrics ? (
-                <li className="scatter-combobox-hint" role="presentation">
-                  输入关键词可搜索全部指标
-                </li>
-              ) : null}
             </>
           )}
         </ul>

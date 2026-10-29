@@ -323,8 +323,18 @@ export function ModelScatter({
     [activeSource, filteredRows]
   );
 
-  /** 坐标轴与模型列实际使用的行集：默认含低覆盖指标，取消勾选后只剩主要指标。 */
-  const coverageRows = showLowCoverageRows ? filteredRows : primaryCoverageRows;
+  /**
+   * 严格矩阵默认视图行集：不补回 Cost / Performance。
+   * 关闭「含低覆盖指标」时模型列必须与首页矩阵一致，否则只在 Cost/Performance
+   * 行有值的模型会留在图里，开关看起来毫无变化。
+   */
+  const defaultViewRows = useMemo(
+    () => buildCoveragePrunedRows(activeSource, filteredRows, SHOW_DUPLICATE_ROWS, false),
+    [activeSource, filteredRows]
+  );
+
+  /** 坐标轴与模型列实际使用的行集：默认含低覆盖指标，取消勾选后回到矩阵默认视图。 */
+  const coverageRows = showLowCoverageRows ? filteredRows : defaultViewRows;
 
   const baseModelColumns = useMemo(
     () => buildModelColumns(
@@ -348,7 +358,7 @@ export function ModelScatter({
   const overallMatrixRows = useMemo(
     () => buildMatrixRows(
       baseSourceRows,
-      buildCoveragePrunedRows(activeSource, filteredRows, SHOW_DUPLICATE_ROWS, false),
+      defaultViewRows,
       SHOW_DUPLICATE_ROWS,
       false,
       activeSource,
@@ -356,7 +366,7 @@ export function ModelScatter({
       aaRevisionsByRow,
       { versionCutoffs: aaVersionCutoffs }
     ),
-    [baseSourceRows, activeSource, filteredRows, aaRevisionsByRow, aaVersionCutoffs]
+    [baseSourceRows, defaultViewRows, activeSource, aaRevisionsByRow, aaVersionCutoffs]
   );
 
   /** 主要指标对应的 MatrixRow，用于给轴下拉标出默认展示的指标集合。 */

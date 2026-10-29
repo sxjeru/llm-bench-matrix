@@ -1029,6 +1029,65 @@ describe("轴选择器（可输入下拉）", () => {
     expect(container.querySelectorAll(".recharts-scatter-symbol").length).toBe(4);
   });
 
+  test("只在 Cost 行出现的模型关闭开关后移出散点图", async () => {
+    stubScatterChartHostSize();
+
+    const costOnlyModelRows: MatrixInputRow[] = [
+      {
+        ...sparseRows[0],
+        recordId: 9500,
+        modelName: "Epsilon",
+        benchmarkName: "AA Intelligence Index Cost per Task",
+        benchmarkType: "Cost",
+        benchmarkCanonicalKey: "aa-intelligence-index-cost-per-task",
+        valueRaw: "2",
+        valueNum: 2
+      }
+    ];
+    const epsilonPrice = {
+      modelId: 99,
+      modelName: "Epsilon",
+      inputCost: 1,
+      outputCost: 2,
+      cacheReadCost: null,
+      lastSyncedAt: null,
+      updatedAt: null
+    };
+    const epsilonParams = {
+      modelId: 99,
+      modelName: "Epsilon",
+      totalParamsB: 500,
+      activatedParamsB: null,
+      isEstimated: false,
+      note: null
+    };
+
+    mockSearchParams = new URLSearchParams("x=price-output&y=params");
+
+    const { container } = await renderReady(
+      <ModelScatter
+        rows={[...rows, ...costOnlyModelRows]}
+        allRows={[...rows, ...costOnlyModelRows]}
+        sourceOptions={["text:demo"]}
+        modelPrices={[...modelPrices, epsilonPrice]}
+        modelParams={[...modelParams, epsilonParams]}
+      />
+    );
+    const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
+
+    // 打开：Cost 行虽低覆盖但被 alwaysKeep 补进模型列，Epsilon 出现在价格 × 参数量图
+    expect(toggle.checked).toBe(true);
+    expect(container.querySelectorAll(".recharts-scatter-symbol").length).toBe(5);
+
+    // 关闭：模型列必须回到严格矩阵默认视图，不能继续保留只在 Cost 行出现的模型
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+
+    expect(toggle.checked).toBe(false);
+    expect(container.querySelectorAll(".recharts-scatter-symbol").length).toBe(4);
+  });
+
   test("低覆盖 Cost 轴关闭开关后散点隐藏、重新勾选恢复", async () => {
     stubScatterChartHostSize();
 
