@@ -1047,16 +1047,6 @@ export function BenchmarkMatrix({
     [baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource, sourceValueMode, aaRevisionsByRow, aaVersionCutoffs]
   );
 
-  // 表格上方的版本图例：只展示带版本划分的 AA 主指数。
-  const aaVersionLegend = useMemo(() => {
-    const versions = new Map<string, string>();
-    matrixRows.forEach((row) => {
-      const version = row.aaRevision?.latestVersion;
-      if (version) versions.set(row.benchmark, version);
-    });
-    return Array.from(versions, ([benchmark, version]) => ({ benchmark, version }));
-  }, [matrixRows]);
-
   function getRowSortCycle(): RowSortMode[] {
     return activeSource === SOURCE_ALL
       ? ["data", "alpha"]
@@ -2012,19 +2002,6 @@ export function BenchmarkMatrix({
         benchmarkSearchInputValue={benchmarkSearchInputValue}
         setBenchmarkSearchInputValue={setBenchmarkSearchInputValue}
       />
-
-      {aaVersionLegend.length > 0 ? (
-        <div className="matrix-version-legend" role="note" aria-label="AA 指数数据版本">
-          <span className="matrix-version-legend-label">数据版本</span>
-          {aaVersionLegend.map((item) => (
-            <span key={item.benchmark} className="matrix-version-legend-item">
-              <span className="matrix-version-legend-name">{item.benchmark}</span>
-              <span className="matrix-version-chip">{item.version}</span>
-            </span>
-          ))}
-          <span className="matrix-version-legend-note">跨版本分数不可直接比较</span>
-        </div>
-      ) : null}
 
       <div
         ref={tableViewportRef}

@@ -1445,37 +1445,6 @@ input.heatmap-alpha-range::-moz-range-track {
   flex-shrink: 0;
 }
 
-/* 表格上方的版本图例 */
-.matrix-version-legend {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px 6px;
-  font-size: 11px;
-  color: var(--subtext);
-}
-
-.matrix-version-legend-label {
-  font-weight: 600;
-  color: var(--text);
-  opacity: 0.82;
-}
-
-.matrix-version-legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.matrix-version-legend-name {
-  opacity: 0.75;
-}
-
-.matrix-version-legend-note {
-  opacity: 0.55;
-}
-
 .scatter-combobox-badge-overlay {
   display: inline-flex;
   align-items: center;
