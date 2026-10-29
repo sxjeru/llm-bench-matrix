@@ -7,6 +7,7 @@ import {
   isAaMajorIndexBenchmark,
   resolveBatchVersion,
   resolveBatchVersionDetail,
+  resolveCutoffVersionAt,
   resolveLatestAaRevisionValues
 } from "@/lib/aa-index-revisions";
 import type { MatrixCellEntry } from "@/components/benchmark-matrix/types";
@@ -54,6 +55,47 @@ describe("lib/aa-index-revisions", () => {
       expect(batches[0].modelNames.has("Model-B")).toBe(true);
       expect(batches[1].modelNames.has("Model-B")).toBe(true);
       expect(batches[0].timestamp).toBeLessThan(batches[1].timestamp);
+    });
+
+    test("窗口按首条记录为锚点，连续小间隔不会链式塌成一批", () => {
+      // 每 3 小时一条：若拿「当前最大时间」当基准，会一路链下去并成一批
+      const items = ["00:00", "03:00", "06:00", "09:00", "12:00"].map((time, index) => ({
+        benchTime: `2026-03-01T${time}:00Z`,
+        modelName: `Model-${index}`
+      }));
+
+      const batches = clusterEntriesByTime(items);
+
+      // 锚点 00:00 只能容纳到 04:00；06:00 重新开批，09:00 并入 06:00 那批
+      expect(batches).toHaveLength(3);
+      expect(batches.map((batch) => batch.modelCount)).toEqual([2, 2, 1]);
+    });
+
+    test("同一时间窗跨版本时不会聚成同一批次", () => {
+      const entries = [
+        {
+          modelName: "v4_model",
+          benchTime: "2026-10-27T23:00:00.000Z",
+          valueNote: null
+        },
+        {
+          modelName: "v5_model",
+          benchTime: "2026-10-28T01:00:00.000Z",
+          valueNote: null
+        }
+      ];
+
+      const batches = clusterEntriesByTime(entries, undefined, {
+        versionOf: (entry) =>
+          resolveCutoffVersionAt(
+            new Date(entry.benchTime).getTime(),
+            "AA Intelligence Index"
+          )
+      });
+
+      expect(batches).toHaveLength(2);
+      expect(batches[0]!.modelNames.has("v4_model")).toBe(true);
+      expect(batches[1]!.modelNames.has("v5_model")).toBe(true);
     });
   });
 
@@ -301,6 +343,58 @@ describe("lib/aa-index-revisions", () => {
       expect(latestGroup.batches.map((batch) => batch.modelCount)).toEqual([39]);
       expect(latestGroup.entryByModel.size).toBe(39);
     });
+
+    test("单模型的新版本批次不开启主要变动桶，只作为补丁并入前一批", () => {
+      const makeBatch = (timeStr: string, count: number, prefix: string) => {
+        const modelNames = new Set<string>();
+        const entries: { modelName: string; benchTime: string; value: number }[] = [];
+        for (let i = 0; i < count; i += 1) {
+          const modelName = `${prefix}_m${i}`;
+          modelNames.add(modelName);
+          entries.push({ modelName, benchTime: timeStr, value: 50 + i });
+        }
+        return { timestamp: new Date(timeStr).getTime(), modelNames, entries, modelCount: count };
+      };
+
+      const b0916 = makeBatch("2026-09-16T00:00:00.000Z", 140, "b_0916");
+      const b0920 = makeBatch("2026-09-20T00:00:00.000Z", 81, "b_0920");
+      // 只有 1 个模型的 v5：更像单模型补录或上游抖动，不该变成「1 个模型的主要变动」
+      const b1028 = makeBatch("2026-10-28T08:00:00.000Z", 1, "b_1028");
+
+      const groups = groupBatchesIntoMajorRevisions([b0916, b0920, b1028], undefined, {
+        benchmarkName: "AA Intelligence Index"
+      });
+
+      expect(groups).toHaveLength(2);
+      expect(groups.every((group) => group.version !== "v5")).toBe(true);
+      // 该模型仍在最新桶里可见，只是不单独构成一次版本断代
+      expect(groups[groups.length - 1]!.batches).toHaveLength(2);
+      expect(groups[groups.length - 1]!.entryByModel.has("b_1028_m0")).toBe(true);
+    });
+
+    test("达到最小规模的版本批次照常断代", () => {
+      const makeBatch = (timeStr: string, count: number, prefix: string) => {
+        const modelNames = new Set<string>();
+        const entries: { modelName: string; benchTime: string; value: number }[] = [];
+        for (let i = 0; i < count; i += 1) {
+          const modelName = `${prefix}_m${i}`;
+          modelNames.add(modelName);
+          entries.push({ modelName, benchTime: timeStr, value: 50 + i });
+        }
+        return { timestamp: new Date(timeStr).getTime(), modelNames, entries, modelCount: count };
+      };
+
+      const b0920 = makeBatch("2026-09-20T00:00:00.000Z", 81, "b_0920");
+      const b1028 = makeBatch("2026-10-28T08:00:00.000Z", 3, "b_1028");
+
+      const groups = groupBatchesIntoMajorRevisions([b0920, b1028], undefined, {
+        benchmarkName: "AA Intelligence Index"
+      });
+
+      const latestGroup = groups[groups.length - 1]!;
+      expect(latestGroup.version).toBe("v5");
+      expect(latestGroup.batches.map((batch) => batch.modelCount)).toEqual([3]);
+    });
   });
 
   describe("extractAaVersionFromNote & resolveBatchVersion", () => {
@@ -335,14 +429,15 @@ describe("lib/aa-index-revisions", () => {
       expect(resolveBatchVersion(batch, "AA Intelligence Index")).toBe("v5");
     });
 
-    test("自定义切分点不会覆盖内置兜底（首次观测时间晚于历史批次时仍能断代）", () => {
+    test("配置里的切分点是唯一事实来源，内置种子只在完全没有配置时兜底", () => {
       const batch = {
         timestamp: new Date("2026-10-28T12:00:00.000Z").getTime(),
         modelNames: new Set(["m1"]),
         entries: [{ modelName: "m1", valueNote: null }],
         modelCount: 1
       };
-      // 模拟 settings 里首次观测到 v5 的时间晚于 10-28 的历史数据
+      // 配置里 v5 从 10-29 起生效：10-28 的批次就还是上一代，
+      // 不能再被代码里的 10-28 种子「拐」成 v5（否则配置怎么改都没用）
       const customCutoffs = [
         {
           version: "v5",
@@ -350,7 +445,24 @@ describe("lib/aa-index-revisions", () => {
           benchmarkName: "AA Intelligence Index"
         }
       ];
-      expect(resolveBatchVersion(batch, "AA Intelligence Index", customCutoffs)).toBe("v5");
+      expect(resolveBatchVersion(batch, "AA Intelligence Index", customCutoffs)).toBeNull();
+      // 完全不传（冷启动）才用种子；显式传空数组表示「彻底关闭版本切分」
+      expect(resolveBatchVersion(batch, "AA Intelligence Index")).toBe("v5");
+      expect(resolveBatchVersion(batch, "AA Intelligence Index", [])).toBeNull();
+    });
+
+    test("切分点严格生效，不再向前放宽 4 小时", () => {
+      const makeBatch = (timeStr: string) => ({
+        timestamp: new Date(timeStr).getTime(),
+        modelNames: new Set(["m1"]),
+        entries: [{ modelName: "m1", valueNote: null }],
+        modelCount: 1
+      });
+
+      // 10-27T21:00 + 4h 会越过 10-28T00:00，之前会被误判成 v5
+      expect(resolveBatchVersion(makeBatch("2026-10-27T21:00:00.000Z"), "AA Intelligence Index")).toBeNull();
+      expect(resolveBatchVersion(makeBatch("2026-10-27T23:59:00.000Z"), "AA Intelligence Index")).toBeNull();
+      expect(resolveBatchVersion(makeBatch("2026-10-28T00:00:00.000Z"), "AA Intelligence Index")).toBe("v5");
     });
 
     test("resolveBatchVersion 优先从条目注释中提取版本，若无则匹配断代切分点", () => {

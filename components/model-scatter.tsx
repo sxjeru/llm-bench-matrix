@@ -329,13 +329,31 @@ export function ModelScatter({
   );
 
   const baseModelColumns = useMemo(
-    () => buildModelColumns(coveragePrunedRows, sourceModelHint, null, SHOW_DUPLICATE_ROWS, {}, activeSource, aaRevisionsByRow),
-    [coveragePrunedRows, sourceModelHint, activeSource, aaRevisionsByRow]
+    () => buildModelColumns(
+      coveragePrunedRows,
+      sourceModelHint,
+      null,
+      SHOW_DUPLICATE_ROWS,
+      {},
+      activeSource,
+      aaRevisionsByRow,
+      { versionCutoffs: aaVersionCutoffs }
+    ),
+    [coveragePrunedRows, sourceModelHint, activeSource, aaRevisionsByRow, aaVersionCutoffs]
   );
 
   const matrixRows = useMemo(
-    () => buildMatrixRows(baseSourceRows, coveragePrunedRows, SHOW_DUPLICATE_ROWS, false, activeSource, "latest", aaRevisionsByRow),
-    [baseSourceRows, coveragePrunedRows, activeSource, aaRevisionsByRow]
+    () => buildMatrixRows(
+      baseSourceRows,
+      coveragePrunedRows,
+      SHOW_DUPLICATE_ROWS,
+      false,
+      activeSource,
+      "latest",
+      aaRevisionsByRow,
+      { versionCutoffs: aaVersionCutoffs }
+    ),
+    [baseSourceRows, coveragePrunedRows, activeSource, aaRevisionsByRow, aaVersionCutoffs]
   );
 
   const priceMatrixRows = useMemo(

@@ -286,7 +286,7 @@ describe("AA 三大指数主要变动自适应与版本合并", () => {
     expect(revision.latestEntriesByModel.has("m_0920_0")).toBe(false);
   });
 
-  test("配置里的 v5 生效时间晚于历史批次时，内置切分点兜底仍然生效", () => {
+  test("配置里没有 v5 时，代码里的种子不再把 10-28 强行切成新版本", () => {
     const rows: MatrixInputRow[] = [];
     let id = 1;
 
@@ -301,18 +301,19 @@ describe("AA 三大指数主要变动自适应与版本合并", () => {
     }
 
     const revision = buildAaIndexRevisionsByRow(rows, false, {
+      // 只有 v4：删掉 v5 切分点后，内置种子必须失效，否则配置形同虚设
       versionCutoffs: [
         {
-          version: "v5",
-          // 模拟「首次观测到 v5」被记录在 10-29，晚于 10-28 的历史批次
-          timestampMs: new Date("2026-10-29T08:00:00.000Z").getTime(),
+          version: "v4",
+          timestampMs: new Date("2026-08-01T00:00:00.000Z").getTime(),
           benchmarkName: "AA Intelligence Index"
         }
       ]
     }).get(getMatrixGroupingKey(rows[0]!, false))!;
 
-    expect(revision.latestVersion).toBe("v5");
-    expect(revision.latestEntriesByModel.size).toBe(39);
+    expect(revision.latestVersion).toBe("v4");
+    // 10-28 的 39 个模型按数量阈值并入 v4 桶，不再凭空出现 v5 快照
+    expect(revision.latestEntriesByModel.has("m_v5_0")).toBe(true);
   });
 
   test("UI 渲染: AA三大指数在矩阵表格中显示最新主要变动值，老模型显示 -- 且带问号，悬浮显示历史值，点击禁止展开折线图", async () => {

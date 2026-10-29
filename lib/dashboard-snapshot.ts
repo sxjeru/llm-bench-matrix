@@ -129,7 +129,9 @@ export async function loadPublicDashboardSnapshot(
     stats,
     modelPrices: modelPrices.map(toPublicModelPrice).filter(hasPublicModelPriceData),
     modelParams,
-    ...(aaVersionCutoffs.length > 0 ? { aaVersionCutoffs } : {}),
+    // settings 里没有 AA 配置时字段缺省 → 前端退回代码里的冷启动种子；
+    // 有配置但历史为空 → 下发空数组，表示「明确不做版本切分」，不能又被种子接管。
+    ...(rawAaConfig === undefined ? {} : { aaVersionCutoffs }),
     ...parseExportFootnote(settings.export_footnote_text)
   };
 }

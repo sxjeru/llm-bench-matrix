@@ -150,6 +150,23 @@ describe("loadPublicDashboardSnapshot", () => {
     ]);
   });
 
+  test("AA 配置存在但版本历史为空时下发空数组，表示明确关闭版本切分", async () => {
+    vi.mocked(getSettings).mockResolvedValueOnce({
+      "external_import:artificial-analysis": { selectedMetrics: [], metricOverrides: {} }
+    });
+
+    const snapshot = await loadPublicDashboardSnapshot();
+
+    // 空数组必须能传到前端：字段缺省才会退回代码里的冷启动种子
+    expect(snapshot.aaVersionCutoffs).toEqual([]);
+  });
+
+  test("settings 里没有 AA 配置时不下发该字段，前端退回冷启动种子", async () => {
+    const snapshot = await loadPublicDashboardSnapshot();
+
+    expect(snapshot.aaVersionCutoffs).toBeUndefined();
+  });
+
   test("调用方传入 versions 时不再探测缓存版本", async () => {
     await loadPublicDashboardSnapshot({
       dashboard: "forced-dashboard",

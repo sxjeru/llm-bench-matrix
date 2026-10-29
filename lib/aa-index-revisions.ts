@@ -1,8 +1,12 @@
 import { compareMatrixCellEntryRecency, parseTimestampMs } from "@/components/benchmark-matrix/utils";
 import {
+  AA_INDEX_VERSION_SEEDS,
   compareAaVersions,
+  DEFAULT_AA_INDEX_VERSION_CUTOFFS,
   extractAaVersionFromNote,
-  normalizeAaVersion
+  findAaVersionSeed,
+  normalizeAaVersion,
+  type AaVersionCutoff
 } from "@/lib/aa-index-version";
 import { isArtificialAnalysisSource } from "@/lib/source-utils";
 import { AA_SUMMARY_INDEX_LABEL_REGEX } from "@/components/model-scatter/constants";
@@ -10,6 +14,14 @@ import type { MatrixCellEntry } from "@/components/benchmark-matrix/types";
 
 /** 4 小时批次聚类窗口 */
 export const SNAPSHOT_CLUSTER_WINDOW_MS = 4 * 60 * 60 * 1000;
+
+/**
+ * 版本断代的最小批次规模。
+ *
+ * 低于这个数的「新版本批次」更可能是单模型补录、上游抖动，或一条被误改的注释；
+ * 给它开一个主要变动桶会让矩阵只剩 1 个有效模型，其余全部显示 --。
+ */
+export const MIN_VERSION_CUTOFF_MODELS = 3;
 
 /** AA 三大指数显式白名单 */
 export const AA_MAJOR_INDEX_NAMES = new Set([
@@ -53,6 +65,15 @@ export type RevisionBatch<T> = {
   modelCount: number;
 };
 
+export type ClusterEntriesOptions<T> = {
+  /**
+   * 条目所属的评估版本。版本不同的条目永不并入同一批次：
+   * 4 小时窗口跨过版本切换点时，把 v4 补丁和 v5 首批评测揉成一批，
+   * 之后就只剩「按注释众数硬猜整批版本」一条路。
+   */
+  versionOf?: (entry: T) => string | null;
+};
+
 /**
  * 将散落的指标记录按时间聚类为时间批次（4 小时窗口）。
  * 聚类后按时间由旧到新（升序）排列。
@@ -61,11 +82,13 @@ export function clusterEntriesByTime<
   T extends { benchTime?: string | null; modelName?: string }
 >(
   entries: readonly T[],
-  windowMs = SNAPSHOT_CLUSTER_WINDOW_MS
+  windowMs = SNAPSHOT_CLUSTER_WINDOW_MS,
+  options?: ClusterEntriesOptions<T>
 ): RevisionBatch<T>[] {
   type RawItem = {
     timestamp: number;
     modelName: string;
+    version: string | null;
     entry: T;
   };
 
@@ -75,7 +98,12 @@ export function clusterEntriesByTime<
     const timeMs = parseTimestampMs(entry.benchTime);
     if (timeMs === null) return;
     const modelName = entry.modelName ?? "";
-    rawItems.push({ timestamp: timeMs, modelName, entry });
+    rawItems.push({
+      timestamp: timeMs,
+      modelName,
+      version: options?.versionOf?.(entry) ?? null,
+      entry
+    });
   });
 
   if (rawItems.length === 0) return [];
@@ -84,11 +112,21 @@ export function clusterEntriesByTime<
   rawItems.sort((a, b) => a.timestamp - b.timestamp);
 
   const batches: RevisionBatch<T>[] = [];
+  // 窗口锚点固定为批次首条记录的时间。此前拿「当前最大时间」当基准，
+  // 间隔 3 小时的数据点能一路链下去，4 小时窗口形同虚设。
+  const anchors: number[] = [];
+  const batchVersions: (string | null)[] = [];
 
   rawItems.forEach((item) => {
-    const existing = batches.find((batch) => {
-      return Math.abs(item.timestamp - batch.timestamp) <= windowMs;
-    });
+    let targetIndex = -1;
+    for (let index = batches.length - 1; index >= 0; index -= 1) {
+      if (batchVersions[index] !== item.version) continue;
+      if (item.timestamp - (anchors[index] ?? item.timestamp) > windowMs) continue;
+      targetIndex = index;
+      break;
+    }
+
+    const existing = targetIndex >= 0 ? batches[targetIndex] : undefined;
 
     if (existing) {
       existing.entries.push(item.entry);
@@ -104,6 +142,8 @@ export function clusterEntriesByTime<
         entries: [item.entry],
         modelCount: modelNames.size
       });
+      anchors.push(item.timestamp);
+      batchVersions.push(item.version);
     }
   });
 
@@ -190,49 +230,30 @@ export function detectAdaptiveMajorThreshold(counts: readonly number[]): number 
   return minCount;
 }
 
-export type AaVersionCutoff = {
-  version: string | number;
-  timestampMs: number;
-  benchmarkName?: string;
-  note?: string;
+// 版本解析与断代种子放在 lib/aa-index-version（无前端依赖，服务端也能引用），
+// 这里保持原有对外导出不变。
+export {
+  AA_INDEX_VERSION_SEEDS,
+  DEFAULT_AA_INDEX_VERSION_CUTOFFS,
+  extractAaVersionFromNote,
+  findAaVersionSeed,
+  type AaVersionCutoff
 };
-
-/** 内置 AA 指标主要版本断代切分点（供历史数据回溯） */
-export const DEFAULT_AA_INDEX_VERSION_CUTOFFS: AaVersionCutoff[] = [
-  {
-    version: "v5",
-    timestampMs: new Date("2026-10-28T00:00:00.000Z").getTime(),
-    benchmarkName: "AA Intelligence Index",
-    note: "Artificial Analysis Intelligence Index v5"
-  }
-];
-
-// 版本解析放在 lib/aa-index-version，服务端导入流程也要用，这里保持对外导出不变
-export { extractAaVersionFromNote };
 
 /**
  * 合并自定义与内置切分点。
  *
- * 自定义切分点不能覆盖内置兜底：settings 里记录的是「首次观测到该版本的时间」，
- * 可能晚于该版本真实生效的数据批次（如 v5 的历史数据早于首次记录时间）。
- * 合并后由 resolveBatchVersion 取最近一次命中的切分点，既保留人工回溯点，
- * 也保留内置兜底。
+ * - 传了数组（哪怕是空数组）：配置就是唯一事实来源，内置种子完全不参与；
+ *   空数组表示「明确不做版本切分」，用于彻底关掉断代。
+ * - 完全没传：视为冷启动/预览环境，用代码里的种子兜底。
+ *
+ * 之前是无条件合并，导致「删了切分点也会被内置点加回来」，配置形同虚设。
  */
 function mergeVersionCutoffs(customCutoffs?: readonly AaVersionCutoff[]): AaVersionCutoff[] {
-  const merged: AaVersionCutoff[] = [];
-  const seen = new Set<string>();
-
-  const push = (cutoff: AaVersionCutoff) => {
-    if (!Number.isFinite(cutoff.timestampMs)) return;
-    const key = `${String(cutoff.version)}@${cutoff.timestampMs}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    merged.push(cutoff);
-  };
-
-  customCutoffs?.forEach(push);
-  DEFAULT_AA_INDEX_VERSION_CUTOFFS.forEach(push);
-  return merged;
+  if (customCutoffs !== undefined) {
+    return customCutoffs.filter((cutoff) => Number.isFinite(cutoff.timestampMs));
+  }
+  return AA_INDEX_VERSION_SEEDS.filter((cutoff) => Number.isFinite(cutoff.timestampMs));
 }
 
 /** 批次版本判定的证据来源 */
@@ -259,18 +280,24 @@ export type AaBatchVersionResolution = {
  */
 const NOTE_VERSION_MAJORITY_SHARE = 0.5;
 
-/** 匹配最近一次命中的断代切分点；无 benchmark 名时不套用任何切分点 */
-function resolveCutoffVersion<T>(
-  batch: RevisionBatch<T>,
+/**
+ * 取 timestampMs 时刻生效的版本。
+ *
+ * 语义是半开区间 [cutoff(V), cutoff(next))：严格 `<=`，**不再向前放宽 4 小时**。
+ * 之前用 `batch + 4h` 兜「批次时间早于切分点」，代价是把切换前 4 小时的 v4 补丁
+ * 也标成了 v5。真正提前发布的新版本由批次内多数版本注释纠正，
+ * 见 resolveBatchVersionDetail 的 hasMajorityNote 分支。
+ */
+export function resolveCutoffVersionAt(
+  timestampMs: number,
   benchmarkName?: string,
   customCutoffs?: readonly AaVersionCutoff[]
 ): string | null {
   // 没有 benchmark 名时无法判断这批切分点是否适用于当前指标。
   // 此前这里直接放行，导致所有指标都套用 AA Intelligence Index 的切分点。
-  if (!benchmarkName) return null;
+  if (!benchmarkName || !Number.isFinite(timestampMs)) return null;
 
   const cutoffs = mergeVersionCutoffs(customCutoffs);
-
   const relevant = cutoffs.filter((c) => {
     if (!c.benchmarkName) return true;
     return c.benchmarkName.trim().toLowerCase() === benchmarkName.trim().toLowerCase();
@@ -278,7 +305,7 @@ function resolveCutoffVersion<T>(
 
   let matchedCutoff: AaVersionCutoff | null = null;
   for (const c of relevant) {
-    if (c.timestampMs <= batch.timestamp + SNAPSHOT_CLUSTER_WINDOW_MS) {
+    if (c.timestampMs <= timestampMs) {
       if (!matchedCutoff || c.timestampMs > matchedCutoff.timestampMs) {
         matchedCutoff = c;
       }
@@ -289,6 +316,14 @@ function resolveCutoffVersion<T>(
 
   const rawVersion = String(matchedCutoff.version);
   return normalizeAaVersion(rawVersion) ?? (rawVersion.startsWith("v") ? rawVersion : `v${rawVersion}`);
+}
+
+function resolveCutoffVersion<T>(
+  batch: RevisionBatch<T>,
+  benchmarkName?: string,
+  customCutoffs?: readonly AaVersionCutoff[]
+): string | null {
+  return resolveCutoffVersionAt(batch.timestamp, benchmarkName, customCutoffs);
 }
 
 /**
@@ -416,6 +451,8 @@ export function groupBatchesIntoMajorRevisions<
     // 检测是否为新版本断代：
     // 1) 当前批次版本有高置信证据（切分点命中，或注释在批次内占多数）
     // 2) 且上一个组存在，但上一个组版本不同
+    // 3) 且批次规模达到下限 —— 1 个模型的「新版本」更像单模型补录或数据抖动，
+    //    真给它开桶会让界面变成「一个模型有值、其余全是 --」
     // 低置信的批次（例如整批只有一条被误改的注释）永远是 null 版本，
     // 既不给自己贴版本，也不允许开启新桶吞掉后续真实跃迁。
     const isNewVersionCutoff = Boolean(
@@ -423,6 +460,7 @@ export function groupBatchesIntoMajorRevisions<
       && batchResolution.confidence === "high"
       && lastGroup
       && lastGroup.version !== batchVersion
+      && batch.modelCount >= MIN_VERSION_CUTOFF_MODELS
     );
 
     const isMajor = isNewVersionCutoff || batch.modelCount >= threshold;
@@ -477,7 +515,18 @@ export function resolveLatestAaRevisionValues(
   entries: readonly (MatrixCellEntry & { modelName: string })[],
   options?: GroupBatchesOptions
 ): LatestAaRevisionResolution {
-  const batches = clusterEntriesByTime(entries);
+  // 先定版本再聚类：版本不同的记录永不并入同一批次，4 小时窗口因此无法跨代。
+  // 时间切分点优先，取不到时才退回行级版本注释（没有配置切分点的场景）。
+  const batches = clusterEntriesByTime(entries, SNAPSHOT_CLUSTER_WINDOW_MS, {
+    versionOf: (entry) => {
+      const timeMs = parseTimestampMs(entry.benchTime);
+      const byCutoff =
+        timeMs === null
+          ? null
+          : resolveCutoffVersionAt(timeMs, options?.benchmarkName, options?.versionCutoffs);
+      return byCutoff ?? extractAaVersionFromNote(entry.valueNote);
+    }
+  });
   const counts = batches.map((b) => b.modelCount);
   const adaptiveThreshold = detectAdaptiveMajorThreshold(counts);
   const groups = groupBatchesIntoMajorRevisions(batches, adaptiveThreshold, options);

@@ -18,6 +18,7 @@ import {
   buildImportRows,
   getArtificialAnalysisSnapshot,
   hasArtificialAnalysisApiKey,
+  mergeIntelligenceIndexVersionHistory,
   normalizeImportConfig,
   resolveModelMatches,
   type ArtificialAnalysisImportConfig,
@@ -555,21 +556,13 @@ export async function runArtificialAnalysisImport(options: {
 
   if (!dryRun) {
     const currentVersion = snapshot.intelligenceIndexVersion;
-    const nextVersionHistory = [...(config.intelligenceIndexVersionHistory ?? [])];
-    let versionHistoryChanged = false;
-    if (currentVersion !== null && currentVersion !== undefined) {
-      const alreadyHas = nextVersionHistory.some((item) => item.version === currentVersion);
-      if (!alreadyHas) {
-        nextVersionHistory.push({
-          version: currentVersion,
-          // 用本次导入批次的 benchTime，而不是保存配置的墙上时间，
-          // 保证版本生效点与 benchmark_values.bench_time 同源。
-          effectiveFrom: result.benchTime,
-          note: `Intelligence Index v${currentVersion}`
-        });
-        versionHistoryChanged = true;
-      }
-    }
+    const merged = mergeIntelligenceIndexVersionHistory(
+      config.intelligenceIndexVersionHistory ?? [],
+      currentVersion,
+      result.benchTime
+    );
+    const nextVersionHistory = merged.history;
+    const versionHistoryChanged = merged.changed;
 
     await saveSetting({
       key: ARTIFICIAL_ANALYSIS_SETTINGS_KEY,

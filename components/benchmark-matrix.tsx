@@ -1027,14 +1027,24 @@ export function BenchmarkMatrix({
       showDuplicateRows,
       modelOrderBySource,
       activeSource,
-      aaRevisionsByRow
+      aaRevisionsByRow,
+      { versionCutoffs: aaVersionCutoffs }
     ),
-    [coveragePrunedRows, sourceModelHint, columnSortBenchmarkKey, isSyntheticRowSortKey, showDuplicateRows, modelOrderBySource, activeSource, aaRevisionsByRow]
+    [coveragePrunedRows, sourceModelHint, columnSortBenchmarkKey, isSyntheticRowSortKey, showDuplicateRows, modelOrderBySource, activeSource, aaRevisionsByRow, aaVersionCutoffs]
   );
 
   const matrixRows = useMemo(
-    () => buildMatrixRows(baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource, sourceValueMode, aaRevisionsByRow),
-    [baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource, sourceValueMode, aaRevisionsByRow]
+    () => buildMatrixRows(
+      baseSourceRows,
+      coveragePrunedRows,
+      showDuplicateRows,
+      displaySourceValuesInCells,
+      activeSource,
+      sourceValueMode,
+      aaRevisionsByRow,
+      { versionCutoffs: aaVersionCutoffs }
+    ),
+    [baseSourceRows, coveragePrunedRows, showDuplicateRows, displaySourceValuesInCells, activeSource, sourceValueMode, aaRevisionsByRow, aaVersionCutoffs]
   );
 
   function getRowSortCycle(): RowSortMode[] {
@@ -1314,7 +1324,8 @@ export function BenchmarkMatrix({
       candidateModelNames,
       modelColumns,
       showDuplicateRows,
-      rankingScaleMode
+      rankingScaleMode,
+      { versionCutoffs: aaVersionCutoffs }
     );
   }, [
     allRankingModelNames,
@@ -1328,7 +1339,8 @@ export function BenchmarkMatrix({
     modelParams,
     rankingScaleMode,
     rankingScope,
-    showDuplicateRows
+    showDuplicateRows,
+    aaVersionCutoffs
   ]);
 
   useLayoutEffect(() => {

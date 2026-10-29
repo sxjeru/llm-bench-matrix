@@ -4,6 +4,7 @@ import {
   invalidateTimedCacheStore,
   withTimedCache
 } from "@/lib/server-cache";
+import { findAaVersionSeed } from "@/lib/aa-index-version";
 import {
   getReasoningEffortRank,
   parseModelReasoningEffort,
@@ -1044,6 +1045,13 @@ export type IntelligenceIndexVersionCutoff = {
   version: number;
   effectiveFrom: string;
   note?: string;
+  /**
+   * 这条生效时间的来源：
+   * - manual：人工回溯，永不被自动流程覆盖；
+   * - seed：来自代码里的冷启动种子（如 v5 @ 2026-10-28）；
+   * - inferred：导入时推断（首次观测到该版本的时间），只允许往早里修正。
+   */
+  source?: "manual" | "seed" | "inferred";
 };
 
 export type ArtificialAnalysisImportConfig = {
@@ -1058,6 +1066,21 @@ export const EMPTY_IMPORT_CONFIG: ArtificialAnalysisImportConfig = {
   selectedMetrics: [],
   metricOverrides: {}
 };
+
+/**
+ * 版本号兼容 number 与字符串（`5` / `"5"` / `"v5"`）。
+ *
+ * 上游一直返回 number，但对外契约并不保证；之前只认 number，遇到字符串会静默
+ * 丢成 null，整批数据因此不带版本标记。
+ */
+function coerceIndexVersion(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value.trim().replace(/^v/i, ""));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
 
 /** settings 里存的是任意 JSON，读出来要先收窄 */
 export function normalizeImportConfig(raw: unknown): ArtificialAnalysisImportConfig {
@@ -1105,10 +1128,7 @@ export function normalizeImportConfig(raw: unknown): ArtificialAnalysisImportCon
     }
   }
 
-  const intelligenceIndexVersion =
-    typeof source.intelligenceIndexVersion === "number" && Number.isFinite(source.intelligenceIndexVersion)
-      ? source.intelligenceIndexVersion
-      : null;
+  const intelligenceIndexVersion = coerceIndexVersion(source.intelligenceIndexVersion);
 
   const rawHistory = source.intelligenceIndexVersionHistory;
   const intelligenceIndexVersionHistory: IntelligenceIndexVersionCutoff[] = [];
@@ -1116,13 +1136,16 @@ export function normalizeImportConfig(raw: unknown): ArtificialAnalysisImportCon
     rawHistory.forEach((item) => {
       if (!item || typeof item !== "object") return;
       const obj = item as Record<string, unknown>;
-      if (typeof obj.version === "number" && Number.isFinite(obj.version) && typeof obj.effectiveFrom === "string") {
-        intelligenceIndexVersionHistory.push({
-          version: obj.version,
-          effectiveFrom: obj.effectiveFrom,
-          ...(typeof obj.note === "string" && obj.note.trim() ? { note: obj.note.trim() } : {})
-        });
-      }
+      const version = coerceIndexVersion(obj.version);
+      if (version === null || typeof obj.effectiveFrom !== "string") return;
+      intelligenceIndexVersionHistory.push({
+        version,
+        effectiveFrom: obj.effectiveFrom,
+        ...(typeof obj.note === "string" && obj.note.trim() ? { note: obj.note.trim() } : {}),
+        ...(obj.source === "manual" || obj.source === "seed" || obj.source === "inferred"
+          ? { source: obj.source }
+          : {})
+      });
     });
   }
 
@@ -1164,6 +1187,61 @@ export type BuildImportRowsInput = {
   localModelsById: Map<number, { modelName: string; providerName: string }>;
   intelligenceIndexVersion?: number | null;
 };
+
+/**
+ * 把「本次导入观测到的版本」合并进版本历史。
+ *
+ * 两条关键规则：
+ * 1. 首次观测时间 ≠ 版本生效时间：有种子（如 v5@2026-10-28）时取更早的那个，
+ *    否则整个切换前的数据区间都会被判成上一代；
+ * 2. 自动推断只能往早里修，人工回溯点（source: "manual"）永不覆盖。
+ */
+export function mergeIntelligenceIndexVersionHistory(
+  history: readonly IntelligenceIndexVersionCutoff[],
+  currentVersion: number | null | undefined,
+  observedAt: string
+): { history: IntelligenceIndexVersionCutoff[]; changed: boolean } {
+  const next = history.map((item) => ({ ...item }));
+  if (currentVersion === null || currentVersion === undefined) {
+    return { history: next, changed: false };
+  }
+
+  const seed = findAaVersionSeed(currentVersion);
+  const observedMs = new Date(observedAt).getTime();
+  const effectiveMs = Number.isFinite(observedMs)
+    ? seed
+      ? Math.min(seed.timestampMs, observedMs)
+      : observedMs
+    : seed?.timestampMs ?? Number.NaN;
+
+  if (!Number.isFinite(effectiveMs)) {
+    return { history: next, changed: false };
+  }
+  const effectiveFrom = new Date(effectiveMs).toISOString();
+
+  const existing = next.find((item) => item.version === currentVersion);
+  if (!existing) {
+    next.push({
+      version: currentVersion,
+      effectiveFrom,
+      note: `Intelligence Index v${currentVersion}`,
+      source: "inferred"
+    });
+    return { history: next, changed: true };
+  }
+
+  if (existing.source === "manual") {
+    return { history: next, changed: false };
+  }
+
+  const existingMs = new Date(existing.effectiveFrom).getTime();
+  if (!Number.isFinite(existingMs) || effectiveMs >= existingMs) {
+    return { history: next, changed: false };
+  }
+
+  existing.effectiveFrom = effectiveFrom;
+  return { history: next, changed: true };
+}
 
 export function buildImportRows(input: BuildImportRowsInput): ExternalImportRow[] {
   const upstreamById = new Map(input.upstreamModels.map((model) => [model.id, model]));

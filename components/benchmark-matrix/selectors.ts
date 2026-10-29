@@ -804,7 +804,8 @@ export function buildModelColumns(
   showDuplicateRows: boolean,
   modelOrderBySource: Record<string, string[]>,
   activeSource: string,
-  aaRevisionsByRow?: ReadonlyMap<string, LatestAaRevisionResolution>
+  aaRevisionsByRow?: ReadonlyMap<string, LatestAaRevisionResolution>,
+  options?: GroupBatchesOptions
 ): string[] {
   const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 
@@ -988,7 +989,9 @@ export function buildModelColumns(
     return orderedByManual;
   }
 
-  const aaRevision = (aaRevisionsByRow ?? buildAaIndexRevisionsByRow(coveragePrunedRows, showDuplicateRows))
+  // 没有外部预计算结果时也必须带上同一份切分点配置：兜底路径静默退回内置种子，
+  // 等于让「按当前指标排序」和矩阵主体用的是两套版本划分。
+  const aaRevision = (aaRevisionsByRow ?? buildAaIndexRevisionsByRow(coveragePrunedRows, showDuplicateRows, options))
     .get(columnSortBenchmarkKey);
   const benchmarkScoreMap = new Map<string, number>();
   const benchmarkRowsByModel = new Map<string, MatrixInputRow[]>();
@@ -1115,8 +1118,12 @@ export function buildMatrixRows(
   displaySourceValuesInCells: boolean,
   activeSource: string,
   sourceValueMode: SourceValueMode = "latest",
-  aaRevisionsByRow: ReadonlyMap<string, LatestAaRevisionResolution> = buildAaIndexRevisionsByRow(baseSourceRows, showDuplicateRows)
+  aaRevisionsByRow?: ReadonlyMap<string, LatestAaRevisionResolution>,
+  options?: GroupBatchesOptions
 ): MatrixRow[] {
+  // 默认参数里拿不到后面的 options，改成显式计算，保证兜底路径也用同一份切分点
+  const revisionByRow =
+    aaRevisionsByRow ?? buildAaIndexRevisionsByRow(baseSourceRows, showDuplicateRows, options);
   const matrixMap = new Map<
     string,
     MatrixRow & {
@@ -1264,7 +1271,7 @@ export function buildMatrixRows(
 
   return Array.from(matrixMap.values())
     .map((matrixRow) => {
-      const aaRevision = aaRevisionsByRow.get(matrixRow.rowKey);
+      const aaRevision = revisionByRow.get(matrixRow.rowKey);
       const aaLatestEntriesByModel = aaRevision?.latestEntriesByModel;
 
       const finalizedCells = new Map<string, MatrixCell>();
@@ -2003,7 +2010,8 @@ export function buildBenchmarkRankingData(
   candidateModelNames: readonly string[],
   visibleModelNames: readonly string[],
   showDuplicateRows: boolean,
-  scaleMode: BenchmarkRankingScaleMode
+  scaleMode: BenchmarkRankingScaleMode,
+  options?: GroupBatchesOptions
 ): BenchmarkRankingData {
   if (matrixRow.isPriceRow || matrixRow.isInfoRow) {
     return buildRankingDataFromMatrixRow(matrixRow, candidateModelNames, visibleModelNames, scaleMode);
@@ -2080,7 +2088,8 @@ export function buildBenchmarkRankingData(
   });
 
   if (isAaMajorIndexBenchmark(matrixRow.benchmark)) {
-    const aaRevision = matrixRow.aaRevision ?? buildAaIndexRevisionsByRow(matchingRows, showDuplicateRows).get(matrixRow.rowKey);
+    const aaRevision = matrixRow.aaRevision
+      ?? buildAaIndexRevisionsByRow(matchingRows, showDuplicateRows, options).get(matrixRow.rowKey);
     const latestEntriesByModel = aaRevision?.latestEntriesByModel;
     cellsByModel.forEach((cell, modelName) => {
       const target = latestEntriesByModel?.get(modelName);
