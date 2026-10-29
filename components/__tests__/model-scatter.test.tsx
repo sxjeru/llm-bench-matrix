@@ -713,6 +713,29 @@ describe("ModelScatter", () => {
     expect(readOverallValue(withNoise.container)).toBe(baselineValue);
   });
 
+  test("勾选含低覆盖指标后 Overall 纳入低覆盖行", async () => {
+    stubScatterChartHostSize();
+    const { container } = await renderReady(
+      <ModelScatter
+        rows={[...rows, ...sparseRows]}
+        allRows={[...rows, ...sparseRows]}
+        sourceOptions={["text:demo"]}
+        modelPrices={modelPrices}
+        modelParams={modelParams}
+      />
+    );
+    const toggle = screen.getByRole("checkbox", { name: /含低覆盖指标/ }) as HTMLInputElement;
+
+    // 默认 Overall 视图未勾选：低覆盖行不参与，Alpha 在两个能力项上都满分
+    expect(toggle.checked).toBe(false);
+    expect(readOverallValue(container)).toBe("100");
+
+    // 勾选后 Overall 吃全量行，Sparse Bench 的 10 分会把 Alpha 拉低
+    fireEvent.click(toggle);
+    expect(toggle.checked).toBe(true);
+    expect(readOverallValue(container)).not.toBe("100");
+  });
+
   test("价格与参数量不计入 Overall，无视矩阵页开关", async () => {
     stubScatterChartHostSize();
 

@@ -351,11 +351,10 @@ export function ModelScatter({
   );
 
   /**
-   * Overall 始终吃矩阵默认视图的行集：不带 alwaysKeep，低覆盖关闭时
-   * Performance 行整类隐藏、Cost 行也要过覆盖率门槛，才能与首页矩阵对得上。
-   * 该开关只影响坐标轴指标与模型列，不影响 Overall。
+   * 固定的矩阵默认视图指标行：只用于判定「哪些指标属于低覆盖」，
+   * 不能跟着 Overall 的行集一起随开关变化，否则判定集合会永远包含全部指标。
    */
-  const overallMatrixRows = useMemo(
+  const defaultViewMatrixRows = useMemo(
     () => buildMatrixRows(
       baseSourceRows,
       defaultViewRows,
@@ -367,6 +366,32 @@ export function ModelScatter({
       { versionCutoffs: aaVersionCutoffs }
     ),
     [baseSourceRows, defaultViewRows, activeSource, aaRevisionsByRow, aaVersionCutoffs]
+  );
+
+  /**
+   * Overall 与首页矩阵的总评同源：勾选低覆盖时吃全量行，取消勾选时回到矩阵默认视图。
+   * 之前固定只吃矩阵默认视图，导致 Overall 轴对开关完全无响应，与矩阵页行为不一致。
+   */
+  const overallMatrixRows = useMemo(
+    () => buildMatrixRows(
+      baseSourceRows,
+      showLowCoverageRows ? filteredRows : defaultViewRows,
+      SHOW_DUPLICATE_ROWS,
+      false,
+      activeSource,
+      "latest",
+      aaRevisionsByRow,
+      { versionCutoffs: aaVersionCutoffs }
+    ),
+    [
+      baseSourceRows,
+      defaultViewRows,
+      filteredRows,
+      showLowCoverageRows,
+      activeSource,
+      aaRevisionsByRow,
+      aaVersionCutoffs
+    ]
   );
 
   /** 主要指标对应的 MatrixRow，用于给轴下拉标出默认展示的指标集合。 */
@@ -490,13 +515,13 @@ export function ModelScatter({
    * 这些行即使覆盖率不足也会被当成主要指标，导致开关对它们（含默认的 AA Cost 轴）失效。
    */
   const defaultViewMetricKeys = useMemo(() => {
-    const rowKeys = new Set(overallMatrixRows.map((row) => row.rowKey));
+    const rowKeys = new Set(defaultViewMatrixRows.map((row) => row.rowKey));
     return new Set(
       allMetrics
         .filter((metric) => metric.kind !== "benchmark" || rowKeys.has(metric.rowKey))
         .map((metric) => metric.key)
     );
-  }, [allMetrics, overallMatrixRows]);
+  }, [allMetrics, defaultViewMatrixRows]);
 
   // 首帧统一水合：localStorage 提供基线，URL 参数覆盖其上，分享链接因此永远优先
   useEffect(() => {
@@ -1292,7 +1317,7 @@ export function ModelScatter({
           {activeSource === SOURCE_ALL ? (
             <label
               className="scatter-note scatter-note-toggle"
-              title="控制低覆盖 benchmark 是否纳入坐标轴与模型列；Overall 与其他指标分别记忆开关状态，当前轴不含低覆盖指标时散点不变"
+              title="控制低覆盖 benchmark 是否纳入坐标轴、模型列与总评；Overall 与其他指标分别记忆开关状态"
             >
               <input
                 type="checkbox"
