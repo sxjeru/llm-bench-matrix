@@ -1,4 +1,5 @@
 import type { MatrixInputRow, ModelParamsInfo, ModelPriceInfo } from "@/components/benchmark-matrix/types";
+import type { AaVersionCutoff } from "@/lib/aa-index-revisions";
 
 /** 指标来源类别。价格与参数量是矩阵合成行，overall 是矩阵的总评分。 */
 export type ScatterMetricKind = "benchmark" | "price" | "params" | "overall";
@@ -209,6 +210,8 @@ export type ModelScatterProps = {
   sourceOptions?: string[];
   modelPrices?: ModelPriceInfo[];
   modelParams?: ModelParamsInfo[];
+  /** AA 指数版本切分点（来自外部导入配置）；缺省时使用内置兜底 */
+  aaVersionCutoffs?: AaVersionCutoff[];
   /** 为 false 时仍更新视图，但不写地址栏。keep-alive 隐藏态由调用方关闭。 */
   urlSyncEnabled?: boolean;
 };

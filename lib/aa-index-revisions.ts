@@ -203,13 +203,40 @@ export const DEFAULT_AA_INDEX_VERSION_CUTOFFS: AaVersionCutoff[] = [
 ];
 
 /**
- * 从 valueNote 中提取形如 v5, v4.1, Intelligence Index v5 等版本号。
+ * 从 valueNote 中提取显式的版本标记（v5 / v4.1 / Intelligence Index v5）。
+ *
+ * 必须带 `v` 前缀：valueNote 同时承载人工备注，像 "2026-10-28 更新" 或
+ * "GPT-5.5 数据" 这类文本里的数字并不是版本号，不能据此切断版本。
  */
 export function extractAaVersionFromNote(note: string | null | undefined): string | null {
   if (!note) return null;
-  const trimmed = note.trim();
-  const match = trimmed.match(/(?:^|\b)(?:Intelligence\s+Index\s+|Index\s+)?v?([0-9]+(?:\.[0-9]+)*)(?:\b|$)/i);
+  const match = note.trim().match(/\bv(\d+(?:\.\d+)*)\b/i);
   return match ? `v${match[1]}` : null;
+}
+
+/**
+ * 合并自定义与内置切分点。
+ *
+ * 自定义切分点不能覆盖内置兜底：settings 里记录的是「首次观测到该版本的时间」，
+ * 可能晚于该版本真实生效的数据批次（如 v5 的历史数据早于首次记录时间）。
+ * 合并后由 resolveBatchVersion 取最近一次命中的切分点，既保留人工回溯点，
+ * 也保留内置兜底。
+ */
+function mergeVersionCutoffs(customCutoffs?: readonly AaVersionCutoff[]): AaVersionCutoff[] {
+  const merged: AaVersionCutoff[] = [];
+  const seen = new Set<string>();
+
+  const push = (cutoff: AaVersionCutoff) => {
+    if (!Number.isFinite(cutoff.timestampMs)) return;
+    const key = `${String(cutoff.version)}@${cutoff.timestampMs}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push(cutoff);
+  };
+
+  customCutoffs?.forEach(push);
+  DEFAULT_AA_INDEX_VERSION_CUTOFFS.forEach(push);
+  return merged;
 }
 
 /**
@@ -243,13 +270,14 @@ export function resolveBatchVersion<T extends { valueNote?: string | null }>(
     if (topVersion) return topVersion;
   }
 
-  const cutoffs = customCutoffs && customCutoffs.length > 0
-    ? customCutoffs
-    : DEFAULT_AA_INDEX_VERSION_CUTOFFS;
+  // 没有 benchmark 名时无法判断这批切分点是否适用于当前指标。
+  // 此前这里返回 true，导致所有指标都套用 AA Intelligence Index 的切分点。
+  if (!benchmarkName) return null;
+
+  const cutoffs = mergeVersionCutoffs(customCutoffs);
 
   const relevant = cutoffs.filter((c) => {
     if (!c.benchmarkName) return true;
-    if (!benchmarkName) return true;
     return c.benchmarkName.trim().toLowerCase() === benchmarkName.trim().toLowerCase();
   });
 

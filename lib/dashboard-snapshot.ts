@@ -111,9 +111,11 @@ export async function loadPublicDashboardSnapshot(
 
   if (aaConfig.intelligenceIndexVersionHistory && aaConfig.intelligenceIndexVersionHistory.length > 0) {
     aaConfig.intelligenceIndexVersionHistory.forEach((h) => {
+      const timestampMs = new Date(h.effectiveFrom).getTime();
+      if (!Number.isFinite(timestampMs)) return;
       aaVersionCutoffs.push({
         version: `v${h.version}`,
-        timestampMs: new Date(h.effectiveFrom).getTime(),
+        timestampMs,
         benchmarkName: "AA Intelligence Index",
         note: h.note
       });

@@ -125,6 +125,31 @@ describe("loadPublicDashboardSnapshot", () => {
     expect(getCacheVersion).toHaveBeenCalledWith("settings");
   });
 
+  test("把 AA 导入配置里的版本历史投影为前端切分点，并过滤非法时间", async () => {
+    vi.mocked(getSettings).mockResolvedValueOnce({
+      "external_import:artificial-analysis": {
+        selectedMetrics: [],
+        metricOverrides: {},
+        intelligenceIndexVersion: 5,
+        intelligenceIndexVersionHistory: [
+          { version: 5, effectiveFrom: "2026-10-28T00:00:00.000Z", note: "v5" },
+          { version: 6, effectiveFrom: "not-a-date" }
+        ]
+      }
+    });
+
+    const snapshot = await loadPublicDashboardSnapshot();
+
+    expect(snapshot.aaVersionCutoffs).toEqual([
+      {
+        version: "v5",
+        timestampMs: Date.parse("2026-10-28T00:00:00.000Z"),
+        benchmarkName: "AA Intelligence Index",
+        note: "v5"
+      }
+    ]);
+  });
+
   test("调用方传入 versions 时不再探测缓存版本", async () => {
     await loadPublicDashboardSnapshot({
       dashboard: "forced-dashboard",

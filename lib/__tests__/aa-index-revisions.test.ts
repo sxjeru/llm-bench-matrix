@@ -256,6 +256,46 @@ describe("lib/aa-index-revisions", () => {
       expect(extractAaVersionFromNote(null)).toBeNull();
     });
 
+    test("备注里的日期、年份、模型名数字不会被误当成版本号", () => {
+      expect(extractAaVersionFromNote("2026-10-28 更新")).toBeNull();
+      expect(extractAaVersionFromNote("est. 2025")).toBeNull();
+      expect(extractAaVersionFromNote("GPT-5.5 数据")).toBeNull();
+      expect(extractAaVersionFromNote("第5批")).toBeNull();
+      expect(extractAaVersionFromNote("dev5 预览")).toBeNull();
+    });
+
+    test("缺少 benchmarkName 时不套用时间切分点，避免所有指标都被标成 AA 版本", () => {
+      const batch = {
+        timestamp: new Date("2026-10-28T12:00:00.000Z").getTime(),
+        modelNames: new Set(["m1"]),
+        entries: [{ modelName: "m1", valueNote: null }],
+        modelCount: 1
+      };
+      expect(resolveBatchVersion(batch)).toBeNull();
+
+      // 非 AA 指标不应命中 "AA Intelligence Index" 的切分点
+      expect(resolveBatchVersion(batch, "MMLU")).toBeNull();
+      expect(resolveBatchVersion(batch, "AA Intelligence Index")).toBe("v5");
+    });
+
+    test("自定义切分点不会覆盖内置兜底（首次观测时间晚于历史批次时仍能断代）", () => {
+      const batch = {
+        timestamp: new Date("2026-10-28T12:00:00.000Z").getTime(),
+        modelNames: new Set(["m1"]),
+        entries: [{ modelName: "m1", valueNote: null }],
+        modelCount: 1
+      };
+      // 模拟 settings 里首次观测到 v5 的时间晚于 10-28 的历史数据
+      const customCutoffs = [
+        {
+          version: "v5",
+          timestampMs: new Date("2026-10-29T08:00:00.000Z").getTime(),
+          benchmarkName: "AA Intelligence Index"
+        }
+      ];
+      expect(resolveBatchVersion(batch, "AA Intelligence Index", customCutoffs)).toBe("v5");
+    });
+
     test("resolveBatchVersion 优先从条目注释中提取版本，若无则匹配断代切分点", () => {
       const batchWithNote = {
         timestamp: new Date("2026-10-28T08:00:00.000Z").getTime(),

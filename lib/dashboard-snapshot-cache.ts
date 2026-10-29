@@ -5,7 +5,7 @@ import type { AaVersionCutoff } from "@/lib/aa-index-revisions";
  * 修改公开快照的字段映射、计算语义或编码格式时递增。
  * 数据版本只跟踪写库；格式版本同时隔离持久化快照和浏览器 HTTP 缓存。
  */
-export const PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION = 1;
+export const PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION = 2;
 
 export const EXPORT_FOOTNOTE_ALIGNS = ["left", "center", "right"] as const;
 

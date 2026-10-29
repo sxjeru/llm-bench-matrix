@@ -100,6 +100,7 @@ export function ModelScatter({
   sourceOptions: sourceOptionsProp = EMPTY_SOURCE_OPTIONS,
   modelPrices = EMPTY_MODEL_PRICES,
   modelParams = EMPTY_MODEL_PARAMS,
+  aaVersionCutoffs,
   urlSyncEnabled = true
 }: ModelScatterProps) {
   const pathname = usePathname();
@@ -258,8 +259,10 @@ export function ModelScatter({
   );
 
   const aaRevisionsByRow = useMemo(
-    () => buildAaIndexRevisionsByRow(indexedSourceRows, SHOW_DUPLICATE_ROWS),
-    [indexedSourceRows]
+    () => buildAaIndexRevisionsByRow(indexedSourceRows, SHOW_DUPLICATE_ROWS, {
+      versionCutoffs: aaVersionCutoffs
+    }),
+    [indexedSourceRows, aaVersionCutoffs]
   );
 
   const baseBenchmarkKeySet = useMemo(
@@ -395,9 +398,10 @@ export function ModelScatter({
         benchmarkRows: matrixRows,
         priceRows: priceMatrixRows,
         paramsRows: modelInfoMatrixRows,
-        overallScoreByModel
+        overallScoreByModel,
+        versionCutoffs: aaVersionCutoffs
       }),
-    [matrixRows, priceMatrixRows, modelInfoMatrixRows, overallScoreByModel]
+    [matrixRows, priceMatrixRows, modelInfoMatrixRows, overallScoreByModel, aaVersionCutoffs]
   );
 
   const metricGroups = useMemo(() => groupScatterMetrics(metrics), [metrics]);

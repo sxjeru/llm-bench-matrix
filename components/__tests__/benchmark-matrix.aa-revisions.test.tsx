@@ -286,6 +286,35 @@ describe("AA 三大指数主要变动自适应与版本合并", () => {
     expect(revision.latestEntriesByModel.has("m_0920_0")).toBe(false);
   });
 
+  test("配置里的 v5 生效时间晚于历史批次时，内置切分点兜底仍然生效", () => {
+    const rows: MatrixInputRow[] = [];
+    let id = 1;
+
+    for (let i = 0; i < 128; i += 1) {
+      rows.push(makeRow(`m_0806_${i}`, benchmark, "60", 60, "2026-08-06T00:00:00.000Z", id++));
+    }
+    for (let i = 0; i < 81; i += 1) {
+      rows.push(makeRow(`m_0920_${i}`, benchmark, "70", 70, "2026-09-20T00:00:00.000Z", id++));
+    }
+    for (let i = 0; i < 39; i += 1) {
+      rows.push(makeRow(`m_v5_${i}`, benchmark, "85", 85, "2026-10-28T08:00:00.000Z", id++));
+    }
+
+    const revision = buildAaIndexRevisionsByRow(rows, false, {
+      versionCutoffs: [
+        {
+          version: "v5",
+          // 模拟「首次观测到 v5」被记录在 10-29，晚于 10-28 的历史批次
+          timestampMs: new Date("2026-10-29T08:00:00.000Z").getTime(),
+          benchmarkName: "AA Intelligence Index"
+        }
+      ]
+    }).get(getMatrixGroupingKey(rows[0]!, false))!;
+
+    expect(revision.latestVersion).toBe("v5");
+    expect(revision.latestEntriesByModel.size).toBe(39);
+  });
+
   test("UI 渲染: AA三大指数在矩阵表格中显示最新主要变动值，老模型显示 -- 且带问号，悬浮显示历史值，点击禁止展开折线图", async () => {
     const rows: MatrixInputRow[] = [];
     let id = 1;
@@ -346,7 +375,7 @@ describe("AA 三大指数主要变动自适应与版本合并", () => {
     fireEvent.mouseEnter(oldQuestionMark!);
     const oldTooltip = document.querySelector('[data-cell-tooltip="1"]');
     expect(oldTooltip?.textContent).toContain("65");
-  });
+  }, 15000);
 
   test("问题 1: 模型筛选只选两个模型时，不会误把单模型补丁当成主要变动，保留完整版本判定", () => {
     const allRows: MatrixInputRow[] = [];

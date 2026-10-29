@@ -194,6 +194,34 @@ describe("extractMetricSnapshots", () => {
     const snap1024 = snapshots.find((s) => s.label === "2026-10-24");
     expect(snap1024?.isMajorRevision).toBe(false);
   });
+
+  test("非 AA 指标不会被 AA 版本切分点误标为 v5 主要变动", () => {
+    const history = new Map<string, ScatterHistorySample[]>();
+
+    // 08-06: 128 个模型（大版本）
+    for (let i = 1; i <= 128; i++) {
+      history.set(`M_0806_${i}`, [{ value: 60, benchTime: "2026-08-06T00:00:00.000Z", recordId: i }]);
+    }
+    // 10-28: 仅 3 个模型的小补丁，没有版本备注
+    for (let i = 1; i <= 3; i++) {
+      const existing = history.get(`M_0806_${i}`) ?? [];
+      existing.push({ value: 61, benchTime: "2026-10-28T08:00:00.000Z", recordId: 9000 + i });
+      history.set(`M_0806_${i}`, existing);
+    }
+
+    // 不传 benchmarkName：此前会把所有指标都套用 AA Intelligence Index 的切分点
+    const snapshots = extractMetricSnapshots(history);
+    const snap1028 = snapshots.find((s) => s.label === "2026-10-28");
+
+    expect(snap1028?.version ?? null).toBeNull();
+    expect(snap1028?.isMajorRevision).toBe(false);
+
+    // 明确传入非 AA 指标名时同样不应命中断代
+    const namedSnapshots = extractMetricSnapshots(history, undefined, { benchmarkName: "MMLU" });
+    const namedSnap1028 = namedSnapshots.find((s) => s.label === "2026-10-28");
+    expect(namedSnap1028?.version ?? null).toBeNull();
+    expect(namedSnap1028?.isMajorRevision).toBe(false);
+  });
 });
 
 describe("pickNearestSampleByTime & resolveSampleForSnapshot", () => {

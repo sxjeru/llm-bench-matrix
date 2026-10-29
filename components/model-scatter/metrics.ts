@@ -24,7 +24,8 @@ import {
 import { isArtificialAnalysisSource } from "@/lib/source-utils";
 import {
   isAaMajorIndexBenchmark,
-  resolveLatestAaRevisionValues
+  resolveLatestAaRevisionValues,
+  type AaVersionCutoff
 } from "@/lib/aa-index-revisions";
 import { extractMetricSnapshots } from "./snapshots";
 import type { MatrixCell, MatrixCellEntry } from "@/components/benchmark-matrix/types";
@@ -208,11 +209,19 @@ function checkIsArtificialAnalysis(row: MatrixRow): boolean {
   return false;
 }
 
-export function toScatterMetric(row: MatrixRow): ScatterMetric {
+export function toScatterMetric(
+  row: MatrixRow,
+  versionCutoffs?: readonly AaVersionCutoff[]
+): ScatterMetric {
   const unit = resolveMetricUnit(row);
   const category = resolveScatterMetricCategory(row);
   const historyByModel = buildHistoryByModel(row);
-  const snapshots = extractMetricSnapshots(historyByModel, row.aaRevision);
+  // 非 AA 指标没有 aaRevision，会走 extractMetricSnapshots 的兜底分支；
+  // 必须带上 benchmarkName，否则切分点无法判断适用范围。
+  const snapshots = extractMetricSnapshots(historyByModel, row.aaRevision, {
+    benchmarkName: row.benchmark,
+    versionCutoffs
+  });
   const isArtificialAnalysis = checkIsArtificialAnalysis(row);
 
   return {
@@ -239,6 +248,8 @@ export type BuildScatterMetricsInput = {
   paramsRows: readonly MatrixRow[];
   /** 矩阵总评分（rawScore）。传 null 表示不提供总评轴。 */
   overallScoreByModel?: ReadonlyMap<string, number | null> | null;
+  /** AA 指数版本切分点；只对 AA Intelligence Index 生效。 */
+  versionCutoffs?: readonly AaVersionCutoff[];
 };
 
 function compareMetricsForSelector(left: ScatterMetric, right: ScatterMetric): number {
@@ -305,7 +316,7 @@ export function buildScatterMetrics(input: BuildScatterMetricsInput): ScatterMet
   }
 
   const rowMetrics = [...input.paramsRows, ...input.priceRows, ...input.benchmarkRows]
-    .map(toScatterMetric)
+    .map((row) => toScatterMetric(row, input.versionCutoffs))
     .filter((metric) => metric.valueByModel.size > 0);
 
   // slug 理论上唯一，但源数据异常时宁可丢重复项也不要让轴选择器出现两个同 key 项

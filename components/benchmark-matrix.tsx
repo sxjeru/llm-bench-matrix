@@ -227,6 +227,7 @@ export function BenchmarkMatrix({
   modelParams = EMPTY_MODEL_PARAMS,
   exportFootnoteText,
   exportFootnoteAlign,
+  aaVersionCutoffs,
   urlSyncEnabled = true
 }: Props) {
   const sectionRef = useRef<HTMLElement | null>(null);
@@ -809,8 +810,10 @@ export function BenchmarkMatrix({
   );
 
   const aaRevisionsByRow = useMemo(
-    () => buildAaIndexRevisionsByRow(indexedSourceRows, showDuplicateRows),
-    [indexedSourceRows, showDuplicateRows]
+    () => buildAaIndexRevisionsByRow(indexedSourceRows, showDuplicateRows, {
+      versionCutoffs: aaVersionCutoffs
+    }),
+    [indexedSourceRows, showDuplicateRows, aaVersionCutoffs]
   );
 
   const baseSourceRows = useMemo(

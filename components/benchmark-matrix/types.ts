@@ -1,4 +1,4 @@
-import type { LatestAaRevisionResolution } from "@/lib/aa-index-revisions";
+import type { AaVersionCutoff, LatestAaRevisionResolution } from "@/lib/aa-index-revisions";
 
 export type MatrixInputRow = {
   recordId?: number | null;
@@ -155,6 +155,8 @@ export type Props = {
   modelParams?: ModelParamsInfo[];
   exportFootnoteText?: string;
   exportFootnoteAlign?: "left" | "center" | "right";
+  /** AA 指数版本切分点（来自外部导入配置）；缺省时使用内置兜底 */
+  aaVersionCutoffs?: AaVersionCutoff[];
   /** 为 false 时仍切换页签，但不读写地址栏。keep-alive 隐藏态由调用方关闭。 */
   urlSyncEnabled?: boolean;
 };

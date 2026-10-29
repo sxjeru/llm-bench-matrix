@@ -14,7 +14,7 @@ export function HomeModelScatter({ urlSyncEnabled = true }: { urlSyncEnabled?: b
     );
   }
 
-  const { rows, sourceOptions, modelPrices, modelParams } = snapshot;
+  const { rows, sourceOptions, modelPrices, modelParams, aaVersionCutoffs } = snapshot;
 
   return (
     <ModelScatter
@@ -22,6 +22,7 @@ export function HomeModelScatter({ urlSyncEnabled = true }: { urlSyncEnabled?: b
       sourceOptions={sourceOptions}
       modelPrices={modelPrices}
       modelParams={modelParams}
+      aaVersionCutoffs={aaVersionCutoffs}
       urlSyncEnabled={urlSyncEnabled}
     />
   );
