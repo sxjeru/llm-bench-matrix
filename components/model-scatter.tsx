@@ -54,9 +54,9 @@ import { buildScatterDataset, buildScatterSnapshotOverlayDataset } from "./model
 import { useScatterImageActions } from "./model-scatter/image-actions";
 import {
   buildScatterMetrics,
-  filterMatrixRowsForScatterOverall,
   findScatterMetric,
   groupScatterMetrics,
+  pickScatterAxisOnlyRows,
   resolveDefaultAxisKeys
 } from "./model-scatter/metrics";
 import {
@@ -322,7 +322,8 @@ export function ModelScatter({
   const coveragePrunedRows = useMemo(
     () =>
       buildCoveragePrunedRows(activeSource, filteredRows, SHOW_DUPLICATE_ROWS, showLowCoverageRows, {
-        // Cost / Performance 作为散点常用轴，始终保留在下拉里
+        // Cost / Performance 是散点最常用的轴：模型列里始终保留它们，
+        // 否则这些模型会在图例与坐标轴取值里凭空消失
         alwaysKeepBenchmarkTypes: SCATTER_ALWAYS_VISIBLE_BENCHMARK_TYPES
       }),
     [activeSource, filteredRows, showLowCoverageRows]
@@ -342,10 +343,17 @@ export function ModelScatter({
     [coveragePrunedRows, sourceModelHint, activeSource, aaRevisionsByRow, aaVersionCutoffs]
   );
 
+  /**
+   * 与首页矩阵默认视图完全同源的行集。
+   *
+   * 不能复用上面带 alwaysKeep 的裁剪结果：矩阵裁剪不带该选项，低覆盖关闭时
+   * Performance 行整类隐藏、Cost 行也要过覆盖率门槛。Overall 必须吃同一批行，
+   * 否则散点里的总评会比表格多算或少算若干行。
+   */
   const matrixRows = useMemo(
     () => buildMatrixRows(
       baseSourceRows,
-      coveragePrunedRows,
+      buildCoveragePrunedRows(activeSource, filteredRows, SHOW_DUPLICATE_ROWS, showLowCoverageRows),
       SHOW_DUPLICATE_ROWS,
       false,
       activeSource,
@@ -353,8 +361,25 @@ export function ModelScatter({
       aaRevisionsByRow,
       { versionCutoffs: aaVersionCutoffs }
     ),
-    [baseSourceRows, coveragePrunedRows, activeSource, aaRevisionsByRow, aaVersionCutoffs]
+    [baseSourceRows, activeSource, filteredRows, showLowCoverageRows, aaRevisionsByRow, aaVersionCutoffs]
   );
+
+  /** 轴下拉额外补的 Cost / Performance 行：矩阵默认视图裁掉了它们，但散点要能当坐标轴用。 */
+  const axisOnlyMatrixRows = useMemo(() => {
+    const axisOnlyRows = pickScatterAxisOnlyRows(filteredRows, showLowCoverageRows, activeSource);
+    if (axisOnlyRows.length === 0) return [];
+
+    return buildMatrixRows(
+      axisOnlyRows,
+      axisOnlyRows,
+      SHOW_DUPLICATE_ROWS,
+      false,
+      activeSource,
+      "latest",
+      aaRevisionsByRow,
+      { versionCutoffs: aaVersionCutoffs }
+    );
+  }, [activeSource, aaRevisionsByRow, aaVersionCutoffs, filteredRows, showLowCoverageRows]);
 
   const priceMatrixRows = useMemo(
     () => (modelPrices.some(hasPublicModelPriceCost) ? buildPriceMatrixRows(baseModelColumns, modelPrices) : []),
@@ -379,22 +404,14 @@ export function ModelScatter({
     [releaseDateMatrixRow, paramsMatrixRows]
   );
 
-  // 轴下拉可保留 alwaysKeep 的 Cost；Overall 在未勾选低覆盖时剔除 Cost
+  // 与矩阵页 summaryMatrixRows 同一条组装规则：总评只吃矩阵默认视图那批行
   const summaryMatrixRows = useMemo(
     () => [
       ...(paramsRowsInOverall ? paramsMatrixRows : []),
       ...(priceRowsInOverall ? priceMatrixRows : []),
-      ...filterMatrixRowsForScatterOverall(matrixRows, showLowCoverageRows, activeSource)
+      ...matrixRows
     ],
-    [
-      paramsRowsInOverall,
-      paramsMatrixRows,
-      priceRowsInOverall,
-      priceMatrixRows,
-      matrixRows,
-      showLowCoverageRows,
-      activeSource
-    ]
+    [paramsRowsInOverall, paramsMatrixRows, priceRowsInOverall, priceMatrixRows, matrixRows]
   );
 
   const overallSummaryByModel = useMemo(
@@ -413,13 +430,14 @@ export function ModelScatter({
   const metrics = useMemo(
     () =>
       buildScatterMetrics({
-        benchmarkRows: matrixRows,
+        // 轴下拉要能选 Cost / Performance，但总评只认 matrixRows
+        benchmarkRows: [...matrixRows, ...axisOnlyMatrixRows],
         priceRows: priceMatrixRows,
         paramsRows: modelInfoMatrixRows,
         overallScoreByModel,
         versionCutoffs: aaVersionCutoffs
       }),
-    [matrixRows, priceMatrixRows, modelInfoMatrixRows, overallScoreByModel, aaVersionCutoffs]
+    [matrixRows, axisOnlyMatrixRows, priceMatrixRows, modelInfoMatrixRows, overallScoreByModel, aaVersionCutoffs]
   );
 
   const metricGroups = useMemo(() => groupScatterMetrics(metrics), [metrics]);

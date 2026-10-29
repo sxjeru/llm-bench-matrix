@@ -29,13 +29,13 @@ import type { LatestAaRevisionResolution } from "@/lib/aa-index-revisions";
 import {
   buildScatterMetrics,
   describeMetricDirection,
-  filterMatrixRowsForScatterOverall,
   findScatterMetric,
   formatScatterAxisTick,
   formatScatterDate,
   formatScatterValue,
   groupScatterMetrics,
   isMetricHigherBetter,
+  pickScatterAxisOnlyRows,
   resolveDefaultAxisKeys,
   toMetricSlug,
   toScatterMetric
@@ -343,34 +343,36 @@ describe("toScatterMetric", () => {
   });
 });
 
-describe("filterMatrixRowsForScatterOverall", () => {
-  const codingRow = createBenchmarkRow(
-    { rowKey: "merged::coding", benchmark: "Bench-One", category: "Coding" },
-    { Alpha: 90 }
-  );
-  const costRow = createBenchmarkRow(
-    {
-      rowKey: "merged::cost-per-task",
-      benchmark: "AA Intelligence Index Cost per Task",
-      category: "Cost",
-      higherIsBetter: false
-    },
-    { Alpha: 0.4 }
-  );
-
-  test("All 且未勾选低覆盖时剔除 Cost 分类", () => {
-    const filtered = filterMatrixRowsForScatterOverall([codingRow, costRow], false, SOURCE_ALL);
-    expect(filtered.map((row) => row.category)).toEqual(["Coding"]);
+describe("pickScatterAxisOnlyRows", () => {
+  const createInputRow = (benchmarkName: string, benchmarkType: string) => ({
+    providerName: "OpenAI",
+    modelName: "Alpha",
+    benchmarkName,
+    benchmarkType,
+    benchTime: "2026-04-06T00:00:00.000Z",
+    valueRaw: "1",
+    valueNum: 1,
+    valueNote: null,
+    source: "text:S1"
   });
 
-  test("勾选含低覆盖指标后保留 Cost", () => {
-    const filtered = filterMatrixRowsForScatterOverall([codingRow, costRow], true, SOURCE_ALL);
-    expect(filtered.some((row) => row.category === "Cost")).toBe(true);
+  const inputRows = [
+    createInputRow("Bench-One", "Coding"),
+    createInputRow("AA Intelligence Index Cost per Task", "Cost"),
+    createInputRow("Latency", "Performance")
+  ];
+
+  test("All 且未勾选低覆盖时，只补 Cost / Performance 行", () => {
+    const picked = pickScatterAxisOnlyRows(inputRows, false, SOURCE_ALL);
+    expect(picked.map((row) => row.benchmarkType)).toEqual(["Cost", "Performance"]);
   });
 
-  test("非 All 来源时不剔除 Cost", () => {
-    const filtered = filterMatrixRowsForScatterOverall([codingRow, costRow], false, "text:demo");
-    expect(filtered.some((row) => row.category === "Cost")).toBe(true);
+  test("勾选含低覆盖指标后矩阵本身已保留全部行，无需补行", () => {
+    expect(pickScatterAxisOnlyRows(inputRows, true, SOURCE_ALL)).toEqual([]);
+  });
+
+  test("非 All 来源时不做覆盖率裁剪，无需补行", () => {
+    expect(pickScatterAxisOnlyRows(inputRows, false, "text:demo")).toEqual([]);
   });
 });
 

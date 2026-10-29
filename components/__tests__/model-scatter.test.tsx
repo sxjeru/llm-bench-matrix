@@ -625,6 +625,63 @@ describe("ModelScatter", () => {
     ) as HTMLElement | undefined;
   }
 
+  test("关闭低覆盖时 Performance 行不计入 Overall，与首页矩阵一致", async () => {
+    stubScatterChartHostSize();
+
+    // 一行 Performance：Alpha 最慢、Delta 最快。若被算进总评，Alpha 的 Overall 会明显掉下来
+    const performanceRows: MatrixInputRow[] = MODEL_SPECS.map((spec, index) => ({
+      recordId: 9100 + index,
+      providerName: spec.provider,
+      providerDisplayName: spec.provider,
+      providerBrandColor: null,
+      modelName: spec.modelName,
+      benchmarkName: "Latency",
+      benchmarkType: "Performance",
+      sourceBenchmarkType: null,
+      higherIsBetter: false,
+      benchmarkCanonicalKey: "latency:performance",
+      modalities: ["Text"],
+      sourceModalities: null,
+      benchTime: "2026-04-06T00:00:00.000Z",
+      valueRaw: String(10 - index),
+      valueNum: 10 - index,
+      valueNum2: null,
+      valueNote: null,
+      source: "text:demo",
+      updatedAt: "2026-04-06T00:00:00.000Z"
+    }));
+
+    const readOverallValue = (container: HTMLElement): string => {
+      const symbol = findScatterSymbol(container, "Alpha");
+      if (!symbol) throw new Error("未找到 Alpha 的散点");
+      fireEvent.mouseEnter(symbol);
+
+      const yRow = Array.from(container.querySelectorAll(".scatter-tooltip-row")).find(
+        (row) => row.querySelector("dt")?.textContent === "Overall Score"
+      );
+      return yRow?.querySelector("dd")?.textContent?.trim() ?? "";
+    };
+
+    const baseline = await renderScatter();
+    const baselineValue = readOverallValue(baseline.container);
+    baseline.unmount();
+
+    const allRowsWithPerformance = [...rows, ...performanceRows];
+    const withPerformance = await renderReady(
+      <ModelScatter
+        rows={allRowsWithPerformance}
+        allRows={allRowsWithPerformance}
+        sourceOptions={["text:demo"]}
+        modelPrices={modelPrices}
+        modelParams={modelParams}
+      />
+    );
+
+    // Alpha 在两个能力项上都是第一 → 100；Performance 行一旦参与会把它压到 66.67
+    expect(baselineValue).toBe("100");
+    expect(readOverallValue(withPerformance.container)).toBe(baselineValue);
+  });
+
   test("价格轴 Alt 点击只提示不支持，不钉住模型", async () => {
     stubScatterChartHostSize();
     const { container } = await renderScatter();

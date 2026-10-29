@@ -18,6 +18,7 @@ import {
   METRIC_CATEGORY_PRIORITY,
   OVERALL_METRIC_LABEL,
   OVERALL_METRIC_SLUG,
+  SCATTER_ALWAYS_VISIBLE_BENCHMARK_TYPES,
   SUMMARY_CATEGORY_LABEL,
   SYNTHETIC_METRIC_SLUGS
 } from "./constants";
@@ -28,7 +29,7 @@ import {
   type AaVersionCutoff
 } from "@/lib/aa-index-revisions";
 import { extractMetricSnapshots } from "./snapshots";
-import type { MatrixCell, MatrixCellEntry } from "@/components/benchmark-matrix/types";
+import type { MatrixCell, MatrixCellEntry, MatrixInputRow } from "@/components/benchmark-matrix/types";
 import type {
   ScatterHistorySample,
   ScatterMetric,
@@ -270,21 +271,20 @@ function compareMetricsForSelector(left: ScatterMetric, right: ScatterMetric): n
 }
 
 /**
- * 散点 Overall 用的 benchmark 行。
+ * 轴下拉额外要保留的行。
  *
- * All 且未勾选「含低覆盖指标」时，Cost 仍会因 alwaysKeep 留在轴下拉里，
- * 但不计入 Overall（与矩阵默认不把成本类指标混进能力总评一致）。
+ * All 且未勾选「含低覆盖指标」时，矩阵默认视图会把 Cost / Performance 整类裁掉，
+ * 但它们是散点最常用的坐标轴，所以这里单独把这些原始行捞回来补一份行集 ——
+ * 只供轴下拉使用，不进 Overall：总评必须与矩阵默认视图吃完全相同的行。
  */
-export function filterMatrixRowsForScatterOverall(
-  matrixRows: readonly MatrixRow[],
+export function pickScatterAxisOnlyRows(
+  filteredRows: readonly MatrixInputRow[],
   showLowCoverageRows: boolean,
   activeSource: string
-): MatrixRow[] {
-  if (showLowCoverageRows || activeSource !== SOURCE_ALL) {
-    return matrixRows as MatrixRow[];
-  }
+): MatrixInputRow[] {
+  if (showLowCoverageRows || activeSource !== SOURCE_ALL) return [];
 
-  return matrixRows.filter((row) => row.category !== "Cost");
+  return filteredRows.filter((row) => SCATTER_ALWAYS_VISIBLE_BENCHMARK_TYPES.has(row.benchmarkType));
 }
 
 /**
