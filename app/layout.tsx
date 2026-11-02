@@ -34,7 +34,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{if(!location.pathname.startsWith('/admin')){window.__PRELOADED_FAST_STATS__=fetch('/api/public/dashboard/stats');window.__PRELOADED_PREVIEW__=fetch('/api/public/dashboard/preview');window.__PRELOADED_SNAPSHOT__=fetch('/api/public/dashboard');}}catch(e){}`
+            __html: `try{if(!location.pathname.startsWith('/admin')){window.__PRELOADED_FAST_STATS__=fetch('/api/public/dashboard/stats');window.__PRELOADED_SNAPSHOT__=fetch('/api/public/dashboard');}}catch(e){}`
           }}
         />
       </head>

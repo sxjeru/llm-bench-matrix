@@ -71,28 +71,20 @@ const SNAPSHOT: PublicDashboardSnapshot = {
 };
 
 const STATS_URL = "/api/public/dashboard/stats";
-const PREVIEW_URL = "/api/public/dashboard/preview";
 const SNAPSHOT_URL = "/api/public/dashboard";
 
 type RouteHandler = (init?: RequestInit) => Promise<Response>;
 
 /**
- * 指标卡、首屏预览与完整快照各走一个端点，测试里必须按 URL 分派，
+ * 指标卡与矩阵各走一个端点，测试里必须按 URL 分派，
  * 否则轻量统计那一路会误命中完整快照的载荷，掩盖真实时序。
- * 预览默认返回 404：多数用例关心的是「只有完整快照」这条退化路径。
  */
-function stubFetchByRoute(
-  routes: { stats?: RouteHandler; preview?: RouteHandler; snapshot?: RouteHandler } = {}
-) {
+function stubFetchByRoute(routes: { stats?: RouteHandler; snapshot?: RouteHandler } = {}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
 
     if (url === STATS_URL) {
       return routes.stats?.(init) ?? Response.json({ stats: SNAPSHOT.stats });
-    }
-
-    if (url === PREVIEW_URL) {
-      return routes.preview?.(init) ?? new Response(null, { status: 404 });
     }
 
     if (url === SNAPSHOT_URL) {
@@ -138,14 +130,11 @@ describe("DashboardProvider", () => {
       expect(screen.getByTestId("benchmark-matrix")).toBeInTheDocument();
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenCalledWith(SNAPSHOT_URL, {
       signal: expect.any(AbortSignal)
     });
     expect(fetchMock).toHaveBeenCalledWith(STATS_URL, {
-      signal: expect.any(AbortSignal)
-    });
-    expect(fetchMock).toHaveBeenCalledWith(PREVIEW_URL, {
       signal: expect.any(AbortSignal)
     });
     expect(matrixProps).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -403,11 +392,9 @@ describe("DashboardProvider", () => {
   test("优先复用 window 上的预加载请求并在消费后清理", async () => {
     const fetchMock = stubFetchByRoute();
     const preloadedStats = Promise.resolve(Response.json({ stats: SNAPSHOT.stats }));
-    const preloadedPreview = Promise.resolve(new Response(null, { status: 404 }));
     const preloadedSnapshot = Promise.resolve(Response.json(encodePublicDashboardSnapshot(SNAPSHOT)));
 
     window.__PRELOADED_FAST_STATS__ = preloadedStats;
-    window.__PRELOADED_PREVIEW__ = preloadedPreview;
     window.__PRELOADED_SNAPSHOT__ = preloadedSnapshot;
 
     function Consumer() {
@@ -433,61 +420,7 @@ describe("DashboardProvider", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(window.__PRELOADED_FAST_STATS__).toBeUndefined();
-    expect(window.__PRELOADED_PREVIEW__).toBeUndefined();
     expect(window.__PRELOADED_SNAPSHOT__).toBeUndefined();
-  });
-
-  test("预览先到时先出矩阵并标记 prePruned，完整快照随后接管", async () => {
-    const previewSnapshot = { ...SNAPSHOT, rows: [ROWS[0]!] };
-    const pendingSnapshot = createDeferredResponse();
-    stubFetchByRoute({
-      preview: async () => Response.json(encodePublicDashboardSnapshot(previewSnapshot)),
-      snapshot: () => pendingSnapshot.promise
-    });
-
-    render(
-      <DashboardProvider>
-        <HomeBenchmarkMatrix />
-      </DashboardProvider>
-    );
-
-    await waitFor(async () => {
-      await flushDeferredDerived();
-      expect(matrixProps).toHaveBeenCalledWith(expect.objectContaining({
-        prePruned: true,
-        rows: [expect.objectContaining({ modelName: "GPT-5" })]
-      }));
-    });
-
-    pendingSnapshot.settle(Response.json(encodePublicDashboardSnapshot(SNAPSHOT)));
-
-    await waitFor(async () => {
-      await flushDeferredDerived();
-      expect(matrixProps).toHaveBeenLastCalledWith(expect.objectContaining({
-        rows: ROWS,
-        prePruned: false
-      }));
-    }, { timeout: 2000 });
-  });
-
-  test("预览失败时退回等完整快照，不写错误态", async () => {
-    stubFetchByRoute({
-      preview: async () => {
-        throw new Error("preview down");
-      }
-    });
-
-    render(
-      <DashboardProvider>
-        <HomeBenchmarkMatrix />
-      </DashboardProvider>
-    );
-
-    await waitFor(async () => {
-      await flushDeferredDerived();
-      expect(screen.getByTestId("benchmark-matrix")).toBeInTheDocument();
-    });
-    expect(screen.queryByText("preview down")).not.toBeInTheDocument();
   });
 
   test("没有 Provider 时 useSharedMatrixDerived 返回 null", () => {
