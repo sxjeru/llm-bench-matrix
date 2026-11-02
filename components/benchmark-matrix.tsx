@@ -86,6 +86,7 @@ import {
   sortMatrixRows
 } from "./benchmark-matrix/selectors";
 import { useSharedMatrixDerived } from "./dashboard-provider";
+import { deserializeAaRevisions } from "@/lib/aa-revision-serialization";
 import { useMatrixSourceTabs } from "./benchmark-matrix/source-tabs";
 import {
   type MatrixInputRow,
@@ -228,7 +229,9 @@ export function BenchmarkMatrix({
   exportFootnoteText,
   exportFootnoteAlign,
   aaVersionCutoffs,
-  urlSyncEnabled = true
+  urlSyncEnabled = true,
+  prePruned = false,
+  precomputedAaRevisions
 }: Props) {
   const sectionRef = useRef<HTMLElement | null>(null);
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
@@ -809,11 +812,14 @@ export function BenchmarkMatrix({
     [allRowsIndex]
   );
 
+  // 预览快照只有裁剪后的行，AA 的最新版本判定必须用服务端基于完整行集算好的结果，
+  // 否则会有一批单元格先出数值、全量到达后又变回 --。
   const aaRevisionsByRow = useMemo(
-    () => buildAaIndexRevisionsByRow(indexedSourceRows, showDuplicateRows, {
-      versionCutoffs: aaVersionCutoffs
-    }),
-    [indexedSourceRows, showDuplicateRows, aaVersionCutoffs]
+    () => deserializeAaRevisions(precomputedAaRevisions)
+      ?? buildAaIndexRevisionsByRow(indexedSourceRows, showDuplicateRows, {
+        versionCutoffs: aaVersionCutoffs
+      }),
+    [precomputedAaRevisions, indexedSourceRows, showDuplicateRows, aaVersionCutoffs]
   );
 
   const baseSourceRows = useMemo(
@@ -1011,9 +1017,13 @@ export function BenchmarkMatrix({
     [allRowsIndex, selectedModelSet, selectedModels, baseBenchmarkKeySet, benchmarkSearchQuery]
   );
 
+  // 首屏预览的 rows 已经是服务端裁剪结果（`prePruned`），这里必须直接放行：
+  // 再裁一次会把候选模型从 331 缩到 217，连带丢掉 69 个模型列。
   const coveragePrunedRows = useMemo(
-    () => buildCoveragePrunedRows(activeSource, filteredRows, showDuplicateRows, showLowCoverageRows),
-    [activeSource, filteredRows, showDuplicateRows, showLowCoverageRows]
+    () => (prePruned
+      ? filteredRows
+      : buildCoveragePrunedRows(activeSource, filteredRows, showDuplicateRows, showLowCoverageRows)),
+    [prePruned, activeSource, filteredRows, showDuplicateRows, showLowCoverageRows]
   );
 
   const isSyntheticRowSortKey = columnSortBenchmarkKey !== null

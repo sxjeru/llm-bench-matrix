@@ -4,7 +4,7 @@ import { BenchmarkMatrix } from "@/components/benchmark-matrix";
 import { useDashboardSnapshot } from "@/components/dashboard-provider";
 
 export function HomeBenchmarkMatrix({ urlSyncEnabled = true }: { urlSyncEnabled?: boolean }) {
-  const { snapshot, derived, isLoading, error } = useDashboardSnapshot();
+  const { snapshot, derived, isLoading, error, isPreview } = useDashboardSnapshot();
 
   if (!snapshot || !derived) {
     return (
@@ -34,6 +34,8 @@ export function HomeBenchmarkMatrix({ urlSyncEnabled = true }: { urlSyncEnabled?
       exportFootnoteAlign={exportFootnoteAlign}
       aaVersionCutoffs={aaVersionCutoffs}
       urlSyncEnabled={urlSyncEnabled}
+      prePruned={isPreview}
+      precomputedAaRevisions={isPreview ? snapshot.previewAaRevisions : undefined}
     />
   );
 }

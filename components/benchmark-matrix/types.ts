@@ -1,4 +1,5 @@
 import type { AaVersionCutoff, LatestAaRevisionResolution } from "@/lib/aa-index-revisions";
+import type { SerializedAaRevision } from "@/lib/dashboard-snapshot-cache";
 
 export type MatrixInputRow = {
   recordId?: number | null;
@@ -159,6 +160,17 @@ export type Props = {
   aaVersionCutoffs?: AaVersionCutoff[];
   /** 为 false 时仍切换页签，但不读写地址栏。keep-alive 隐藏态由调用方关闭。 */
   urlSyncEnabled?: boolean;
+  /**
+   * rows 已由服务端按默认视图裁剪过（首屏预览快照）。
+   * 此时跳过客户端覆盖率裁剪：再裁一次会让候选模型从 331 缩到 217，
+   * 连带丢掉 69 个模型列，与完整快照的列集合对不上。
+   */
+  prePruned?: boolean;
+  /**
+   * 服务端用完整行集算好的 AA 版本划分（仅预览快照携带）。
+   * 预览只有裁剪后的行，自己重算会得到不同的最新版本判定。
+   */
+  precomputedAaRevisions?: Record<string, SerializedAaRevision>;
 };
 
 export type ModelParamsInfo = {

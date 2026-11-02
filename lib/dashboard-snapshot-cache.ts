@@ -1,4 +1,9 @@
-import type { MatrixInputRow, ModelParamsInfo, ModelPriceInfo } from "@/components/benchmark-matrix/types";
+import type {
+  MatrixCellEntry,
+  MatrixInputRow,
+  ModelParamsInfo,
+  ModelPriceInfo
+} from "@/components/benchmark-matrix/types";
 import type { AaVersionCutoff } from "@/lib/aa-index-revisions";
 
 /**
@@ -24,6 +29,11 @@ export type PublicDashboardStats = {
   totalRecords: number;
 };
 
+export type SerializedAaRevision = {
+  latestVersion: string | null;
+  latestEntriesByModel: Record<string, MatrixCellEntry>;
+};
+
 export type PublicDashboardSnapshot = {
   versions: PublicDashboardSnapshotVersions;
   rows: MatrixInputRow[];
@@ -34,6 +44,12 @@ export type PublicDashboardSnapshot = {
   exportFootnoteText?: string;
   exportFootnoteAlign: ExportFootnoteAlign;
   aaVersionCutoffs?: AaVersionCutoff[];
+  /**
+   * 仅首屏预览携带：服务端用完整行集算好的 AA 版本划分。
+   * 预览只有裁剪后的行，客户端自己重算会得到不同的「最新版本」判定，
+   * 表现为若干 AA 单元格先显示数值、全量到达后又变回 --。
+   */
+  previewAaRevisions?: Record<string, SerializedAaRevision>;
 };
 
 export function createPublicDashboardSnapshotEtag(versions: PublicDashboardSnapshotVersions) {

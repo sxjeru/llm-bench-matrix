@@ -87,6 +87,10 @@ function stubFetchByRoute(snapshot: PublicDashboardSnapshot) {
       return Response.json({ stats: snapshot.stats });
     }
 
+    if (url === "/api/public/dashboard/preview") {
+      return new Response(null, { status: 404 });
+    }
+
     if (url === "/api/public/dashboard") {
       return Response.json(encodePublicDashboardSnapshot(snapshot));
     }
