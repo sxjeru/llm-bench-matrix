@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { GET } from "@/app/api/public/dashboard/route";
+import {
+  PUBLIC_CACHE_CONTROL_BROWSER,
+  PUBLIC_CACHE_CONTROL_CDN,
+  PUBLIC_CACHE_CONTROL_VERCEL
+} from "@/app/api/public/cache-headers";
 import type { MatrixInputRow } from "@/components/benchmark-matrix/types";
 import {
   PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION,
@@ -109,9 +114,9 @@ describe("GET /api/public/dashboard", () => {
       "valueRaw"
     ]);
     expect(decodePublicDashboardSnapshot(payload)).toEqual(SNAPSHOT);
-    expect(response.headers.get("Cache-Control")).toBe("public, max-age=0, must-revalidate");
-    expect(response.headers.get("CDN-Cache-Control")).toBe("public, s-maxage=0, must-revalidate");
-    expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe("public, s-maxage=0, must-revalidate");
+    expect(response.headers.get("Cache-Control")).toBe(PUBLIC_CACHE_CONTROL_BROWSER);
+    expect(response.headers.get("CDN-Cache-Control")).toBe(PUBLIC_CACHE_CONTROL_CDN);
+    expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe(PUBLIC_CACHE_CONTROL_VERCEL);
     expect(response.headers.get("X-Dashboard-Version")).toBe("dashboard-version");
     expect(response.headers.get("X-Pricing-Version")).toBe("pricing-version");
     expect(response.headers.get("X-Settings-Version")).toBe("settings-version");
@@ -119,6 +124,17 @@ describe("GET /api/public/dashboard", () => {
       `"dashboard:v${PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION}:dashboard-version:pricing-version:settings-version"`
     );
     expect(response.headers.get("Content-Type")).toBe("application/json; charset=utf-8");
+  });
+
+  test("边缘允许缓存，并带 stale-while-revalidate 兜住源站慢/冷启动", async () => {
+    const response = await GET(new Request("https://example.com/api/public/dashboard"));
+    const cdn = response.headers.get("CDN-Cache-Control") ?? "";
+
+    // 回归保护：曾经是 s-maxage=0，等于每个访客都要打到函数（冷启动 1.4–2.4 s）
+    expect(cdn).not.toMatch(/(?:^|[,;\s])s-maxage=0(?:[,;\s]|$)/);
+    expect(cdn).toMatch(/s-maxage=\d+/);
+    expect(cdn).toContain("stale-while-revalidate=");
+    expect(response.headers.get("Cache-Control")).toContain("stale-while-revalidate=");
   });
 
   test("If-None-Match 命中时返回 304 且不加载快照", async () => {

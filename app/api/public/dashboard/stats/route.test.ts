@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { GET } from "@/app/api/public/dashboard/stats/route";
+import {
+  PUBLIC_CACHE_CONTROL_BROWSER,
+  PUBLIC_CACHE_CONTROL_CDN,
+  PUBLIC_CACHE_CONTROL_VERCEL
+} from "@/app/api/public/cache-headers";
 import { getDashboardStats } from "@/lib/db/queries";
 
 vi.mock("@/lib/db/queries", () => ({
@@ -25,9 +30,9 @@ describe("GET /api/public/dashboard/stats", () => {
     const payload = await response.json();
 
     expect(payload).toEqual({ stats: STATS });
-    expect(response.headers.get("Cache-Control")).toBe("public, max-age=0, must-revalidate");
-    expect(response.headers.get("CDN-Cache-Control")).toBe("public, s-maxage=0, must-revalidate");
-    expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe("public, s-maxage=0, must-revalidate");
+    expect(response.headers.get("Cache-Control")).toBe(PUBLIC_CACHE_CONTROL_BROWSER);
+    expect(response.headers.get("CDN-Cache-Control")).toBe(PUBLIC_CACHE_CONTROL_CDN);
+    expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe(PUBLIC_CACHE_CONTROL_VERCEL);
     expect(response.headers.get("ETag")).toBe('"dashboard-stats:9-18-27-36"');
   });
 

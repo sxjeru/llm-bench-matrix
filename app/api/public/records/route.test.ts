@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { GET } from "@/app/api/public/records/route";
+import {
+  PUBLIC_CACHE_CONTROL_BROWSER,
+  PUBLIC_CACHE_CONTROL_CDN,
+  PUBLIC_CACHE_CONTROL_VERCEL
+} from "@/app/api/public/cache-headers";
 import { getDashboardRows } from "@/lib/db/queries";
 import { getCacheVersion } from "@/lib/cache-versions";
 
@@ -27,9 +32,9 @@ describe("GET /api/public/records", () => {
     expect(getCacheVersion).toHaveBeenCalledWith("dashboard");
     expect(getCacheVersion).toHaveBeenCalledWith("pricing");
     expect(getDashboardRows).toHaveBeenCalledWith(300, null, "dashboard-version");
-    expect(response.headers.get("Cache-Control")).toBe("public, max-age=0, must-revalidate");
-    expect(response.headers.get("CDN-Cache-Control")).toBe("public, s-maxage=0, must-revalidate");
-    expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe("public, s-maxage=0, must-revalidate");
+    expect(response.headers.get("Cache-Control")).toBe(PUBLIC_CACHE_CONTROL_BROWSER);
+    expect(response.headers.get("CDN-Cache-Control")).toBe(PUBLIC_CACHE_CONTROL_CDN);
+    expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe(PUBLIC_CACHE_CONTROL_VERCEL);
     expect(response.headers.get("X-Dashboard-Version")).toBe("dashboard-version");
     expect(response.headers.get("X-Pricing-Version")).toBe("pricing-version");
     expect(response.headers.get("ETag")).toBe('"records:dashboard-version:pricing-version:limit:300:f23a4e48f80ed64c"');
