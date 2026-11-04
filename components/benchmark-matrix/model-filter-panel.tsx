@@ -6,16 +6,50 @@ import { PROVIDER_MODEL_AUTO_COLLAPSE_LIMIT } from "./constants";
 import type { ProviderGroup } from "./selectors";
 
 const SEARCH_SYNTAX_HINTS = [
-  { syntax: "!internal", description: "排除包含该词的行" },
-  { syntax: "^GSM", description: "以…开头" },
-  { syntax: "500$", description: "以…结尾" },
-  { syntax: "^GSM8K$", description: "完全匹配" },
-  { syntax: '"Math 500"', description: "连续短语" },
-  { syntax: "100\\$", description: "转义为字面量" }
+  {
+    syntax: "!internal",
+    label: "排除",
+    description: "排除包含该词的行",
+    color: "text-rose-400 bg-rose-500/10 border-rose-500/30 hover:border-rose-400/50 hover:bg-rose-500/20"
+  },
+  {
+    syntax: "^GSM",
+    label: "前缀",
+    description: "以…开头",
+    color: "text-amber-400 bg-amber-500/10 border-amber-500/30 hover:border-amber-400/50 hover:bg-amber-500/20"
+  },
+  {
+    syntax: "500$",
+    label: "后缀",
+    description: "以…结尾",
+    color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-400/50 hover:bg-emerald-500/20"
+  },
+  {
+    syntax: "^GSM8K$",
+    label: "精准",
+    description: "完全匹配",
+    color: "text-cyan-400 bg-cyan-500/10 border-cyan-500/30 hover:border-cyan-400/50 hover:bg-cyan-500/20"
+  },
+  {
+    syntax: '"Math 500"',
+    label: "短语",
+    description: "连续短语",
+    color: "text-indigo-300 bg-indigo-500/10 border-indigo-500/30 hover:border-indigo-400/50 hover:bg-indigo-500/20"
+  },
+  {
+    syntax: "100\\$",
+    label: "转义",
+    description: "转义为字面量",
+    color: "text-purple-300 bg-purple-500/10 border-purple-500/30 hover:border-purple-400/50 hover:bg-purple-500/20"
+  }
 ] as const;
 
+interface SearchSyntaxHelpProps {
+  onSelectExample?: (syntax: string) => void;
+}
+
 /** 搜索语法帮助：常驻入口 + 轻量弹层，避免只能靠 hover title 发现语法。 */
-function SearchSyntaxHelp() {
+function SearchSyntaxHelp({ onSelectExample }: SearchSyntaxHelpProps) {
   const [isOpen, setIsOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -42,18 +76,26 @@ function SearchSyntaxHelp() {
     };
   }, [isOpen]);
 
+  const handleApply = (syntax: string) => {
+    onSelectExample?.(syntax);
+  };
+
   return (
     <div className="relative" ref={rootRef}>
       <button
         ref={triggerRef}
         type="button"
-        className="btn btn-xs btn-ghost h-6 min-h-0 gap-1 border-none px-1.5 text-[11px] font-normal text-base-content/65 hover:bg-base-300/40 hover:text-base-content"
+        className={`btn btn-xs h-6 min-h-0 gap-1 rounded-md px-2 text-[11px] font-normal transition-all ${
+          isOpen
+            ? "border border-sky-400/50 bg-sky-500/20 text-sky-200 shadow-[0_0_10px_rgba(56,189,248,0.2)]"
+            : "btn-ghost border-transparent text-base-content/70 hover:bg-base-300/40 hover:text-base-content"
+        }`}
         aria-label="查看搜索语法"
         aria-expanded={isOpen}
         aria-controls={isOpen ? "benchmark-search-syntax" : undefined}
         onClick={() => setIsOpen((open) => !open)}
       >
-        <CircleHelp size={13} aria-hidden="true" />
+        <CircleHelp size={13} className={isOpen ? "text-sky-300" : "opacity-70"} aria-hidden="true" />
         语法
       </button>
 
@@ -62,13 +104,22 @@ function SearchSyntaxHelp() {
           id="benchmark-search-syntax"
           role="dialog"
           aria-label="搜索语法"
-          className="absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-base-300 bg-base-100 p-3 shadow-xl"
+          className="absolute right-0 top-full z-[100] mt-2.5 w-[310px] rounded-2xl border border-slate-700/90 bg-slate-900/98 p-3 text-slate-100 shadow-[0_16px_40px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.08)] backdrop-blur-xl"
         >
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-semibold tracking-wide text-base-content/80">搜索语法</span>
+          {/* 指向触发按钮的箭头 */}
+          <div className="absolute -top-1.5 right-3.5 h-3 w-3 rotate-45 border-l border-t border-slate-700/90 bg-slate-900" />
+
+          {/* 标题栏 */}
+          <div className="mb-2.5 flex items-center justify-between border-b border-slate-800/80 pb-2">
+            <div className="flex items-center gap-1.5">
+              <span className="flex h-5 w-5 items-center justify-center rounded-md bg-sky-500/15 text-sky-400">
+                <CircleHelp size={13} />
+              </span>
+              <span className="text-xs font-semibold tracking-wide text-slate-200">搜索语法说明</span>
+            </div>
             <button
               type="button"
-              className="btn btn-xs btn-circle btn-ghost h-5 w-5 min-h-0 border-none p-0 text-base-content/50 hover:bg-base-300/40 hover:text-base-content"
+              className="btn btn-xs btn-circle btn-ghost h-5 w-5 min-h-0 border-none p-0 text-slate-400 transition hover:bg-slate-800 hover:text-slate-100"
               aria-label="关闭搜索语法"
               onClick={() => setIsOpen(false)}
             >
@@ -76,20 +127,54 @@ function SearchSyntaxHelp() {
             </button>
           </div>
 
+          {/* 语法规则列表 */}
           <ul className="space-y-1.5">
             {SEARCH_SYNTAX_HINTS.map((hint) => (
-              <li key={hint.syntax} className="flex items-center gap-2 text-[11px]">
-                <code className="w-20 shrink-0 rounded-md bg-base-200/80 px-1.5 py-0.5 text-center font-mono text-[10px] text-base-content/80">
-                  {hint.syntax}
-                </code>
-                <span className="text-base-content/65">{hint.description}</span>
+              <li
+                key={hint.syntax}
+                className="group flex items-center justify-between gap-2 rounded-lg px-1.5 py-1 transition hover:bg-slate-800/50"
+              >
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleApply(hint.syntax)}
+                    className={`inline-flex min-w-[76px] shrink-0 items-center justify-center rounded border px-1.5 py-0.5 font-mono text-[10px] font-medium transition ${hint.color}`}
+                    title="点击填入搜索框"
+                  >
+                    {hint.syntax}
+                  </button>
+                  <span className="text-[11px] text-slate-300">{hint.description}</span>
+                </div>
+                <span className="rounded bg-slate-800/90 px-1 py-0.2 text-[9px] font-medium text-slate-400 group-hover:text-slate-200">
+                  {hint.label}
+                </span>
               </li>
             ))}
           </ul>
 
-          <div className="mt-2.5 border-t border-base-300/60 pt-2 text-[10px] leading-relaxed text-base-content/50">
-            空格分隔多个条件，需同时满足。示例：<code className="font-mono">^GSM !internal</code>
-            <div className="mt-1">排除符支持全角 <code className="font-mono">！</code>：<code className="font-mono">！internal</code> 等价于 <code className="font-mono">!internal</code></div>
+          {/* 提示与示例 */}
+          <div className="mt-2.5 space-y-1.5 rounded-lg border border-slate-800/90 bg-slate-950/70 p-2 text-[10px] leading-relaxed text-slate-400">
+            <div className="flex items-start gap-1">
+              <span className="text-sky-400 shrink-0 font-bold">•</span>
+              <div>
+                空格分隔多个条件，需同时满足。示例：
+                <button
+                  type="button"
+                  onClick={() => handleApply("^GSM !internal")}
+                  className="ml-1 inline-flex items-center rounded border border-sky-500/30 bg-sky-950/60 px-1 py-0.2 font-mono text-[10px] text-sky-200 transition hover:border-sky-400 hover:bg-sky-900/60"
+                  title="点击填入示例"
+                >
+                  ^GSM !internal
+                </button>
+              </div>
+            </div>
+            <div className="flex items-start gap-1 border-t border-slate-800/60 pt-1 text-slate-400">
+              <span className="text-sky-400/80 shrink-0 font-bold">•</span>
+              <div>
+                排除符支持全角 <code className="font-mono text-slate-200">！</code>：
+                <code className="font-mono text-slate-200">！internal</code> 等价于 <code className="font-mono text-slate-200">!internal</code>
+              </div>
+            </div>
           </div>
         </div>
       ) : null}
@@ -143,21 +228,23 @@ export function ModelFilterPanel({
   setBenchmarkSearchInputValue
 }: ModelFilterPanelProps) {
   return (
-    <div className={`${isFullscreen ? "mt-2" : ""} rounded-box border border-base-300/70 bg-base-200/35 p-3`} data-nosnippet>
-      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs opacity-80">
-        <Layers size={14} />
-        <span>模型层叠筛选：点击可展开具体模型列表</span>
-        <button
-          type="button"
-          className="btn btn-xs btn-outline"
-          style={{ marginLeft: 4 }}
-          onClick={() => setIsModelFilterExpanded((prev) => !prev)}
-        >
-          {isModelFilterExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-          {isModelFilterExpanded ? "收起模型筛选" : "展开模型筛选"}
-        </button>
+    <div className={`${isFullscreen ? "mt-2" : ""} relative z-30 rounded-box border border-base-300/70 bg-base-200/35 p-3`} data-nosnippet>
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+        <div className="flex items-center gap-2 opacity-80">
+          <Layers size={14} />
+          <span>模型层叠筛选：点击可展开具体模型列表</span>
+          <button
+            type="button"
+            className="btn btn-xs btn-outline"
+            style={{ marginLeft: 4 }}
+            onClick={() => setIsModelFilterExpanded((prev) => !prev)}
+          >
+            {isModelFilterExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            {isModelFilterExpanded ? "收起模型筛选" : "展开模型筛选"}
+          </button>
+        </div>
 
-        <div className="ml-auto flex flex-wrap items-center gap-2 opacity-100">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           <div className="mr-2 flex items-center gap-0.5">
             <div className="relative flex items-center">
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-50 pointer-events-none" />
@@ -180,7 +267,7 @@ export function ModelFilterPanel({
                 </button>
               )}
             </div>
-            <SearchSyntaxHelp />
+            <SearchSyntaxHelp onSelectExample={(syntax) => setBenchmarkSearchInputValue(syntax)} />
           </div>
 
           <div className="flex items-center gap-1 text-xs opacity-75">

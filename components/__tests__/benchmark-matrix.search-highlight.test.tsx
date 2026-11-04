@@ -533,6 +533,36 @@ describe("BenchmarkMatrix 表格搜索词高亮集成", () => {
     expect(trigger).toHaveFocus();
   });
 
+  test("搜索语法帮助点击语法标签或示例按钮可直接填入搜索框，且可通过关闭按钮关闭", async () => {
+    await renderReady(
+      <BenchmarkMatrix
+        sourceOptions={["text:S1"]}
+        rows={rows}
+      />
+    );
+
+    const trigger = screen.getByRole("button", { name: "查看搜索语法" });
+    fireEvent.click(trigger);
+
+    const searchInput = screen.getByPlaceholderText("筛选 Benchmark") as HTMLInputElement;
+    expect(searchInput.value).toBe("");
+
+    // 点击示例中的 ^GSM !internal
+    const exampleButton = screen.getByRole("button", { name: "^GSM !internal" });
+    fireEvent.click(exampleButton);
+    expect(searchInput.value).toBe("^GSM !internal");
+
+    // 点击某单条语法按钮，例如 ^GSM
+    const syntaxButton = screen.getByRole("button", { name: "^GSM" });
+    fireEvent.click(syntaxButton);
+    expect(searchInput.value).toBe("^GSM");
+
+    // 点击关闭按钮关闭弹窗
+    const closeButton = screen.getByRole("button", { name: "关闭搜索语法" });
+    fireEvent.click(closeButton);
+    expect(screen.queryByRole("dialog", { name: "搜索语法" })).not.toBeInTheDocument();
+  });
+
   test("在表格中输入 500$：只保留以 500 结尾的行，并高亮结尾片段", async () => {
     await renderReady(
       <BenchmarkMatrix
