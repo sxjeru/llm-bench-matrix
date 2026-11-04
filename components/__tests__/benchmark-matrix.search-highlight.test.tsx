@@ -445,6 +445,30 @@ describe("BenchmarkMatrix 表格搜索词高亮集成", () => {
     expect(Array.from(marks).some((m) => m.textContent === "Human")).toBe(true);
   });
 
+  test("搜索语法帮助可展开、关闭，并展示关键语法", async () => {
+    await renderReady(
+      <BenchmarkMatrix
+        sourceOptions={["text:S1"]}
+        rows={rows}
+      />
+    );
+
+    const trigger = screen.getByRole("button", { name: "查看搜索语法" });
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("dialog", { name: "搜索语法" })).not.toBeInTheDocument();
+
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+
+    const dialog = screen.getByRole("dialog", { name: "搜索语法" });
+    expect(dialog).toHaveTextContent("完全匹配");
+    expect(dialog).toHaveTextContent("^GSM !internal");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "搜索语法" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
   test("在表格中输入 500$：只保留以 500 结尾的行，并高亮结尾片段", async () => {
     await renderReady(
       <BenchmarkMatrix

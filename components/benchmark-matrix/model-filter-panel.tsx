@@ -1,8 +1,100 @@
-import { ChevronDown, ChevronUp, Filter, Layers, Search, X } from "lucide-react";
+import { ChevronDown, ChevronUp, CircleHelp, Filter, Layers, Search, X } from "lucide-react";
 import { resolveProviderBrandColorForDarkTheme } from "@/lib/provider-config";
+import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { PROVIDER_MODEL_AUTO_COLLAPSE_LIMIT } from "./constants";
 import type { ProviderGroup } from "./selectors";
+
+const SEARCH_SYNTAX_HINTS = [
+  { syntax: "!internal", description: "排除包含该词的行" },
+  { syntax: "^GSM", description: "以…开头" },
+  { syntax: "500$", description: "以…结尾" },
+  { syntax: "^GSM8K$", description: "完全匹配" },
+  { syntax: '"Math 500"', description: "连续短语" },
+  { syntax: "100\\$", description: "转义为字面量" }
+] as const;
+
+/** 搜索语法帮助：常驻入口 + 轻量弹层，避免只能靠 hover title 发现语法。 */
+function SearchSyntaxHelp() {
+  const [isOpen, setIsOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target || rootRef.current?.contains(target)) return;
+      setIsOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setIsOpen(false);
+      triggerRef.current?.focus();
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="btn btn-xs btn-ghost h-6 min-h-0 gap-1 border-none px-1.5 text-[11px] font-normal text-base-content/65 hover:bg-base-300/40 hover:text-base-content"
+        aria-label="查看搜索语法"
+        aria-expanded={isOpen}
+        aria-controls={isOpen ? "benchmark-search-syntax" : undefined}
+        onClick={() => setIsOpen((open) => !open)}
+      >
+        <CircleHelp size={13} aria-hidden="true" />
+        语法
+      </button>
+
+      {isOpen ? (
+        <div
+          id="benchmark-search-syntax"
+          role="dialog"
+          aria-label="搜索语法"
+          className="absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-base-300 bg-base-100 p-3 shadow-xl"
+        >
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs font-semibold tracking-wide text-base-content/80">搜索语法</span>
+            <button
+              type="button"
+              className="btn btn-xs btn-circle btn-ghost h-5 w-5 min-h-0 border-none p-0 text-base-content/50 hover:bg-base-300/40 hover:text-base-content"
+              aria-label="关闭搜索语法"
+              onClick={() => setIsOpen(false)}
+            >
+              <X size={12} aria-hidden="true" />
+            </button>
+          </div>
+
+          <ul className="space-y-1.5">
+            {SEARCH_SYNTAX_HINTS.map((hint) => (
+              <li key={hint.syntax} className="flex items-center gap-2 text-[11px]">
+                <code className="w-20 shrink-0 rounded-md bg-base-200/80 px-1.5 py-0.5 text-center font-mono text-[10px] text-base-content/80">
+                  {hint.syntax}
+                </code>
+                <span className="text-base-content/65">{hint.description}</span>
+              </li>
+            ))}
+          </ul>
+
+          <div className="mt-2.5 border-t border-base-300/60 pt-2 text-[10px] leading-relaxed text-base-content/50">
+            空格分隔多个条件，需同时满足。示例：<code className="font-mono">^GSM !internal</code>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 type ModelFilterPanelProps = {
   isFullscreen: boolean;
@@ -65,26 +157,29 @@ export function ModelFilterPanel({
         </button>
 
         <div className="ml-auto flex flex-wrap items-center gap-2 opacity-100">
-          <div className="relative flex items-center mr-2">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-50 pointer-events-none" />
-            <input
-              type="text"
-              className="input input-xs input-bordered pl-7 pr-7 w-36 bg-base-100/50 transition-all focus:w-48"
-              placeholder="筛选 Benchmark"
-              title={'搜索语法：! 排除，^ 开头，$ 结尾，^x$ 完全匹配，"引号短语"，\\ 转义（如 100\\$）'}
-              value={benchmarkSearchInputValue}
-              onChange={(e) => setBenchmarkSearchInputValue(e.target.value)}
-            />
-            {benchmarkSearchInputValue && (
-              <button
-                type="button"
-                aria-label="清除搜索"
-                className="btn btn-xs btn-circle btn-ghost absolute right-1.5 top-1/2 -translate-y-1/2 h-5 w-5 min-h-0 p-0 text-base-content/50 hover:text-base-content hover:bg-base-300/30 border-none"
-                onClick={() => setBenchmarkSearchInputValue("")}
-              >
-                <X size={12} />
-              </button>
-            )}
+          <div className="mr-2 flex items-center gap-0.5">
+            <div className="relative flex items-center">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-50 pointer-events-none" />
+              <input
+                type="text"
+                className="input input-xs input-bordered pl-7 pr-7 w-36 bg-base-100/50 transition-all focus:w-48"
+                placeholder="筛选 Benchmark"
+                title={'搜索语法：! 排除，^ 开头，$ 结尾，^x$ 完全匹配，"引号短语"，\\ 转义（如 100\\$）'}
+                value={benchmarkSearchInputValue}
+                onChange={(e) => setBenchmarkSearchInputValue(e.target.value)}
+              />
+              {benchmarkSearchInputValue && (
+                <button
+                  type="button"
+                  aria-label="清除搜索"
+                  className="btn btn-xs btn-circle btn-ghost absolute right-1.5 top-1/2 -translate-y-1/2 h-5 w-5 min-h-0 p-0 text-base-content/50 hover:text-base-content hover:bg-base-300/30 border-none"
+                  onClick={() => setBenchmarkSearchInputValue("")}
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+            <SearchSyntaxHelp />
           </div>
 
           <div className="flex items-center gap-1 text-xs opacity-75">
