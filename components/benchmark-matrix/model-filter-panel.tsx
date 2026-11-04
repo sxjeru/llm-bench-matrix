@@ -71,7 +71,7 @@ export function ModelFilterPanel({
               type="text"
               className="input input-xs input-bordered pl-7 pr-7 w-36 bg-base-100/50 transition-all focus:w-48"
               placeholder="筛选 Benchmark"
-              title="支持普通搜索，! 排除，^ 开头匹配（例如: ^GSM !internal）"
+              title={'搜索语法：! 排除，^ 开头，$ 结尾，^x$ 完全匹配，"引号短语"，\\ 转义（如 100\\$）'}
               value={benchmarkSearchInputValue}
               onChange={(e) => setBenchmarkSearchInputValue(e.target.value)}
             />

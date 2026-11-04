@@ -154,17 +154,9 @@ export {
 
 export {
   escapeRegExp,
-  extractSearchTokens,
-  extractSearchTerms,
   createSearchMatcher,
   getSearchHighlightPlan,
-  parseSearchQuery,
-  tokenizeSearchQuery,
-  type SearchHighlightPlan,
-  type SearchRule,
-  type SearchRuleKind,
-  type SearchTarget,
-  type ParsedSearchQuery
+  type SearchHighlightPlan
 } from "./search-match";
 
 // Re-export selectors

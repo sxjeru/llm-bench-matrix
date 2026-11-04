@@ -555,8 +555,9 @@ export function buildFilteredRows(
   }
 
   const result: MatrixInputRow[] = [];
-  // 筛选与单元格高亮共用 search-match 的分词规则：空格切开的词必须全部命中（交集），
-  // 名称与分类合并成同一个检索域，避免多个词被拆到两列时漏召回。
+  // 筛选与单元格高亮共用 search-match 的分词规则：空格切开的词必须全部命中（交集）。
+  // 每条规则只需命中任意一个字段：^ 表示「某字段以…开头」，^x$ 表示「某字段完全匹配 x」。
+  // 未加引号的多词查询会拆成多条规则，因此词被拆到名称与分类两列时仍可命中。
   const searchMatcher = createSearchMatcher(benchmarkSearchQuery);
 
   selectedModels.forEach((modelName) => {
@@ -567,7 +568,9 @@ export function buildFilteredRows(
 
     indexedRows.forEach((indexed) => {
       if (baseBenchmarkKeySet.has(indexed.matrixKey)) {
-        if (searchMatcher && !searchMatcher([indexed.row.benchmarkName, indexed.row.benchmarkType])) {
+        // 与展示层保持一致：空分类按 General 参与筛选，否则会出现「显示 General 却搜不到」。
+        const category = indexed.row.benchmarkType || "General";
+        if (searchMatcher && !searchMatcher([indexed.row.benchmarkName, category])) {
           return;
         }
         result.push(indexed.row);

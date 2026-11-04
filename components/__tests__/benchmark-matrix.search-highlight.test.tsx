@@ -6,8 +6,7 @@ import { HighlightText } from "@/components/benchmark-matrix/highlight-text";
 import {
   createSearchMatcher,
   escapeRegExp,
-  extractSearchTerms,
-  extractSearchTokens
+  getSearchHighlightPlan
 } from "@/components/benchmark-matrix/search-match";
 import { renderReady } from "@/tests/flush-microtasks";
 
@@ -35,17 +34,17 @@ describe("search-match 交集匹配口径", () => {
     expect(matcher?.("MMLU")).toBe(false);
   });
 
-  test("extractSearchTerms 只取单词交集，extractSearchTokens 仍保留整句供高亮", () => {
-    expect(extractSearchTerms("Harvey Legal Agent")).toEqual(["harvey", "legal", "agent"]);
-    expect(extractSearchTerms("  Math   MATH 500 ")).toEqual(["math", "500"]);
-    expect(extractSearchTerms("")).toEqual([]);
-
-    expect(extractSearchTokens("Harvey Legal Agent")).toEqual([
+  test("高亮计划保留整句与各单词，排除词与空查询不产生高亮", () => {
+    expect(getSearchHighlightPlan("Harvey Legal Agent")?.tokens).toEqual([
       "Harvey Legal Agent",
       "Harvey",
       "Legal",
       "Agent"
     ]);
+    // 引号短语只保留去掉引号后的检索词，不把原始带引号 token 塞进高亮计划
+    expect(getSearchHighlightPlan('"Math 500"')?.tokens).toEqual(["Math 500"]);
+    expect(getSearchHighlightPlan("!internal")).toBeNull();
+    expect(getSearchHighlightPlan("   ")).toBeNull();
   });
 
   test("类正则排除匹配：!internal 排除包含 internal 的项", () => {
@@ -110,6 +109,59 @@ describe("search-match 交集匹配口径", () => {
     expect(matcher?.("!internal")).toBe(true);
     expect(matcher?.("internal")).toBe(false);
   });
+
+  test("转义在任意位置生效：\\$ 不会被当作后缀修饰符", () => {
+    const literalDollar = createSearchMatcher("100\\$");
+    expect(literalDollar).not.toBeNull();
+    expect(literalDollar?.("USD 100$")).toBe(true);
+    expect(literalDollar?.("USD 100")).toBe(false);
+
+    expect(createSearchMatcher("foo\\$bar")?.("foo$bar")).toBe(true);
+    expect(createSearchMatcher("\\^internal")?.("^internal")).toBe(true);
+  });
+
+  test("未闭合引号按普通空白降级，不吞掉后续检索词", () => {
+    expect(createSearchMatcher('"math')?.("MATH-500")).toBe(true);
+    expect(createSearchMatcher('"math 500')?.("MATH-500")).toBe(true);
+    expect(createSearchMatcher('"math 500')?.("HumanEval")).toBe(false);
+  });
+
+  test("后缀与完全匹配：term$ 按字段结尾命中，^term$ 要求字段完全一致", () => {
+    const suffix = createSearchMatcher("500$");
+    expect(suffix).not.toBeNull();
+    expect(suffix?.("MATH-500")).toBe(true);
+    expect(suffix?.("500-MATH")).toBe(false);
+    expect(suffix?.(["GSM8K", "Pass@500"])).toBe(true);
+
+    const exact = createSearchMatcher("^MATH-500$");
+    expect(exact).not.toBeNull();
+    expect(exact?.("MATH-500")).toBe(true);
+    expect(exact?.("MATH-500 (CoT)")).toBe(false);
+    expect(exact?.(["MATH-500", "Reasoning"])).toBe(true);
+    expect(exact?.(["MATH", "500"])).toBe(false);
+  });
+
+  test("纯否定查询保留空字段行，含正向规则时不命中", () => {
+    const exclude = createSearchMatcher("!internal");
+    expect(exclude?.(["", ""])).toBe(true);
+    expect(exclude?.(["", null])).toBe(true);
+    expect(exclude?.([])).toBe(true);
+    expect(exclude?.(["", "Internal Review"])).toBe(false);
+
+    expect(createSearchMatcher("^gsm")?.(["", ""])).toBe(false);
+    expect(createSearchMatcher("!internal ^gsm")?.(["", ""])).toBe(false);
+  });
+
+  test("多字段按「任一字段」匹配，引号短语不跨字段拼接", () => {
+    // 未加引号的多词查询会拆成多条规则，可以分别命中名称与分类
+    expect(createSearchMatcher("math 500")?.(["Math", "500"])).toBe(true);
+    // 引号短语是单条规则，必须完整落在某个字段内
+    expect(createSearchMatcher('"Math 500"')?.(["Math", "500"])).toBe(false);
+    expect(createSearchMatcher('"Math 500"')?.(["Math 500", "Reasoning"])).toBe(true);
+    // ^x$ 表示某个字段完全匹配
+    expect(createSearchMatcher("^foo$")?.(["Foo", "Bar"])).toBe(true);
+    expect(createSearchMatcher("^foo$")?.(["Foo Bar", "Baz"])).toBe(false);
+  });
 });
 
 describe("HighlightText 核心高亮逻辑与无障碍测试", () => {
@@ -159,7 +211,7 @@ describe("HighlightText 核心高亮逻辑与无障碍测试", () => {
 
   test("支持多词与特殊字符安全转义匹配", () => {
     expect(escapeRegExp("C++ (Math) [Pro]*")).toBe("C\\+\\+ \\(Math\\) \\[Pro\\]\\*");
-    expect(extractSearchTokens("math 500")).toEqual(["math 500", "math", "500"]);
+    expect(getSearchHighlightPlan("math 500")?.tokens).toEqual(["math 500", "math", "500"]);
 
     const { container } = render(<HighlightText text="MATH-500 (CoT)" query="math cot" />);
     const marks = container.querySelectorAll("mark");
@@ -183,6 +235,27 @@ describe("HighlightText 核心高亮逻辑与无障碍测试", () => {
     const mark = container.querySelector("mark");
     expect(mark).not.toBeNull();
     expect(mark?.textContent).toBe("GSM");
+  });
+
+  test("锚点语法只高亮字段边界上的匹配，不高亮中间片段", () => {
+    const { container: prefix } = render(<HighlightText text="My GSM Bench" query="^GSM" />);
+    expect(prefix.querySelector("mark")).toBeNull();
+
+    const { container: suffix } = render(<HighlightText text="MATH-500 Pro" query="500$" />);
+    expect(suffix.querySelector("mark")).toBeNull();
+
+    const { container: exact } = render(
+      <HighlightText text="MATH-500 (CoT)" query="^MATH-500$" />
+    );
+    expect(exact.querySelector("mark")).toBeNull();
+
+    const { container: hit } = render(<HighlightText text="MATH-500" query="500$" />);
+    expect(hit.querySelector("mark")?.textContent).toBe("500");
+
+    const { container: exactHit } = render(
+      <HighlightText text="MATH-500" query="^MATH-500$" />
+    );
+    expect(exactHit.querySelector("mark")?.textContent).toBe("MATH-500");
   });
 
   test("组合语法 ^GSM !internal 仅对正向关键词 GSM 高亮，不包含 internal", () => {
@@ -370,5 +443,89 @@ describe("BenchmarkMatrix 表格搜索词高亮集成", () => {
     const marks = document.querySelectorAll("mark.matrix-search-highlight");
     expect(marks.length).toBeGreaterThan(0);
     expect(Array.from(marks).some((m) => m.textContent === "Human")).toBe(true);
+  });
+
+  test("在表格中输入 500$：只保留以 500 结尾的行，并高亮结尾片段", async () => {
+    await renderReady(
+      <BenchmarkMatrix
+        sourceOptions={["text:S1"]}
+        rows={rows}
+      />
+    );
+
+    const searchInput = screen.getByPlaceholderText("筛选 Benchmark");
+    fireEvent.change(searchInput, { target: { value: "500$" } });
+    act(() => {
+      vi.advanceTimersByTime(300);
+      vi.runAllTicks();
+    });
+
+    expect(screen.getByText("MATH-500")).toBeInTheDocument();
+    expect(screen.queryByText("HumanEval")).not.toBeInTheDocument();
+
+    const markTexts = Array.from(document.querySelectorAll("mark.matrix-search-highlight")).map(
+      (mark) => mark.textContent
+    );
+    expect(markTexts).toContain("500");
+  });
+
+  test("引号短语按连续子串筛选，并整段高亮命中的单元格", async () => {
+    await renderReady(
+      <BenchmarkMatrix
+        sourceOptions={["text:S1"]}
+        rows={rows}
+      />
+    );
+
+    const searchInput = screen.getByPlaceholderText("筛选 Benchmark");
+    fireEvent.change(searchInput, { target: { value: '"math-500"' } });
+    act(() => {
+      vi.advanceTimersByTime(300);
+      vi.runAllTicks();
+    });
+
+    expect(screen.getByText("MATH-500")).toBeInTheDocument();
+    expect(screen.queryByText("HumanEval")).not.toBeInTheDocument();
+
+    const markTexts = Array.from(document.querySelectorAll("mark.matrix-search-highlight")).map(
+      (mark) => mark.textContent
+    );
+    expect(markTexts).toEqual(["MATH-500"]);
+  });
+
+  test("benchmarkType 为空时按展示值 General 参与筛选与高亮", async () => {
+    await renderReady(
+      <BenchmarkMatrix
+        sourceOptions={["text:S1"]}
+        rows={[
+          {
+            providerName: "OpenAI",
+            modelName: "GPT-4o",
+            benchmarkName: "custom-bench",
+            benchmarkType: "",
+            benchmarkCanonicalKey: "custom-bench:general",
+            benchTime: "2026-04-06T00:00:00.000Z",
+            valueRaw: "80",
+            valueNum: 80,
+            valueNote: null,
+            source: "text:S1"
+          }
+        ]}
+      />
+    );
+
+    const searchInput = screen.getByPlaceholderText("筛选 Benchmark");
+    fireEvent.change(searchInput, { target: { value: "^general" } });
+    act(() => {
+      vi.advanceTimersByTime(300);
+      vi.runAllTicks();
+    });
+
+    expect(screen.getByText("custom-bench")).toBeInTheDocument();
+
+    const markTexts = Array.from(document.querySelectorAll("mark.matrix-search-highlight")).map(
+      (mark) => mark.textContent
+    );
+    expect(markTexts).toContain("General");
   });
 });
