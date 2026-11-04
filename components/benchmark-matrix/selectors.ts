@@ -567,7 +567,7 @@ export function buildFilteredRows(
 
     indexedRows.forEach((indexed) => {
       if (baseBenchmarkKeySet.has(indexed.matrixKey)) {
-        if (searchMatcher && !searchMatcher(`${indexed.row.benchmarkName} ${indexed.row.benchmarkType}`)) {
+        if (searchMatcher && !searchMatcher([indexed.row.benchmarkName, indexed.row.benchmarkType])) {
           return;
         }
         result.push(indexed.row);

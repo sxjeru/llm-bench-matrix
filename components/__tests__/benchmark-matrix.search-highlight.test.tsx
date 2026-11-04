@@ -47,6 +47,69 @@ describe("search-match 交集匹配口径", () => {
       "Agent"
     ]);
   });
+
+  test("类正则排除匹配：!internal 排除包含 internal 的项", () => {
+    const matcher = createSearchMatcher("!internal");
+    expect(matcher).not.toBeNull();
+
+    expect(matcher?.("GSM8K")).toBe(true);
+    expect(matcher?.("Internal-Bench")).toBe(false);
+    expect(matcher?.("bench_internal_v2")).toBe(false);
+    expect(matcher?.("SWE-bench")).toBe(true);
+    expect(matcher?.(["SWE-bench", "Coding"])).toBe(true);
+    expect(matcher?.(["Internal-Bench", "Coding"])).toBe(false);
+    expect(matcher?.(["SWE-bench", "Internal Evaluation"])).toBe(false);
+    expect(matcher?.(null)).toBe(false);
+  });
+
+  test("类正则前缀匹配：^internal 筛选以 internal 开头的项", () => {
+    const matcher = createSearchMatcher("^internal");
+    expect(matcher).not.toBeNull();
+
+    expect(matcher?.("internal-bench")).toBe(true);
+    expect(matcher?.("Internal_v2")).toBe(true);
+    expect(matcher?.("my-internal-bench")).toBe(false);
+    expect(matcher?.("bench_internal")).toBe(false);
+    expect(matcher?.(["internal-test", "General"])).toBe(true);
+    expect(matcher?.(["General-Bench", "Internal Category"])).toBe(true);
+    expect(matcher?.(["Other-Bench", "Other Category"])).toBe(false);
+  });
+
+  test("前缀排除组合：!^internal 排除以 internal 开头的项，但保留包含在中间的项", () => {
+    const matcher = createSearchMatcher("!^internal");
+    expect(matcher).not.toBeNull();
+
+    expect(matcher?.("internal-bench")).toBe(false);
+    expect(matcher?.("Internal_v2")).toBe(false);
+    expect(matcher?.("my-internal-bench")).toBe(true);
+    expect(matcher?.("bench_internal")).toBe(true);
+  });
+
+  test("多规则组合：^GSM !internal 必须以 GSM 开头且不能含有 internal", () => {
+    const matcher = createSearchMatcher("^GSM !internal");
+    expect(matcher).not.toBeNull();
+
+    expect(matcher?.("GSM8K")).toBe(true);
+    expect(matcher?.("GSM-Internal")).toBe(false);
+    expect(matcher?.("Math-GSM8K")).toBe(false);
+    expect(matcher?.(["GSM8K", "Reasoning"])).toBe(true);
+    expect(matcher?.(["GSM8K-Internal", "Reasoning"])).toBe(false);
+    expect(matcher?.(["GSM8K", "Internal Review"])).toBe(false);
+  });
+
+  test("未完成的修饰符不作为有效过滤，避免打字中断流", () => {
+    expect(createSearchMatcher("!")).toBeNull();
+    expect(createSearchMatcher("^")).toBeNull();
+    expect(createSearchMatcher("!^")).toBeNull();
+    expect(createSearchMatcher("!   ")).toBeNull();
+  });
+
+  test("转义支持：\\!internal 视为普通字面量搜索", () => {
+    const matcher = createSearchMatcher("\\!internal");
+    expect(matcher).not.toBeNull();
+    expect(matcher?.("!internal")).toBe(true);
+    expect(matcher?.("internal")).toBe(false);
+  });
 });
 
 describe("HighlightText 核心高亮逻辑与无障碍测试", () => {
@@ -107,6 +170,26 @@ describe("HighlightText 核心高亮逻辑与无障碍测试", () => {
 
     const { container: escapedContainer } = render(<HighlightText text="C++ (Math)" query="C++" />);
     expect(escapedContainer.querySelector("mark")?.textContent).toBe("C++");
+  });
+
+  test("排除语法 !internal 不产生任何高亮标记，保持纯文本", () => {
+    const { container } = render(<HighlightText text="Internal-Bench" query="!internal" />);
+    expect(container.querySelector("mark")).toBeNull();
+    expect(container.textContent).toBe("Internal-Bench");
+  });
+
+  test("前缀语法 ^GSM 正确提取关键词并高亮对应前缀内容", () => {
+    const { container } = render(<HighlightText text="GSM8K" query="^GSM" />);
+    const mark = container.querySelector("mark");
+    expect(mark).not.toBeNull();
+    expect(mark?.textContent).toBe("GSM");
+  });
+
+  test("组合语法 ^GSM !internal 仅对正向关键词 GSM 高亮，不包含 internal", () => {
+    const { container } = render(<HighlightText text="GSM8K-Internal" query="^GSM !internal" />);
+    const marks = container.querySelectorAll("mark");
+    expect(marks).toHaveLength(1);
+    expect(marks[0].textContent).toBe("GSM");
   });
 });
 
@@ -241,5 +324,51 @@ describe("BenchmarkMatrix 表格搜索词高亮集成", () => {
     expect(markTexts).toContain("500");
     expect(screen.getByText("MATH-500")).toBeInTheDocument();
     expect(screen.queryByText("HumanEval")).not.toBeInTheDocument();
+  });
+
+  test("在表格中输入 !math 进行排除：MATH-500 被排除，保留 HumanEval，且不产生任何高亮 mark", async () => {
+    await renderReady(
+      <BenchmarkMatrix
+        sourceOptions={["text:S1"]}
+        rows={rows}
+      />
+    );
+
+    const searchInput = screen.getByPlaceholderText("筛选 Benchmark");
+    fireEvent.change(searchInput, { target: { value: "!math" } });
+    act(() => {
+      vi.advanceTimersByTime(300);
+      vi.runAllTicks();
+    });
+
+    // MATH-500 被排除，HumanEval 保留
+    expect(screen.queryByText("MATH-500")).not.toBeInTheDocument();
+    expect(screen.getByText("HumanEval")).toBeInTheDocument();
+
+    // 排除搜索不应对保留的行产生任何高亮 mark
+    expect(document.querySelectorAll("mark.matrix-search-highlight")).toHaveLength(0);
+  });
+
+  test("在表格中输入 ^Human 筛选前缀：HumanEval 命中并高亮 Human 前缀，MATH-500 被排除", async () => {
+    await renderReady(
+      <BenchmarkMatrix
+        sourceOptions={["text:S1"]}
+        rows={rows}
+      />
+    );
+
+    const searchInput = screen.getByPlaceholderText("筛选 Benchmark");
+    fireEvent.change(searchInput, { target: { value: "^Human" } });
+    act(() => {
+      vi.advanceTimersByTime(300);
+      vi.runAllTicks();
+    });
+
+    expect(screen.getByText("HumanEval")).toBeInTheDocument();
+    expect(screen.queryByText("MATH-500")).not.toBeInTheDocument();
+
+    const marks = document.querySelectorAll("mark.matrix-search-highlight");
+    expect(marks.length).toBeGreaterThan(0);
+    expect(Array.from(marks).some((m) => m.textContent === "Human")).toBe(true);
   });
 });

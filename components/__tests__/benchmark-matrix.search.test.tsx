@@ -227,6 +227,56 @@ describe("BenchmarkMatrix 搜索筛选与低覆盖率状态恢复", () => {
     expect(screen.queryByText("AgentBench")).not.toBeInTheDocument();
   });
 
+  test("输入 !internal 排除含 internal 的结果，输入 ^internal 筛选以 internal 开头的内容", async () => {
+    const specialRows = [
+      { providerName: "OpenAI", modelName: "Model A", benchmarkName: "internal-bench-1", benchmarkType: "General", benchmarkCanonicalKey: "internal-bench-1:general", benchTime: "2026-04-06T00:00:00.000Z", valueRaw: "90", valueNum: 90, valueNote: null, source: "text:S1" },
+      { providerName: "OpenAI", modelName: "Model A", benchmarkName: "external-internal-bench", benchmarkType: "General", benchmarkCanonicalKey: "external-internal-bench:general", benchTime: "2026-04-06T00:00:00.000Z", valueRaw: "80", valueNum: 80, valueNote: null, source: "text:S1" },
+      { providerName: "OpenAI", modelName: "Model A", benchmarkName: "public-bench", benchmarkType: "General", benchmarkCanonicalKey: "public-bench:general", benchTime: "2026-04-06T00:00:00.000Z", valueRaw: "70", valueNum: 70, valueNote: null, source: "text:S1" }
+    ] as const;
+
+    await renderReady(
+      <BenchmarkMatrix
+        sourceOptions={["text:S1"]}
+        rows={[...specialRows]}
+      />
+    );
+
+    const searchInput = screen.getByPlaceholderText("筛选 Benchmark");
+
+    // 1. 测试 !internal 排除包含 internal 的所有结果
+    fireEvent.change(searchInput, { target: { value: "!internal" } });
+    act(() => {
+      vi.advanceTimersByTime(300);
+      vi.runAllTicks();
+    });
+
+    expect(screen.getByText("public-bench")).toBeInTheDocument();
+    expect(screen.queryByText("internal-bench-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("external-internal-bench")).not.toBeInTheDocument();
+
+    // 2. 测试 ^internal 仅筛选以 internal 开头的结果
+    fireEvent.change(searchInput, { target: { value: "^internal" } });
+    act(() => {
+      vi.advanceTimersByTime(300);
+      vi.runAllTicks();
+    });
+
+    expect(screen.getByText("internal-bench-1")).toBeInTheDocument();
+    expect(screen.queryByText("external-internal-bench")).not.toBeInTheDocument();
+    expect(screen.queryByText("public-bench")).not.toBeInTheDocument();
+
+    // 3. 测试组合：!^internal 排除以 internal 开头的，保留 external-internal-bench 和 public-bench
+    fireEvent.change(searchInput, { target: { value: "!^internal" } });
+    act(() => {
+      vi.advanceTimersByTime(300);
+      vi.runAllTicks();
+    });
+
+    expect(screen.getByText("external-internal-bench")).toBeInTheDocument();
+    expect(screen.getByText("public-bench")).toBeInTheDocument();
+    expect(screen.queryByText("internal-bench-1")).not.toBeInTheDocument();
+  });
+
   test("脚注占位符替换：当前日期 {time} 格式为 YYYY-MM-DD，source 最后更新日期 {source_time} 正确计算并替换", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-06-06T12:00:00.000Z"));
