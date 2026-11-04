@@ -61,6 +61,69 @@ describe("search-match 交集匹配口径", () => {
     expect(matcher?.(null)).toBe(false);
   });
 
+  test("全角中文感叹号 ！等价于 ! 排除修饰符，且不参与高亮", () => {
+    const halfWidth = createSearchMatcher("!internal")!;
+    const fullWidth = createSearchMatcher("！internal")!;
+    expect(fullWidth).not.toBeNull();
+
+    const targets = [
+      "GSM8K",
+      "Internal-Bench",
+      "bench_internal_v2",
+      ["SWE-bench", "Coding"],
+      ["SWE-bench", "Internal Evaluation"],
+      ["", ""],
+      null
+    ] as const;
+    for (const target of targets) {
+      expect(fullWidth(target)).toBe(halfWidth(target));
+    }
+
+    expect(fullWidth("GSM8K")).toBe(true);
+    expect(fullWidth("Internal-Bench")).toBe(false);
+    expect(fullWidth(["", ""])).toBe(true);
+    expect(getSearchHighlightPlan("！internal")).toBeNull();
+    expect(getSearchHighlightPlan("^GSM ！internal")?.tokens).toEqual(["GSM"]);
+  });
+
+  test("全角 ！可与 ^ / $ 组合，转义与未完成输入语义不变", () => {
+    const queryPairs = [
+      ["！^internal", "!^internal"],
+      ["^！internal", "^!internal"],
+      ["！internal$", "!internal$"],
+      ["！^internal$", "!^internal$"],
+      ["^GSM ！internal", "^GSM !internal"]
+    ] as const;
+    const targets = [
+      "internal-bench",
+      "my-internal-bench",
+      "GSM8K",
+      "GSM-Internal",
+      "internal"
+    ] as const;
+
+    for (const [fullWidthQuery, halfWidthQuery] of queryPairs) {
+      const fullWidth = createSearchMatcher(fullWidthQuery);
+      const halfWidth = createSearchMatcher(halfWidthQuery);
+      expect(fullWidth).not.toBeNull();
+      expect(halfWidth).not.toBeNull();
+      for (const target of targets) {
+        expect(fullWidth?.(target)).toBe(halfWidth?.(target));
+      }
+    }
+
+    // 转义后的 ！按字面量匹配，不再作为排除符
+    const literal = createSearchMatcher("\\！internal");
+    expect(literal?.("！internal")).toBe(true);
+    expect(literal?.("internal")).toBe(false);
+    // 非开头的 ！仍是普通字符
+    expect(createSearchMatcher("in！ternal")?.("in！ternal")).toBe(true);
+
+    expect(createSearchMatcher("！")).toBeNull();
+    expect(createSearchMatcher("！^")).toBeNull();
+    expect(createSearchMatcher("！   ")).toBeNull();
+  });
+
   test("类正则前缀匹配：^internal 筛选以 internal 开头的项", () => {
     const matcher = createSearchMatcher("^internal");
     expect(matcher).not.toBeNull();
@@ -463,6 +526,7 @@ describe("BenchmarkMatrix 表格搜索词高亮集成", () => {
     const dialog = screen.getByRole("dialog", { name: "搜索语法" });
     expect(dialog).toHaveTextContent("完全匹配");
     expect(dialog).toHaveTextContent("^GSM !internal");
+    expect(dialog).toHaveTextContent("！internal");
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "搜索语法" })).not.toBeInTheDocument();

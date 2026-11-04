@@ -227,7 +227,7 @@ describe("BenchmarkMatrix 搜索筛选与低覆盖率状态恢复", () => {
     expect(screen.queryByText("AgentBench")).not.toBeInTheDocument();
   });
 
-  test("输入 !internal 排除含 internal 的结果，输入 ^internal 筛选以 internal 开头的内容", async () => {
+  test("输入 !internal / ！internal 排除含 internal 的结果，输入 ^internal 筛选以 internal 开头的内容", async () => {
     const specialRows = [
       { providerName: "OpenAI", modelName: "Model A", benchmarkName: "internal-bench-1", benchmarkType: "General", benchmarkCanonicalKey: "internal-bench-1:general", benchTime: "2026-04-06T00:00:00.000Z", valueRaw: "90", valueNum: 90, valueNote: null, source: "text:S1" },
       { providerName: "OpenAI", modelName: "Model A", benchmarkName: "external-internal-bench", benchmarkType: "General", benchmarkCanonicalKey: "external-internal-bench:general", benchTime: "2026-04-06T00:00:00.000Z", valueRaw: "80", valueNum: 80, valueNote: null, source: "text:S1" },
@@ -245,6 +245,17 @@ describe("BenchmarkMatrix 搜索筛选与低覆盖率状态恢复", () => {
 
     // 1. 测试 !internal 排除包含 internal 的所有结果
     fireEvent.change(searchInput, { target: { value: "!internal" } });
+    act(() => {
+      vi.advanceTimersByTime(300);
+      vi.runAllTicks();
+    });
+
+    expect(screen.getByText("public-bench")).toBeInTheDocument();
+    expect(screen.queryByText("internal-bench-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("external-internal-bench")).not.toBeInTheDocument();
+
+    // 1.1 全角中文感叹号 ！与 ! 等价
+    fireEvent.change(searchInput, { target: { value: "！internal" } });
     act(() => {
       vi.advanceTimersByTime(300);
       vi.runAllTicks();

@@ -18,6 +18,8 @@
  * - 未闭合引号 : 按普通空白切分降级（打字中间态不阻塞后续检索词）
  * - 多词组合   : 多个规则以空格分隔，遵循交集（AND / 必须同时满足）
  *
+ * 排除修饰符 ! 同时兼容全角中文感叹号 ！（U+FF01），如 ！internal 等价于 !internal。
+ *
  * 多字段目标（数组，如 [benchmarkName, benchmarkType]）的匹配口径：
  * 每条规则只需命中任意一个字段；空字段会被忽略。
  * 因此 ^foo 表示「某个字段以 foo 开头」，^foo$ 表示「某个字段完全等于 foo」。
@@ -201,6 +203,11 @@ function tokenizeSearchQuery(query: string): string[] {
     : scanQueryTokens(trimmed, false);
 }
 
+/** 排除修饰符：半角 ! 与全角中文感叹号 ！（U+FF01）等价。 */
+function isExcludeMark(char: string | undefined): boolean {
+  return char === "!" || char === "\uFF01";
+}
+
 /**
  * 解析单个 Token 为对应的搜索规则。
  *
@@ -218,11 +225,11 @@ function parseTokenRule(rawToken: string): SearchRule | null {
     const hasUnescapedSecond = chars.length > 1 && !escaped[1];
     if (
       hasUnescapedSecond &&
-      ((chars[0] === "!" && chars[1] === "^") || (chars[0] === "^" && chars[1] === "!"))
+      ((isExcludeMark(chars[0]) && chars[1] === "^") || (chars[0] === "^" && isExcludeMark(chars[1])))
     ) {
       kind = "exclude_prefix";
       start = 2;
-    } else if (chars[0] === "!") {
+    } else if (isExcludeMark(chars[0])) {
       kind = "exclude";
       start = 1;
     } else if (chars[0] === "^") {

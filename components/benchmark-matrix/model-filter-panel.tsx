@@ -89,6 +89,7 @@ function SearchSyntaxHelp() {
 
           <div className="mt-2.5 border-t border-base-300/60 pt-2 text-[10px] leading-relaxed text-base-content/50">
             空格分隔多个条件，需同时满足。示例：<code className="font-mono">^GSM !internal</code>
+            <div className="mt-1">排除符支持全角 <code className="font-mono">！</code>：<code className="font-mono">！internal</code> 等价于 <code className="font-mono">!internal</code></div>
           </div>
         </div>
       ) : null}
@@ -164,7 +165,7 @@ export function ModelFilterPanel({
                 type="text"
                 className="input input-xs input-bordered pl-7 pr-7 w-36 bg-base-100/50 transition-all focus:w-48"
                 placeholder="筛选 Benchmark"
-                title={'搜索语法：! 排除，^ 开头，$ 结尾，^x$ 完全匹配，"引号短语"，\\ 转义（如 100\\$）'}
+                title={'搜索语法：! / ！ 排除，^ 开头，$ 结尾，^x$ 完全匹配，"引号短语"，\\ 转义（如 100\\$）'}
                 value={benchmarkSearchInputValue}
                 onChange={(e) => setBenchmarkSearchInputValue(e.target.value)}
               />
