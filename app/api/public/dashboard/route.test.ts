@@ -1,3 +1,4 @@
+import { brotliCompressSync, brotliDecompressSync } from "node:zlib";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { GET } from "@/app/api/public/dashboard/route";
@@ -70,6 +71,9 @@ const SNAPSHOT = {
   exportFootnoteAlign: "center" as const
 };
 
+const PAYLOAD_JSON = JSON.stringify(encodePublicDashboardSnapshot(SNAPSHOT));
+const PAYLOAD_BR = brotliCompressSync(Buffer.from(PAYLOAD_JSON, "utf8"));
+
 describe("GET /api/public/dashboard", () => {
   beforeEach(() => {
     vi.mocked(getPublicDashboardSnapshotVersions).mockReset();
@@ -85,7 +89,8 @@ describe("GET /api/public/dashboard", () => {
       dashboardVersion: SNAPSHOT.versions.dashboard,
       pricingVersion: SNAPSHOT.versions.pricing,
       settingsVersion: SNAPSHOT.versions.settings,
-      payloadJson: JSON.stringify(encodePublicDashboardSnapshot(SNAPSHOT)),
+      payloadBr: PAYLOAD_BR,
+      payloadJson: PAYLOAD_JSON,
       updatedAt: new Date()
     });
   });
@@ -124,6 +129,31 @@ describe("GET /api/public/dashboard", () => {
       `"dashboard:v${PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION}:dashboard-version:pricing-version:settings-version"`
     );
     expect(response.headers.get("Content-Type")).toBe("application/json; charset=utf-8");
+  });
+
+  test("客户端支持 br 时下发预压缩字节，避免源站重复压缩", async () => {
+    const response = await GET(new Request("https://example.com/api/public/dashboard", {
+      headers: { "Accept-Encoding": "gzip, deflate, br" }
+    }));
+
+    expect(response.headers.get("Content-Encoding")).toBe("br");
+    expect(response.headers.get("Vary")).toBe("Accept-Encoding");
+    expect(response.headers.get("Content-Length")).toBe(String(PAYLOAD_BR.byteLength));
+    expect(response.headers.get("ETag")).toBe(
+      `"dashboard:v${PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION}:dashboard-version:pricing-version:settings-version"`
+    );
+
+    const body = brotliDecompressSync(Buffer.from(await response.arrayBuffer())).toString("utf8");
+    expect(decodePublicDashboardSnapshot(JSON.parse(body))).toEqual(SNAPSHOT);
+  });
+
+  test("明确拒绝 br（q=0）时退回未压缩 JSON", async () => {
+    const response = await GET(new Request("https://example.com/api/public/dashboard", {
+      headers: { "Accept-Encoding": "br;q=0, gzip" }
+    }));
+
+    expect(response.headers.get("Content-Encoding")).toBeNull();
+    expect(decodePublicDashboardSnapshot(await response.json())).toEqual(SNAPSHOT);
   });
 
   test("边缘允许缓存，并带 stale-while-revalidate 兜住源站慢/冷启动", async () => {

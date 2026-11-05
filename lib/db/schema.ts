@@ -1,5 +1,23 @@
-import { index, integer, jsonb, numeric, pgTable, serial, text, timestamp, uniqueIndex, boolean } from "drizzle-orm/pg-core";
+import { customType, index, integer, jsonb, numeric, pgTable, serial, text, timestamp, uniqueIndex, boolean } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+
+/**
+ * Postgres bytea。
+ *
+ * pg 驱动返回 Buffer，@neondatabase/serverless 返回 Uint8Array；
+ * 统一成 Uint8Array，路由可以直接作为 Response body 下发。
+ */
+const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({
+  dataType() {
+    return "bytea";
+  },
+  fromDriver(value) {
+    return value instanceof Uint8Array ? value : new Uint8Array(value);
+  },
+  toDriver(value) {
+    return value;
+  }
+});
 
 export type ProviderConfigPrefixRule = {
   prefix: string;
@@ -230,7 +248,10 @@ export const publicDashboardSnapshots = pgTable("public_dashboard_snapshots", {
   dashboardVersion: text("dashboard_version").notNull(),
   pricingVersion: text("pricing_version").notNull(),
   settingsVersion: text("settings_version").notNull(),
-  payloadJson: text("payload_json").notNull(),
+  /** Brotli 压缩后的快照 wire JSON：新行只写这一列，冷启动只读 ~350 KB。 */
+  payloadBr: bytea("payload_br"),
+  /** 旧行的未压缩 JSON。新行写 null，读取时作为一次性回退并就地回填压缩列。 */
+  payloadJson: text("payload_json"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
 });
