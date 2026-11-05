@@ -224,6 +224,13 @@ describe("BenchmarkMatrix 星号值显示", () => {
       expect(tooltip).not.toBeNull();
       expect(tooltip).toHaveAttribute("data-cell-tooltip-scrollable", "1");
       expect(tooltip).toHaveClass("pointer-events-auto");
+      // 整框高度由 max-height 约束，记录列表必须能自己收缩，否则溢出时永远不出现滚动条
+      expect(tooltip).toHaveClass("flex", "flex-col", "overflow-hidden");
+      expect(tooltip!.querySelector(".matrix-cell-tooltip-list")).toHaveClass(
+        "overflow-auto",
+        "min-h-0",
+        "flex-auto"
+      );
 
       fireEvent.mouseLeave(questionMark as HTMLElement);
       fireEvent.mouseEnter(tooltip as HTMLElement);

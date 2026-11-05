@@ -629,6 +629,30 @@ button:not(:disabled) {
   overflow: hidden;
 }
 
+/* 矩阵单元格 tooltip 的记录列表：细滚动条，既不遮挡内容又能明确「可滚动」 */
+.matrix-cell-tooltip-list {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+  overscroll-behavior: contain;
+}
+
+.matrix-cell-tooltip-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.matrix-cell-tooltip-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.matrix-cell-tooltip-list::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.matrix-cell-tooltip-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.42);
+}
+
 /* 矩阵表格内搜索关键字高亮 */
 mark.matrix-search-highlight {
   background-color: rgba(245, 158, 11, 0.22);
