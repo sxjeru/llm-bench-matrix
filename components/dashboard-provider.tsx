@@ -15,6 +15,7 @@ import {
   type AllRowsIndex
 } from "@/components/benchmark-matrix/selectors";
 import type { MatrixInputRow } from "@/components/benchmark-matrix/types";
+import type { MatrixLoadStage } from "@/components/matrix-loading-status";
 import {
   decodePublicDashboardSnapshot,
   type PublicDashboardSnapshot,
@@ -36,7 +37,38 @@ type DashboardSnapshotContextValue = {
   isLoading: boolean;
   error: string | null;
   derived: SharedDashboardDerived | null;
+  /** 加载进度：供占位进度条展示当前卡在哪一步 */
+  stage: MatrixLoadStage;
 };
+
+/**
+ * 等到浏览器完成一次绘制再继续。
+ *
+ * 解码与派生索引都是同步重活，若不先让进度条画出来就直接开算，
+ * 用户只会看到加载文案冻结在原地，看不出「走到第几步」。
+ * 双 rAF 保证上一帧已经上屏；后台标签页里 rAF 可能不触发，用定时器兜底。
+ */
+function waitForNextPaint(): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+  if (typeof window.requestAnimationFrame !== "function") {
+    return new Promise((resolve) => window.setTimeout(resolve, 0));
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      resolve();
+    };
+    const timer = window.setTimeout(finish, 120);
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(finish);
+    });
+  });
+}
 
 const DashboardSnapshotContext = createContext<DashboardSnapshotContextValue | null>(null);
 
@@ -66,6 +98,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const [snapshot, setSnapshot] = useState<PublicDashboardSnapshot | null>(null);
   const [derived, setDerived] = useState<SharedDashboardDerived | null>(null);
   const [fastStats, setFastStats] = useState<PublicDashboardStats | null>(null);
+  const [stage, setStage] = useState<MatrixLoadStage>("fetching");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -112,16 +145,29 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
           throw new Error(`Failed to load dashboard snapshot: ${response.status}`);
         }
 
+        // 每个阶段都先让进度条画出来再做这一段的重活，否则几段计算会挤在同一帧里，
+        // 用户只能看到最后一步的文案。
+        setStage("decoding");
+        await waitForNextPaint();
+        if (controller.signal.aborted) return;
+
         const wire = await response.json() as PublicDashboardSnapshotWire;
         const nextSnapshot = decodePublicDashboardSnapshot(wire);
+
+        setStage("indexing");
+        await waitForNextPaint();
         if (controller.signal.aborted) return;
+
+        const nextDerived = buildSharedDashboardDerived(nextSnapshot.rows);
+
+        setStage("rendering");
+        await waitForNextPaint();
+        if (controller.signal.aborted) return;
+
         snapshotArrived = true;
         setSnapshot(nextSnapshot);
         setError(null);
-        startTransition(() => {
-          if (controller.signal.aborted) return;
-          setDerived(buildSharedDashboardDerived(nextSnapshot.rows));
-        });
+        startTransition(() => setDerived(nextDerived));
       } catch (loadError) {
         if (controller.signal.aborted) return;
         setError(loadError instanceof Error ? loadError.message : "Failed to load dashboard snapshot");
@@ -139,7 +185,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   return (
     <DashboardSnapshotContext.Provider
-      value={{ snapshot, stats: snapshot?.stats ?? fastStats, isLoading, error, derived }}
+      value={{ snapshot, stats: snapshot?.stats ?? fastStats, isLoading, error, derived, stage }}
     >
       {children}
     </DashboardSnapshotContext.Provider>

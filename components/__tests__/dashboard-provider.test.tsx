@@ -123,6 +123,8 @@ describe("DashboardProvider", () => {
     );
 
     expect(screen.getByRole("status")).toHaveTextContent("正在加载矩阵数据");
+    // 占位里带上当前阶段，别让用户对着一句静止的文案猜
+    expect(screen.getByRole("status")).toHaveTextContent("获取快照 · 1/4");
     expect(screen.queryByTestId("benchmark-matrix")).not.toBeInTheDocument();
 
     await waitFor(async () => {

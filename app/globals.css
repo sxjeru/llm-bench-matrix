@@ -2183,3 +2183,143 @@ input.heatmap-alpha-range::-moz-range-track {
   background: rgba(255, 255, 255, 0.1);
 }
 
+/* ===== 矩阵加载进度 ===== */
+
+.matrix-loading {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  min-height: 132px;
+}
+
+.matrix-loading-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.matrix-loading-spinner {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(93, 167, 255, 0.26);
+  border-top-color: #5da7ff;
+  animation: matrix-loading-spin 0.8s linear infinite;
+}
+
+.matrix-loading-title {
+  font-weight: 600;
+  color: #dbe6fb;
+}
+
+.matrix-loading-step {
+  margin-left: auto;
+  font-size: 12px;
+  color: #8fa3c8;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.matrix-loading-track {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  overflow: hidden;
+}
+
+.matrix-loading-fill {
+  position: relative;
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  overflow: hidden;
+  background: linear-gradient(90deg, #3b82f6, #7dd3fc);
+  transition: width 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 正在推进的那一段来回扫光，让整表渲染这类无法切分的长任务也有「还在动」的反馈 */
+.matrix-loading-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  transform: translateX(-100%);
+  animation: matrix-loading-sweep 1.3s linear infinite;
+}
+
+.matrix-loading-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.matrix-loading-step-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.matrix-loading-bullet {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
+}
+
+.matrix-loading-step-item.is-done {
+  color: #8fb6ff;
+}
+
+.matrix-loading-step-item.is-active {
+  color: #e2e8f0;
+}
+
+.matrix-loading-step-item.is-active .matrix-loading-bullet {
+  background: #5da7ff;
+  opacity: 1;
+  box-shadow: 0 0 0 3px rgba(93, 167, 255, 0.18);
+}
+
+.matrix-loading-step-item.is-pending {
+  opacity: 0.7;
+}
+
+.matrix-loading-error {
+  margin: 0;
+  font-size: 14px;
+  color: #ff9aa4;
+}
+
+@keyframes matrix-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes matrix-loading-sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .matrix-loading-spinner,
+  .matrix-loading-fill::after {
+    animation: none;
+  }
+
+  .matrix-loading-fill {
+    transition: none;
+  }
+}
+

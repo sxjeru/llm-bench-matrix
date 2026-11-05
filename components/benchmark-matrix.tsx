@@ -17,6 +17,7 @@ import {
   TriangleAlert
 } from "lucide-react";
 import dynamic from "next/dynamic";
+import { MatrixLoadingStatus } from "./matrix-loading-status";
 import { BenchmarkRankingPanel } from "./benchmark-matrix/benchmark-ranking-panel";
 const CellTrendPanel = dynamic(
   () => import("./benchmark-matrix/cell-trend-panel").then((mod) => mod.CellTrendPanel),
@@ -1845,8 +1846,10 @@ export function BenchmarkMatrix({
     }
   }
 
+  // 快照与派生索引都已就位，只剩这张表本身要算：此时若返回 null，
+  // 上一层的加载占位已经被卸载，页面会空出一段时间，所以这里接着出同一套占位。
   if (!isClientReady) {
-    return null;
+    return <MatrixLoadingStatus stage="rendering" />;
   }
 
   return (
