@@ -54,7 +54,7 @@ export async function GET(request: Request) {
   }
 
   const record = await getOrBuildPublicDashboardSnapshotRecord(versions);
-  const useBrotli = acceptsBrotli(request.headers.get("accept-encoding"));
+  const useBrotli = shouldSendBrotli(request.headers.get("accept-encoding"));
 
   // 自己压好再下发：函数返回的 3.6 MB 文本交给平台动态压缩只能到 ~475 KB，
   // 而预压缩的 brotli 是 ~400 KB，且边缘缓存的就是这份字节，无需二次压缩。
@@ -81,14 +81,21 @@ export async function GET(request: Request) {
 }
 
 /**
- * 判断客户端是否接受 br。
+ * 是否下发预压缩字节。
  *
- * 注意 `acceptEncoding === null` 必须按「接受」处理：Vercel 的边缘在把请求
- * 转发给函数前会处理掉这个头（压缩由边缘统一负责），函数里经常拿到 null。
- * 若按「不接受」处理，预压缩分支永远不会命中，等于白压——线上实测下发
- * 仍会退回平台动态压缩（485 KB vs 预压缩的 400 KB）。
+ * Vercel 会在转发前改写/移除入站 `Accept-Encoding`（压缩协商由它的边缘完成），
+ * 函数内拿到的值不可信：线上实测浏览器明确接受 br，函数里却读不到 br，
+ * 于是一直走未压缩分支、再被平台动态压缩成 485 KB（预压缩只有 400 KB）。
+ * 因此 Vercel 上直接下发 br，由边缘按客户端的真实 AE 决定透传或转码；
+ * 其它部署环境（自托管、本地 dev）仍按请求头正常协商。
  */
+function shouldSendBrotli(acceptEncoding: string | null): boolean {
+  if (process.env.VERCEL === "1") return true;
+  return acceptsBrotli(acceptEncoding);
+}
+
 function acceptsBrotli(acceptEncoding: string | null): boolean {
+  // 缺失表示客户端没做限制，按接受处理
   if (!acceptEncoding) return true;
   return acceptEncoding
     .split(",")

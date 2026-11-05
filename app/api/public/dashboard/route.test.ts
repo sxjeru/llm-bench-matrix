@@ -163,6 +163,23 @@ describe("GET /api/public/dashboard", () => {
     )).toEqual(SNAPSHOT);
   });
 
+  test("Vercel 环境不信任入站 Accept-Encoding，仍下发预压缩字节", async () => {
+    // 线上实测：浏览器接受 br，但函数内读到的是被改写后的值（不含 br），
+    // 导致预压缩分支永不命中。
+    vi.stubEnv("VERCEL", "1");
+    try {
+      const response = await GET(new Request("https://example.com/api/public/dashboard", {
+        headers: { "Accept-Encoding": "gzip, deflate" }
+      }));
+
+      expect(response.headers.get("Content-Encoding")).toBe("br");
+      expect(response.headers.get("X-Payload-Encoding")).toBe("br");
+      expect(response.headers.get("Content-Length")).toBe(String(PAYLOAD_BR.byteLength));
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   test("明确拒绝 br（q=0）时退回未压缩 JSON", async () => {
     const response = await GET(new Request("https://example.com/api/public/dashboard", {
       headers: { "Accept-Encoding": "br;q=0, gzip" }
