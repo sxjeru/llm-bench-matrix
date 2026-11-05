@@ -2,10 +2,14 @@ import type { MatrixInputRow, ModelParamsInfo, ModelPriceInfo } from "@/componen
 import type { AaVersionCutoff } from "@/lib/aa-index-revisions";
 
 /**
- * 修改公开快照的字段映射、计算语义或编码格式时递增。
+ * 修改公开快照的字段映射、计算语义、编码格式或持久化表示时递增。
  * 数据版本只跟踪写库；格式版本同时隔离持久化快照和浏览器 HTTP 缓存。
+ *
+ * v3：落库只写 payload_br，payload_json 置空。这里必须递增——上一版读路径
+ * 不区分 null，会把 payload_json 的 null 直接当 body 下发（200 + 空响应体），
+ * 换命名空间后新旧实例各行其是，滚动部署与回滚都不会读到对方写的行。
  */
-export const PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION = 2;
+export const PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION = 3;
 
 export const EXPORT_FOOTNOTE_ALIGNS = ["left", "center", "right"] as const;
 
