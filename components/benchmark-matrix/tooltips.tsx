@@ -38,35 +38,27 @@ function clampTooltipTop(preferredTop: number, height: number, viewportHeight: n
   return Math.min(Math.max(preferredTop, TOOLTIP_VIEWPORT_MARGIN), maxTop);
 }
 
-function getTooltipListMaxHeight(viewportHeight: number): number {
-  return Math.max(96, viewportHeight - TOOLTIP_VIEWPORT_MARGIN * 2 - 48);
-}
-
 export function MatrixCellTooltip({ tooltip, onHoverChange, onScrollableChange }: MatrixCellTooltipProps) {
   const ref = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLSpanElement>(null);
   const [adjustedTop, setAdjustedTop] = useState<number | null>(null);
-  const [listMaxHeight, setListMaxHeight] = useState<number | null>(null);
   const [isListScrollable, setIsListScrollable] = useState(false);
 
+  /**
+   * 高度约束全部交给 CSS：外层 flex 列 + max-height，记录列表 flex-auto + min-h-0 自行收缩。
+   * 之前用 JS 估算列表 max-height（视口高度减固定 48px）时，标题行/注释的实际高度常常超过这个余量，
+   * 结果整框被 max-height 截断、列表却始终没到「内容高于容器」的阈值，滚动条永远不出现。
+   */
   useLayoutEffect(() => {
     if (!tooltip) {
       setAdjustedTop(null);
-      setListMaxHeight(null);
       setIsListScrollable(false);
       onScrollableChange?.(false);
       return;
     }
 
-    const viewportHeight = window.innerHeight;
-    const nextListMaxHeight = getTooltipListMaxHeight(viewportHeight);
-    setListMaxHeight(nextListMaxHeight);
-
-    if (listRef.current) {
-      listRef.current.style.maxHeight = `${nextListMaxHeight}px`;
-    }
-
     if (ref.current) {
+      const viewportHeight = window.innerHeight;
       const height = Math.min(ref.current.offsetHeight, viewportHeight - TOOLTIP_VIEWPORT_MARGIN * 2);
       const spaceAbove = tooltip.y - TOOLTIP_VIEWPORT_MARGIN;
       const preferredTop = spaceAbove >= height
@@ -88,7 +80,7 @@ export function MatrixCellTooltip({ tooltip, onHoverChange, onScrollableChange }
       ref={ref}
       data-cell-tooltip="1"
       data-cell-tooltip-scrollable={isListScrollable ? "1" : "0"}
-      className={`${isListScrollable ? "pointer-events-auto" : "pointer-events-none"} fixed z-[2600] w-[320px] max-w-[320px] rounded-xl border border-white/20 bg-slate-900/80 p-2 text-left text-[11px] font-medium text-slate-100 shadow-2xl backdrop-blur-lg`}
+      className={`${isListScrollable ? "pointer-events-auto" : "pointer-events-none"} fixed z-[2600] flex w-[320px] max-w-[320px] flex-col overflow-hidden rounded-xl border border-white/20 bg-slate-900/80 p-2 text-left text-[11px] font-medium text-slate-100 shadow-2xl backdrop-blur-lg`}
       style={{
         left: tooltip.x,
         top: adjustedTop !== null ? adjustedTop : tooltip.y,
@@ -102,19 +94,18 @@ export function MatrixCellTooltip({ tooltip, onHoverChange, onScrollableChange }
       }}
     >
       {tooltip.entries.length > 1 ? (
-        <span className="mb-1 block text-[10px] text-slate-300">存在多条记录</span>
+        <span className="mb-1 block shrink-0 text-[10px] text-slate-300">存在多条记录</span>
       ) : null}
 
       {tooltip.note ? (
-        <span className="mb-1 block rounded-md bg-amber-400/10 px-2 py-1 text-[10px] text-amber-200">
+        <span className="mb-1 block max-h-[30vh] shrink-0 overflow-y-auto rounded-md bg-amber-400/10 px-2 py-1 text-[10px] text-amber-200">
           注释：{tooltip.note}
         </span>
       ) : null}
 
       <span
         ref={listRef}
-        className="block space-y-1 overflow-auto"
-        style={listMaxHeight !== null ? { maxHeight: listMaxHeight } : { maxHeight: "65vh" }}
+        className="matrix-cell-tooltip-list block min-h-0 flex-auto overflow-auto pr-1"
       >
         {tooltip.entries.map((entry) => {
           const formattedTime = entry.benchTime ? formatTooltipTime(entry.benchTime) : null;
@@ -122,7 +113,7 @@ export function MatrixCellTooltip({ tooltip, onHoverChange, onScrollableChange }
           return (
             <span
               key={`${entry.valueRaw}-${entry.valueNote ?? ""}-${entry.source ?? "-"}-${entry.benchTime ?? "no-time"}`}
-              className="block rounded-md bg-white/5 px-2 py-1 leading-4"
+              className="mb-1 block rounded-md bg-white/5 px-2 py-1 leading-4"
             >
               {getMatrixCellDisplayValue(entry.valueNum, entry.valueNum2, entry.valueRaw, entry.valueNote)}
               {entry.valueNote ? <span className="opacity-80"> · note: {entry.valueNote}</span> : null}

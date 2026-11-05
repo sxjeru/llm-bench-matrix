@@ -1,3 +1,4 @@
+import { brotliCompressSync, brotliDecompressSync } from "node:zlib";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, test, vi } from "vitest";
@@ -48,13 +49,17 @@ function createSnapshot(versions = VERSIONS, value = 88): PublicDashboardSnapsho
 }
 
 function createRecord(overrides: Partial<PublicDashboardSnapshotRecord> = {}): PublicDashboardSnapshotRecord {
+  const payloadJson = overrides.payloadJson
+    ?? JSON.stringify(cacheModule.encodePublicDashboardSnapshot(createSnapshot()));
+
   return {
     key: DEFAULT_SNAPSHOT_KEY,
     etag: cacheModule.createPublicDashboardSnapshotEtag(VERSIONS),
     dashboardVersion: VERSIONS.dashboard,
     pricingVersion: VERSIONS.pricing,
     settingsVersion: VERSIONS.settings,
-    payloadJson: JSON.stringify(cacheModule.encodePublicDashboardSnapshot(createSnapshot())),
+    payloadBr: new Uint8Array(brotliCompressSync(Buffer.from(payloadJson, "utf8"))),
+    payloadJson,
     updatedAt: new Date(),
     ...overrides
   };
@@ -117,6 +122,32 @@ describe("dashboard-snapshot-store", () => {
     expect(db.insert).not.toHaveBeenCalled();
   });
 
+  test("旧行只有未压缩 JSON 时就地压缩并回填", async () => {
+    const legacyJson = JSON.stringify(cacheModule.encodePublicDashboardSnapshot(createSnapshot()));
+    readRows.mockResolvedValue([{
+      key: DEFAULT_SNAPSHOT_KEY,
+      etag: cacheModule.createPublicDashboardSnapshotEtag(VERSIONS),
+      dashboardVersion: VERSIONS.dashboard,
+      pricingVersion: VERSIONS.pricing,
+      settingsVersion: VERSIONS.settings,
+      payloadBr: null,
+      payloadJson: legacyJson,
+      updatedAt: new Date()
+    } as unknown as PublicDashboardSnapshotRecord]);
+
+    const record = await getOrBuildPublicDashboardSnapshotRecord(VERSIONS);
+
+    expect(record.payloadJson).toBe(legacyJson);
+    expect(brotliDecompressSync(record.payloadBr).toString("utf8")).toBe(legacyJson);
+    expect(snapshotModule.loadPublicDashboardSnapshot).not.toHaveBeenCalled();
+    expect(persist).toHaveBeenCalledTimes(1);
+    expect(values).toHaveBeenCalledWith(expect.objectContaining({
+      payloadJson: null,
+      payloadBr: record.payloadBr
+    }));
+    expect(_getInMemoryRecordForTest()).toBe(record);
+  });
+
   test("20 个同版本冷请求只读取、编码和持久化一次", async () => {
     const read = deferred<PublicDashboardSnapshotRecord[]>();
     readRows.mockReturnValue(read.promise);
@@ -132,11 +163,14 @@ describe("dashboard-snapshot-store", () => {
     expect(persist).toHaveBeenCalledTimes(1);
     expect(records.every((record) => record === records[0])).toBe(true);
     expect(cacheModule.decodePublicDashboardSnapshot(JSON.parse(records[0].payloadJson))).toEqual(createSnapshot());
+    // 落库只写压缩字节，未压缩 JSON 置空
     expect(values).toHaveBeenCalledWith(expect.objectContaining({
       key: DEFAULT_SNAPSHOT_KEY,
       etag: cacheModule.createPublicDashboardSnapshotEtag(VERSIONS),
-      payloadJson: records[0].payloadJson
+      payloadJson: null,
+      payloadBr: records[0].payloadBr
     }));
+    expect(JSON.parse(brotliDecompressSync(records[0].payloadBr).toString("utf8")).rowCount).toBe(1);
   });
 
   test("并发读取已有快照也只查询一次数据库", async () => {
@@ -333,9 +367,9 @@ describe("dashboard-snapshot-store", () => {
     oldWrite.resolve();
     const [oldRecord, newRecord] = await Promise.all([oldRequest, newRequest]);
 
-    expect(values.mock.calls.map(([record]) => record.payloadJson)).toEqual([
-      oldRecord.payloadJson,
-      newRecord.payloadJson
+    expect(values.mock.calls.map(([row]) => Array.from(row.payloadBr as Uint8Array))).toEqual([
+      Array.from(oldRecord.payloadBr),
+      Array.from(newRecord.payloadBr)
     ]);
     expect(_getInMemoryRecordForTest()).toBe(newRecord);
     expect(persist).toHaveBeenCalledTimes(2);

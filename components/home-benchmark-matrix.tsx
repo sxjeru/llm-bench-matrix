@@ -2,16 +2,25 @@
 
 import { BenchmarkMatrix } from "@/components/benchmark-matrix";
 import { useDashboardSnapshot } from "@/components/dashboard-provider";
+import { MatrixLoadingStatus } from "@/components/matrix-loading-status";
 
 export function HomeBenchmarkMatrix({ urlSyncEnabled = true }: { urlSyncEnabled?: boolean }) {
-  const { snapshot, derived, isLoading, error } = useDashboardSnapshot();
+  const { snapshot, derived, isLoading, error, stage } = useDashboardSnapshot();
 
   if (!snapshot || !derived) {
-    return (
-      <div className="card" role="status">
-        {error ?? (isLoading || snapshot ? "正在加载矩阵数据…" : "暂无矩阵数据")}
-      </div>
-    );
+    if (error) {
+      return <MatrixLoadingStatus error={error} />;
+    }
+
+    if (!isLoading && !snapshot) {
+      return (
+        <div className="card" role="status">
+          暂无矩阵数据
+        </div>
+      );
+    }
+
+    return <MatrixLoadingStatus stage={stage} />;
   }
 
   const {

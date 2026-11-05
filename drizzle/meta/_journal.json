@@ -71,6 +71,13 @@
       "when": 1789392000000,
       "tag": "0009_public_dashboard_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793836800000,
+      "tag": "0010_public_dashboard_snapshot_br",
+      "breakpoints": true
     }
   ]
 }

@@ -42,7 +42,7 @@ export type DashboardRow = {
 const SOURCE_EMPTY_KEY = "__EMPTY__";
 const CACHE_VERSION_PROBE_TTL_MS = 5_000;
 const CACHE_STALE_IF_ERROR_MS = 30 * 60_000;
-const DEFAULT_MAX_DASHBOARD_ROWS = 50_000;
+const DEFAULT_MAX_DASHBOARD_ROWS = 100_000;
 
 const dashboardRowsStore = createVersionedCacheStore<DashboardRow[]>();
 const dashboardStatsStore = createVersionedCacheStore<DashboardStats>();

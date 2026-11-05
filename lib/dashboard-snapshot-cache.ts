@@ -2,10 +2,14 @@ import type { MatrixInputRow, ModelParamsInfo, ModelPriceInfo } from "@/componen
 import type { AaVersionCutoff } from "@/lib/aa-index-revisions";
 
 /**
- * 修改公开快照的字段映射、计算语义或编码格式时递增。
+ * 修改公开快照的字段映射、计算语义、编码格式或持久化表示时递增。
  * 数据版本只跟踪写库；格式版本同时隔离持久化快照和浏览器 HTTP 缓存。
+ *
+ * v3：落库只写 payload_br，payload_json 置空。这里必须递增——上一版读路径
+ * 不区分 null，会把 payload_json 的 null 直接当 body 下发（200 + 空响应体），
+ * 换命名空间后新旧实例各行其是，滚动部署与回滚都不会读到对方写的行。
  */
-export const PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION = 2;
+export const PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION = 3;
 
 export const EXPORT_FOOTNOTE_ALIGNS = ["left", "center", "right"] as const;
 
@@ -36,8 +40,21 @@ export type PublicDashboardSnapshot = {
   aaVersionCutoffs?: AaVersionCutoff[];
 };
 
-export function createPublicDashboardSnapshotEtag(versions: PublicDashboardSnapshotVersions) {
-  return `"dashboard:v${PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION}:${versions.dashboard}:${versions.pricing}:${versions.settings}"`;
+export type PublicDashboardSnapshotEncoding = "br" | "identity";
+
+/**
+ * 快照 ETag 按「表示」变体区分。
+ *
+ * br 与未压缩 JSON 是两份不同表示。Vercel 上编码由 URL 决定、不再发 Vary，
+ * 若两者共用一个 ETag，带 br ETag 的条件请求打到明文端点会命中 304，
+ * 从而复用压缩副本——所以明文变体必须带独立后缀。
+ */
+export function createPublicDashboardSnapshotEtag(
+  versions: PublicDashboardSnapshotVersions,
+  encoding: PublicDashboardSnapshotEncoding = "br"
+) {
+  const suffix = encoding === "identity" ? ":identity" : "";
+  return `"dashboard:v${PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION}:${versions.dashboard}:${versions.pricing}:${versions.settings}${suffix}"`;
 }
 
 /**
