@@ -46,26 +46,37 @@ type DashboardSnapshotContextValue = {
  *
  * 解码与派生索引都是同步重活，若不先让进度条画出来就直接开算，
  * 用户只会看到加载文案冻结在原地，看不出「走到第几步」。
- * 双 rAF 保证上一帧已经上屏；后台标签页里 rAF 可能不触发，用定时器兜底。
+ * 双 rAF 保证上一帧已经上屏。
+ *
+ * 后台标签页不绘制也不跑 rAF，等待只会白白推迟首屏，直接放行；
+ * 兜底定时器只留两帧量级，纯粹防止 rAF 被节流后卡死。
+ * 传入 signal 是为了组件卸载时立刻收掉 rAF 与定时器，而不是等它们自然结束。
  */
-function waitForNextPaint(): Promise<void> {
-  if (typeof window === "undefined") return Promise.resolve();
+function waitForNextPaint(signal: AbortSignal): Promise<void> {
+  if (typeof window === "undefined" || typeof document === "undefined") return Promise.resolve();
+  if (signal.aborted || document.visibilityState === "hidden") return Promise.resolve();
   if (typeof window.requestAnimationFrame !== "function") {
     return new Promise((resolve) => window.setTimeout(resolve, 0));
   }
 
   return new Promise((resolve) => {
     let settled = false;
+    let frame = 0;
+    let timer = 0;
+
     const finish = () => {
       if (settled) return;
       settled = true;
       window.clearTimeout(timer);
+      window.cancelAnimationFrame(frame);
+      signal.removeEventListener("abort", finish);
       resolve();
     };
-    const timer = window.setTimeout(finish, 120);
 
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(finish);
+    timer = window.setTimeout(finish, 32);
+    signal.addEventListener("abort", finish, { once: true });
+    frame = window.requestAnimationFrame(() => {
+      frame = window.requestAnimationFrame(finish);
     });
   });
 }
@@ -148,20 +159,20 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         // 每个阶段都先让进度条画出来再做这一段的重活，否则几段计算会挤在同一帧里，
         // 用户只能看到最后一步的文案。
         setStage("decoding");
-        await waitForNextPaint();
+        await waitForNextPaint(controller.signal);
         if (controller.signal.aborted) return;
 
         const wire = await response.json() as PublicDashboardSnapshotWire;
         const nextSnapshot = decodePublicDashboardSnapshot(wire);
 
         setStage("indexing");
-        await waitForNextPaint();
+        await waitForNextPaint(controller.signal);
         if (controller.signal.aborted) return;
 
         const nextDerived = buildSharedDashboardDerived(nextSnapshot.rows);
 
         setStage("rendering");
-        await waitForNextPaint();
+        await waitForNextPaint(controller.signal);
         if (controller.signal.aborted) return;
 
         snapshotArrived = true;
