@@ -96,7 +96,9 @@ describe("GET /api/public/dashboard", () => {
   });
 
   test("返回完整快照、缓存头和版本号", async () => {
-    const response = await GET(new Request("https://example.com/api/public/dashboard"));
+    const response = await GET(new Request("https://example.com/api/public/dashboard", {
+      headers: { "Accept-Encoding": "gzip" }
+    }));
     const payload = await response.json();
 
     expect(getPublicDashboardSnapshotVersions).toHaveBeenCalledTimes(1);
@@ -138,6 +140,7 @@ describe("GET /api/public/dashboard", () => {
 
     expect(response.headers.get("Content-Encoding")).toBe("br");
     expect(response.headers.get("Vary")).toBe("Accept-Encoding");
+    expect(response.headers.get("X-Payload-Encoding")).toBe("br");
     expect(response.headers.get("Content-Length")).toBe(String(PAYLOAD_BR.byteLength));
     expect(response.headers.get("ETag")).toBe(
       `"dashboard:v${PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION}:dashboard-version:pricing-version:settings-version"`
@@ -147,12 +150,26 @@ describe("GET /api/public/dashboard", () => {
     expect(decodePublicDashboardSnapshot(JSON.parse(body))).toEqual(SNAPSHOT);
   });
 
+  test("缺少 Accept-Encoding 时仍下发预压缩字节（Vercel 边缘会剥离该头）", async () => {
+    // 回归保护：按「缺失 = 不支持」处理会让预压缩分支永远不命中，
+    // 线上退回平台动态压缩（485 KB 而非 400 KB）。
+    const response = await GET(new Request("https://example.com/api/public/dashboard"));
+
+    expect(response.headers.get("Content-Encoding")).toBe("br");
+    expect(response.headers.get("X-Payload-Encoding")).toBe("br");
+    expect(response.headers.get("Content-Length")).toBe(String(PAYLOAD_BR.byteLength));
+    expect(decodePublicDashboardSnapshot(
+      JSON.parse(brotliDecompressSync(Buffer.from(await response.arrayBuffer())).toString("utf8"))
+    )).toEqual(SNAPSHOT);
+  });
+
   test("明确拒绝 br（q=0）时退回未压缩 JSON", async () => {
     const response = await GET(new Request("https://example.com/api/public/dashboard", {
       headers: { "Accept-Encoding": "br;q=0, gzip" }
     }));
 
     expect(response.headers.get("Content-Encoding")).toBeNull();
+    expect(response.headers.get("X-Payload-Encoding")).toBe("identity");
     expect(decodePublicDashboardSnapshot(await response.json())).toEqual(SNAPSHOT);
   });
 
@@ -185,7 +202,7 @@ describe("GET /api/public/dashboard", () => {
     `"dashboard:v${PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION - 1}:dashboard-version:pricing-version:settings-version"`
   ])("旧格式 ETag %s 不返回 304，即使业务数据版本未变", async (oldEtag) => {
     const response = await GET(new Request("https://example.com/api/public/dashboard", {
-      headers: { "If-None-Match": oldEtag }
+      headers: { "Accept-Encoding": "gzip", "If-None-Match": oldEtag }
     }));
 
     expect(response.status).toBe(200);

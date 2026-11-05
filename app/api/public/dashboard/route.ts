@@ -54,31 +54,42 @@ export async function GET(request: Request) {
   }
 
   const record = await getOrBuildPublicDashboardSnapshotRecord(versions);
+  const useBrotli = acceptsBrotli(request.headers.get("accept-encoding"));
 
-  // 自己压好再下发：函数返回的 3.5 MB 文本交给 Vercel 动态压缩只能到 ~475 KB，
-  // 而预压缩的 brotli 是 ~350 KB，且边缘缓存的就是这份字节，无需二次压缩。
-  if (acceptsBrotli(request.headers.get("accept-encoding"))) {
+  // 自己压好再下发：函数返回的 3.6 MB 文本交给平台动态压缩只能到 ~475 KB，
+  // 而预压缩的 brotli 是 ~400 KB，且边缘缓存的就是这份字节，无需二次压缩。
+  if (useBrotli) {
     return new Response(record.payloadBr, {
       headers: {
         ...headers,
         "Content-Type": "application/json; charset=utf-8",
         "Content-Encoding": "br",
-        "Content-Length": String(record.payloadBr.byteLength)
+        "Content-Length": String(record.payloadBr.byteLength),
+        "X-Payload-Encoding": "br"
       }
     });
   }
 
-  // 不支持 br 的客户端（脚本、老爬虫）退回未压缩 JSON，交给上游按需 gzip。
+  // 明确不支持 br 的客户端（脚本、老爬虫）退回未压缩 JSON，交给上游按需 gzip。
   return new Response(record.payloadJson, {
     headers: {
       ...headers,
-      "Content-Type": "application/json; charset=utf-8"
+      "Content-Type": "application/json; charset=utf-8",
+      "X-Payload-Encoding": "identity"
     }
   });
 }
 
+/**
+ * 判断客户端是否接受 br。
+ *
+ * 注意 `acceptEncoding === null` 必须按「接受」处理：Vercel 的边缘在把请求
+ * 转发给函数前会处理掉这个头（压缩由边缘统一负责），函数里经常拿到 null。
+ * 若按「不接受」处理，预压缩分支永远不会命中，等于白压——线上实测下发
+ * 仍会退回平台动态压缩（485 KB vs 预压缩的 400 KB）。
+ */
 function acceptsBrotli(acceptEncoding: string | null): boolean {
-  if (!acceptEncoding) return false;
+  if (!acceptEncoding) return true;
   return acceptEncoding
     .split(",")
     .some((part) => {
