@@ -20,3 +20,12 @@ export const PUBLIC_CACHE_CONTROL_CDN = "public, s-maxage=30, stale-while-revali
 // Vercel 边缘只认自己的头；通用 CDN（EdgeOne 等）走 CDN-Cache-Control。
 export const PUBLIC_CACHE_CONTROL_VERCEL = PUBLIC_CACHE_CONTROL_CDN;
 export const PUBLIC_NO_STORE_CACHE_CONTROL = "private, no-store, no-cache, must-revalidate, max-age=0";
+
+/**
+ * 明文逃生舱（`/api/public/dashboard/plain`）的缓存策略。
+ *
+ * 3.6 MB 明文没必要在边缘滞留一天，而且必须显式 `no-transform`：
+ * 一旦被代理或平台再 gzip 一次，调用方拿到的就不是可直接解析的 JSON，
+ * 这个端点也就失去意义了。
+ */
+export const PUBLIC_PLAIN_CACHE_CONTROL = `${PUBLIC_NO_STORE_CACHE_CONTROL}, no-transform`;

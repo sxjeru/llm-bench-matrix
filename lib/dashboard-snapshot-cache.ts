@@ -40,8 +40,21 @@ export type PublicDashboardSnapshot = {
   aaVersionCutoffs?: AaVersionCutoff[];
 };
 
-export function createPublicDashboardSnapshotEtag(versions: PublicDashboardSnapshotVersions) {
-  return `"dashboard:v${PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION}:${versions.dashboard}:${versions.pricing}:${versions.settings}"`;
+export type PublicDashboardSnapshotEncoding = "br" | "identity";
+
+/**
+ * 快照 ETag 按「表示」变体区分。
+ *
+ * br 与未压缩 JSON 是两份不同表示。Vercel 上编码由 URL 决定、不再发 Vary，
+ * 若两者共用一个 ETag，带 br ETag 的条件请求打到明文端点会命中 304，
+ * 从而复用压缩副本——所以明文变体必须带独立后缀。
+ */
+export function createPublicDashboardSnapshotEtag(
+  versions: PublicDashboardSnapshotVersions,
+  encoding: PublicDashboardSnapshotEncoding = "br"
+) {
+  const suffix = encoding === "identity" ? ":identity" : "";
+  return `"dashboard:v${PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION}:${versions.dashboard}:${versions.pricing}:${versions.settings}${suffix}"`;
 }
 
 /**

@@ -2,6 +2,7 @@ import { brotliCompressSync, brotliDecompressSync } from "node:zlib";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { GET } from "@/app/api/public/dashboard/route";
+import { GET as GET_PLAIN } from "@/app/api/public/dashboard/plain/route";
 import {
   PUBLIC_CACHE_CONTROL_BROWSER,
   PUBLIC_CACHE_CONTROL_CDN,
@@ -127,8 +128,9 @@ describe("GET /api/public/dashboard", () => {
     expect(response.headers.get("X-Dashboard-Version")).toBe("dashboard-version");
     expect(response.headers.get("X-Pricing-Version")).toBe("pricing-version");
     expect(response.headers.get("X-Settings-Version")).toBe("settings-version");
+    // 该用例显式声明不接受 br，走明文表示，ETag 必须带变体后缀
     expect(response.headers.get("ETag")).toBe(
-      `"dashboard:v${PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION}:dashboard-version:pricing-version:settings-version"`
+      `"dashboard:v${PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION}:dashboard-version:pricing-version:settings-version:identity"`
     );
     expect(response.headers.get("Content-Type")).toBe("application/json; charset=utf-8");
   });
@@ -188,6 +190,52 @@ describe("GET /api/public/dashboard", () => {
     expect(response.headers.get("Content-Encoding")).toBeNull();
     expect(response.headers.get("X-Payload-Encoding")).toBe("identity");
     expect(decodePublicDashboardSnapshot(await response.json())).toEqual(SNAPSHOT);
+  });
+
+  test("明文端点返回未压缩 JSON，且不进入公共缓存", async () => {
+    const response = await GET_PLAIN(new Request("https://example.com/api/public/dashboard/plain", {
+      headers: { "Accept-Encoding": "br" }
+    }));
+
+    expect(response.headers.get("Content-Encoding")).toBeNull();
+    expect(response.headers.get("X-Payload-Encoding")).toBe("identity");
+    expect(response.headers.get("Cache-Control")).toContain("no-store");
+    expect(response.headers.get("Cache-Control")).toContain("no-transform");
+    expect(response.headers.get("CDN-Cache-Control")).toBeNull();
+    expect(response.headers.get("Vercel-CDN-Cache-Control")).toBeNull();
+    expect(response.headers.get("Vary")).toBeNull();
+    expect(response.headers.get("ETag")).toBe(
+      `"dashboard:v${PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION}:dashboard-version:pricing-version:settings-version:identity"`
+    );
+    expect(decodePublicDashboardSnapshot(await response.json())).toEqual(SNAPSHOT);
+  });
+
+  test("br 的 ETag 不会让明文端点复用压缩副本", async () => {
+    const compressed = await GET(new Request("https://example.com/api/public/dashboard", {
+      headers: { "Accept-Encoding": "br" }
+    }));
+    const compressedEtag = compressed.headers.get("ETag") ?? "";
+    expect(compressedEtag).not.toContain(":identity");
+
+    const response = await GET_PLAIN(new Request("https://example.com/api/public/dashboard/plain", {
+      headers: { "If-None-Match": compressedEtag }
+    }));
+
+    expect(response.status).toBe(200);
+    expect(decodePublicDashboardSnapshot(await response.json())).toEqual(SNAPSHOT);
+  });
+
+  test("Vercel 环境不输出 Vary，避免按 Accept-Encoding 切分缓存", async () => {
+    vi.stubEnv("VERCEL", "1");
+    try {
+      const response = await GET(new Request("https://example.com/api/public/dashboard"));
+
+      expect(response.headers.get("Vary")).toBeNull();
+      expect(response.headers.get("Content-Encoding")).toBe("br");
+      expect(response.headers.get("CDN-Cache-Control")).toBe(PUBLIC_CACHE_CONTROL_CDN);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   test("边缘允许缓存，并带 stale-while-revalidate 兜住源站慢/冷启动", async () => {
