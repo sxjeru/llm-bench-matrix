@@ -16,7 +16,7 @@
  * 正确性兜底仍是 ETag：过期后浏览器/边缘的再验证请求命中 304 即复用旧副本。
  */
 export const PUBLIC_CACHE_CONTROL_BROWSER = "public, max-age=15, stale-while-revalidate=45";
-export const PUBLIC_CACHE_CONTROL_CDN = "public, s-maxage=30, stale-while-revalidate=300";
+export const PUBLIC_CACHE_CONTROL_CDN = "public, s-maxage=30, stale-while-revalidate=86400";
 // Vercel 边缘只认自己的头；通用 CDN（EdgeOne 等）走 CDN-Cache-Control。
 export const PUBLIC_CACHE_CONTROL_VERCEL = PUBLIC_CACHE_CONTROL_CDN;
 export const PUBLIC_NO_STORE_CACHE_CONTROL = "private, no-store, no-cache, must-revalidate, max-age=0";
