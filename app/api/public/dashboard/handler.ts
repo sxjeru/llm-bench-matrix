@@ -6,6 +6,9 @@ import { createPublicDashboardSnapshotEtag } from "@/lib/dashboard-snapshot-cach
 import { getPublicDashboardSnapshotVersions } from "@/lib/dashboard-snapshot";
 import { getOrBuildPublicDashboardSnapshotRecord } from "@/lib/dashboard-snapshot-store";
 import {
+  PUBLIC_BROTLI_CACHE_CONTROL_BROWSER,
+  PUBLIC_BROTLI_CACHE_CONTROL_CDN,
+  PUBLIC_BROTLI_CACHE_CONTROL_VERCEL,
   PUBLIC_CACHE_CONTROL_BROWSER,
   PUBLIC_CACHE_CONTROL_CDN,
   PUBLIC_CACHE_CONTROL_VERCEL,
@@ -62,12 +65,20 @@ export async function handleDashboardRequest(
 
   const versions = await getPublicDashboardSnapshotVersions();
   const etag = createPublicDashboardSnapshotEtag(versions, useBrotli ? "br" : "identity");
-  const headers = buildHeaders({
-    versions,
-    etag,
-    wantsPlain,
-    remaining: rateLimit.remaining
-  });
+  // 304 也要带上与 200 一致的表示元数据，否则浏览器/边缘复用缓存副本时
+  // 可能丢掉 Content-Encoding，把 br 字节当明文交给 response.json()。
+  const headers: Record<string, string> = {
+    ...buildHeaders({
+      versions,
+      etag,
+      wantsPlain,
+      encoded: useBrotli,
+      remaining: rateLimit.remaining
+    }),
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Payload-Encoding": useBrotli ? "br" : "identity",
+    ...(useBrotli ? { "Content-Encoding": "br" } : {})
+  };
 
   if (ifNoneMatchMatches(request.headers.get("if-none-match"), etag)) {
     return new NextResponse(null, {
@@ -79,37 +90,28 @@ export async function handleDashboardRequest(
   const record = await getOrBuildPublicDashboardSnapshotRecord(versions);
 
   if (useBrotli) {
-    // 自己压好再下发：函数返回的 3.6 MB 文本交给平台动态压缩只能到 ~475 KB，
-    // 而预压缩的 brotli 是 ~400 KB，且边缘缓存的就是这份字节，无需二次压缩。
+    // 数据库出站仍是 ~400 KB 预压缩字节；no-transform 阻止边缘再压一层，
+    // 否则响应只标一层编码，浏览器解压后仍是 br 字节。
     return new Response(record.payloadBr, {
       headers: {
         ...headers,
-        "Content-Type": "application/json; charset=utf-8",
-        "Content-Encoding": "br",
-        "Content-Length": String(record.payloadBr.byteLength),
-        "X-Payload-Encoding": "br"
+        "Content-Length": String(record.payloadBr.byteLength)
       }
     });
   }
 
-  // 明文分支：不开公共缓存（3.6 MB 明文没必要在边缘滞留），
-  // no-transform 防止上游再压一次导致调用方拿不到可直接解析的 JSON。
-  return new Response(record.payloadJson, {
-    headers: {
-      ...headers,
-      "Content-Type": "application/json; charset=utf-8",
-      "X-Payload-Encoding": "identity"
-    }
-  });
+  // 明文分支：no-transform 防止上游再压一次导致调用方拿不到可直接解析的 JSON。
+  return new Response(record.payloadJson, { headers });
 }
 
 function buildHeaders(input: {
   versions: PublicDashboardSnapshotVersions;
   etag: string;
   wantsPlain: boolean;
+  encoded: boolean;
   remaining: number;
 }): Record<string, string> {
-  const { versions, etag, wantsPlain, remaining } = input;
+  const { versions, etag, wantsPlain, encoded, remaining } = input;
   const headers: Record<string, string> = {
     ETag: etag,
     "X-Dashboard-Version": versions.dashboard,
@@ -123,15 +125,15 @@ function buildHeaders(input: {
     return headers;
   }
 
-  headers["Cache-Control"] = PUBLIC_CACHE_CONTROL_BROWSER;
-  headers["CDN-Cache-Control"] = PUBLIC_CACHE_CONTROL_CDN;
-  headers["Vercel-CDN-Cache-Control"] = PUBLIC_CACHE_CONTROL_VERCEL;
+  headers["Cache-Control"] = encoded ? PUBLIC_BROTLI_CACHE_CONTROL_BROWSER : PUBLIC_CACHE_CONTROL_BROWSER;
+  headers["CDN-Cache-Control"] = encoded ? PUBLIC_BROTLI_CACHE_CONTROL_CDN : PUBLIC_CACHE_CONTROL_CDN;
+  headers["Vercel-CDN-Cache-Control"] = encoded
+    ? PUBLIC_BROTLI_CACHE_CONTROL_VERCEL
+    : PUBLIC_CACHE_CONTROL_VERCEL;
 
-  // Vercel 上编码由 URL 决定，响应不随 Accept-Encoding 变化，Vary 只会把缓存
-  // 按不同的 AE 字符串切成多份；自托管仍按 AE 协商，才需要 Vary。
-  if (!isVercel()) {
-    headers.Vary = "Accept-Encoding";
-  }
+  // 编码随客户端 Accept-Encoding 变化，Vercel 也可能改写入站头。不声明 Vary 时
+  // 各层 CDN 会把压缩副本与非压缩副本混在同一缓存键下，导致请求方拿到编码不匹配的 body。
+  headers.Vary = "Accept-Encoding";
 
   return headers;
 }

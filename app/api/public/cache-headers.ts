@@ -29,3 +29,15 @@ export const PUBLIC_NO_STORE_CACHE_CONTROL = "private, no-store, no-cache, must-
  * 这个端点也就失去意义了。
  */
 export const PUBLIC_PLAIN_CACHE_CONTROL = `${PUBLIC_NO_STORE_CACHE_CONTROL}, no-transform`;
+
+/**
+ * 预压缩 br 表示的缓存策略：额外带 `no-transform`，禁止 Vercel / EdgeOne 等
+ * 中间层对已压缩的 payload_br 再压一次。
+ *
+ * 二次压缩后响应仍只有一层 `Content-Encoding: br`，浏览器解压一层拿到的
+ * 还是 Brotli 字节，前端 `response.json()` 会直接抛二进制解析错误。
+ * 三个头都要带：CDN-Cache-Control 对共享缓存优先于 Cache-Control。
+ */
+export const PUBLIC_BROTLI_CACHE_CONTROL_BROWSER = `${PUBLIC_CACHE_CONTROL_BROWSER}, no-transform`;
+export const PUBLIC_BROTLI_CACHE_CONTROL_CDN = `${PUBLIC_CACHE_CONTROL_CDN}, no-transform`;
+export const PUBLIC_BROTLI_CACHE_CONTROL_VERCEL = `${PUBLIC_CACHE_CONTROL_VERCEL}, no-transform`;

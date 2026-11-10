@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { GET } from "@/app/api/public/dashboard/route";
 import { GET as GET_PLAIN } from "@/app/api/public/dashboard/plain/route";
 import {
+  PUBLIC_BROTLI_CACHE_CONTROL_BROWSER,
+  PUBLIC_BROTLI_CACHE_CONTROL_CDN,
+  PUBLIC_BROTLI_CACHE_CONTROL_VERCEL,
   PUBLIC_CACHE_CONTROL_BROWSER,
   PUBLIC_CACHE_CONTROL_CDN,
   PUBLIC_CACHE_CONTROL_VERCEL
@@ -125,6 +128,7 @@ describe("GET /api/public/dashboard", () => {
     expect(response.headers.get("Cache-Control")).toBe(PUBLIC_CACHE_CONTROL_BROWSER);
     expect(response.headers.get("CDN-Cache-Control")).toBe(PUBLIC_CACHE_CONTROL_CDN);
     expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe(PUBLIC_CACHE_CONTROL_VERCEL);
+    expect(response.headers.get("Cache-Control")).not.toContain("no-transform");
     expect(response.headers.get("X-Dashboard-Version")).toBe("dashboard-version");
     expect(response.headers.get("X-Pricing-Version")).toBe("pricing-version");
     expect(response.headers.get("X-Settings-Version")).toBe("settings-version");
@@ -144,6 +148,10 @@ describe("GET /api/public/dashboard", () => {
     expect(response.headers.get("Vary")).toBe("Accept-Encoding");
     expect(response.headers.get("X-Payload-Encoding")).toBe("br");
     expect(response.headers.get("Content-Length")).toBe(String(PAYLOAD_BR.byteLength));
+    // 禁止平台把已经压好的 payload_br 再压一层，否则浏览器只解一层仍是二进制
+    expect(response.headers.get("Cache-Control")).toBe(PUBLIC_BROTLI_CACHE_CONTROL_BROWSER);
+    expect(response.headers.get("CDN-Cache-Control")).toBe(PUBLIC_BROTLI_CACHE_CONTROL_CDN);
+    expect(response.headers.get("Vercel-CDN-Cache-Control")).toBe(PUBLIC_BROTLI_CACHE_CONTROL_VERCEL);
     expect(response.headers.get("ETag")).toBe(
       `"dashboard:v${PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION}:dashboard-version:pricing-version:settings-version"`
     );
@@ -225,14 +233,15 @@ describe("GET /api/public/dashboard", () => {
     expect(decodePublicDashboardSnapshot(await response.json())).toEqual(SNAPSHOT);
   });
 
-  test("Vercel 环境不输出 Vary，避免按 Accept-Encoding 切分缓存", async () => {
+  test("Vercel 环境同样声明 Vary 与 no-transform，避免缓存串味与二次压缩", async () => {
     vi.stubEnv("VERCEL", "1");
     try {
       const response = await GET(new Request("https://example.com/api/public/dashboard"));
 
-      expect(response.headers.get("Vary")).toBeNull();
+      expect(response.headers.get("Vary")).toBe("Accept-Encoding");
       expect(response.headers.get("Content-Encoding")).toBe("br");
-      expect(response.headers.get("CDN-Cache-Control")).toBe(PUBLIC_CACHE_CONTROL_CDN);
+      expect(response.headers.get("CDN-Cache-Control")).toBe(PUBLIC_BROTLI_CACHE_CONTROL_CDN);
+      expect(response.headers.get("CDN-Cache-Control")).toContain("no-transform");
     } finally {
       vi.unstubAllEnvs();
     }
@@ -260,6 +269,10 @@ describe("GET /api/public/dashboard", () => {
 
     expect(response.status).toBe(304);
     expect(getOrBuildPublicDashboardSnapshotRecord).not.toHaveBeenCalled();
+    // 304 必须保留表示元数据，缓存副本被复用时才不会把 br 字节当明文解析
+    expect(response.headers.get("Content-Encoding")).toBe("br");
+    expect(response.headers.get("Vary")).toBe("Accept-Encoding");
+    expect(response.headers.get("Cache-Control")).toContain("no-transform");
   });
 
   test.each([
