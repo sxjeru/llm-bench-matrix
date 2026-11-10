@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db/client";
 import { getSettings, invalidateAllCaches, saveSetting } from "@/lib/db/queries";
@@ -8,6 +8,7 @@ import {
   ensureModelByProviderId,
   ensureProvider,
   importExternalBenchmarkRows,
+  resolveMergedModelTargets,
   type ExternalImportResult
 } from "@/lib/admin-service";
 import {
@@ -115,6 +116,15 @@ async function getStoredMappings() {
     .where(eq(externalModelMappings.source, ARTIFICIAL_ANALYSIS_SOURCE_ID));
 }
 
+/** 已合并模型 -> 最终活跃模型，用来归一化历史上残留的外部映射。 */
+async function getMergedModelTargets(): Promise<Map<number, number>> {
+  const rows = await db
+    .select({ id: models.id, mergedIntoModelId: models.mergedIntoModelId })
+    .from(models)
+    .where(isNotNull(models.mergedIntoModelId));
+  return resolveMergedModelTargets(rows);
+}
+
 export async function getArtificialAnalysisConfig(): Promise<ArtificialAnalysisImportConfig> {
   const settingsMap = await getSettings();
   return normalizeImportConfig(settingsMap[ARTIFICIAL_ANALYSIS_SETTINGS_KEY]);
@@ -138,10 +148,11 @@ function toUpstreamOption(model: ArtificialAnalysisModel): UpstreamOnlyModel {
 export async function getArtificialAnalysisAdminSnapshot(options?: {
   forceRefresh?: boolean;
 }): Promise<ArtificialAnalysisAdminSnapshot> {
-  const [config, localModels, storedMappings] = await Promise.all([
+  const [config, localModels, storedMappings, mergedTargets] = await Promise.all([
     getArtificialAnalysisConfig(),
     getLocalModels(),
-    getStoredMappings()
+    getStoredMappings(),
+    getMergedModelTargets()
   ]);
 
   if (!hasArtificialAnalysisApiKey()) {
@@ -165,16 +176,27 @@ export async function getArtificialAnalysisAdminSnapshot(options?: {
   const snapshot = await getArtificialAnalysisSnapshot({ forceRefresh: options?.forceRefresh });
   const upstreamById = new Map(snapshot.models.map((model) => [model.id, model]));
 
-  const pinnedMatches = new Map<number, ModelMatchResult>();
+  // 模型合并后旧映射可能仍挂在已弃用的 model_id 上。读取时按最终活跃模型归一化：
+  // 既让它继续生效，又避免把对应上游条目误判成「上游独有模型」。
+  const activeModelIds = new Set(localModels.map((model) => model.id));
   const manualByModelId = new Map<number, (typeof storedMappings)[number]>();
   for (const stored of storedMappings) {
     if (stored.modelId === null) continue;
-    manualByModelId.set(stored.modelId, stored);
+    const finalModelId = mergedTargets.get(stored.modelId) ?? stored.modelId;
+    if (!activeModelIds.has(finalModelId)) continue;
+    const current = manualByModelId.get(finalModelId);
+    // 活跃模型自己的映射优先于已合并来源的残留映射
+    if (!current || stored.modelId === finalModelId) {
+      manualByModelId.set(finalModelId, stored);
+    }
+  }
 
+  const pinnedMatches = new Map<number, ModelMatchResult>();
+  for (const [modelId, stored] of manualByModelId) {
     if (!stored.manualOverride && stored.matchStatus !== "ignored") continue;
 
-    pinnedMatches.set(stored.modelId, {
-      modelId: stored.modelId,
+    pinnedMatches.set(modelId, {
+      modelId,
       externalModelId: stored.externalModelId,
       externalModelName: stored.externalModelName,
       externalModelSlug: stored.externalModelSlug,
@@ -240,7 +262,8 @@ export async function getArtificialAnalysisAdminSnapshot(options?: {
   });
 
   const boundExternalIds = new Set(
-    mappings.map((mapping) => mapping.externalModelId).filter((id): id is string => id !== null)
+    [...mappings.map((mapping) => mapping.externalModelId), ...storedMappings.map((stored) => stored.externalModelId)]
+      .filter((id): id is string => id !== null)
   );
   const upstreamOnly = snapshot.models
     .filter((model) => !boundExternalIds.has(model.id))
@@ -349,10 +372,45 @@ export async function saveArtificialAnalysisMappings(inputs: unknown) {
           )
         );
       const updatedModelIds = new Set(updates.map((update) => update.modelId));
+      const orphanModelIds = new Set<number>();
+      const hasMergedOwner = existing.some(
+        (mapping) => mapping.modelId !== null && !updatedModelIds.has(mapping.modelId)
+      );
+      // 占用者可能是已合并模型：后台列表里看不到它，无法手动解除绑定。
+      // 解析到最终活跃模型，目标在本批次内就把旧行一并清掉。
+      const mergedTargets = hasMergedOwner
+        ? resolveMergedModelTargets(
+            await tx
+              .select({ id: models.id, mergedIntoModelId: models.mergedIntoModelId })
+              .from(models)
+              .where(isNotNull(models.mergedIntoModelId))
+          )
+        : new Map<number, number>();
+
       for (const mapping of existing) {
-        if (mapping.modelId === null || !updatedModelIds.has(mapping.modelId)) {
-          throw new Error(`上游条目 ${mapping.externalModelId} 已被${mapping.modelId === null ? "其他映射" : `模型 #${mapping.modelId}`}绑定，请先解除绑定或在同一批次中改绑`);
+        if (mapping.modelId !== null && updatedModelIds.has(mapping.modelId)) continue;
+        if (mapping.modelId === null) {
+          throw new Error(`上游条目 ${mapping.externalModelId} 已被其他映射绑定，请先解除绑定或在同一批次中改绑`);
         }
+
+        const finalModelId = mergedTargets.get(mapping.modelId);
+        if (finalModelId !== undefined && updatedModelIds.has(finalModelId)) {
+          orphanModelIds.add(mapping.modelId);
+          continue;
+        }
+
+        const mergedHint = finalModelId === undefined ? "" : `（已合并到模型 #${finalModelId}）`;
+        throw new Error(`上游条目 ${mapping.externalModelId} 已被模型 #${mapping.modelId}${mergedHint}绑定，请先解除绑定或在同一批次中改绑`);
+      }
+
+      // 已合并来源的旧行也要删除，否则插入时会撞上游条目唯一索引。
+      if (orphanModelIds.size > 0) {
+        await tx.delete(externalModelMappings).where(
+          and(
+            eq(externalModelMappings.source, ARTIFICIAL_ANALYSIS_SOURCE_ID),
+            inArray(externalModelMappings.modelId, [...orphanModelIds])
+          )
+        );
       }
     }
 

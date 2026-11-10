@@ -26,7 +26,7 @@ import {
   normalizeNameParenthesisSpacing
 } from "@/lib/import/slot-key";
 import type { ParsedImportRecord } from "@/lib/import/xlsm";
-import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
+import { benchmarkSourceMeta, benchmarkValues, benchmarks, externalModelMappings, models, providers, settings } from "@/lib/db/schema";
 import type { ProviderConfig } from "@/lib/db/schema";
 import { invalidateAllCaches, registerCacheInvalidator } from "@/lib/db/queries";
 import { createVersionedCacheStore, withVersionedCache, invalidateVersionedCacheStore } from "@/lib/server-cache";
@@ -1960,6 +1960,8 @@ export async function deleteProviderAndTransferModels(
           .set({ mergedIntoModelId: conflictTargetId })
           .where(eq(models.mergedIntoModelId, sourceModel.id));
 
+        // 删除模型会级联删掉它的外部映射，先迁到目标模型才能保留绑定关系
+        await migrateExternalModelMappingsOnMerge(tx, sourceModel.id, conflictTargetId);
         await tx.delete(models).where(eq(models.id, sourceModel.id));
       }
 
@@ -2339,6 +2341,7 @@ export async function rebuildModelCanonicalKeysByRule(rawRule: unknown) {
           })
           .where(eq(models.id, duplicate.id));
 
+        await migrateExternalModelMappingsOnMerge(tx, duplicate.id, keeper.id);
         mergedCount += 1;
       }
     }
@@ -2569,6 +2572,83 @@ export async function ensureProvider(name: string, options?: { db?: DbExecutor }
   }
 
   return provider;
+}
+
+/**
+ * 解析每个已合并模型的最终活跃目标。环路或断链一律跳过，避免把数据迁到错误模型。
+ * 用于快照与保存匹配时把历史残留映射归一化到最终活跃模型。
+ */
+export function resolveMergedModelTargets(
+  mergedModels: Array<{ id: number; mergedIntoModelId: number | null }>
+): Map<number, number> {
+  const byId = new Map(mergedModels.map((model) => [model.id, model.mergedIntoModelId]));
+  const targets = new Map<number, number>();
+
+  for (const { id } of mergedModels) {
+    let targetId = byId.get(id) ?? null;
+    const seen = new Set<number>([id]);
+    while (targetId !== null && byId.has(targetId)) {
+      if (seen.has(targetId)) {
+        targetId = null;
+        break;
+      }
+      seen.add(targetId);
+      targetId = byId.get(targetId) ?? null;
+    }
+    if (targetId !== null && targetId !== id) targets.set(id, targetId);
+  }
+
+  return targets;
+}
+
+/**
+ * 模型合并时把外部数据源映射迁到目标模型。
+ *
+ * 映射表同时有 (source, model_id) 和 (source, external_model_id) 两个唯一索引：
+ * 目标已有绑定时只能删掉来源行，否则会撞索引；目标没有绑定时才改 model_id。
+ */
+type ExternalMappingMergeExecutor = Pick<DbTransactionClient, "select" | "update" | "delete">;
+
+export async function migrateExternalModelMappingsOnMerge(
+  executor: ExternalMappingMergeExecutor,
+  sourceModelId: number,
+  targetModelId: number
+): Promise<number> {
+  if (sourceModelId === targetModelId) return 0;
+
+  const sourceRows = await executor
+    .select({ id: externalModelMappings.id, source: externalModelMappings.source })
+    .from(externalModelMappings)
+    .where(eq(externalModelMappings.modelId, sourceModelId));
+  if (sourceRows.length === 0) return 0;
+
+  const now = new Date();
+  let migratedCount = 0;
+
+  for (const source of new Set(sourceRows.map((row) => row.source))) {
+    const ids = sourceRows.filter((row) => row.source === source).map((row) => row.id);
+    const targetRows = await executor
+      .select({ id: externalModelMappings.id })
+      .from(externalModelMappings)
+      .where(
+        and(
+          eq(externalModelMappings.source, source),
+          eq(externalModelMappings.modelId, targetModelId)
+        )
+      );
+
+    if (targetRows.length > 0) {
+      await executor.delete(externalModelMappings).where(inArray(externalModelMappings.id, ids));
+    } else {
+      await executor
+        .update(externalModelMappings)
+        .set({ modelId: targetModelId, updatedAt: now })
+        .where(inArray(externalModelMappings.id, ids));
+    }
+    migratedCount += ids.length;
+  }
+
+  return migratedCount;
 }
 
 async function resolveActiveModel(
@@ -3199,6 +3279,7 @@ export async function mergeEntity(input: {
         .set({ mergedIntoModelId: input.targetId })
         .where(eq(models.mergedIntoModelId, input.sourceId));
 
+      await migrateExternalModelMappingsOnMerge(tx, input.sourceId, input.targetId);
       return;
     }
 
@@ -3779,6 +3860,12 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
         })
         .where(eq(models.id, conflict.id));
 
+      await migrateExternalModelMappingsOnMerge(
+        tx,
+        conflict.id,
+        conflict.mergedIntoModelId ?? current.id
+      );
+
       action = "merged-and-renamed";
       mergedSourceId = conflict.id;
       mergedSourceName = conflict.modelName;
@@ -3837,6 +3924,8 @@ export async function updateMergedEntityRecord(input: {
         .update(models)
         .set({ mergedIntoModelId: input.targetId })
         .where(eq(models.mergedIntoModelId, input.sourceId));
+
+      await migrateExternalModelMappingsOnMerge(tx, input.sourceId, input.targetId);
     } else {
       await tx
         .update(benchmarkValues)

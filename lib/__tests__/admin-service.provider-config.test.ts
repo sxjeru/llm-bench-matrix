@@ -733,6 +733,10 @@ describe("deleteProviderAndTransferModels", () => {
       .mockReturnValueOnce({ from: fromTarget })
       .mockReturnValueOnce({ from: fromSourceModels })
       .mockReturnValueOnce({ from: fromTargetModels })
+      // 合并同名模型时会先查询外部映射，返回空结果表示无需迁移
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) }))
+      })
       .mockReturnValueOnce({ from: fromProviderRows });
 
     const tx = { execute, select, update, delete: deleteFn };

@@ -1114,7 +1114,9 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     const tx = {
       update,
-      select: vi.fn(),
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) }))
+      })),
       insert: vi.fn(),
       delete: vi.fn()
     };
@@ -1145,7 +1147,9 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     const tx = {
       update,
-      select: vi.fn(),
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) }))
+      })),
       insert: vi.fn(),
       delete: vi.fn()
     };
@@ -1177,7 +1181,9 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     const tx = {
       update,
-      select: vi.fn(),
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) }))
+      })),
       insert: vi.fn(),
       delete: vi.fn()
     };

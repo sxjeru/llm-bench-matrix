@@ -5,7 +5,8 @@ import { saveArtificialAnalysisMappings } from "@/lib/external-providers/artific
 const mocks = vi.hoisted(() => ({
   existing: vi.fn(),
   deleteWhere: vi.fn(),
-  insertValues: vi.fn()
+  insertValues: vi.fn(),
+  mergedTargets: vi.fn()
 }));
 
 vi.mock("@/lib/db/client", () => ({
@@ -18,7 +19,9 @@ vi.mock("@/lib/db/client", () => ({
   }
 }));
 vi.mock("@/lib/db/queries", () => ({}));
-vi.mock("@/lib/admin-service", () => ({}));
+vi.mock("@/lib/admin-service", () => ({
+  resolveMergedModelTargets: () => mocks.mergedTargets()
+}));
 vi.mock("@/lib/external-providers/artificial-analysis", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/external-providers/artificial-analysis")>(),
   hasArtificialAnalysisApiKey: () => false
@@ -29,6 +32,7 @@ beforeEach(() => {
   mocks.existing.mockResolvedValue([]);
   mocks.deleteWhere.mockResolvedValue(undefined);
   mocks.insertValues.mockResolvedValue(undefined);
+  mocks.mergedTargets.mockReturnValue(new Map());
 });
 
 describe("saveArtificialAnalysisMappings", () => {
@@ -60,5 +64,30 @@ describe("saveArtificialAnalysisMappings", () => {
       expect.objectContaining({ modelId: 1, externalModelId: "aa-y", manualOverride: true }),
       expect.objectContaining({ modelId: 2, externalModelId: "aa-x", manualOverride: false })
     ]);
+  });
+
+  test("占用者是已合并模型时，最终目标在本批次内则放行并清掉旧行", async () => {
+    mocks.existing.mockResolvedValue([{ modelId: 184, externalModelId: "aa-x" }]);
+    mocks.mergedTargets.mockReturnValue(new Map([[184, 414]]));
+
+    await expect(saveArtificialAnalysisMappings([
+      { modelId: 414, externalModelId: "aa-x", matchStatus: "matched", manualOverride: false }
+    ])).resolves.toEqual({ updatedCount: 1 });
+
+    // 一次删已合并模型的残留旧行，一次删本批次模型的旧映射
+    expect(mocks.deleteWhere).toHaveBeenCalledTimes(2);
+    expect(mocks.insertValues).toHaveBeenCalledWith([
+      expect.objectContaining({ modelId: 414, externalModelId: "aa-x" })
+    ]);
+  });
+
+  test("占用者已合并且目标不在批次时，错误信息给出合并目标", async () => {
+    mocks.existing.mockResolvedValue([{ modelId: 184, externalModelId: "aa-x" }]);
+    mocks.mergedTargets.mockReturnValue(new Map([[184, 414]]));
+
+    await expect(saveArtificialAnalysisMappings([
+      { modelId: 99, externalModelId: "aa-x", matchStatus: "matched", manualOverride: false }
+    ])).rejects.toThrow("已合并到模型 #414");
+    expect(mocks.deleteWhere).not.toHaveBeenCalled();
   });
 });
