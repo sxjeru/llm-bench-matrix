@@ -105,6 +105,27 @@ declare global {
   }
 }
 
+/**
+ * 边缘层可能把响应二次压缩，浏览器只解一层后拿到的不是 JSON。
+ * 主端点解析失败时改用不进公共缓存的明文逃生舱，避免整页白屏。
+ */
+async function parseSnapshotResponse(
+  response: Response,
+  signal: AbortSignal
+): Promise<PublicDashboardSnapshotWire> {
+  try {
+    return await response.json() as PublicDashboardSnapshotWire;
+  } catch (error) {
+    if (signal.aborted) throw error;
+
+    const fallback = await fetch("/api/public/dashboard/plain", { signal });
+    if (!fallback.ok) {
+      throw new Error(`Failed to load dashboard snapshot from plain endpoint: ${fallback.status}`);
+    }
+    return await fallback.json() as PublicDashboardSnapshotWire;
+  }
+}
+
 export function DashboardProvider({ children }: { children: ReactNode }) {
   const [snapshot, setSnapshot] = useState<PublicDashboardSnapshot | null>(null);
   const [derived, setDerived] = useState<SharedDashboardDerived | null>(null);
@@ -162,7 +183,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         await waitForNextPaint(controller.signal);
         if (controller.signal.aborted) return;
 
-        const wire = await response.json() as PublicDashboardSnapshotWire;
+        const wire = await parseSnapshotResponse(response, controller.signal);
         const nextSnapshot = decodePublicDashboardSnapshot(wire);
 
         setStage("indexing");

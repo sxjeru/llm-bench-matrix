@@ -72,6 +72,7 @@ const SNAPSHOT: PublicDashboardSnapshot = {
 
 const STATS_URL = "/api/public/dashboard/stats";
 const SNAPSHOT_URL = "/api/public/dashboard";
+const PLAIN_URL = "/api/public/dashboard/plain";
 
 type RouteHandler = (init?: RequestInit) => Promise<Response>;
 
@@ -79,7 +80,11 @@ type RouteHandler = (init?: RequestInit) => Promise<Response>;
  * 指标卡与矩阵各走一个端点，测试里必须按 URL 分派，
  * 否则轻量统计那一路会误命中完整快照的载荷，掩盖真实时序。
  */
-function stubFetchByRoute(routes: { stats?: RouteHandler; snapshot?: RouteHandler } = {}) {
+function stubFetchByRoute(routes: {
+  stats?: RouteHandler;
+  snapshot?: RouteHandler;
+  plain?: RouteHandler;
+} = {}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
 
@@ -89,6 +94,10 @@ function stubFetchByRoute(routes: { stats?: RouteHandler; snapshot?: RouteHandle
 
     if (url === SNAPSHOT_URL) {
       return routes.snapshot?.(init) ?? Response.json(encodePublicDashboardSnapshot(SNAPSHOT));
+    }
+
+    if (url === PLAIN_URL) {
+      return routes.plain?.(init) ?? Response.json(encodePublicDashboardSnapshot(SNAPSHOT));
     }
 
     throw new Error(`unexpected fetch: ${url}`);
@@ -189,6 +198,31 @@ describe("DashboardProvider", () => {
       );
     });
     expect(screen.queryByTestId("benchmark-matrix")).not.toBeInTheDocument();
+  });
+
+  test("主端点响应不是 JSON 时回退到明文端点而非白屏", async () => {
+    const fetchMock = stubFetchByRoute({
+      snapshot: async () => new Response("\u0000\u0000binary", {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    });
+
+    render(
+      <DashboardProvider>
+        <HomeBenchmarkMatrix />
+      </DashboardProvider>
+    );
+
+    await waitFor(async () => {
+      await flushDeferredDerived();
+      expect(screen.getByTestId("benchmark-matrix")).toBeInTheDocument();
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(PLAIN_URL, {
+      signal: expect.any(AbortSignal)
+    });
+    expect(matrixProps).toHaveBeenLastCalledWith(expect.objectContaining({ rows: ROWS }));
   });
 
   test("请求抛错时展示错误信息而非停在加载态", async () => {
