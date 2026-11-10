@@ -20,7 +20,7 @@
   "dependencies": {
     "@neondatabase/serverless": "^1.2.0",
     "@vercel/analytics": "^2.0.1",
-    "@vercel/speed-insights": "^2.0.0",
+    "@vercel/speed-insights": "^2.1.0",
     "csv-parse": "^7.0.3",
     "dotenv": "^18.0.9",
     "drizzle-orm": "^0.45.4",
