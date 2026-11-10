@@ -302,7 +302,8 @@ describe("BenchmarkMatrix 星号值显示", () => {
       const maxHeight = tooltip.style.maxHeight;
       expect(top).toBeGreaterThanOrEqual(8);
       expect(top).toBeLessThanOrEqual(8);
-      expect(maxHeight).toBe("calc(100vh - 16px)");
+      // jsdom 31 会规范化 calc() 的项顺序（如 "calc(-16px + 100vh)"），只校验等价表达式
+      expect(maxHeight).toMatch(/^calc\((?:100vh - 16px|-16px \+ 100vh)\)$/);
     } finally {
       Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
       restorePrototypeProperty(HTMLElement.prototype, "offsetHeight", offsetHeightDescriptor);
