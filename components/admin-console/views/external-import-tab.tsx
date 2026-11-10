@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { Cloud, Download, Eye, RefreshCw, RotateCcw, Save } from "lucide-react";
 import type {
   ExternalImportSnapshot,
@@ -27,6 +27,27 @@ const REASONING_EFFORT_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "xhigh", label: "xhigh" },
   { value: "max", label: "max" }
 ];
+
+/** 旧接口下线是已知状态，同一条告警只提示一次，之后进入后台导入不再重复显示 */
+const LEGACY_WARNING_STORAGE_KEY = "admin:external-import:aa-legacy-warning-shown";
+
+function readShownLegacyWarning(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(LEGACY_WARNING_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function rememberShownLegacyWarning(warning: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(LEGACY_WARNING_STORAGE_KEY, warning);
+  } catch {
+    // 存储不可用时退化为每个会话提示一次
+  }
+}
 
 const MATCH_REASON_LABELS: Record<string, string> = {
   "source-model-id": "source_model_id 精确命中",
@@ -160,6 +181,16 @@ export function ExternalImportTab({
 }: ExternalImportTabProps) {
   const busy = loading || savingMappings || savingConfig || previewing || importing;
   const apiKeyMissing = snapshot !== null && !snapshot.apiKeyConfigured;
+
+  // 只在挂载时读取已展示过的告警：本次进入后台仍能看到，之后再进入则不再提示
+  const [shownLegacyWarning] = useState(readShownLegacyWarning);
+  const legacyWarning = snapshot?.legacyWarning ?? null;
+  const showLegacyWarning = Boolean(legacyWarning) && legacyWarning !== shownLegacyWarning;
+
+  useEffect(() => {
+    if (!legacyWarning || legacyWarning === shownLegacyWarning) return;
+    rememberShownLegacyWarning(legacyWarning);
+  }, [legacyWarning, shownLegacyWarning]);
 
   const conflictModelIds = useMemo(
     () => new Set((snapshot?.conflicts ?? []).flatMap((conflict) => conflict.modelIds)),
@@ -307,10 +338,10 @@ export function ExternalImportTab({
         </div>
       ) : null}
 
-      {snapshot?.legacyWarning ? (
+      {showLegacyWarning ? (
         <div className="alert alert-warning mb-4 text-sm">
           <span>
-            旧接口拉取失败（{snapshot.legacyWarning}），本次只有复合指数与性能指标可用，
+            旧接口拉取失败（{legacyWarning}），本次只有复合指数与性能指标可用，
             逐项 benchmark（MMLU-Pro / GPQA / HLE 等）缺失。复合指数不受影响。
           </span>
         </div>

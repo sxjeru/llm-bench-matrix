@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
 import { renderReady } from "@/tests/flush-microtasks";
 import userEvent from "@testing-library/user-event";
@@ -650,5 +650,43 @@ describe("ExternalImportTab", () => {
     // 不显示“新”tag，仅显示“未保存”tag
     expect(screen.queryByTestId("new-match-badge-2")).not.toBeInTheDocument();
     expect(screen.getByTestId("dirty-mapping-badge-2")).toHaveTextContent("未保存");
+  });
+});
+
+describe("ExternalImportTab - 旧接口告警只显示一次", () => {
+  const LEGACY_WARNING = "Artificial Analysis 请求失败：410（/data/llms/models）";
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    window.localStorage.clear();
+  });
+
+  test("首次进入显示告警，之后再进入后台导入不再显示", async () => {
+    const snapshot = makeSnapshot({ legacyWarning: LEGACY_WARNING });
+    const first = await renderTab({ snapshot });
+
+    expect(screen.getByText(/旧接口拉取失败/)).toHaveTextContent(LEGACY_WARNING);
+
+    first.unmount();
+    await renderTab({ snapshot: makeSnapshot({ legacyWarning: LEGACY_WARNING }) });
+
+    expect(screen.queryByText(/旧接口拉取失败/)).not.toBeInTheDocument();
+  });
+
+  test("旧接口恢复后又报不同错误时重新提示一次，其他警告不受影响", async () => {
+    const first = await renderTab({ snapshot: makeSnapshot({ legacyWarning: LEGACY_WARNING }) });
+    expect(screen.getByText(/旧接口拉取失败/)).toBeInTheDocument();
+    first.unmount();
+
+    const nextWarning = "Artificial Analysis 请求失败：500（/data/llms/models）";
+    await renderTab({
+      snapshot: makeSnapshot({ legacyWarning: nextWarning, apiKeyConfigured: false })
+    });
+
+    expect(screen.getByText(/旧接口拉取失败/)).toHaveTextContent(nextWarning);
+    expect(screen.getByText(/未配置/)).toBeInTheDocument();
   });
 });
