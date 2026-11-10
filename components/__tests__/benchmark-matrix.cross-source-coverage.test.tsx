@@ -16,6 +16,9 @@ import { buildCoveragePrunedRows } from "@/components/benchmark-matrix/selectors
 
 const mockSearchParams = new URLSearchParams();
 
+// jsdom 31 会把 thickness/color 一并序列化进 text-decoration 简写，名次下划线改断言 line 子属性
+const UNDERLINE_STYLE = "text-decoration-line: underline";
+
 vi.mock("next/navigation", () => ({
   usePathname: () => "/",
   useRouter: () => ({
@@ -922,8 +925,10 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     expect(tdRow.style.boxShadow).toBe("none");
     expect(tdBrowserVariant.style.boxShadow).toBe("none");
 
-    // 无关阴影保持原样
-    expect(tdOther.style.boxShadow).toBe("0 0 0 1px rgba(94, 234, 212, 0.22)");
+    // 无关阴影保持原样；jsdom 31 会重排 box-shadow 分量顺序，因此与同值声明的序列化结果比较
+    const expectedShadow = document.createElement("td");
+    expectedShadow.style.boxShadow = "0 0 0 1px rgba(94, 234, 212, 0.22)";
+    expect(tdOther.style.boxShadow).toBe(expectedShadow.style.boxShadow);
   });
 
   test("表头 tooltip 仅显示点击动作且会随排序状态更新", async () => {
@@ -1388,11 +1393,11 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
 
     expect(screen.getByText("80")).toHaveStyle("font-weight: 800");
     expect(screen.getByText("95")).toHaveStyle("font-weight: 800");
-    expect(screen.getByText("80")).not.toHaveStyle("text-decoration: underline");
-    expect(screen.getByText("95")).not.toHaveStyle("text-decoration: underline");
+    expect(screen.getByText("80")).not.toHaveStyle(UNDERLINE_STYLE);
+    expect(screen.getByText("95")).not.toHaveStyle(UNDERLINE_STYLE);
 
-    expect(screen.getByText("70")).toHaveStyle("text-decoration: underline");
-    expect(screen.getByText("90")).toHaveStyle("text-decoration: underline");
+    expect(screen.getByText("70")).toHaveStyle(UNDERLINE_STYLE);
+    expect(screen.getByText("90")).toHaveStyle(UNDERLINE_STYLE);
   });
 
   test("前端表格双值展示使用紧凑分隔符", async () => {
@@ -1444,9 +1449,9 @@ describe("BenchmarkMatrix 跨页签模型覆盖", () => {
     );
 
     expect(screen.getByText("93")).toHaveStyle("font-weight: 800");
-    expect(screen.getByText("93")).not.toHaveStyle("text-decoration: underline");
+    expect(screen.getByText("93")).not.toHaveStyle(UNDERLINE_STYLE);
 
-    expect(screen.getByText("90")).toHaveStyle("text-decoration: underline");
-    expect(screen.getByText("88")).not.toHaveStyle("text-decoration: underline");
+    expect(screen.getByText("90")).toHaveStyle(UNDERLINE_STYLE);
+    expect(screen.getByText("88")).not.toHaveStyle(UNDERLINE_STYLE);
   });
 });

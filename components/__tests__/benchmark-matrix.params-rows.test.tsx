@@ -197,8 +197,9 @@ describe("BenchmarkMatrix 参数量展示", () => {
     const slashSpan = spans.find((node) => node.textContent === "/");
 
     // 397B 比 Dense Model 的 120B 大，以小为好下排第二 → 两段数值都带下划线
-    expect(activatedSpan?.style.textDecoration).toBe("underline");
-    expect(totalSpan?.style.textDecoration).toBe("underline");
+    // jsdom 31 会把 thickness/color 一并序列化进 text-decoration 简写，只校验下划线类型
+    expect(activatedSpan?.style.textDecoration).toMatch(/^underline\b/);
+    expect(totalSpan?.style.textDecoration).toMatch(/^underline\b/);
     // 斜杠只做分隔，既不加粗也不带下划线，否则会连成一条横穿整格的线
     expect(slashSpan?.style.textDecoration).toBe("");
     expect(slashSpan?.style.fontWeight).toBe("");
