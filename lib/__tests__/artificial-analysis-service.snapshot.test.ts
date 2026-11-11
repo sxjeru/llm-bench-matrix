@@ -46,8 +46,7 @@ const upstreamModel = {
   slug: "claude-fable-5",
   creatorName: "Anthropic",
   releaseDate: null,
-  metrics: {},
-  legacyMetricKeys: []
+  metrics: {}
 };
 
 const storedMapping = {
@@ -96,8 +95,7 @@ beforeEach(() => {
     models: [upstreamModel],
     catalog: [],
     intelligenceIndexVersion: null,
-    freePageCount: 1,
-    legacyWarning: null
+    freePageCount: 1
   });
 });
 

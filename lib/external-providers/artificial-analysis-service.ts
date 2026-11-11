@@ -77,10 +77,8 @@ export type ArtificialAnalysisAdminSnapshot = {
   upstreamOptions: UpstreamOnlyModel[];
   /** Intelligence Index 版本；AA 明确说跨版本分数不可直接比较 */
   intelligenceIndexVersion: number | null;
-  /** 本次拉取翻了几页新 API */
+  /** 本次拉取翻了几页上游列表 */
   freePageCount: number;
-  /** 旧 API（逐项 benchmark 的来源）失败时的原因 */
-  legacyWarning: string | null;
 };
 
 async function getLocalModels(): Promise<Array<LocalModelInput & { providerDisplayName: string | null }>> {
@@ -168,8 +166,7 @@ export async function getArtificialAnalysisAdminSnapshot(options?: {
       conflicts: [],
       upstreamOptions: [],
       intelligenceIndexVersion: null,
-      freePageCount: 0,
-      legacyWarning: null
+      freePageCount: 0
     };
   }
 
@@ -281,8 +278,7 @@ export async function getArtificialAnalysisAdminSnapshot(options?: {
     conflicts,
     upstreamOptions: snapshot.models.map(toUpstreamOption),
     intelligenceIndexVersion: snapshot.intelligenceIndexVersion,
-    freePageCount: snapshot.freePageCount,
-    legacyWarning: snapshot.legacyWarning
+    freePageCount: snapshot.freePageCount
   };
 }
 

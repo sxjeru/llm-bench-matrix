@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
 import { renderReady } from "@/tests/flush-microtasks";
 import userEvent from "@testing-library/user-event";
@@ -24,8 +24,7 @@ function makeSnapshot(overrides: Partial<ExternalImportSnapshot> = {}): External
         modelCount: 120,
         minValue: 0.4,
         maxValue: 0.92,
-        sampleValues: [0.791],
-        legacyOnly: true
+        sampleValues: [0.791]
       },
       {
         key: "performance.median_time_to_first_token_seconds",
@@ -39,8 +38,7 @@ function makeSnapshot(overrides: Partial<ExternalImportSnapshot> = {}): External
         modelCount: 300,
         minValue: 0.38,
         maxValue: 20,
-        sampleValues: [14.939],
-        legacyOnly: false
+        sampleValues: [14.939]
       }
     ],
     config: { selectedMetrics: ["evaluations.mmlu_pro"], metricOverrides: {} },
@@ -99,7 +97,6 @@ function makeSnapshot(overrides: Partial<ExternalImportSnapshot> = {}): External
     ],
     intelligenceIndexVersion: 4.1,
     freePageCount: 3,
-    legacyWarning: null,
     ...overrides
   };
 }
@@ -653,40 +650,3 @@ describe("ExternalImportTab", () => {
   });
 });
 
-describe("ExternalImportTab - 旧接口告警只显示一次", () => {
-  const LEGACY_WARNING = "Artificial Analysis 请求失败：410（/data/llms/models）";
-
-  beforeEach(() => {
-    window.localStorage.clear();
-  });
-
-  afterEach(() => {
-    window.localStorage.clear();
-  });
-
-  test("首次进入显示告警，之后再进入后台导入不再显示", async () => {
-    const snapshot = makeSnapshot({ legacyWarning: LEGACY_WARNING });
-    const first = await renderTab({ snapshot });
-
-    expect(screen.getByText(/旧接口拉取失败/)).toHaveTextContent(LEGACY_WARNING);
-
-    first.unmount();
-    await renderTab({ snapshot: makeSnapshot({ legacyWarning: LEGACY_WARNING }) });
-
-    expect(screen.queryByText(/旧接口拉取失败/)).not.toBeInTheDocument();
-  });
-
-  test("旧接口恢复后又报不同错误时重新提示一次，其他警告不受影响", async () => {
-    const first = await renderTab({ snapshot: makeSnapshot({ legacyWarning: LEGACY_WARNING }) });
-    expect(screen.getByText(/旧接口拉取失败/)).toBeInTheDocument();
-    first.unmount();
-
-    const nextWarning = "Artificial Analysis 请求失败：500（/data/llms/models）";
-    await renderTab({
-      snapshot: makeSnapshot({ legacyWarning: nextWarning, apiKeyConfigured: false })
-    });
-
-    expect(screen.getByText(/旧接口拉取失败/)).toHaveTextContent(nextWarning);
-    expect(screen.getByText(/未配置/)).toBeInTheDocument();
-  });
-});

@@ -17,17 +17,12 @@ import {
  * 只负责「抓取 → 指标目录 → 模型匹配 → 生成导入行」，落库由
  * `importExternalBenchmarkRows`（lib/admin-service.ts）负责。
  *
- * 同时用两个端点，因为免费档下它们的数据是互补的：
+ * 唯一数据源是 `/api/v2/language/models/free`
+ * （文档 https://artificialanalysis.ai/data-api/docs）。分页返回，必须枚举完所有页。
+ * 免费档不含完整逐项 benchmark；指标目录由运行时发现，上游没给的指标不会出现在目录里，
+ * 也不会额外提示。`/api/v2/data/*` 旧端点族已于 2026-11-04 退役（410），不再请求。
  *
- * - 新 API `/api/v2/language/models/free`（文档 https://artificialanalysis.ai/data-api/docs）
- *   是主源：三个复合指数、`artificial_analysis_intelligence_index_cost`、pricing、performance
- *   都以它为准。分页返回，必须枚举完所有页。
- * - 旧 API `/api/v2/data/llms/models` 仍可用，且免费档下**反而**带着逐项 benchmark
- *   （mmlu_pro / gpqa / hle / livecodebench / scicode / math_500 / aime）——
- *   新 API 免费档明确「Excludes the full evaluation set」，逐项分数是 Pro 档才有的。
- *   所以旧 API 只用来补齐新 API 没有的 evaluations，其余字段一律不采信。
- *
- * 两者都用 `x-api-key` 鉴权。使用需按 AA 要求标注数据来源。
+ * 用 `x-api-key` 鉴权。使用需按 AA 要求标注数据来源。
  */
 
 export const ARTIFICIAL_ANALYSIS_SOURCE_ID = "artificial-analysis";
@@ -46,10 +41,8 @@ export const ARTIFICIAL_ANALYSIS_ATTRIBUTION_URL = "https://artificialanalysis.a
  * 将来接它们时在这里加端点常量即可，不必再动请求层。
  */
 const API_BASE_URL = "https://artificialanalysis.ai/api/v2";
-/** 新 API：主源，分页 */
+/** 免费档语言模型列表，分页 */
 const FREE_LANGUAGE_MODELS_ENDPOINT = "/language/models/free";
-/** 旧 API：只用来补 evaluations，单次返回全量 */
-const LEGACY_LLM_MODELS_ENDPOINT = "/data/llms/models";
 const FETCH_TIMEOUT_MS = 60_000;
 const MAX_BYTES = 16 * 1024 * 1024;
 /** 分页失控时的兜底上限，正常终止条件是 pagination.has_more */
@@ -128,23 +121,7 @@ const freeResponseSchema = z
   })
   .loose();
 
-const legacyModelSchema = z
-  .object({
-    id: z.string(),
-    name: z.string().optional(),
-    slug: z.string().optional(),
-    model_creator: z.object({ name: z.string().optional() }).loose().optional(),
-    evaluations: numericRecordSchema.optional()
-  })
-  .loose();
-
-const legacyResponseSchema = z
-  .object({
-    data: z.array(legacyModelSchema)
-  })
-  .loose();
-
-/** 指标键的组前缀。带前缀是为了让两个来源的字段不会撞名，也让 sourceBenchmarkId 自解释。 */
+/** 指标键的组前缀。区分上游字段所在的分组，也让 sourceBenchmarkId 自解释。 */
 export const METRIC_GROUP_PREFIX = {
   evaluation: "evaluations.",
   performance: "performance.",
@@ -152,10 +129,10 @@ export const METRIC_GROUP_PREFIX = {
 } as const;
 
 /**
- * 归一化后的上游模型：两个 API 合并的结果。
+ * 归一化后的上游模型。
  *
  * `metrics` 是扁平化的指标表，键即 catalog 的 key，避免下游还要区分
- * 「这个字段在 evaluations 里还是顶层」。
+ * 「这个字段在 evaluations 里还是顶层」。上游没返回的指标不会出现在表里。
  */
 export type ArtificialAnalysisModel = {
   id: string;
@@ -164,8 +141,6 @@ export type ArtificialAnalysisModel = {
   creatorName: string | null;
   releaseDate: string | null;
   metrics: Record<string, number>;
-  /** 哪些指标是旧 API 补进来的，供后台排查用 */
-  legacyMetricKeys: string[];
 };
 
 // ---------------------------------------------------------------------------
@@ -192,8 +167,6 @@ export type MetricCatalogEntry = {
   minValue: number | null;
   maxValue: number | null;
   sampleValues: number[];
-  /** 该指标是否只能从旧 API 拿到 */
-  legacyOnly: boolean;
 };
 
 type KnownMetric = {
@@ -207,10 +180,10 @@ type KnownMetric = {
 
 /**
  * 已知指标的展示名与分类。命中不到的走 `humanizeMetricKey` 兜底 ——
- * 上游加新指标不需要改代码。
+ * 上游加新指标不需要改代码；反过来，上游不再返回的指标也不会进目录。
  */
 const KNOWN_METRICS: Record<string, KnownMetric> = {
-  // --- 复合指数：新旧 API 都有，0-100 绝对量纲 ---
+  // --- 复合指数：0-100 绝对量纲 ---
   "evaluations.artificial_analysis_intelligence_index": {
     label: "AA Intelligence Index",
     benchmarkType: "Overall",
@@ -232,7 +205,7 @@ const KNOWN_METRICS: Record<string, KnownMetric> = {
     valueScale: "absolute"
   },
 
-  // --- 逐项 benchmark：免费档只有旧 API 给，0-1 小数 ---
+  // --- 逐项 benchmark：Pro 档端点才提供，0-1 小数；免费档缺失时不进目录 ---
   "evaluations.mmlu_pro": { label: "MMLU-Pro", benchmarkType: "Knowledge" },
   "evaluations.gpqa": { label: "GPQA Diamond", benchmarkType: "Reasoning" },
   "evaluations.gpqa_diamond": { label: "GPQA Diamond", benchmarkType: "Reasoning" },
@@ -375,29 +348,23 @@ type MetricStats = {
   values: number[];
   min: number;
   max: number;
-  legacyOnly: boolean;
 };
 
 function collectMetricStats(models: ArtificialAnalysisModel[]) {
   const stats = new Map<string, MetricStats>();
 
   for (const model of models) {
-    const legacyKeys = new Set(model.legacyMetricKeys);
-
     for (const [key, value] of Object.entries(model.metrics)) {
-      const fromLegacy = legacyKeys.has(key);
       const existing = stats.get(key);
 
       if (existing) {
         existing.values.push(value);
         existing.min = Math.min(existing.min, value);
         existing.max = Math.max(existing.max, value);
-        // 只要有一个模型是从新 API 拿到的，这一项就不算「仅旧 API」
-        existing.legacyOnly = existing.legacyOnly && fromLegacy;
         continue;
       }
 
-      stats.set(key, { values: [value], min: value, max: value, legacyOnly: fromLegacy });
+      stats.set(key, { values: [value], min: value, max: value });
     }
   }
 
@@ -455,8 +422,7 @@ export function buildMetricCatalog(models: ArtificialAnalysisModel[]): MetricCat
       modelCount: stats.values.length,
       minValue: stats.min,
       maxValue: stats.max,
-      sampleValues: stats.values.slice(0, 3),
-      legacyOnly: stats.legacyOnly
+      sampleValues: stats.values.slice(0, 3)
     });
   }
 
@@ -562,7 +528,6 @@ async function requestJson<T>(path: string, apiKey: string, schema: z.ZodType<T>
 }
 
 type FreeModel = z.output<typeof freeModelSchema>;
-type LegacyModel = z.output<typeof legacyModelSchema>;
 
 /**
  * 新 API 是分页的，必须一路翻到 `has_more === false` 为止。
@@ -623,89 +588,22 @@ function collectFreeMetrics(model: FreeModel): Record<string, number> {
   return metrics;
 }
 
-function collectLegacyEvaluationMetrics(model: LegacyModel): Record<string, number> {
-  const metrics: Record<string, number> = {};
-
-  for (const [key, value] of Object.entries(model.evaluations ?? {})) {
-    if (EXCLUDED_EVALUATION_PATTERN.test(key)) continue;
-    if (typeof value === "number" && Number.isFinite(value)) {
-      metrics[`${METRIC_GROUP_PREFIX.evaluation}${key}`] = value;
-    }
-  }
-
-  return metrics;
-}
-
-/**
- * 合并两个来源。
- *
- * 新 API 为准，旧 API 只补它没有的 evaluations 键 —— 同名键一律不覆盖，
- * 免得旧接口的陈旧分数把新接口的现行指数盖掉。
- * 按 id 对齐，对不上再退回 slug（AA 明确说 id 稳定、slug 可能变）。
- */
-function mergeUpstreamModels(freeModels: FreeModel[], legacyModels: LegacyModel[]): ArtificialAnalysisModel[] {
-  const legacyById = new Map<string, LegacyModel>();
-  const legacyBySlug = new Map<string, LegacyModel>();
-  for (const legacy of legacyModels) {
-    legacyById.set(legacy.id, legacy);
-    const slugKey = normalizeMatchToken(legacy.slug ?? legacy.name ?? "");
-    if (slugKey && !legacyBySlug.has(slugKey)) legacyBySlug.set(slugKey, legacy);
-  }
-
-  const consumedLegacyIds = new Set<string>();
-  const merged: ArtificialAnalysisModel[] = freeModels.map((free) => {
-    const slugKey = normalizeMatchToken(free.slug ?? free.name);
-    const legacy = legacyById.get(free.id) ?? (slugKey ? legacyBySlug.get(slugKey) : undefined);
-    if (legacy) consumedLegacyIds.add(legacy.id);
-
-    const metrics = collectFreeMetrics(free);
-    const legacyMetricKeys: string[] = [];
-
-    if (legacy) {
-      for (const [key, value] of Object.entries(collectLegacyEvaluationMetrics(legacy))) {
-        if (key in metrics) continue;
-        metrics[key] = value;
-        legacyMetricKeys.push(key);
-      }
-    }
-
-    return {
-      id: free.id,
-      name: free.name,
-      slug: free.slug ?? null,
-      creatorName: free.model_creator?.name ?? null,
-      releaseDate: free.release_date ?? null,
-      metrics,
-      legacyMetricKeys
-    };
-  });
-
-  // 旧 API 独有的模型（多为已下架条目）也保留：静默丢数据比多几个候选更糟
-  for (const legacy of legacyModels) {
-    if (consumedLegacyIds.has(legacy.id)) continue;
-    const metrics = collectLegacyEvaluationMetrics(legacy);
-    if (Object.keys(metrics).length === 0) continue;
-
-    merged.push({
-      id: legacy.id,
-      name: legacy.name ?? legacy.slug ?? legacy.id,
-      slug: legacy.slug ?? null,
-      creatorName: legacy.model_creator?.name ?? null,
-      releaseDate: null,
-      metrics,
-      legacyMetricKeys: Object.keys(metrics)
-    });
-  }
-
-  return merged;
+/** 把上游模型归一化成本项目内部形状；上游没返回的字段不会进 metrics。 */
+function toArtificialAnalysisModel(free: FreeModel): ArtificialAnalysisModel {
+  return {
+    id: free.id,
+    name: free.name,
+    slug: free.slug ?? null,
+    creatorName: free.model_creator?.name ?? null,
+    releaseDate: free.release_date ?? null,
+    metrics: collectFreeMetrics(free)
+  };
 }
 
 export type FetchUpstreamResult = {
   models: ArtificialAnalysisModel[];
   intelligenceIndexVersion: number | null;
   freePageCount: number;
-  /** 旧 API 拉取失败时的原因；失败不阻断，只是拿不到逐项 benchmark */
-  legacyWarning: string | null;
 };
 
 export async function fetchArtificialAnalysisModels(): Promise<FetchUpstreamResult> {
@@ -714,23 +612,12 @@ export async function fetchArtificialAnalysisModels(): Promise<FetchUpstreamResu
     throw new Error("未配置 ARTIFICIAL_ANALYSIS_API_KEY，无法拉取 Artificial Analysis 数据");
   }
 
-  // 旧 API 只是补充来源，它挂掉不该让整次拉取失败 —— 降级成「少了逐项 benchmark」
-  const [free, legacy] = await Promise.all([
-    fetchAllFreeLanguageModels(apiKey),
-    requestJson(LEGACY_LLM_MODELS_ENDPOINT, apiKey, legacyResponseSchema).then(
-      (parsed) => ({ models: parsed.data, warning: null as string | null }),
-      (error: unknown) => ({
-        models: [] as LegacyModel[],
-        warning: error instanceof Error ? error.message : "旧接口拉取失败"
-      })
-    )
-  ]);
+  const free = await fetchAllFreeLanguageModels(apiKey);
 
   return {
-    models: mergeUpstreamModels(free.models, legacy.models),
+    models: free.models.map(toArtificialAnalysisModel),
     intelligenceIndexVersion: free.intelligenceIndexVersion,
-    freePageCount: free.pageCount,
-    legacyWarning: legacy.warning
+    freePageCount: free.pageCount
   };
 }
 
@@ -1003,10 +890,8 @@ export type ArtificialAnalysisSnapshot = {
   catalog: MetricCatalogEntry[];
   /** AA 明确说不同版本的 Intelligence Index 分数不可直接比较，需要在后台显示出来 */
   intelligenceIndexVersion: number | null;
-  /** 新 API 这次翻了几页，用于判断调用额度消耗 */
+  /** 这次翻了几页上游列表，用于判断调用额度消耗 */
   freePageCount: number;
-  /** 旧 API 拉取失败时的原因；此时逐项 benchmark 会缺失，但复合指数仍在 */
-  legacyWarning: string | null;
 };
 
 export async function getArtificialAnalysisSnapshot(options?: {
@@ -1023,8 +908,7 @@ export async function getArtificialAnalysisSnapshot(options?: {
       models: upstream.models,
       catalog: buildMetricCatalog(upstream.models),
       intelligenceIndexVersion: upstream.intelligenceIndexVersion,
-      freePageCount: upstream.freePageCount,
-      legacyWarning: upstream.legacyWarning
+      freePageCount: upstream.freePageCount
     };
   });
 }

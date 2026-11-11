@@ -14,11 +14,7 @@ import {
 } from "@/lib/external-providers/artificial-analysis";
 
 /**
- * fixture 对齐两个上游端点的真实形状：
- *
- * - 新 API `/api/v2/language/models/free`：只给三个复合指数 + performance + cost
- * - 旧 API `/api/v2/data/llms/models`：给逐项 benchmark（免费档下只有它有）
- *
+ * fixture 对齐 `/api/v2/language/models/free` 的真实形状：复合指数 + performance + cost。
  * 模型命名沿用 artificialanalysis.ai/models 上的真实写法
  * （`(max)` / `(Adaptive Reasoning, Max Effort)` / `(Non-reasoning)`）。
  */
@@ -26,8 +22,7 @@ function upstream(
   id: string,
   name: string,
   creator: string,
-  metrics: Record<string, number> = {},
-  legacyMetricKeys: string[] = []
+  metrics: Record<string, number> = {}
 ): ArtificialAnalysisModel {
   return {
     id,
@@ -35,8 +30,7 @@ function upstream(
     slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
     creatorName: creator,
     releaseDate: null,
-    metrics,
-    legacyMetricKeys
+    metrics
   };
 }
 
@@ -215,9 +209,7 @@ describe("buildMetricCatalog", () => {
         "performance.median_output_tokens_per_second": 153.831,
         "performance.median_time_to_first_token_seconds": 14.939,
         "cost.intelligence_index_cost_per_task": 0.0321
-      },
-      // 逐项 benchmark 在免费档下只有旧接口给
-      ["evaluations.mmlu_pro", "evaluations.gpqa", "evaluations.hle"]
+      }
     ),
     upstream(
       "m2",
@@ -227,8 +219,7 @@ describe("buildMetricCatalog", () => {
         "evaluations.artificial_analysis_intelligence_index": 59,
         "evaluations.mmlu_pro": 0.88,
         "performance.median_output_tokens_per_second": 90.2
-      },
-      ["evaluations.mmlu_pro"]
+      }
     )
   ];
 
@@ -263,13 +254,6 @@ describe("buildMetricCatalog", () => {
     expect(byKey.get("performance.median_output_tokens_per_second")?.group).toBe("performance");
     expect(byKey.get("cost.intelligence_index_cost_per_task")?.group).toBe("cost");
     expect(byKey.get("evaluations.mmlu_pro")?.group).toBe("evaluation");
-  });
-
-  test("标出哪些指标只能从旧接口拿到", () => {
-    expect(byKey.get("evaluations.mmlu_pro")?.legacyOnly).toBe(true);
-    expect(byKey.get("evaluations.hle")?.legacyOnly).toBe(true);
-    expect(byKey.get("evaluations.artificial_analysis_intelligence_index")?.legacyOnly).toBe(false);
-    expect(byKey.get("performance.median_output_tokens_per_second")?.legacyOnly).toBe(false);
   });
 
   test("统计覆盖模型数与值域", () => {
@@ -576,7 +560,7 @@ describe("buildImportRows", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 抓取：新 API 分页 + 旧 API 补 evaluations
+// 抓取：免费档列表分页
 // ---------------------------------------------------------------------------
 
 function freePage(page: number, hasMore: boolean, data: unknown[]) {
@@ -611,8 +595,8 @@ function freeModel(id: string, name: string, creator: string) {
   };
 }
 
-/** 按 URL 分派的 fetch mock，记录每次请求以便断言分页行为 */
-function mockUpstream(handlers: { free: unknown[]; legacy?: unknown; legacyStatus?: number }) {
+/** 记录每次请求，以便断言分页行为与不再请求已退役端点 */
+function mockUpstream(free: unknown[]) {
   const calls: string[] = [];
   let freeIndex = 0;
 
@@ -620,17 +604,9 @@ function mockUpstream(handlers: { free: unknown[]; legacy?: unknown; legacyStatu
     "fetch",
     vi.fn(async (url: string) => {
       calls.push(url);
-
-      if (url.includes("/language/models/free")) {
-        const body = handlers.free[freeIndex] ?? handlers.free[handlers.free.length - 1];
-        freeIndex += 1;
-        return jsonResponse(body);
-      }
-
-      if (handlers.legacyStatus && handlers.legacyStatus >= 400) {
-        return { ok: false, status: handlers.legacyStatus, headers: { get: () => null } };
-      }
-      return jsonResponse(handlers.legacy ?? { data: [] });
+      const body = free[freeIndex] ?? free[free.length - 1];
+      freeIndex += 1;
+      return jsonResponse(body);
     })
   );
 
@@ -659,27 +635,27 @@ describe("fetchArtificialAnalysisModels", () => {
     vi.unstubAllGlobals();
   });
 
-  test("枚举完新 API 的所有分页，直到 has_more 为 false", async () => {
-    const calls = mockUpstream({
-      free: [
-        freePage(1, true, [freeModel("aa-1", "GPT 5.4 (max)", "OpenAI")]),
-        freePage(2, true, [freeModel("aa-2", "Claude Opus 5 (max)", "Anthropic")]),
-        freePage(3, false, [freeModel("aa-3", "Kimi K3 (max)", "Kimi")])
-      ]
-    });
+  test("枚举完所有分页，直到 has_more 为 false，且不再请求已退役的旧端点", async () => {
+    const calls = mockUpstream([
+      freePage(1, true, [freeModel("aa-1", "GPT 5.4 (max)", "OpenAI")]),
+      freePage(2, true, [freeModel("aa-2", "Claude Opus 5 (max)", "Anthropic")]),
+      freePage(3, false, [freeModel("aa-3", "Kimi K3 (max)", "Kimi")])
+    ]);
 
     const result = await fetchArtificialAnalysisModels();
 
     expect(result.models.map((model) => model.id)).toEqual(["aa-1", "aa-2", "aa-3"]);
     expect(result.freePageCount).toBe(3);
     expect(result.intelligenceIndexVersion).toBe(4.1);
+    expect(calls).toHaveLength(3);
+    expect(calls.every((url) => url.includes("/language/models/free"))).toBe(true);
     expect(calls.filter((url) => url.includes("page=1"))).toHaveLength(1);
     expect(calls.filter((url) => url.includes("page=3"))).toHaveLength(1);
     expect(calls.some((url) => url.includes("page=4"))).toBe(false);
   });
 
-  test("新 API 的指标带组前缀，pricing 不进指标表", async () => {
-    mockUpstream({ free: [freePage(1, false, [freeModel("aa-1", "GPT 5.4 (max)", "OpenAI")])] });
+  test("指标带组前缀，pricing 不进指标表", async () => {
+    mockUpstream([freePage(1, false, [freeModel("aa-1", "GPT 5.4 (max)", "OpenAI")])]);
 
     const { models } = await fetchArtificialAnalysisModels();
     const metrics = models[0]!.metrics;
@@ -692,73 +668,13 @@ describe("fetchArtificialAnalysisModels", () => {
     expect(Object.keys(metrics).some((key) => key.includes("price_1m"))).toBe(false);
   });
 
-  test("旧 API 补齐新 API 没有的逐项 benchmark，并标注来源", async () => {
-    mockUpstream({
-      free: [freePage(1, false, [freeModel("aa-1", "GPT 5.4 (max)", "OpenAI")])],
-      legacy: {
-        data: [
-          {
-            id: "aa-1",
-            name: "GPT 5.4 (max)",
-            slug: "gpt-5-4-max",
-            evaluations: { mmlu_pro: 0.791, gpqa: 0.748, artificial_analysis_intelligence_index: 55 }
-          }
-        ]
-      }
-    });
+  test("上游没返回的指标不进 metrics，catalog 里自然也不会出现", async () => {
+    mockUpstream([freePage(1, false, [freeModel("aa-1", "GPT 5.4 (max)", "OpenAI")])]);
 
     const { models } = await fetchArtificialAnalysisModels();
-    const model = models[0]!;
+    const catalog = buildMetricCatalog(models);
 
-    expect(model.metrics["evaluations.mmlu_pro"]).toBe(0.791);
-    expect(model.metrics["evaluations.gpqa"]).toBe(0.748);
-    expect(model.legacyMetricKeys).toEqual(
-      expect.arrayContaining(["evaluations.mmlu_pro", "evaluations.gpqa"])
-    );
-    // 同名键不覆盖：复合指数以新 API 为准
-    expect(model.metrics["evaluations.artificial_analysis_intelligence_index"]).toBe(61);
-    expect(model.legacyMetricKeys).not.toContain("evaluations.artificial_analysis_intelligence_index");
-  });
-
-  test("id 对不上时退回 slug 对齐", async () => {
-    mockUpstream({
-      free: [freePage(1, false, [freeModel("new-id", "GPT 5.4 (max)", "OpenAI")])],
-      legacy: {
-        data: [{ id: "old-id", name: "GPT 5.4 (max)", slug: "gpt-5-4-max", evaluations: { mmlu_pro: 0.8 } }]
-      }
-    });
-
-    const { models } = await fetchArtificialAnalysisModels();
-
-    expect(models).toHaveLength(1);
-    expect(models[0]!.metrics["evaluations.mmlu_pro"]).toBe(0.8);
-  });
-
-  test("旧 API 挂掉时降级而不是整体失败", async () => {
-    mockUpstream({
-      free: [freePage(1, false, [freeModel("aa-1", "GPT 5.4 (max)", "OpenAI")])],
-      legacyStatus: 500
-    });
-
-    const result = await fetchArtificialAnalysisModels();
-
-    expect(result.models).toHaveLength(1);
-    expect(result.models[0]!.metrics["evaluations.artificial_analysis_intelligence_index"]).toBe(61);
-    expect(result.legacyWarning).toContain("500");
-  });
-
-  test("旧 API 独有的模型也保留，不静默丢数据", async () => {
-    mockUpstream({
-      free: [freePage(1, false, [freeModel("aa-1", "GPT 5.4 (max)", "OpenAI")])],
-      legacy: {
-        data: [{ id: "retired", name: "已下架模型", slug: "retired-model", evaluations: { mmlu_pro: 0.5 } }]
-      }
-    });
-
-    const { models } = await fetchArtificialAnalysisModels();
-
-    expect(models.map((model) => model.id)).toEqual(["aa-1", "retired"]);
-    expect(models[1]!.legacyMetricKeys).toEqual(["evaluations.mmlu_pro"]);
+    expect(catalog.some((entry) => entry.key === "evaluations.mmlu_pro")).toBe(false);
   });
 
   test("未配置 API key 时直接报错", async () => {

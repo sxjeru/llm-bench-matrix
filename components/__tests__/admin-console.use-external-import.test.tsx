@@ -51,8 +51,7 @@ function makeSnapshot(): ExternalImportSnapshot {
     conflicts: [],
     upstreamOptions: [],
     intelligenceIndexVersion: 4.1,
-    freePageCount: 1,
-    legacyWarning: null
+    freePageCount: 1
   };
 }
 

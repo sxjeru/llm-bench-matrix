@@ -284,8 +284,6 @@ export type ExternalMetricCatalogEntry = {
   minValue: number | null;
   maxValue: number | null;
   sampleValues: number[];
-  /** 该指标只能从旧 API 拿到（新 API 免费档不含逐项 benchmark） */
-  legacyOnly: boolean;
 };
 
 export type ExternalMetricOverride = {
@@ -347,7 +345,6 @@ export type ExternalImportSnapshot = {
   upstreamOptions: ExternalUpstreamModel[];
   intelligenceIndexVersion: number | null;
   freePageCount: number;
-  legacyWarning: string | null;
 };
 
 export type ExternalImportPreviewRow = {
