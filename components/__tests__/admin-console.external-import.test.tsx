@@ -27,7 +27,7 @@ function makeSnapshot(overrides: Partial<ExternalImportSnapshot> = {}): External
         sampleValues: [0.791]
       },
       {
-        key: "performance.median_time_to_first_token_seconds",
+        key: "performance_v3.mean_time_to_first_token_seconds",
         group: "performance",
         label: "Time To First Token",
         unit: "s",
@@ -186,7 +186,7 @@ describe("ExternalImportTab", () => {
 
     await user.click(screen.getByLabelText("选择数据项 Time To First Token"));
 
-    expect(onToggleMetric).toHaveBeenCalledWith("performance.median_time_to_first_token_seconds");
+    expect(onToggleMetric).toHaveBeenCalledWith("performance_v3.mean_time_to_first_token_seconds");
   });
 
   test("把「默认取上游最高强度」的匹配来源翻译成中文说明", async () => {

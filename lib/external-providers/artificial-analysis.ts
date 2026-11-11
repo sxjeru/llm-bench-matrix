@@ -22,6 +22,10 @@ import {
  * 免费档不含完整逐项 benchmark；指标目录由运行时发现，上游没给的指标不会出现在目录里，
  * 也不会额外提示。`/api/v2/data/*` 旧端点族已于 2026-11-04 退役（410），不再请求。
  *
+ * 性能只消费 `performance_v3`（旧 `performance` 从 2026-12-10 起返回 null）。
+ * 免费档的 v3 只有 3 个 mean_* 字段，`time_per_task_seconds` / `workloads` / `bucket_date`
+ * 是 Pro-only，这里没有也不补；口径与旧的 median_* 不同，benchmark 名独立。
+ *
  * 用 `x-api-key` 鉴权。使用需按 AA 要求标注数据来源。
  */
 
@@ -89,6 +93,12 @@ const intelligenceIndexCostSchema = z
   })
   .loose();
 
+/**
+ * `performance_v3` 在 Pro shape 里混有 `workloads` 对象与 `bucket_date` 字符串，
+ * 所以不能用 numericRecordSchema 收，改为宽松 record + 运行时只取数值。
+ */
+const performanceV3Schema = z.record(z.string(), z.unknown());
+
 const freeModelSchema = z
   .object({
     id: z.string(),
@@ -99,7 +109,7 @@ const freeModelSchema = z
     evaluations: numericRecordSchema.nullable().optional(),
     artificial_analysis_intelligence_index_cost: intelligenceIndexCostSchema.nullable().optional(),
     pricing: numericRecordSchema.nullable().optional(),
-    performance: numericRecordSchema.nullable().optional()
+    performance_v3: performanceV3Schema.nullable().optional()
   })
   .loose();
 
@@ -121,10 +131,15 @@ const freeResponseSchema = z
   })
   .loose();
 
-/** 指标键的组前缀。区分上游字段所在的分组，也让 sourceBenchmarkId 自解释。 */
+/**
+ * 指标键的组前缀。区分上游字段所在的分组，也让 sourceBenchmarkId 自解释。
+ *
+ * `performance_v3` 从 2026-12-10 起取代旧 `performance` 字段；两者口径不同
+ * （median → 过去 5 天各 workload 的 mean），因此用独立前缀，绝不落到同一条 benchmark 上。
+ */
 export const METRIC_GROUP_PREFIX = {
   evaluation: "evaluations.",
-  performance: "performance.",
+  performanceV3: "performance_v3.",
   cost: "cost."
 } as const;
 
@@ -151,7 +166,7 @@ export type MetricGroup = "evaluation" | "performance" | "cost";
 export type MetricValueScale = "fraction" | "absolute";
 
 export type MetricCatalogEntry = {
-  /** 带组前缀的指标键，如 `evaluations.mmlu_pro`、`performance.median_output_tokens_per_second` */
+  /** 带组前缀的指标键，如 `evaluations.mmlu_pro`、`performance_v3.mean_output_tokens_per_second` */
   key: string;
   group: MetricGroup;
   /** 默认 benchmark 名称，后台可覆盖 */
@@ -250,30 +265,24 @@ const KNOWN_METRICS: Record<string, KnownMetric> = {
     valueScale: "absolute"
   },
 
-  // --- 性能：绝对量纲 ---
-  "performance.median_output_tokens_per_second": {
-    label: "Output Speed",
+  // --- Performance v3：12-10 起取代旧 performance 字段，口径不可与旧 median_* 混用 ---
+  // 免费档只有这 3 个 mean_* 字段；time_per_task_seconds / workloads 是 Pro-only。
+  "performance_v3.mean_output_tokens_per_second": {
+    label: "Output Speed (v3)",
     benchmarkType: "Performance",
     unit: "tokens/s",
     higherIsBetter: true,
     valueScale: "absolute"
   },
-  "performance.median_time_to_first_token_seconds": {
-    label: "Time To First Token",
+  "performance_v3.mean_time_to_first_token_seconds": {
+    label: "Time To First Token (v3)",
     benchmarkType: "Performance",
     unit: "s",
     higherIsBetter: false,
     valueScale: "absolute"
   },
-  "performance.median_time_to_first_answer_token_seconds": {
-    label: "Time To First Answer Token",
-    benchmarkType: "Performance",
-    unit: "s",
-    higherIsBetter: false,
-    valueScale: "absolute"
-  },
-  "performance.median_end_to_end_response_time_seconds": {
-    label: "End-to-End Response Time",
+  "performance_v3.mean_time_to_first_answer_token_seconds": {
+    label: "Time To First Answer Token (v3)",
     benchmarkType: "Performance",
     unit: "s",
     higherIsBetter: false,
@@ -386,7 +395,7 @@ function inferValueScale(stats: MetricStats): MetricValueScale {
 }
 
 function getMetricGroup(key: string): MetricGroup {
-  if (key.startsWith(METRIC_GROUP_PREFIX.performance)) return "performance";
+  if (key.startsWith(METRIC_GROUP_PREFIX.performanceV3)) return "performance";
   if (key.startsWith(METRIC_GROUP_PREFIX.cost)) return "cost";
   return "evaluation";
 }
@@ -575,8 +584,10 @@ function collectFreeMetrics(model: FreeModel): Record<string, number> {
     put(`${METRIC_GROUP_PREFIX.evaluation}${key}`, value);
   }
 
-  for (const [key, value] of Object.entries(model.performance ?? {})) {
-    put(`${METRIC_GROUP_PREFIX.performance}${key}`, value);
+  // 只消费 performance_v3：旧 performance 从 2026-12-10 起全部返回 null。
+  // put 只收 number，Pro shape 里的 workloads 对象、bucket_date 字符串、null 都会被跳过。
+  for (const [key, value] of Object.entries(model.performance_v3 ?? {})) {
+    put(`${METRIC_GROUP_PREFIX.performanceV3}${key}`, value);
   }
 
   // pricing 有意不进指标表：token 单价由既有的「价格管理」(models.dev) 负责，

@@ -206,8 +206,8 @@ describe("buildMetricCatalog", () => {
         "evaluations.hle": 0.087,
         "evaluations.some_new_upstream_eval": 41.2,
         "evaluations.response_latency_seconds": 3.2,
-        "performance.median_output_tokens_per_second": 153.831,
-        "performance.median_time_to_first_token_seconds": 14.939,
+        "performance_v3.mean_output_tokens_per_second": 62.36,
+        "performance_v3.mean_time_to_first_token_seconds": 3.45,
         "cost.intelligence_index_cost_per_task": 0.0321
       }
     ),
@@ -218,7 +218,7 @@ describe("buildMetricCatalog", () => {
       {
         "evaluations.artificial_analysis_intelligence_index": 59,
         "evaluations.mmlu_pro": 0.88,
-        "performance.median_output_tokens_per_second": 90.2
+        "performance_v3.mean_output_tokens_per_second": 98.83
       }
     )
   ];
@@ -230,6 +230,15 @@ describe("buildMetricCatalog", () => {
     expect(byKey.get("evaluations.mmlu_pro")?.label).toBe("MMLU-Pro");
     expect(byKey.get("evaluations.gpqa")?.benchmarkType).toBe("Reasoning");
     expect(byKey.get("evaluations.artificial_analysis_intelligence_index")?.label).toBe("AA Intelligence Index");
+  });
+
+  test("Performance v3 指标带 v3 标签、单位与绝对量纲", () => {
+    const speed = byKey.get("performance_v3.mean_output_tokens_per_second");
+    expect(speed?.label).toBe("Output Speed (v3)");
+    expect(speed?.unit).toBe("tokens/s");
+    expect(speed?.valueScale).toBe("absolute");
+    expect(speed?.benchmarkType).toBe("Performance");
+    expect(byKey.get("performance_v3.mean_time_to_first_token_seconds")?.label).toBe("Time To First Token (v3)");
   });
 
   test("未知指标用 humanize 兜底，不会因为上游新增字段而漏掉", () => {
@@ -245,13 +254,13 @@ describe("buildMetricCatalog", () => {
 
   test("延迟与成本类指标判为越低越好", () => {
     expect(byKey.get("evaluations.response_latency_seconds")?.higherIsBetter).toBe(false);
-    expect(byKey.get("performance.median_time_to_first_token_seconds")?.higherIsBetter).toBe(false);
+    expect(byKey.get("performance_v3.mean_time_to_first_token_seconds")?.higherIsBetter).toBe(false);
     expect(byKey.get("cost.intelligence_index_cost_per_task")?.higherIsBetter).toBe(false);
-    expect(byKey.get("performance.median_output_tokens_per_second")?.higherIsBetter).toBe(true);
+    expect(byKey.get("performance_v3.mean_output_tokens_per_second")?.higherIsBetter).toBe(true);
   });
 
   test("按组前缀归组", () => {
-    expect(byKey.get("performance.median_output_tokens_per_second")?.group).toBe("performance");
+    expect(byKey.get("performance_v3.mean_output_tokens_per_second")?.group).toBe("performance");
     expect(byKey.get("cost.intelligence_index_cost_per_task")?.group).toBe("cost");
     expect(byKey.get("evaluations.mmlu_pro")?.group).toBe("evaluation");
   });
@@ -586,11 +595,21 @@ function freeModel(id: string, name: string, creator: string) {
     },
     artificial_analysis_intelligence_index_cost: { total_cost: 812.5, cost_per_task: { total_cost: 0.0321 } },
     pricing: { price_1m_input_tokens: 1.1, price_1m_output_tokens: 4.4 },
+    // 12-10 前上游仍会带旧字段，适配层不再消费它
     performance: {
       median_output_tokens_per_second: 153.831,
       median_time_to_first_token_seconds: 14.939,
       median_time_to_first_answer_token_seconds: 20.1,
       median_end_to_end_response_time_seconds: 24.2
+    },
+    performance_v3: {
+      mean_output_tokens_per_second: 62.36,
+      mean_time_to_first_token_seconds: 3.45,
+      mean_time_to_first_answer_token_seconds: 79.11,
+      // Pro shape 会混入非数值字段，free 档也要能安全跳过
+      workloads: { "1k": { mean_time_to_first_token_seconds: 1.96 } },
+      bucket_date: "2026-10-30",
+      endpoint_error_rate: null
     }
   };
 }
@@ -661,11 +680,43 @@ describe("fetchArtificialAnalysisModels", () => {
     const metrics = models[0]!.metrics;
 
     expect(metrics["evaluations.artificial_analysis_intelligence_index"]).toBe(61);
-    expect(metrics["performance.median_end_to_end_response_time_seconds"]).toBe(24.2);
+    expect(metrics["performance_v3.mean_output_tokens_per_second"]).toBe(62.36);
     expect(metrics["cost.intelligence_index_total_cost"]).toBe(812.5);
     expect(metrics["cost.intelligence_index_cost_per_task"]).toBe(0.0321);
     // token 单价由既有的「价格管理」负责
     expect(Object.keys(metrics).some((key) => key.includes("price_1m"))).toBe(false);
+  });
+
+  test("只消费 performance_v3：旧字段与 v3 里的非数值字段都不进指标表", async () => {
+    mockUpstream([freePage(1, false, [freeModel("aa-1", "GPT 5.4 (max)", "OpenAI")])]);
+
+    const { models } = await fetchArtificialAnalysisModels();
+    const metrics = models[0]!.metrics;
+
+    expect(Object.keys(metrics).some((key) => key.startsWith("performance."))).toBe(false);
+    expect(metrics["performance_v3.workloads"]).toBeUndefined();
+    expect(metrics["performance_v3.bucket_date"]).toBeUndefined();
+    expect(metrics["performance_v3.endpoint_error_rate"]).toBeUndefined();
+    expect(Object.keys(metrics).filter((key) => key.startsWith("performance_v3."))).toHaveLength(3);
+  });
+
+  test("12-10 后旧 performance 全为 null 时，v3 指标仍完整", async () => {
+    const model = {
+      ...freeModel("aa-1", "GPT 5.4 (max)", "OpenAI"),
+      performance: {
+        median_output_tokens_per_second: null,
+        median_time_to_first_token_seconds: null,
+        median_time_to_first_answer_token_seconds: null,
+        median_end_to_end_response_time_seconds: null
+      }
+    };
+    mockUpstream([freePage(1, false, [model])]);
+
+    const { models } = await fetchArtificialAnalysisModels();
+    const catalog = buildMetricCatalog(models);
+
+    expect(models[0]!.metrics["performance_v3.mean_output_tokens_per_second"]).toBe(62.36);
+    expect(catalog.filter((entry) => entry.group === "performance")).toHaveLength(3);
   });
 
   test("上游没返回的指标不进 metrics，catalog 里自然也不会出现", async () => {
