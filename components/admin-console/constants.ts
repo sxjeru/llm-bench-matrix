@@ -24,6 +24,7 @@ export const RENAME_LIST_VIEWPORT_HEIGHT = 320;
 export const RENAME_LIST_OVERSCAN = 8;
 export const MAPPING_LIST_ROW_HEIGHT = 64;
 export const MAPPING_LIST_HEADER_HEIGHT = 36;
-export const MAPPING_LIST_VIEWPORT_HEIGHT = 600;
+/** 测得真实视口高度前的回退值（12 行）；ResizeObserver 接管后以实际高度为准 */
+export const MAPPING_LIST_VIEWPORT_HEIGHT = 768;
 export const MAPPING_LIST_OVERSCAN = 6;
 export const MERGED_RECORDS_AUTO_COLLAPSE_THRESHOLD = 30;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { Cloud, Download, Eye, RefreshCw, RotateCcw, Save } from "lucide-react";
 import {
   MAPPING_LIST_HEADER_HEIGHT,
@@ -209,20 +209,48 @@ export function ExternalImportTab({
       });
   }, [snapshot, mappingDrafts, searchQuery, statusFilter, conflictModelIds]);
 
+  const mappingHeadingId = useId();
   const [mappingScrollTop, setMappingScrollTop] = useState(0);
+  const [mappingViewportHeight, setMappingViewportHeight] = useState(0);
   const mappingViewportRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const viewport = mappingViewportRef.current;
+    if (!viewport) return;
+
+    const syncViewportHeight = () => {
+      const nextHeight = viewport.clientHeight;
+      if (nextHeight > 0) {
+        setMappingViewportHeight((prev) => (prev === nextHeight ? prev : nextHeight));
+      }
+    };
+
+    syncViewportHeight();
+
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(syncViewportHeight);
+      observer.observe(viewport);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener("resize", syncViewportHeight);
+    return () => window.removeEventListener("resize", syncViewportHeight);
+  }, [filteredMappings.length]);
+
+  const effectiveViewportHeight =
+    mappingViewportHeight > 0 ? mappingViewportHeight : MAPPING_LIST_VIEWPORT_HEIGHT;
 
   const mappingVirtualWindow = useMemo(() => {
     const total = filteredMappings.length;
     if (total === 0) return { start: 0, end: 0 };
 
     const firstVisible = Math.floor(mappingScrollTop / MAPPING_LIST_ROW_HEIGHT);
-    const visibleCount = Math.ceil(MAPPING_LIST_VIEWPORT_HEIGHT / MAPPING_LIST_ROW_HEIGHT);
+    const visibleCount = Math.ceil(effectiveViewportHeight / MAPPING_LIST_ROW_HEIGHT);
     return {
       start: Math.max(0, firstVisible - MAPPING_LIST_OVERSCAN),
       end: Math.min(total, firstVisible + visibleCount + MAPPING_LIST_OVERSCAN)
     };
-  }, [filteredMappings.length, mappingScrollTop]);
+  }, [filteredMappings.length, mappingScrollTop, effectiveViewportHeight]);
 
   const visibleMappings = useMemo(
     () => filteredMappings.slice(mappingVirtualWindow.start, mappingVirtualWindow.end),
@@ -248,7 +276,7 @@ export function ExternalImportTab({
       viewport.scrollTop = maxScrollTop;
       setMappingScrollTop(viewport.scrollTop);
     }
-  }, [mappingListHeight]);
+  }, [mappingListHeight, mappingViewportHeight]);
 
   const matchedCount = snapshot?.mappings.filter(
     (row) => row.matchStatus === "matched" || row.matchStatus === "manual"
@@ -518,7 +546,7 @@ export function ExternalImportTab({
       {/* --- 模型匹配 --- */}
       <div className="mb-5">
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <h4 className="text-base font-semibold">模型匹配</h4>
+          <h4 id={mappingHeadingId} className="text-base font-semibold">模型匹配</h4>
           <span className="text-xs opacity-70">本地未标注推理强度的模型，默认绑定上游同族里最高的档位</span>
           <span className="ml-auto text-xs opacity-70">
             匹配 {filteredMappings.length} 条（虚拟列表渲染）
@@ -546,13 +574,14 @@ export function ExternalImportTab({
           </select>
         </div>
 
-        <div className="rounded-box border border-base-300">
+        <div className="overflow-clip rounded-box border border-base-300">
           <div
             className="admin-mapping-viewport"
             ref={mappingViewportRef}
             data-testid="mapping-list-viewport"
+            role="region"
+            aria-labelledby={mappingHeadingId}
             tabIndex={0}
-            style={{ height: `clamp(360px, 56vh, ${MAPPING_LIST_VIEWPORT_HEIGHT}px)` }}
             onScroll={(event) => setMappingScrollTop(event.currentTarget.scrollTop)}
           >
             <div
@@ -561,12 +590,15 @@ export function ExternalImportTab({
               aria-label="模型匹配"
               aria-rowcount={filteredMappings.length + 1}
             >
-              <div className="admin-mapping-header" role="rowgroup">
+              <div
+                className="admin-mapping-header"
+                role="rowgroup"
+                style={{ height: `${MAPPING_LIST_HEADER_HEIGHT}px` }}
+              >
                 <div
                   className="admin-mapping-row admin-mapping-head-row"
                   role="row"
                   aria-rowindex={1}
-                  style={{ height: `${MAPPING_LIST_HEADER_HEIGHT}px` }}
                 >
                   <div role="columnheader">本地模型</div>
                   <div role="columnheader">上游条目</div>

@@ -2011,51 +2011,66 @@ input.heatmap-alpha-range::-moz-range-track {
   position: relative;
   overflow: auto;
   overscroll-behavior: contain;
+  max-block-size: max(360px, calc(100vh - 130px));
+  max-block-size: max(360px, calc(100dvh - 130px));
+}
+
+.admin-mapping-viewport:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary) 65%, transparent);
+  outline-offset: -2px;
 }
 
 .admin-mapping-table {
+  width: 100%;
   min-width: 1180px;
+  text-align: left;
 }
 
 .admin-mapping-header {
   position: sticky;
-  top: 0;
+  inset-block-start: 0;
   z-index: 2;
-  background: var(--color-base-100, var(--panel));
-  box-shadow: 0 1px 0 #26314f;
+  background-color: var(--color-base-100, var(--panel));
+  border-bottom: 1px solid #2a3658;
+}
+
+.admin-mapping-head-row {
+  height: 100%;
 }
 
 .admin-mapping-row {
   display: grid;
   grid-template-columns: 200px minmax(0, 1fr) 128px 180px 108px 56px;
-  box-shadow: inset 0 -1px 0 rgba(148, 163, 184, 0.12);
-}
-
-.admin-mapping-head-row {
-  box-shadow: none;
 }
 
 .admin-mapping-row > [role="cell"],
 .admin-mapping-row > [role="columnheader"] {
   min-width: 0;
   overflow: hidden;
-  padding: 6px 10px;
+  padding: 6px 8px;
+  font-size: 13px;
+  text-align: left;
 }
 
 .admin-mapping-row > [role="columnheader"] {
   display: flex;
   align-items: center;
-  font-size: 12px;
-  font-weight: 650;
-  color: var(--subtext);
+  white-space: nowrap;
+  font-weight: 600;
+  color: #c8d2e8;
 }
 
-.admin-mapping-cell-center {
+.admin-mapping-row > [role="cell"] {
+  color: #e7ebf7;
+}
+
+.admin-mapping-row > [role="cell"].admin-mapping-cell-center {
   text-align: center;
 }
 
 .admin-mapping-row > [role="columnheader"].admin-mapping-cell-center {
   justify-content: center;
+  text-align: center;
 }
 
 .admin-mapping-body {
@@ -2067,19 +2082,22 @@ input.heatmap-alpha-range::-moz-range-track {
   left: 0;
   right: 0;
   overflow: hidden;
+  border-bottom: 1px solid #2a3658;
 }
 
 .admin-mapping-row.is-striped {
-  background: rgba(148, 163, 184, 0.06);
+  background-color: var(--color-base-200);
 }
 
 .admin-mapping-row.is-conflict {
-  background: rgba(255, 110, 121, 0.1);
+  background-color: rgba(255, 110, 121, 0.1);
+  background-color: color-mix(in oklab, var(--color-error, #ff6e79) 10%, transparent);
 }
 
 .admin-mapping-empty {
   padding: 32px 12px;
   font-size: 14px;
+  color: #e7ebf7;
   text-align: center;
   opacity: 0.6;
 }
