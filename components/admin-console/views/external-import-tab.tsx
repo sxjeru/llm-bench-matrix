@@ -1,7 +1,13 @@
 "use client";
 
-import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { Cloud, Download, Eye, RefreshCw, RotateCcw, Save } from "lucide-react";
+import {
+  MAPPING_LIST_HEADER_HEIGHT,
+  MAPPING_LIST_OVERSCAN,
+  MAPPING_LIST_ROW_HEIGHT,
+  MAPPING_LIST_VIEWPORT_HEIGHT
+} from "../constants";
 import type {
   ExternalImportSnapshot,
   ExternalImportSummary,
@@ -173,6 +179,7 @@ export function ExternalImportTab({
     return snapshot.mappings
       .filter((row) => {
         const draft = mappingDrafts[row.modelId];
+        if (!draft) return false;
         const effectiveStatus = getEffectiveStatus(row, draft);
 
         const matchesQuery =
@@ -201,6 +208,47 @@ export function ExternalImportTab({
         return 0;
       });
   }, [snapshot, mappingDrafts, searchQuery, statusFilter, conflictModelIds]);
+
+  const [mappingScrollTop, setMappingScrollTop] = useState(0);
+  const mappingViewportRef = useRef<HTMLDivElement | null>(null);
+
+  const mappingVirtualWindow = useMemo(() => {
+    const total = filteredMappings.length;
+    if (total === 0) return { start: 0, end: 0 };
+
+    const firstVisible = Math.floor(mappingScrollTop / MAPPING_LIST_ROW_HEIGHT);
+    const visibleCount = Math.ceil(MAPPING_LIST_VIEWPORT_HEIGHT / MAPPING_LIST_ROW_HEIGHT);
+    return {
+      start: Math.max(0, firstVisible - MAPPING_LIST_OVERSCAN),
+      end: Math.min(total, firstVisible + visibleCount + MAPPING_LIST_OVERSCAN)
+    };
+  }, [filteredMappings.length, mappingScrollTop]);
+
+  const visibleMappings = useMemo(
+    () => filteredMappings.slice(mappingVirtualWindow.start, mappingVirtualWindow.end),
+    [filteredMappings, mappingVirtualWindow.start, mappingVirtualWindow.end]
+  );
+  const mappingListHeight = filteredMappings.length * MAPPING_LIST_ROW_HEIGHT;
+
+  useEffect(() => {
+    const viewport = mappingViewportRef.current;
+    if (!viewport) return;
+    viewport.scrollTop = 0;
+    setMappingScrollTop(0);
+  }, [searchQuery, statusFilter, snapshot]);
+
+  useEffect(() => {
+    const viewport = mappingViewportRef.current;
+    if (!viewport) return;
+    const maxScrollTop = Math.max(
+      0,
+      mappingListHeight + MAPPING_LIST_HEADER_HEIGHT - viewport.clientHeight
+    );
+    if (viewport.scrollTop > maxScrollTop) {
+      viewport.scrollTop = maxScrollTop;
+      setMappingScrollTop(viewport.scrollTop);
+    }
+  }, [mappingListHeight]);
 
   const matchedCount = snapshot?.mappings.filter(
     (row) => row.matchStatus === "matched" || row.matchStatus === "manual"
@@ -472,6 +520,9 @@ export function ExternalImportTab({
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <h4 className="text-base font-semibold">模型匹配</h4>
           <span className="text-xs opacity-70">本地未标注推理强度的模型，默认绑定上游同族里最高的档位</span>
+          <span className="ml-auto text-xs opacity-70">
+            匹配 {filteredMappings.length} 条（虚拟列表渲染）
+          </span>
         </div>
 
         <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-[1fr_200px]">
@@ -495,165 +546,199 @@ export function ExternalImportTab({
           </select>
         </div>
 
-        <div className="overflow-x-auto rounded-box border border-base-300">
-          <table className="admin-mapping-table table table-fixed table-zebra table-sm min-w-[1180px]">
-            <thead>
-              <tr>
-                <th className="w-[200px]">本地模型</th>
-                <th>上游条目</th>
-                <th className="w-[128px]">推理强度</th>
-                <th className="w-[180px]">匹配来源</th>
-                <th className="w-[108px]">状态</th>
-                <th className="w-14 text-center">忽略</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredMappings.map((row) => {
-                const draft = mappingDrafts[row.modelId];
-                if (!draft) return null;
-                const dirty = isMappingDraftDirty(row, draft);
-                const effectiveStatus = getEffectiveStatus(row, draft);
-                const isNew = isNewMatchRow(row, draft);
-                const matchReasonLabel = MATCH_REASON_LABELS[row.matchReason] ?? row.matchReason;
-                const selectedUpstream = (snapshot?.upstreamOptions ?? []).find(
-                  (option) => option.externalModelId === draft.externalModelId
-                );
-                const selectedUpstreamLabel = selectedUpstream
-                  ? `${selectedUpstream.externalModelName}${
-                      selectedUpstream.externalCreator ? ` — ${selectedUpstream.externalCreator}` : ""
-                    }`
-                  : draft.externalModelId
-                    ? row.externalModelName ?? draft.externalModelId
-                    : "";
+        <div className="rounded-box border border-base-300">
+          <div
+            className="admin-mapping-viewport"
+            ref={mappingViewportRef}
+            data-testid="mapping-list-viewport"
+            tabIndex={0}
+            style={{ height: `clamp(360px, 56vh, ${MAPPING_LIST_VIEWPORT_HEIGHT}px)` }}
+            onScroll={(event) => setMappingScrollTop(event.currentTarget.scrollTop)}
+          >
+            <div
+              className="admin-mapping-table"
+              role="table"
+              aria-label="模型匹配"
+              aria-rowcount={filteredMappings.length + 1}
+            >
+              <div className="admin-mapping-header" role="rowgroup">
+                <div
+                  className="admin-mapping-row admin-mapping-head-row"
+                  role="row"
+                  aria-rowindex={1}
+                  style={{ height: `${MAPPING_LIST_HEADER_HEIGHT}px` }}
+                >
+                  <div role="columnheader">本地模型</div>
+                  <div role="columnheader">上游条目</div>
+                  <div role="columnheader">推理强度</div>
+                  <div role="columnheader">匹配来源</div>
+                  <div role="columnheader">状态</div>
+                  <div role="columnheader" className="admin-mapping-cell-center">忽略</div>
+                </div>
+              </div>
+              <div
+                className="admin-mapping-body"
+                role="rowgroup"
+                style={mappingListHeight > 0 ? { height: `${mappingListHeight}px` } : undefined}
+              >
+                {visibleMappings.map((row, visibleIndex) => {
+                  const index = mappingVirtualWindow.start + visibleIndex;
+                  const draft = mappingDrafts[row.modelId];
+                  const dirty = isMappingDraftDirty(row, draft);
+                  const effectiveStatus = getEffectiveStatus(row, draft);
+                  const isNew = isNewMatchRow(row, draft);
+                  const isConflict = conflictModelIds.has(row.modelId);
+                  const matchReasonLabel = MATCH_REASON_LABELS[row.matchReason] ?? row.matchReason;
+                  const selectedUpstream = (snapshot?.upstreamOptions ?? []).find(
+                    (option) => option.externalModelId === draft.externalModelId
+                  );
+                  const selectedUpstreamLabel = selectedUpstream
+                    ? `${selectedUpstream.externalModelName}${
+                        selectedUpstream.externalCreator ? ` — ${selectedUpstream.externalCreator}` : ""
+                      }`
+                    : draft.externalModelId
+                      ? row.externalModelName ?? draft.externalModelId
+                      : "";
 
-                return (
-                  <tr key={row.modelId} className={conflictModelIds.has(row.modelId) ? "bg-error/10" : undefined}>
-                    <td className="align-top overflow-hidden">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 truncate">
-                          <span className="min-w-0 truncate font-semibold" title={row.modelName}>
-                            {row.modelName}
-                          </span>
-                          {isNew ? (
-                            <span
-                              data-testid={`new-match-badge-${row.modelId}`}
-                              className="badge badge-success badge-xs shrink-0 font-semibold whitespace-nowrap"
-                            >
-                              新
+                  return (
+                    <div
+                      key={row.modelId}
+                      role="row"
+                      aria-rowindex={index + 2}
+                      data-mapping-row={row.modelId}
+                      className={`admin-mapping-row${
+                        isConflict ? " is-conflict" : index % 2 === 1 ? " is-striped" : ""
+                      }`}
+                      style={{
+                        top: `${index * MAPPING_LIST_ROW_HEIGHT}px`,
+                        height: `${MAPPING_LIST_ROW_HEIGHT}px`
+                      }}
+                    >
+                      <div role="cell">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 truncate">
+                            <span className="min-w-0 truncate font-semibold" title={row.modelName}>
+                              {row.modelName}
                             </span>
-                          ) : null}
-                          {dirty ? (
-                            <span
-                              data-testid={`dirty-mapping-badge-${row.modelId}`}
-                              className="badge badge-warning badge-xs shrink-0 whitespace-nowrap"
-                            >
-                              未保存
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="truncate text-xs opacity-60" title={row.providerName}>
-                          {row.providerName}
+                            {isNew ? (
+                              <span
+                                data-testid={`new-match-badge-${row.modelId}`}
+                                className="badge badge-success badge-xs shrink-0 font-semibold whitespace-nowrap"
+                              >
+                                新
+                              </span>
+                            ) : null}
+                            {dirty ? (
+                              <span
+                                data-testid={`dirty-mapping-badge-${row.modelId}`}
+                                className="badge badge-warning badge-xs shrink-0 whitespace-nowrap"
+                              >
+                                未保存
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="truncate text-xs opacity-60" title={row.providerName}>
+                            {row.providerName}
+                          </div>
                         </div>
                       </div>
-                    </td>
-                    <td className="align-top overflow-hidden">
-                      <div className="min-w-0 max-w-full">
-                        <UpstreamModelCombobox
-                          modelName={row.modelName}
-                          value={draft.externalModelId}
-                          selectedLabel={selectedUpstreamLabel}
-                          options={snapshot?.upstreamOptions ?? []}
-                          onChange={(nextExternalModelId) => {
-                            const selectedOption = (snapshot?.upstreamOptions ?? []).find(
-                              (option) => option.externalModelId === nextExternalModelId
-                            );
-                            const inferredEffort = selectedOption
-                              ? parseModelReasoningEffort(selectedOption.externalModelName).effort ??
-                                (selectedOption.externalModelSlug
-                                  ? parseModelReasoningEffort(selectedOption.externalModelSlug).effort
-                                  : null)
-                              : null;
+                      <div role="cell">
+                        <div className="min-w-0 max-w-full">
+                          <UpstreamModelCombobox
+                            modelName={row.modelName}
+                            value={draft.externalModelId}
+                            selectedLabel={selectedUpstreamLabel}
+                            options={snapshot?.upstreamOptions ?? []}
+                            onChange={(nextExternalModelId) => {
+                              const selectedOption = (snapshot?.upstreamOptions ?? []).find(
+                                (option) => option.externalModelId === nextExternalModelId
+                              );
+                              const inferredEffort = selectedOption
+                                ? parseModelReasoningEffort(selectedOption.externalModelName).effort ??
+                                  (selectedOption.externalModelSlug
+                                    ? parseModelReasoningEffort(selectedOption.externalModelSlug).effort
+                                    : null)
+                                : null;
 
+                              onUpdateMappingDraft(row.modelId, (current) => ({
+                                ...current,
+                                externalModelId: nextExternalModelId,
+                                reasoningEffort: inferredEffort,
+                                ignored: false,
+                                manualOverride: true
+                              }));
+                            }}
+                          />
+                          {row.externalMissing ? (
+                            <div className="mt-1 text-xs text-error">已绑定的上游条目在本次拉取中不存在</div>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div role="cell">
+                        <select
+                          className="select select-bordered select-xs w-full max-w-full overflow-hidden text-ellipsis whitespace-nowrap"
+                          value={draft.reasoningEffort ?? ""}
+                          onChange={(event) => {
+                            const nextEffort = event.target.value || null;
                             onUpdateMappingDraft(row.modelId, (current) => ({
                               ...current,
-                              externalModelId: nextExternalModelId,
-                              reasoningEffort: inferredEffort,
+                              reasoningEffort: nextEffort,
                               ignored: false,
                               manualOverride: true
                             }));
                           }}
-                        />
-                        {row.externalMissing ? (
-                          <div className="mt-1 text-xs text-error">已绑定的上游条目在本次拉取中不存在</div>
-                        ) : null}
-                      </div>
-                    </td>
-                    <td className="align-top overflow-hidden">
-                      <select
-                        className="select select-bordered select-xs w-full max-w-full overflow-hidden text-ellipsis whitespace-nowrap"
-                        value={draft.reasoningEffort ?? ""}
-                        onChange={(event) => {
-                          const nextEffort = event.target.value || null;
-                          onUpdateMappingDraft(row.modelId, (current) => ({
-                            ...current,
-                            reasoningEffort: nextEffort,
-                            ignored: false,
-                            manualOverride: true
-                          }));
-                        }}
-                        aria-label={`${row.modelName} 的推理强度`}
-                      >
-                        {REASONING_EFFORT_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="align-top overflow-hidden">
-                      <div className="line-clamp-2 text-xs leading-5 opacity-75" title={matchReasonLabel}>
-                        {matchReasonLabel}
-                      </div>
-                    </td>
-                    <td className="align-top overflow-hidden">
-                      <div className="flex min-w-0 flex-col items-start gap-1">
-                        <div
-                          className={`inline-flex h-6 items-center rounded-full border px-2.5 text-[11px] font-semibold whitespace-nowrap ${getStatusBadgeClass(
-                            effectiveStatus
-                          )}`}
+                          aria-label={`${row.modelName} 的推理强度`}
                         >
-                          {getStatusLabel(effectiveStatus)}
-                        </div>
-                        <div className="text-[11px] opacity-60 whitespace-nowrap">置信 {row.matchConfidence}</div>
+                          {REASONING_EFFORT_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
                       </div>
-                    </td>
-                    <td className="align-top text-center">
-                      <input
-                        type="checkbox"
-                        className="checkbox checkbox-xs"
-                        checked={draft.ignored}
-                        onChange={(event) => {
-                          const nextIgnored = event.target.checked;
-                          onUpdateMappingDraft(row.modelId, (current) => ({
-                            ...current,
-                            ignored: nextIgnored
-                          }));
-                        }}
-                        aria-label={`忽略 ${row.modelName}`}
-                      />
-                    </td>
-                  </tr>
-                );
-              })}
-              {filteredMappings.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-8 text-center text-sm opacity-60">
-                    {snapshot ? "无匹配记录" : "尚未拉取上游数据"}
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
+                      <div role="cell">
+                        <div className="line-clamp-2 text-xs leading-5 opacity-75" title={matchReasonLabel}>
+                          {matchReasonLabel}
+                        </div>
+                      </div>
+                      <div role="cell">
+                        <div className="flex min-w-0 flex-col items-start gap-1">
+                          <div
+                            className={`inline-flex h-6 items-center rounded-full border px-2.5 text-[11px] font-semibold whitespace-nowrap ${getStatusBadgeClass(
+                              effectiveStatus
+                            )}`}
+                          >
+                            {getStatusLabel(effectiveStatus)}
+                          </div>
+                          <div className="text-[11px] opacity-60 whitespace-nowrap">置信 {row.matchConfidence}</div>
+                        </div>
+                      </div>
+                      <div role="cell" className="admin-mapping-cell-center">
+                        <input
+                          type="checkbox"
+                          className="checkbox checkbox-xs"
+                          checked={draft.ignored}
+                          onChange={(event) => {
+                            const nextIgnored = event.target.checked;
+                            onUpdateMappingDraft(row.modelId, (current) => ({
+                              ...current,
+                              ignored: nextIgnored
+                            }));
+                          }}
+                          aria-label={`忽略 ${row.modelName}`}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+                {filteredMappings.length === 0 ? (
+                  <div className="admin-mapping-empty" role="row">
+                    <div role="cell">{snapshot ? "无匹配记录" : "尚未拉取上游数据"}</div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 

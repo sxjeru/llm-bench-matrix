@@ -2006,15 +2006,82 @@ input.heatmap-alpha-range::-moz-range-track {
   }
 }
 
-/* 后台外部数据源：模型匹配表固定列宽，长上游名不溢出到相邻列 */
-.admin-mapping-table {
-  table-layout: fixed;
+/* 后台外部数据源：模型匹配虚拟列表，固定行高且只渲染可视窗口内的行 */
+.admin-mapping-viewport {
+  position: relative;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
-.admin-mapping-table th,
-.admin-mapping-table td {
+.admin-mapping-table {
+  min-width: 1180px;
+}
+
+.admin-mapping-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--color-base-100, var(--panel));
+  box-shadow: 0 1px 0 #26314f;
+}
+
+.admin-mapping-row {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr) 128px 180px 108px 56px;
+  box-shadow: inset 0 -1px 0 rgba(148, 163, 184, 0.12);
+}
+
+.admin-mapping-head-row {
+  box-shadow: none;
+}
+
+.admin-mapping-row > [role="cell"],
+.admin-mapping-row > [role="columnheader"] {
+  min-width: 0;
   overflow: hidden;
-  vertical-align: top;
+  padding: 6px 10px;
+}
+
+.admin-mapping-row > [role="columnheader"] {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--subtext);
+}
+
+.admin-mapping-cell-center {
+  text-align: center;
+}
+
+.admin-mapping-row > [role="columnheader"].admin-mapping-cell-center {
+  justify-content: center;
+}
+
+.admin-mapping-body {
+  position: relative;
+}
+
+.admin-mapping-body > .admin-mapping-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+}
+
+.admin-mapping-row.is-striped {
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.admin-mapping-row.is-conflict {
+  background: rgba(255, 110, 121, 0.1);
+}
+
+.admin-mapping-empty {
+  padding: 32px 12px;
+  font-size: 14px;
+  text-align: center;
+  opacity: 0.6;
 }
 
 .admin-mapping-table .select {

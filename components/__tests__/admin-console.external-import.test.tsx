@@ -1,8 +1,12 @@
 import { describe, expect, test, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { renderReady } from "@/tests/flush-microtasks";
 import userEvent from "@testing-library/user-event";
 import { ExternalImportTab } from "@/components/admin-console/views/external-import-tab";
+import {
+  MAPPING_LIST_ROW_HEIGHT,
+  MAPPING_LIST_VIEWPORT_HEIGHT
+} from "@/components/admin-console/constants";
 import type { ExternalImportSnapshot, ExternalMappingDraft } from "@/components/admin-console/types";
 
 function makeSnapshot(overrides: Partial<ExternalImportSnapshot> = {}): ExternalImportSnapshot {
@@ -647,6 +651,46 @@ describe("ExternalImportTab", () => {
     // 不显示“新”tag，仅显示“未保存”tag
     expect(screen.queryByTestId("new-match-badge-2")).not.toBeInTheDocument();
     expect(screen.getByTestId("dirty-mapping-badge-2")).toHaveTextContent("未保存");
+  });
+
+  test("模型匹配使用虚拟列表：限制可视高度，只渲染滚动窗口内的行", async () => {
+    const mappings = Array.from({ length: 120 }, (_, index) => ({
+      modelId: index + 1,
+      modelName: `模型 ${index + 1}`,
+      providerName: "OpenAI",
+      externalModelId: null,
+      externalModelName: null,
+      externalCreator: null,
+      reasoningEffort: null,
+      matchStatus: "unmatched" as const,
+      matchConfidence: 0,
+      matchReason: "no-match",
+      manualOverride: false,
+      externalMissing: false
+    }));
+    const { rerender, props } = await renderTab({ snapshot: makeSnapshot({ mappings }) });
+
+    const viewport = screen.getByTestId("mapping-list-viewport");
+    const table = document.querySelector<HTMLElement>(".admin-mapping-table")!;
+    const body = document.querySelector<HTMLElement>(".admin-mapping-body")!;
+
+    expect(viewport.style.height).toContain(`${MAPPING_LIST_VIEWPORT_HEIGHT}px`);
+    expect(body.style.height).toBe(`${mappings.length * MAPPING_LIST_ROW_HEIGHT}px`);
+    expect(within(table).getAllByRole("row").length).toBeLessThan(mappings.length);
+    expect(screen.getByText("模型 1")).toBeInTheDocument();
+    expect(screen.queryByText("模型 100")).not.toBeInTheDocument();
+
+    fireEvent.scroll(viewport, { target: { scrollTop: 90 * MAPPING_LIST_ROW_HEIGHT } });
+
+    expect(screen.queryByText("模型 1")).not.toBeInTheDocument();
+    expect(screen.getByText("模型 91")).toBeInTheDocument();
+    expect(screen.queryByText("模型 110")).not.toBeInTheDocument();
+    expect(within(table).getAllByRole("row")[0]).toHaveTextContent("本地模型");
+
+    rerender(<ExternalImportTab {...props} searchQuery="模型 100" />);
+
+    expect(screen.getByText("模型 100")).toBeInTheDocument();
+    expect(screen.queryByText("模型 91")).not.toBeInTheDocument();
   });
 });
 
