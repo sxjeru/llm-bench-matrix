@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { type ClipboardEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type ClipboardEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EMPTY_SOURCE_OPTIONS } from "@/components/benchmark-matrix/constants";
 import { getJson, postFormData, postJson } from "./admin-console/api";
 import { useEntityLookups } from "./admin-console/hooks/use-entity-lookups";
@@ -40,6 +40,7 @@ import type {
   ScaleConsistencyCheckResult,
   ScaleConsistencyIssue,
   TabKey,
+  TextImportDuplicateCheckPayload,
   TextImportPreviewRow
 } from "./admin-console/types";
 import {
@@ -276,6 +277,19 @@ export function AdminConsole({
   }>({ key: "", status: "idle", stats: [] });
   const [benchmarkPreviewValueOverlapDebouncedTriggerKey, setBenchmarkPreviewValueOverlapDebouncedTriggerKey] = useState("");
   const benchmarkPreviewValueOverlapLastTriggerKeyRef = useRef("");
+  const [autoRefreshImportDuplicates, setAutoRefreshImportDuplicates] = useState(true);
+  const [importDuplicateRefreshState, setImportDuplicateRefreshState] = useState<{
+    status: "idle" | "loading" | "success" | "error";
+    message: string;
+  }>({ status: "idle", message: "" });
+  const [importDuplicateRefreshNonce, setImportDuplicateRefreshNonce] = useState(0);
+  const [importDuplicateRefreshReadyKey, setImportDuplicateRefreshReadyKey] = useState("");
+  const [importDuplicateRefreshFocusVersion, setImportDuplicateRefreshFocusVersion] = useState(0);
+  const importDuplicateRefreshLastKeyRef = useRef("");
+  const importDuplicateRefreshLastNonceRef = useRef(0);
+  const importDuplicateRefreshAbortRef = useRef<AbortController | null>(null);
+  const importMatrixInputFocusedRef = useRef(false);
+  const importDuplicateRefreshKeyRef = useRef("");
   const mergeSubmitResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mergeSubmitButtonRef = useRef<HTMLButtonElement | null>(null);
   const [mergedRecordList, setMergedRecordList] = useState<MergedRecord[]>(mergedRecords);
@@ -395,6 +409,7 @@ export function AdminConsole({
     starRowsMissingSupplementCount,
     finalizedTextImportRows,
     skippedDuplicateRowIndices,
+    textImportDuplicateCheckPayload,
     ignoredTextImportCount,
     textImportPreviewTableRows,
     visibleResolvedTextImportPreviewRows
@@ -439,6 +454,230 @@ export function AdminConsole({
       clearTimeout(timer);
     };
   }, [benchmarkPreviewValueOverlapTriggerKey]);
+
+  useEffect(() => {
+    importDuplicateRefreshKeyRef.current = textImportDuplicateCheckPayload.key;
+  }, [textImportDuplicateCheckPayload.key]);
+
+  useEffect(() => {
+    // 内容一旦变化，旧请求的结果已过期，立即取消避免回写到新内容上
+    importDuplicateRefreshAbortRef.current?.abort();
+    const key = textImportDuplicateCheckPayload.key;
+    const timer = setTimeout(() => {
+      // 仍聚焦在预览矩阵输入框时不发请求，等失焦后按最新内容一次性刷新；
+      // 这里只用于合并勾选/按钮/下拉等非输入类连续操作。
+      if (importMatrixInputFocusedRef.current) return;
+      setImportDuplicateRefreshReadyKey(key);
+    }, 300);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [textImportDuplicateCheckPayload.key]);
+
+  useEffect(() => {
+    if (activeTab !== "import") return;
+
+    function isTextEditingTarget(node: EventTarget | null): boolean {
+      if (node instanceof HTMLTextAreaElement || node instanceof HTMLSelectElement) return true;
+      if (node instanceof HTMLInputElement) {
+        return !["checkbox", "radio", "button", "submit", "reset", "range", "file", "color"].includes(node.type);
+      }
+      return node instanceof HTMLElement && node.isContentEditable;
+    }
+
+    function handleFocusIn(event: FocusEvent) {
+      if (isTextEditingTarget(event.target)) {
+        importMatrixInputFocusedRef.current = true;
+      }
+    }
+
+    function handleFocusOut(event: FocusEvent) {
+      if (!isTextEditingTarget(event.target)) return;
+      const next = event.relatedTarget;
+      const stillEditing = isTextEditingTarget(next);
+      importMatrixInputFocusedRef.current = stillEditing;
+
+      // 焦点真正离开编辑控件后按最新内容刷新；只有「刷新库内重复」按钮自己会强制发起，避免重复请求
+      const isManualRefreshButton = next instanceof HTMLElement
+        && next.closest("[data-import-duplicate-refresh]") !== null;
+      if (!stillEditing && !isManualRefreshButton) {
+        setImportDuplicateRefreshReadyKey(importDuplicateRefreshKeyRef.current);
+        setImportDuplicateRefreshFocusVersion((prev) => prev + 1);
+      }
+    }
+
+    document.addEventListener("focusin", handleFocusIn, true);
+    document.addEventListener("focusout", handleFocusOut, true);
+
+    return () => {
+      document.removeEventListener("focusin", handleFocusIn, true);
+      document.removeEventListener("focusout", handleFocusOut, true);
+    };
+  }, [activeTab]);
+
+  const runImportDuplicateCheck = useCallback(async (payload: TextImportDuplicateCheckPayload) => {
+    const key = payload.key;
+    if (!key || payload.rows.length === 0) return;
+
+    importDuplicateRefreshAbortRef.current?.abort();
+    const controller = new AbortController();
+    importDuplicateRefreshAbortRef.current = controller;
+    importDuplicateRefreshLastKeyRef.current = key;
+    setImportDuplicateRefreshState({ status: "loading", message: "正在检查库内重复…" });
+
+    try {
+      const response = await fetch("/api/admin/import-csv/check-duplicates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: payload.source,
+          rows: payload.rows.map((row) => ({
+            modelName: row.modelName,
+            benchmarkName: row.benchmarkName,
+            rawValue: row.rawValue
+          }))
+        }),
+        signal: controller.signal
+      });
+      const data = await response.json().catch(() => ({}));
+      if (controller.signal.aborted) return;
+      if (!response.ok) {
+        throw new Error(typeof data?.error === "string" ? data.error : "库内重复检查失败");
+      }
+
+      const results: Array<{ isDuplicate?: boolean; duplicateSlotKey?: string }> =
+        Array.isArray(data?.rows) ? data.rows : [];
+      // checked=false 表示无可用来源或查询失败，此时不能覆盖现有重复标记
+      if (data?.checked !== true || results.length !== payload.rows.length) {
+        const skippedReason = Array.isArray(data?.warnings)
+          ? data.warnings.find((item: { reason?: unknown }) => typeof item?.reason === "string")?.reason
+          : undefined;
+        throw new Error(typeof skippedReason === "string" ? skippedReason : "库内重复检查未返回有效结果");
+      }
+
+      const nextFlags = new Map<number, { isDuplicate: boolean; duplicateSlotKey?: string }>();
+      payload.rows.forEach((row, index) => {
+        const result = results[index];
+        nextFlags.set(row.rowIndex, {
+          isDuplicate: Boolean(result?.isDuplicate),
+          duplicateSlotKey: result?.isDuplicate ? result.duplicateSlotKey : undefined
+        });
+      });
+
+      setTextImportDraftRows((prev) => {
+        if (prev.length === 0) return prev;
+        let changed = false;
+        const next = prev.map((row, index) => {
+          const flag = nextFlags.get(index);
+          const isDuplicate = flag?.isDuplicate ?? false;
+          const duplicateSlotKey = flag?.duplicateSlotKey;
+          const originalRawValue = row.rawValue;
+
+          if (
+            Boolean(row.isDuplicate) === isDuplicate
+            && row.duplicateSlotKey === duplicateSlotKey
+            && (row.originalRawValue ?? row.rawValue) === originalRawValue
+            && isSameImportSource(row.source, payload.source)
+          ) {
+            return row;
+          }
+
+          changed = true;
+          return {
+            ...row,
+            isDuplicate,
+            duplicateSlotKey,
+            originalRawValue,
+            source: payload.source
+          };
+        });
+        return changed ? next : prev;
+      });
+
+      const duplicateCount = results.filter((row) => row?.isDuplicate).length;
+      setImportDuplicateRefreshState({
+        status: "success",
+        message: `已按当前矩阵更新：库内重复 ${duplicateCount} 条`
+      });
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      if (error instanceof Error && error.name === "AbortError") return;
+      // 保留已尝试的 key，避免失败后因无关状态变化反复自动重试；手动按钮仍可强制重试
+      const reason = error instanceof Error ? error.message.trim() : "";
+      setImportDuplicateRefreshState({
+        status: "error",
+        message: reason ? `${reason}，可点击「刷新库内重复」重试` : "检查失败，可点击「刷新库内重复」重试"
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    const payload = textImportDuplicateCheckPayload;
+    const isManual = importDuplicateRefreshNonce !== importDuplicateRefreshLastNonceRef.current;
+    importDuplicateRefreshLastNonceRef.current = importDuplicateRefreshNonce;
+
+    const setStatus = (
+      status: "idle" | "loading" | "success" | "error",
+      message: string
+    ) => {
+      setImportDuplicateRefreshState((prev) =>
+        prev.status === status && prev.message === message ? prev : { status, message }
+      );
+    };
+
+    if (!payload.key || payload.rows.length === 0) {
+      importDuplicateRefreshAbortRef.current?.abort();
+      importDuplicateRefreshLastKeyRef.current = "";
+      setStatus("idle", "");
+      return;
+    }
+
+    if (isImportSourceChangedAfterPreview) {
+      importDuplicateRefreshAbortRef.current?.abort();
+      importDuplicateRefreshLastKeyRef.current = "";
+      setStatus("idle", "来源已变更，请点击「重新预览」按新来源校验");
+      return;
+    }
+
+    if (!isManual && !autoRefreshImportDuplicates) {
+      setStatus("idle", "已关闭自动刷新，可手动点击「刷新库内重复」");
+      return;
+    }
+
+    if (!isManual) {
+      // 正在输入框中编辑：内容还没定稿，等失焦后再一次性检查
+      if (importMatrixInputFocusedRef.current) return;
+      if (importDuplicateRefreshReadyKey !== payload.key) return;
+      if (importDuplicateRefreshLastKeyRef.current === payload.key) return;
+    }
+
+    void runImportDuplicateCheck(payload);
+  }, [
+    textImportDuplicateCheckPayload,
+    importDuplicateRefreshReadyKey,
+    importDuplicateRefreshFocusVersion,
+    importDuplicateRefreshNonce,
+    autoRefreshImportDuplicates,
+    isImportSourceChangedAfterPreview,
+    runImportDuplicateCheck
+  ]);
+
+  useEffect(() => () => {
+    importDuplicateRefreshAbortRef.current?.abort();
+  }, []);
+
+  function onRefreshImportDuplicates() {
+    if (!textImportDuplicateCheckPayload.key || isImportSourceChangedAfterPreview) return;
+    setImportDuplicateRefreshNonce((prev) => prev + 1);
+  }
+
+  function onToggleAutoRefreshImportDuplicates(checked: boolean) {
+    setAutoRefreshImportDuplicates(checked);
+    if (checked) {
+      setImportDuplicateRefreshNonce((prev) => prev + 1);
+    }
+  }
 
   function hasBenchmarkEloSuffix(benchmarkName: string): boolean {
     return /\s*[（(]\s*elo\s*[)）]\s*$/i.test(benchmarkName.trim());
@@ -1003,6 +1242,9 @@ export function AdminConsole({
       skipped: skippedCount
     });
     setTextImportPreviewVisibleCount(200);
+    importDuplicateRefreshAbortRef.current?.abort();
+    importDuplicateRefreshLastKeyRef.current = "";
+    setImportDuplicateRefreshState({ status: "idle", message: "" });
 
     notifySuccess(`预览完成：解析 ${parsedCount} 条，警告 ${warningCount} 条；已同步到下方统一预览表`);
 
@@ -1726,6 +1968,9 @@ export function AdminConsole({
       });
       setTextImportPreviewSource(csvSource.trim());
       setTextImportPreviewVisibleCount(200);
+      importDuplicateRefreshAbortRef.current?.abort();
+      importDuplicateRefreshLastKeyRef.current = "";
+      setImportDuplicateRefreshState({ status: "idle", message: "" });
 
       const directionWarningCount = Number(result.warningCount ?? 0);
       const duplicateCount = Number(result.duplicateCount ?? 0);
@@ -3258,6 +3503,10 @@ export function AdminConsole({
             textImportDraftRows={textImportDraftRows}
             finalizedTextImportRows={finalizedTextImportRows}
             skippedDuplicateRowIndices={skippedDuplicateRowIndices}
+            onRefreshImportDuplicates={onRefreshImportDuplicates}
+            importDuplicateRefreshState={importDuplicateRefreshState}
+            autoRefreshImportDuplicates={autoRefreshImportDuplicates}
+            onToggleAutoRefreshImportDuplicates={onToggleAutoRefreshImportDuplicates}
             ignoredTextImportCount={ignoredTextImportCount}
             pairValueRows={pairValueRows}
             pairRowsMissingNoteCount={pairRowsMissingNoteCount}

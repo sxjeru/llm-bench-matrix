@@ -1055,3 +1055,86 @@ describe("useImportPreviewState Hook - duplicate row filtering and slot key inva
   });
 });
 
+describe("useImportPreviewState Hook - textImportDuplicateCheckPayload", () => {
+  const draftRow: TextImportPreviewRow = {
+    rowNumber: 1,
+    providerName: "OpenAI",
+    modelName: "Model A",
+    benchmarkName: "MMLU",
+    benchmarkType: "General",
+    rawValue: "85.5",
+    originalRawValue: "85.5",
+    valueNum: 85.5,
+    valueNum2: null,
+    valueNote: null,
+    source: "paper-src",
+    valid: true
+  };
+
+  test("未填写来源时不产生查重请求", () => {
+    const options = createMockOptions({ textImportDraftRows: [draftRow], csvSource: "" });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    expect(result.current.textImportDuplicateCheckPayload).toEqual({ key: "", source: "", rows: [] });
+  });
+
+  test("查重载荷包含当前矩阵内容，且未 blur 的 name / model 草稿也生效", () => {
+    const options = createMockOptions({
+      textImportDraftRows: [draftRow],
+      csvSource: "paper-src",
+      matrixBenchmarkNameDrafts: { "MMLU@@General": "MMLU-Pro" },
+      matrixModelNameDrafts: { "Model A": "Model A (New)" }
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    const payload = result.current.textImportDuplicateCheckPayload;
+
+    expect(payload.source).toBe("paper-src");
+    expect(payload.rows).toEqual([
+      {
+        rowIndex: 0,
+        modelName: "Model A (New)",
+        benchmarkName: "MMLU-Pro",
+        rawValue: "85.5"
+      }
+    ]);
+    expect(payload.key).toContain("MMLU-Pro");
+  });
+
+  test("修改单元格值后触发键变化，仅改动重复标记时触发键保持稳定", () => {
+    const options = createMockOptions({
+      textImportDraftRows: [draftRow],
+      csvSource: "paper-src"
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    const initialKey = result.current.textImportDuplicateCheckPayload.key;
+
+    const flaggedOptions = createMockOptions({
+      textImportDraftRows: [{ ...draftRow, isDuplicate: true, duplicateSlotKey: "model a::mmlu" }],
+      csvSource: "paper-src"
+    });
+    const { result: flaggedResult } = renderHook(() => useImportPreviewState(flaggedOptions));
+    expect(flaggedResult.current.textImportDuplicateCheckPayload.key).toBe(initialKey);
+
+    const editedOptions = createMockOptions({
+      textImportDraftRows: [{ ...draftRow, rawValue: "88.0" }],
+      csvSource: "paper-src"
+    });
+    const { result: editedResult } = renderHook(() => useImportPreviewState(editedOptions));
+    expect(editedResult.current.textImportDuplicateCheckPayload.key).not.toBe(initialKey);
+  });
+
+  test("已被标记为重复而跳过的行仍留在查重载荷中，便于解绑后再次校验", () => {
+    const options = createMockOptions({
+      textImportDraftRows: [{ ...draftRow, isDuplicate: true, duplicateSlotKey: "model a::mmlu" }],
+      csvSource: "paper-src"
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+    expect(result.current.skippedDuplicateRowIndices.has(0)).toBe(true);
+    expect(result.current.textImportDuplicateCheckPayload.rows).toHaveLength(1);
+    expect(result.current.textImportDuplicateCheckPayload.rows[0].rowIndex).toBe(0);
+  });
+});
+

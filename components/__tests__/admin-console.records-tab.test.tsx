@@ -58,6 +58,11 @@ function mockFetchSequence(...payloads: unknown[]) {
       return createJsonResponse({ stats: [] });
     }
 
+    // 编辑后的库内重复刷新是独立的异步请求，默认短路为「未执行检查」，避免干扰队列
+    if (url === "/api/admin/import-csv/check-duplicates") {
+      return createJsonResponse({ checked: false, rows: [], duplicateCount: 0, warnings: [] });
+    }
+
     return fetchMock(url, init);
   };
 

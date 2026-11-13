@@ -448,6 +448,13 @@ type ImportTabProps = {
   textImportDraftRows: TextImportPreviewRow[];
   finalizedTextImportRows: StructuredCsvImportRow[];
   skippedDuplicateRowIndices?: Set<number>;
+  onRefreshImportDuplicates: () => void;
+  importDuplicateRefreshState: {
+    status: "idle" | "loading" | "success" | "error";
+    message: string;
+  };
+  autoRefreshImportDuplicates: boolean;
+  onToggleAutoRefreshImportDuplicates: (checked: boolean) => void;
   ignoredTextImportCount: number;
   pairValueRows: PairValueRow[];
   pairRowsMissingNoteCount: number;
@@ -573,6 +580,10 @@ export function ImportTab({
   textImportDraftRows,
   finalizedTextImportRows,
   skippedDuplicateRowIndices,
+  onRefreshImportDuplicates,
+  importDuplicateRefreshState,
+  autoRefreshImportDuplicates,
+  onToggleAutoRefreshImportDuplicates,
   ignoredTextImportCount,
   pairValueRows,
   pairRowsMissingNoteCount,
@@ -963,6 +974,46 @@ export function ImportTab({
               {textImportDraftRows.length > 0 ? (
                 <div>
                   当前草稿：{finalizedTextImportRows.length} 条可提交，忽略/空值 {ignoredTextImportCount} 条
+                </div>
+              ) : null}
+              {textImportDraftRows.length > 0 ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-info/20 pt-2 text-xs">
+                  <button
+                    type="button"
+                    data-import-duplicate-refresh="true"
+                    className="btn btn-outline btn-xs font-semibold"
+                    onClick={onRefreshImportDuplicates}
+                    disabled={
+                      isPreviewingTextImport
+                      || isImportingTextCsv
+                      || Boolean(isImportSourceChangedAfterPreview)
+                      || !csvSource.trim()
+                      || importDuplicateRefreshState.status === "loading"
+                    }
+                    title="按当前预览矩阵内容重新校验库内重复，不会覆盖已填写内容"
+                  >
+                    {importDuplicateRefreshState.status === "loading" ? "检查中…" : "刷新库内重复"}
+                  </button>
+                  <label
+                    className="flex cursor-pointer items-center gap-1"
+                    title="输入框聚焦期间不查库，失焦后按最新矩阵内容自动刷新"
+                  >
+                    <input
+                      type="checkbox"
+                      className="checkbox checkbox-xs"
+                      checked={autoRefreshImportDuplicates}
+                      onChange={(event) => onToggleAutoRefreshImportDuplicates(event.target.checked)}
+                    />
+                    修改后自动刷新
+                  </label>
+                  {importDuplicateRefreshState.message ? (
+                    <span className={importDuplicateRefreshState.status === "error" ? "text-error" : "opacity-70"}>
+                      {importDuplicateRefreshState.message}
+                    </span>
+                  ) : null}
+                  {!csvSource.trim() ? (
+                    <span className="opacity-60">未填写来源，暂不检查库内重复</span>
+                  ) : null}
                 </div>
               ) : null}
             </div>

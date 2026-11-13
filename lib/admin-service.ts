@@ -6045,13 +6045,147 @@ function isSameScore(
   return importedRawClean.length > 0 && importedRawClean === existingRawClean;
 }
 
-export type PreviewBenchmarkTextImportOptions = {
-  checkDuplicates?: boolean;
+const DEFAULT_PREVIEW_DUPLICATE_CHECK_TIMEOUT_MS = 10000;
+
+export type TextImportDuplicateCheckRow = {
+  modelName: string;
+  benchmarkName: string;
+  rawValue: string;
+};
+
+export type TextImportDuplicateCheckOptions = {
   duplicateTimeoutMs?: number;
   db?: typeof db;
 };
 
-const DEFAULT_PREVIEW_DUPLICATE_CHECK_TIMEOUT_MS = 10000;
+export type TextImportDuplicateCheckResult = {
+  /** 是否真正查询了库内数据。无来源、查询失败或超时时为 false，调用方应保留原有标记 */
+  checked: boolean;
+  rows: Array<{ isDuplicate: boolean; duplicateSlotKey?: string }>;
+  warnings: DuplicateCheckSkippedWarning[];
+};
+
+/**
+ * 对一组（模型名、benchmark 名、值）按来源查询库内已有的相同分值。
+ * 与 previewBenchmarkTextImport 共用同一套查重规则，用于预览矩阵编辑后的重复状态刷新。
+ */
+export async function checkTextImportPreviewDuplicates(
+  rows: TextImportDuplicateCheckRow[],
+  sourceInput?: string | null,
+  options?: TextImportDuplicateCheckOptions
+): Promise<TextImportDuplicateCheckResult> {
+  const warnings: TextImportDuplicateCheckResult["warnings"] = [];
+  const uncheckedRows = () => rows.map(() => ({ isDuplicate: false }));
+  const rawSource = sourceInput?.trim();
+
+  if (!rawSource) {
+    return { checked: false, rows: uncheckedRows(), warnings };
+  }
+
+  const sourceCandidates = buildSourceLookupCandidates(rawSource);
+  const lowerCandidates = Array.from(new Set(sourceCandidates.map((c) => c.toLowerCase())));
+  const dbClient = options?.db ?? db;
+  const timeoutMs = options?.duplicateTimeoutMs ?? DEFAULT_PREVIEW_DUPLICATE_CHECK_TIMEOUT_MS;
+  const existingValuesBySlot = new Map<
+    string,
+    Array<{ valueRaw: string; valueNum: string | null; valueNum2: string | null }>
+  >();
+
+  try {
+    const queryPromise = Promise.resolve(
+      dbClient
+        .select({
+          valueRaw: benchmarkValues.valueRaw,
+          valueNum: benchmarkValues.valueNum,
+          valueNum2: benchmarkValues.valueNum2,
+          source: benchmarkValues.source,
+          modelName: models.modelName,
+          modelAlias: models.modelAlias,
+          benchmarkName: benchmarks.benchmarkName,
+          benchmarkType: benchmarks.benchmarkType
+        })
+        .from(benchmarkValues)
+        .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+        .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+        .where(
+          and(
+            isNull(models.mergedIntoModelId),
+            isNull(benchmarks.mergedIntoBenchmarkId),
+            or(
+              inArray(benchmarkValues.source, sourceCandidates),
+              inArray(sql<string>`lower(${benchmarkValues.source})`, lowerCandidates)
+            )
+          )
+        )
+    );
+
+    // Attach catch handler to queryPromise to prevent unhandled rejection if timeout triggers before query finishes
+    queryPromise.catch(() => {});
+
+    const existingRows = await runWithTimeout(
+      queryPromise,
+      timeoutMs,
+      `Duplicate check timed out after ${timeoutMs}ms`
+    );
+
+    const addValueToSlot = (slotKey: string, row: (typeof existingRows)[number]) => {
+      const list = existingValuesBySlot.get(slotKey) ?? [];
+      list.push({
+        valueRaw: row.valueRaw,
+        valueNum: row.valueNum,
+        valueNum2: row.valueNum2
+      });
+      existingValuesBySlot.set(slotKey, list);
+    };
+
+    for (const row of existingRows) {
+      // 查重只看 model + benchmark 名称：benchmarkType 只是同一 benchmark 的分类标注，
+      // 同一个 benchmark 不应因为类型不同而被当成两条记录。
+      addValueToSlot(buildDuplicateNameSlotKey(row.modelName, row.benchmarkName), row);
+
+      if (row.modelAlias?.trim()) {
+        addValueToSlot(buildDuplicateNameSlotKey(row.modelAlias, row.benchmarkName), row);
+      }
+    }
+  } catch (error) {
+    // Ignored / fail-open for environments without DB connection or when DB query times out / jitters
+    const message = error instanceof Error ? error.message : String(error);
+    warnings.push({
+      type: "duplicate-check-skipped",
+      reason: `查重检查跳过: ${message}`,
+      action: "已自动容错降级（fail-open），本次检查未剔除库内已有重复记录"
+    });
+    return { checked: false, rows: uncheckedRows(), warnings };
+  }
+
+  return {
+    checked: true,
+    rows: rows.map((row) => {
+      const parsedValue = parseBenchmarkValue(row.rawValue);
+      const slotKey = buildDuplicateNameSlotKey(row.modelName, row.benchmarkName);
+      for (const existing of existingValuesBySlot.get(slotKey) ?? []) {
+        if (
+          isSameScore(
+            {
+              valueRaw: row.rawValue,
+              valueNum: parsedValue.valueNum,
+              valueNum2: parsedValue.valueNum2
+            },
+            existing
+          )
+        ) {
+          return { isDuplicate: true, duplicateSlotKey: slotKey };
+        }
+      }
+      return { isDuplicate: false };
+    }),
+    warnings
+  };
+}
+
+export type PreviewBenchmarkTextImportOptions = TextImportDuplicateCheckOptions & {
+  checkDuplicates?: boolean;
+};
 
 async function runWithTimeout<T>(
   promise: Promise<T>,
@@ -6086,121 +6220,21 @@ export async function previewBenchmarkTextImport(
   const allWarnings = [...parseWarnings, ...directionWarnings];
 
   const shouldCheckDuplicates = options?.checkDuplicates ?? false;
-  const rawSource = sourceInput?.trim();
-  const existingValuesBySlot = new Map<
-    string,
-    Array<{
-      valueRaw: string;
-      valueNum: string | null;
-      valueNum2: string | null;
-    }>
-  >();
-  let hasExistingSource = false;
+  const duplicateCheck = await checkTextImportPreviewDuplicates(
+    parsed.rows.map((row) => ({
+      modelName: row.modelName,
+      benchmarkName: row.benchmarkName,
+      rawValue: row.valueRaw
+    })),
+    shouldCheckDuplicates ? sourceInput : null,
+    { duplicateTimeoutMs: options?.duplicateTimeoutMs, db: options?.db }
+  );
+  allWarnings.push(...duplicateCheck.warnings);
 
-  if (shouldCheckDuplicates && rawSource) {
-    const sourceCandidates = buildSourceLookupCandidates(rawSource);
-    const lowerCandidates = Array.from(new Set(sourceCandidates.map((c) => c.toLowerCase())));
-    const dbClient = options?.db ?? db;
-    const timeoutMs = options?.duplicateTimeoutMs ?? DEFAULT_PREVIEW_DUPLICATE_CHECK_TIMEOUT_MS;
-
-    try {
-      const queryPromise = Promise.resolve(
-        dbClient
-          .select({
-            valueRaw: benchmarkValues.valueRaw,
-            valueNum: benchmarkValues.valueNum,
-            valueNum2: benchmarkValues.valueNum2,
-            source: benchmarkValues.source,
-            modelName: models.modelName,
-            modelAlias: models.modelAlias,
-            benchmarkName: benchmarks.benchmarkName,
-            benchmarkType: benchmarks.benchmarkType
-          })
-          .from(benchmarkValues)
-          .innerJoin(models, eq(benchmarkValues.modelId, models.id))
-          .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-          .where(
-            and(
-              isNull(models.mergedIntoModelId),
-              isNull(benchmarks.mergedIntoBenchmarkId),
-              or(
-                inArray(benchmarkValues.source, sourceCandidates),
-                inArray(sql<string>`lower(${benchmarkValues.source})`, lowerCandidates)
-              )
-            )
-          )
-      );
-
-      // Attach catch handler to queryPromise to prevent unhandled rejection if timeout triggers before query finishes
-      queryPromise.catch(() => {});
-
-      const existingRows = await runWithTimeout(
-        queryPromise,
-        timeoutMs,
-        `Duplicate check timed out after ${timeoutMs}ms`
-      );
-
-      if (existingRows.length > 0) {
-        hasExistingSource = true;
-        const addValueToSlot = (slotKey: string, row: (typeof existingRows)[number]) => {
-          const list = existingValuesBySlot.get(slotKey) ?? [];
-          list.push({
-            valueRaw: row.valueRaw,
-            valueNum: row.valueNum,
-            valueNum2: row.valueNum2
-          });
-          existingValuesBySlot.set(slotKey, list);
-        };
-
-        for (const row of existingRows) {
-          // 查重只看 model + benchmark 名称：benchmarkType 只是同一 benchmark 的分类标注，
-          // 同一个 benchmark 不应因为类型不同而被当成两条记录。
-          addValueToSlot(buildDuplicateNameSlotKey(row.modelName, row.benchmarkName), row);
-
-          if (row.modelAlias?.trim()) {
-            addValueToSlot(buildDuplicateNameSlotKey(row.modelAlias, row.benchmarkName), row);
-          }
-        }
-      }
-    } catch (error) {
-      // Ignored / fail-open for environments without DB connection or when DB query times out / jitters
-      const message = error instanceof Error ? error.message : String(error);
-      allWarnings.push({
-        type: "duplicate-check-skipped",
-        reason: `查重检查跳过: ${message}`,
-        action: "已自动容错降级（fail-open），本次预览未剔除库内已有重复记录"
-      });
-    }
-  }
-
-  const previewRows = parsed.rows.map((row) => {
+  const previewRows = parsed.rows.map((row, rowIndex) => {
     const parsedValue = parseBenchmarkValue(row.valueRaw);
     const mergedNote = mergeImportValueNotes(row.valueNote, parsedValue.valueNote);
-
-    let isDuplicate = false;
-    let duplicateSlotKey: string | undefined = undefined;
-    if (hasExistingSource) {
-      const slotKey = buildDuplicateNameSlotKey(row.modelName, row.benchmarkName);
-      const candidates = existingValuesBySlot.get(slotKey);
-      if (candidates && candidates.length > 0) {
-        for (const existing of candidates) {
-          if (
-            isSameScore(
-              {
-                valueRaw: row.valueRaw,
-                valueNum: parsedValue.valueNum,
-                valueNum2: parsedValue.valueNum2
-              },
-              existing
-            )
-          ) {
-            isDuplicate = true;
-            duplicateSlotKey = slotKey;
-            break;
-          }
-        }
-      }
-    }
+    const duplicate = duplicateCheck.rows[rowIndex] ?? { isDuplicate: false };
 
     return {
       rowNumber: row.rowNumber,
@@ -6218,8 +6252,8 @@ export async function previewBenchmarkTextImport(
       valueNote: mergedNote,
       source: row.source,
       valid: parsedValue.valueRaw.length > 0 && (parsedValue.valueNum !== null || parsedValue.valueNum2 !== null),
-      isDuplicate,
-      duplicateSlotKey
+      isDuplicate: duplicate.isDuplicate,
+      duplicateSlotKey: duplicate.duplicateSlotKey
     };
   });
 

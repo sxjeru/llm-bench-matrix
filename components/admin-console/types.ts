@@ -88,6 +88,21 @@ export type TextImportPreviewRow = {
   duplicateSlotKey?: string;
 };
 
+/** 预览矩阵当前内容中需要重新校验库内重复的一行（已应用草稿、合并、括号处理等） */
+export type TextImportDuplicateCheckCandidate = {
+  rowIndex: number;
+  modelName: string;
+  benchmarkName: string;
+  rawValue: string;
+};
+
+export type TextImportDuplicateCheckPayload = {
+  /** 内容指纹，编辑后才变化，用于避免重复请求 */
+  key: string;
+  source: string;
+  rows: TextImportDuplicateCheckCandidate[];
+};
+
 export type Props = {
   initialTab?: TabKey;
   providers: ProviderOption[];

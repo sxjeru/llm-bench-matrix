@@ -11,6 +11,8 @@ import type {
   ModelWarningItem,
   ProviderOption,
   StructuredCsvImportRow,
+  TextImportDuplicateCheckCandidate,
+  TextImportDuplicateCheckPayload,
   TextImportPreviewRow
 } from "../types";
 import {
@@ -759,8 +761,13 @@ export function useImportPreviewState({
     [starValueRows]
   );
 
-  const { finalizedTextImportRows, skippedDuplicateRowIndices } = useMemo(() => {
+  const {
+    finalizedTextImportRows,
+    skippedDuplicateRowIndices,
+    duplicateCheckCandidates
+  } = useMemo(() => {
     const skippedIndices = new Set<number>();
+    const candidates: TextImportDuplicateCheckCandidate[] = [];
     const latestSourceInput = csvSource.trim();
     // 导入路径必须包含尚未 blur 的矩阵 type/name/model 草稿，否则点导入时会丢修改
     const rowsForFinalize = applyPendingMatrixDraftsToRows(
@@ -928,6 +935,14 @@ export function useImportPreviewState({
           : (row.source?.trim() || null);
       const isSourceMatched = isSameImportSource(row.source, targetSource);
 
+      // 无论当前是否已被标记为重复，都记录最新内容，供编辑后重新校验库内重复
+      candidates.push({
+        rowIndex,
+        modelName,
+        benchmarkName,
+        rawValue
+      });
+
       if (
         row.isDuplicate &&
         isSourceMatched &&
@@ -962,7 +977,8 @@ export function useImportPreviewState({
 
     return {
       finalizedTextImportRows: finalizedRows,
-      skippedDuplicateRowIndices: skippedIndices
+      skippedDuplicateRowIndices: skippedIndices,
+      duplicateCheckCandidates: candidates
     };
   }, [
     csvSource,
@@ -988,6 +1004,28 @@ export function useImportPreviewState({
     existingBenchmarkExactMap,
     mergedRecords
   ]);
+
+  const textImportDuplicateCheckPayload = useMemo<TextImportDuplicateCheckPayload>(() => {
+    const source = csvSource.trim();
+    if (!source || duplicateCheckCandidates.length === 0) {
+      return { key: "", source: "", rows: [] };
+    }
+
+    const rows = duplicateCheckCandidates.map((candidate) => ({
+      rowIndex: candidate.rowIndex,
+      modelName: candidate.modelName,
+      benchmarkName: candidate.benchmarkName,
+      rawValue: candidate.rawValue
+    }));
+    const key = [
+      source.toLowerCase(),
+      ...rows.map((row) =>
+        `${row.rowIndex}\u001e${row.modelName}\u001e${row.benchmarkName}\u001e${row.rawValue}`
+      )
+    ].join("\u001f");
+
+    return { key, source, rows };
+  }, [csvSource, duplicateCheckCandidates]);
 
   const ignoredTextImportCount = useMemo(() => {
     if (textImportDraftRows.length === 0) return 0;
@@ -1042,6 +1080,7 @@ export function useImportPreviewState({
     starRowsMissingSupplementCount,
     finalizedTextImportRows,
     skippedDuplicateRowIndices,
+    textImportDuplicateCheckPayload,
     ignoredTextImportCount,
     textImportPreviewTableRows,
     visibleResolvedTextImportPreviewRows

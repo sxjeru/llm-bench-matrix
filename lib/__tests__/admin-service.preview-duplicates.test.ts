@@ -2,6 +2,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 
 let previewBenchmarkTextImport: any;
+let checkTextImportPreviewDuplicates: any;
 let db: any;
 
 function mockDbQuery(resolveValue: any) {
@@ -26,6 +27,7 @@ beforeAll(async () => {
 
   const adminServiceModule = await import("@/lib/admin-service");
   previewBenchmarkTextImport = adminServiceModule.previewBenchmarkTextImport;
+  checkTextImportPreviewDuplicates = adminServiceModule.checkTextImportPreviewDuplicates;
 
   const dbClientModule = await import("@/lib/db/client");
   db = dbClientModule.db;
@@ -453,6 +455,128 @@ describe("previewBenchmarkTextImport 来源存在性检查与重复值比对", (
     expect(result.duplicateCount).toBe(1);
     expect(result.previewRows[0].isDuplicate).toBe(true);
     expect(result.previewRows[0].duplicateSlotKey).toBe("model a::mmlu");
+  });
+});
+
+describe("checkTextImportPreviewDuplicates 编辑后重复状态刷新", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("无来源时不查库，返回 checked=false 供调用方保留已有标记", async () => {
+    const selectSpy = vi.spyOn(db, "select");
+
+    const result = await checkTextImportPreviewDuplicates(
+      [{ modelName: "Model A", benchmarkName: "MMLU", rawValue: "85.0" }],
+      null
+    );
+
+    expect(selectSpy).not.toHaveBeenCalled();
+    expect(result.checked).toBe(false);
+    expect(result.rows).toEqual([{ isDuplicate: false }]);
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  test("按编辑后的模型名 / benchmark / 分值重新判定重复，原预览未命中的行也能被标记", async () => {
+    const existingDbRows = [
+      {
+        valueRaw: "85.0",
+        valueNum: "85.000000",
+        valueNum2: null,
+        source: "text:paper-src",
+        modelName: "Model A",
+        modelAlias: null,
+        benchmarkName: "MMLU",
+        benchmarkType: "general"
+      },
+      {
+        valueRaw: "70.5",
+        valueNum: "70.500000",
+        valueNum2: null,
+        source: "text:paper-src",
+        modelName: "Model B",
+        modelAlias: null,
+        benchmarkName: "MMLU",
+        benchmarkType: "general"
+      }
+    ];
+
+    const query = mockDbQuery(existingDbRows);
+    vi.spyOn(db, "select").mockImplementation(() => query);
+
+    const result = await checkTextImportPreviewDuplicates(
+      [
+        { modelName: "Model A", benchmarkName: "MMLU", rawValue: "85.0" },
+        { modelName: "Model A", benchmarkName: "MMLU", rawValue: "99.0" },
+        { modelName: "Model C", benchmarkName: "MMLU", rawValue: "70.5" }
+      ],
+      "paper-src"
+    );
+
+    expect(query.then).toHaveBeenCalledTimes(1);
+    expect(result.checked).toBe(true);
+    expect(result.rows).toEqual([
+      { isDuplicate: true, duplicateSlotKey: "model a::mmlu" },
+      { isDuplicate: false },
+      { isDuplicate: false }
+    ]);
+  });
+
+  test("编辑模型名后命中库内别名时标记为重复", async () => {
+    const existingDbRows = [
+      {
+        valueRaw: "88.0",
+        valueNum: "88.000000",
+        valueNum2: null,
+        source: "text:paper-src",
+        modelName: "Model A",
+        modelAlias: "Model A (New)",
+        benchmarkName: "MMLU",
+        benchmarkType: "general"
+      }
+    ];
+
+    vi.spyOn(db, "select").mockImplementation(() => mockDbQuery(existingDbRows));
+
+    const result = await checkTextImportPreviewDuplicates(
+      [{ modelName: "Model A (New)", benchmarkName: "MMLU", rawValue: "88.0" }],
+      "paper-src"
+    );
+
+    expect(result.checked).toBe(true);
+    expect(result.rows[0].isDuplicate).toBe(true);
+    expect(result.rows[0].duplicateSlotKey).toBe("model a (new)::mmlu");
+  });
+
+  test("查询超时时 fail-open，返回 checked=false 且附带 duplicate-check-skipped 警告", async () => {
+    const query: any = {
+      from: vi.fn().mockImplementation(() => query),
+      innerJoin: vi.fn().mockImplementation(() => query),
+      where: vi.fn().mockImplementation(() => query),
+      then: vi.fn().mockImplementation(() => new Promise(() => {})),
+      catch: vi.fn().mockImplementation(function (this: any, onrejected: any) {
+        return this.then(undefined, onrejected);
+      })
+    };
+    vi.spyOn(db, "select").mockImplementation(() => query);
+
+    const result = await checkTextImportPreviewDuplicates(
+      [{ modelName: "Model A", benchmarkName: "MMLU", rawValue: "85.0" }],
+      "paper-src",
+      { duplicateTimeoutMs: 20 }
+    );
+
+    expect(result.checked).toBe(false);
+    expect(result.rows).toEqual([{ isDuplicate: false }]);
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "duplicate-check-skipped" })
+      ])
+    );
   });
 });
 

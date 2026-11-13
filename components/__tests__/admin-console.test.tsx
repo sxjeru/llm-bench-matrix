@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderReady } from "@/tests/flush-microtasks";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
@@ -67,6 +67,12 @@ function mockFetchSequence(...payloads: unknown[]) {
 
     if (url === "/api/admin/benchmarks/preview-value-overlap") {
       return createJsonResponse({ stats: [] });
+    }
+
+    // 编辑后的库内重复刷新是独立的异步请求，默认短路为「未执行检查」，
+    // 避免消耗按调用顺序排队的预览/导入响应，也不改变已有重复标记。
+    if (url === "/api/admin/import-csv/check-duplicates") {
+      return createJsonResponse({ checked: false, rows: [], duplicateCount: 0, warnings: [] });
     }
 
     return fetchMock(url, init);
@@ -4842,5 +4848,145 @@ describe("AdminConsole 批量保存", () => {
     expect(await screen.findByText("有 1 个模型的参数量填写有误，已取消保存")).toBeInTheDocument();
     expect(screen.getByText("Alpha Model：激活参数量不能大于总参数量")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("AdminConsole 预览矩阵编辑后刷新库内重复", () => {
+  const previewResponse = {
+    format: "matrix-table",
+    total: 1,
+    skipped: 0,
+    duplicateCount: 0,
+    modelColumns: ["Model A"],
+    warningCount: 0,
+    warnings: [],
+    previewRows: [
+      {
+        rowNumber: 2,
+        providerName: "OpenAI",
+        modelName: "Model A",
+        benchmarkName: "MMLU",
+        benchmarkType: "general",
+        rawValue: "85.0",
+        originalRawValue: "85.0",
+        valueNum: 85,
+        valueNum2: null,
+        valueNote: null,
+        source: "paper-src",
+        valid: true,
+        isDuplicate: false
+      }
+    ]
+  };
+
+  type DuplicateCheckRequest = {
+    source: string;
+    rows: Array<{ modelName: string; benchmarkName: string; rawValue: string }>;
+  };
+
+  function createDuplicateCheckFetchMock() {
+    const calls: DuplicateCheckRequest[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+
+      if (url === "/api/admin/import-csv/preview") {
+        return createJsonResponse(previewResponse);
+      }
+
+      if (url === "/api/admin/import-csv/check-duplicates") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as DuplicateCheckRequest;
+        calls.push(body);
+        // 模拟库内已有 88.0：只有编辑成 88.0 之后才应当被标记为重复
+        const rows = body.rows.map((row) => row.rawValue.trim() === "88.0"
+          ? { isDuplicate: true, duplicateSlotKey: "model a::mmlu" }
+          : { isDuplicate: false });
+        return createJsonResponse({
+          checked: true,
+          rows,
+          duplicateCount: rows.filter((row) => row.isDuplicate).length,
+          warnings: []
+        });
+      }
+
+      if (url === "/api/admin/benchmarks/preview-value-overlap") {
+        return createJsonResponse({ stats: [] });
+      }
+
+      return createJsonResponse({});
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    return calls;
+  }
+
+  async function setupPreview(user: ReturnType<typeof userEvent.setup>) {
+    await user.type(screen.getByPlaceholderText(/source（可选/i), "paper-src");
+    await user.type(screen.getByLabelText("粘贴 CSV / 文本"), "Benchmark,Model A\nMMLU,85.0");
+    await user.click(screen.getByRole("button", { name: "预览导入结果" }));
+    return findMatrixPreviewTable();
+  }
+
+  test("输入框聚焦期间不查库，失焦后按新内容自动重查并更新忽略状态", async () => {
+    const user = userEvent.setup();
+    const calls = createDuplicateCheckFetchMock();
+    await renderReady(<AdminConsole {...buildProps()} />);
+
+    const matrixTable = await setupPreview(user);
+    expect(screen.getByText(/当前草稿：1 条可提交，忽略\/空值 0 条/)).toBeInTheDocument();
+
+    const scoreInput = within(matrixTable).getByDisplayValue("85.0");
+    await user.clear(scoreInput);
+    await user.type(scoreInput, "88.0");
+
+    // 焦点还在输入框里：即使过了合并窗口，也不能拿半成品内容去查库
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 500));
+    });
+    expect(scoreInput).toHaveFocus();
+    expect(calls.some((call) => call.rows.some((row) => row.rawValue === "88.0"))).toBe(false);
+
+    fireEvent.focusOut(scoreInput);
+
+    await waitFor(() => {
+      expect(within(matrixTable).getByText("已忽略不导入")).toBeInTheDocument();
+    }, { timeout: 3000 });
+
+    expect(screen.getByText(/库内重复已忽略：1 条/)).toBeInTheDocument();
+    expect(screen.getByText(/当前草稿：0 条可提交，忽略\/空值 1 条/)).toBeInTheDocument();
+    expect(calls.some((call) => call.rows.some((row) => row.rawValue === "88.0"))).toBe(true);
+  });
+
+  test("关闭自动刷新后编辑不发请求，点击手动刷新按钮可立即更新重复状态", async () => {
+    const user = userEvent.setup();
+    const calls = createDuplicateCheckFetchMock();
+    await renderReady(<AdminConsole {...buildProps()} />);
+
+    const matrixTable = await setupPreview(user);
+
+    await waitFor(() => expect(calls.length).toBeGreaterThanOrEqual(1), { timeout: 3000 });
+    const initialCallCount = calls.length;
+
+    await user.click(screen.getByLabelText("修改后自动刷新"));
+
+    const scoreInput = within(matrixTable).getByDisplayValue("85.0");
+    await user.clear(scoreInput);
+    await user.type(scoreInput, "88.0");
+
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 800));
+    });
+    expect(calls.length).toBe(initialCallCount);
+    expect(within(matrixTable).queryByText("已忽略不导入")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "刷新库内重复" }));
+
+    await waitFor(() => {
+      expect(within(matrixTable).getByText("已忽略不导入")).toBeInTheDocument();
+    }, { timeout: 3000 });
+    expect(calls.length).toBeGreaterThan(initialCallCount);
   });
 });
