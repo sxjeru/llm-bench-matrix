@@ -3,6 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vi
 
 let previewBenchmarkTextImport: any;
 let checkTextImportPreviewDuplicates: any;
+let clearTextImportDuplicateCheckCache: () => void;
 let db: any;
 
 function mockDbQuery(resolveValue: any) {
@@ -28,6 +29,7 @@ beforeAll(async () => {
   const adminServiceModule = await import("@/lib/admin-service");
   previewBenchmarkTextImport = adminServiceModule.previewBenchmarkTextImport;
   checkTextImportPreviewDuplicates = adminServiceModule.checkTextImportPreviewDuplicates;
+  clearTextImportDuplicateCheckCache = adminServiceModule.clearTextImportDuplicateCheckCache;
 
   const dbClientModule = await import("@/lib/db/client");
   db = dbClientModule.db;
@@ -36,6 +38,7 @@ beforeAll(async () => {
 describe("previewBenchmarkTextImport 来源存在性检查与重复值比对", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    clearTextImportDuplicateCheckCache();
   });
 
   afterEach(() => {
@@ -461,6 +464,7 @@ describe("previewBenchmarkTextImport 来源存在性检查与重复值比对", (
 describe("checkTextImportPreviewDuplicates 编辑后重复状态刷新", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    clearTextImportDuplicateCheckCache();
   });
 
   afterEach(() => {
@@ -577,6 +581,150 @@ describe("checkTextImportPreviewDuplicates 编辑后重复状态刷新", () => {
         expect.objectContaining({ type: "duplicate-check-skipped" })
       ])
     );
+  });
+});
+
+describe("checkTextImportPreviewDuplicates 同 source TTL 缓存", () => {
+  const existingDbRows = [
+    {
+      valueRaw: "85.0",
+      valueNum: "85.000000",
+      valueNum2: null,
+      source: "text:paper-src",
+      modelName: "Model A",
+      modelAlias: null,
+      benchmarkName: "MMLU",
+      benchmarkType: "general"
+    }
+  ];
+
+  const row = { modelName: "Model A", benchmarkName: "MMLU", rawValue: "85.0" };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    clearTextImportDuplicateCheckCache();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearTextImportDuplicateCheckCache();
+  });
+
+  test("同一 source 在 TTL 内复用快照，不同编辑内容都能正确判定", async () => {
+    const query = mockDbQuery(existingDbRows);
+    vi.spyOn(db, "select").mockImplementation(() => query);
+
+    const first = await checkTextImportPreviewDuplicates([row], "paper-src");
+    const second = await checkTextImportPreviewDuplicates(
+      [{ ...row, rawValue: "99.0" }],
+      "paper-src"
+    );
+
+    expect(query.then).toHaveBeenCalledTimes(1);
+    expect(first.checked).toBe(true);
+    expect(first.rows[0]).toEqual({ isDuplicate: true, duplicateSlotKey: "model a::mmlu" });
+    expect(second.checked).toBe(true);
+    expect(second.rows[0]).toEqual({ isDuplicate: false });
+  });
+
+  test("预览查重后，编辑矩阵触发的刷新直接命中缓存，只查一次库", async () => {
+    const query = mockDbQuery(existingDbRows);
+    vi.spyOn(db, "select").mockImplementation(() => query);
+
+    const inputText = ["Benchmark,Model A", "MMLU,85.0"].join("\n");
+    const preview = await previewBenchmarkTextImport(inputText, "paper-src", null, { checkDuplicates: true });
+    const refreshed = await checkTextImportPreviewDuplicates(
+      [{ ...row, rawValue: "99.0" }],
+      "paper-src"
+    );
+
+    expect(query.then).toHaveBeenCalledTimes(1);
+    expect(preview.previewRows[0].isDuplicate).toBe(true);
+    expect(refreshed.checked).toBe(true);
+    expect(refreshed.rows[0]).toEqual({ isDuplicate: false });
+  });
+
+  test("text: 前缀和大小写归一化后命中同一份缓存", async () => {
+    const query = mockDbQuery(existingDbRows);
+    vi.spyOn(db, "select").mockImplementation(() => query);
+
+    await checkTextImportPreviewDuplicates([row], "text:paper-src");
+    await checkTextImportPreviewDuplicates([row], "PAPER-SRC");
+
+    expect(query.then).toHaveBeenCalledTimes(1);
+  });
+
+  test("不同 source 各自查询，不共享快照", async () => {
+    const query = mockDbQuery(existingDbRows);
+    vi.spyOn(db, "select").mockImplementation(() => query);
+
+    await checkTextImportPreviewDuplicates([row], "paper-src");
+    await checkTextImportPreviewDuplicates([row], "other-src");
+
+    expect(query.then).toHaveBeenCalledTimes(2);
+  });
+
+  test("TTL 过期后重新查库", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const query = mockDbQuery(existingDbRows);
+    vi.spyOn(db, "select").mockImplementation(() => query);
+
+    await checkTextImportPreviewDuplicates([row], "paper-src");
+    now += 31_000;
+    await checkTextImportPreviewDuplicates([row], "paper-src");
+
+    expect(query.then).toHaveBeenCalledTimes(2);
+  });
+
+  test("并发的同 source 请求合并为一次查询", async () => {
+    const query = mockDbQuery(existingDbRows);
+    vi.spyOn(db, "select").mockImplementation(() => query);
+
+    const [first, second] = await Promise.all([
+      checkTextImportPreviewDuplicates([row], "paper-src"),
+      checkTextImportPreviewDuplicates([{ ...row, rawValue: "99.0" }], "paper-src")
+    ]);
+
+    expect(query.then).toHaveBeenCalledTimes(1);
+    expect(first.rows[0].isDuplicate).toBe(true);
+    expect(second.rows[0].isDuplicate).toBe(false);
+  });
+
+  test("数据写入后清理缓存，下一次检查重新查库", async () => {
+    const query = mockDbQuery(existingDbRows);
+    vi.spyOn(db, "select").mockImplementation(() => query);
+
+    await checkTextImportPreviewDuplicates([row], "paper-src");
+    clearTextImportDuplicateCheckCache();
+    await checkTextImportPreviewDuplicates([row], "paper-src");
+
+    expect(query.then).toHaveBeenCalledTimes(2);
+  });
+
+  test("查询失败不写入缓存，后续请求会重新查库", async () => {
+    const failingQuery: any = {
+      from: vi.fn().mockImplementation(() => failingQuery),
+      innerJoin: vi.fn().mockImplementation(() => failingQuery),
+      where: vi.fn().mockImplementation(() => failingQuery),
+      then: vi.fn().mockImplementation((_onfulfilled: any, onrejected: any) => {
+        return Promise.reject(new Error("DB down")).then(_onfulfilled, onrejected);
+      }),
+      catch: vi.fn().mockImplementation(function (this: any, onrejected: any) {
+        return this.then(undefined, onrejected);
+      })
+    };
+    const successQuery = mockDbQuery(existingDbRows);
+    const selectSpy = vi.spyOn(db, "select")
+      .mockImplementationOnce(() => failingQuery)
+      .mockImplementationOnce(() => successQuery);
+
+    const first = await checkTextImportPreviewDuplicates([row], "paper-src");
+    const second = await checkTextImportPreviewDuplicates([row], "paper-src");
+
+    expect(first.checked).toBe(false);
+    expect(second.checked).toBe(true);
+    expect(selectSpy).toHaveBeenCalledTimes(2);
   });
 });
 

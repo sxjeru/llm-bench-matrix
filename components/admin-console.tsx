@@ -277,17 +277,15 @@ export function AdminConsole({
   }>({ key: "", status: "idle", stats: [] });
   const [benchmarkPreviewValueOverlapDebouncedTriggerKey, setBenchmarkPreviewValueOverlapDebouncedTriggerKey] = useState("");
   const benchmarkPreviewValueOverlapLastTriggerKeyRef = useRef("");
-  const [autoRefreshImportDuplicates, setAutoRefreshImportDuplicates] = useState(true);
   const [importDuplicateRefreshState, setImportDuplicateRefreshState] = useState<{
     status: "idle" | "loading" | "success" | "error";
     message: string;
   }>({ status: "idle", message: "" });
-  const [importDuplicateRefreshNonce, setImportDuplicateRefreshNonce] = useState(0);
   const [importDuplicateRefreshReadyKey, setImportDuplicateRefreshReadyKey] = useState("");
   const [importDuplicateRefreshFocusVersion, setImportDuplicateRefreshFocusVersion] = useState(0);
   const importDuplicateRefreshLastKeyRef = useRef("");
-  const importDuplicateRefreshLastNonceRef = useRef(0);
   const importDuplicateRefreshAbortRef = useRef<AbortController | null>(null);
+  const importDuplicateRefreshFailedRef = useRef(false);
   const importMatrixInputFocusedRef = useRef(false);
   const importDuplicateRefreshKeyRef = useRef("");
   const mergeSubmitResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -498,10 +496,11 @@ export function AdminConsole({
       const stillEditing = isTextEditingTarget(next);
       importMatrixInputFocusedRef.current = stillEditing;
 
-      // 焦点真正离开编辑控件后按最新内容刷新；只有「刷新库内重复」按钮自己会强制发起，避免重复请求
-      const isManualRefreshButton = next instanceof HTMLElement
-        && next.closest("[data-import-duplicate-refresh]") !== null;
-      if (!stillEditing && !isManualRefreshButton) {
+      // 焦点真正离开编辑控件后按最新内容刷新；上次失败时借助本次失焦自动重试
+      if (!stillEditing) {
+        if (importDuplicateRefreshFailedRef.current) {
+          importDuplicateRefreshLastKeyRef.current = "";
+        }
         setImportDuplicateRefreshReadyKey(importDuplicateRefreshKeyRef.current);
         setImportDuplicateRefreshFocusVersion((prev) => prev + 1);
       }
@@ -524,6 +523,7 @@ export function AdminConsole({
     const controller = new AbortController();
     importDuplicateRefreshAbortRef.current = controller;
     importDuplicateRefreshLastKeyRef.current = key;
+    importDuplicateRefreshFailedRef.current = false;
     setImportDuplicateRefreshState({ status: "loading", message: "正在检查库内重复…" });
 
     try {
@@ -603,19 +603,18 @@ export function AdminConsole({
     } catch (error) {
       if (controller.signal.aborted) return;
       if (error instanceof Error && error.name === "AbortError") return;
-      // 保留已尝试的 key，避免失败后因无关状态变化反复自动重试；手动按钮仍可强制重试
+      // 保留已尝试的 key，避免无关状态变化反复重试；下次失焦或内容变化会自动重试
+      importDuplicateRefreshFailedRef.current = true;
       const reason = error instanceof Error ? error.message.trim() : "";
       setImportDuplicateRefreshState({
         status: "error",
-        message: reason ? `${reason}，可点击「刷新库内重复」重试` : "检查失败，可点击「刷新库内重复」重试"
+        message: reason ? `${reason}，失焦时会自动重试` : "检查失败，失焦时会自动重试"
       });
     }
   }, []);
 
   useEffect(() => {
     const payload = textImportDuplicateCheckPayload;
-    const isManual = importDuplicateRefreshNonce !== importDuplicateRefreshLastNonceRef.current;
-    importDuplicateRefreshLastNonceRef.current = importDuplicateRefreshNonce;
 
     const setStatus = (
       status: "idle" | "loading" | "success" | "error",
@@ -640,25 +639,16 @@ export function AdminConsole({
       return;
     }
 
-    if (!isManual && !autoRefreshImportDuplicates) {
-      setStatus("idle", "已关闭自动刷新，可手动点击「刷新库内重复」");
-      return;
-    }
-
-    if (!isManual) {
-      // 正在输入框中编辑：内容还没定稿，等失焦后再一次性检查
-      if (importMatrixInputFocusedRef.current) return;
-      if (importDuplicateRefreshReadyKey !== payload.key) return;
-      if (importDuplicateRefreshLastKeyRef.current === payload.key) return;
-    }
+    // 正在输入框中编辑：内容还没定稿，等失焦后再一次性检查
+    if (importMatrixInputFocusedRef.current) return;
+    if (importDuplicateRefreshReadyKey !== payload.key) return;
+    if (importDuplicateRefreshLastKeyRef.current === payload.key) return;
 
     void runImportDuplicateCheck(payload);
   }, [
     textImportDuplicateCheckPayload,
     importDuplicateRefreshReadyKey,
     importDuplicateRefreshFocusVersion,
-    importDuplicateRefreshNonce,
-    autoRefreshImportDuplicates,
     isImportSourceChangedAfterPreview,
     runImportDuplicateCheck
   ]);
@@ -666,18 +656,6 @@ export function AdminConsole({
   useEffect(() => () => {
     importDuplicateRefreshAbortRef.current?.abort();
   }, []);
-
-  function onRefreshImportDuplicates() {
-    if (!textImportDuplicateCheckPayload.key || isImportSourceChangedAfterPreview) return;
-    setImportDuplicateRefreshNonce((prev) => prev + 1);
-  }
-
-  function onToggleAutoRefreshImportDuplicates(checked: boolean) {
-    setAutoRefreshImportDuplicates(checked);
-    if (checked) {
-      setImportDuplicateRefreshNonce((prev) => prev + 1);
-    }
-  }
 
   function hasBenchmarkEloSuffix(benchmarkName: string): boolean {
     return /\s*[（(]\s*elo\s*[)）]\s*$/i.test(benchmarkName.trim());
@@ -3503,10 +3481,7 @@ export function AdminConsole({
             textImportDraftRows={textImportDraftRows}
             finalizedTextImportRows={finalizedTextImportRows}
             skippedDuplicateRowIndices={skippedDuplicateRowIndices}
-            onRefreshImportDuplicates={onRefreshImportDuplicates}
             importDuplicateRefreshState={importDuplicateRefreshState}
-            autoRefreshImportDuplicates={autoRefreshImportDuplicates}
-            onToggleAutoRefreshImportDuplicates={onToggleAutoRefreshImportDuplicates}
             ignoredTextImportCount={ignoredTextImportCount}
             pairValueRows={pairValueRows}
             pairRowsMissingNoteCount={pairRowsMissingNoteCount}

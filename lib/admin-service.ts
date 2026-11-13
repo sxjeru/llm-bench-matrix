@@ -4092,6 +4092,7 @@ export async function importParsedRecords(
 
   const expandedRows = expandMetricLabeledImportRows(rows);
   const { inserted } = await importNormalizedRows(expandedRows);
+  clearTextImportDuplicateCheckCache();
 
   return {
     total: expandedRows.length,
@@ -4449,6 +4450,7 @@ export async function importStructuredRows(
 
   const expandedRows = expandMetricLabeledImportRows(normalizedRows);
   const { inserted } = await importNormalizedRows(expandedRows);
+  clearTextImportDuplicateCheckCache();
 
   return {
     total: expandedRows.length,
@@ -6047,6 +6049,143 @@ function isSameScore(
 
 const DEFAULT_PREVIEW_DUPLICATE_CHECK_TIMEOUT_MS = 10000;
 
+/**
+ * 同一来源的库内分值快照缓存。预览时查过一次后，编辑预览矩阵触发的重复状态
+ * 刷新在 TTL 内可直接复用，避免每次失焦都全量扫描该 source 的历史记录。
+ */
+const DUPLICATE_CHECK_CACHE_TTL_MS = 30_000;
+const DUPLICATE_CHECK_CACHE_MAX_ENTRIES = 32;
+
+type ExistingValuesBySlot = Map<
+  string,
+  Array<{ valueRaw: string; valueNum: string | null; valueNum2: string | null }>
+>;
+
+type DuplicateCheckCacheEntry = { expiresAt: number; values: ExistingValuesBySlot };
+
+const duplicateCheckCache = new Map<string, DuplicateCheckCacheEntry>();
+const duplicateCheckInFlight = new Map<string, Promise<ExistingValuesBySlot>>();
+let duplicateCheckCacheGeneration = 0;
+
+function buildDuplicateCheckCacheKey(rawSource: string): string {
+  const normalized = rawSource.trim().toLowerCase();
+  return normalized.startsWith("text:") ? normalized.slice(5).trim() : normalized;
+}
+
+/** 数据写入后调用：递增代数，使在途查询也不再把旧快照写回缓存 */
+export function clearTextImportDuplicateCheckCache(): void {
+  duplicateCheckCacheGeneration += 1;
+  duplicateCheckCache.clear();
+  duplicateCheckInFlight.clear();
+}
+
+async function loadExistingValuesBySlot(
+  cacheKey: string,
+  sourceCandidates: string[],
+  lowerCandidates: string[],
+  dbClient: typeof db,
+  timeoutMs: number
+): Promise<ExistingValuesBySlot> {
+  const cached = duplicateCheckCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.values;
+  }
+  if (cached) {
+    duplicateCheckCache.delete(cacheKey);
+  }
+
+  // 同一 source 的并发请求共用一个查询，避免缓存击穿
+  const inFlight = duplicateCheckInFlight.get(cacheKey);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const generation = duplicateCheckCacheGeneration;
+  const promise = (async (): Promise<ExistingValuesBySlot> => {
+    const queryPromise = Promise.resolve(
+      dbClient
+        .select({
+          valueRaw: benchmarkValues.valueRaw,
+          valueNum: benchmarkValues.valueNum,
+          valueNum2: benchmarkValues.valueNum2,
+          source: benchmarkValues.source,
+          modelName: models.modelName,
+          modelAlias: models.modelAlias,
+          benchmarkName: benchmarks.benchmarkName,
+          benchmarkType: benchmarks.benchmarkType
+        })
+        .from(benchmarkValues)
+        .innerJoin(models, eq(benchmarkValues.modelId, models.id))
+        .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
+        .where(
+          and(
+            isNull(models.mergedIntoModelId),
+            isNull(benchmarks.mergedIntoBenchmarkId),
+            or(
+              inArray(benchmarkValues.source, sourceCandidates),
+              inArray(sql<string>`lower(${benchmarkValues.source})`, lowerCandidates)
+            )
+          )
+        )
+    );
+
+    // Attach catch handler to queryPromise to prevent unhandled rejection if timeout triggers before query finishes
+    queryPromise.catch(() => {});
+
+    const existingRows = await runWithTimeout(
+      queryPromise,
+      timeoutMs,
+      `Duplicate check timed out after ${timeoutMs}ms`
+    );
+
+    const values: ExistingValuesBySlot = new Map();
+    const addValueToSlot = (slotKey: string, row: (typeof existingRows)[number]) => {
+      const list = values.get(slotKey) ?? [];
+      list.push({
+        valueRaw: row.valueRaw,
+        valueNum: row.valueNum,
+        valueNum2: row.valueNum2
+      });
+      values.set(slotKey, list);
+    };
+
+    for (const row of existingRows) {
+      // 查重只看 model + benchmark 名称：benchmarkType 只是同一 benchmark 的分类标注，
+      // 同一个 benchmark 不应因为类型不同而被当成两条记录。
+      addValueToSlot(buildDuplicateNameSlotKey(row.modelName, row.benchmarkName), row);
+
+      if (row.modelAlias?.trim()) {
+        addValueToSlot(buildDuplicateNameSlotKey(row.modelAlias, row.benchmarkName), row);
+      }
+    }
+
+    return values;
+  })();
+
+  duplicateCheckInFlight.set(cacheKey, promise);
+
+  try {
+    const values = await promise;
+    if (generation === duplicateCheckCacheGeneration) {
+      if (duplicateCheckCache.size >= DUPLICATE_CHECK_CACHE_MAX_ENTRIES) {
+        const oldestKey = duplicateCheckCache.keys().next().value;
+        if (oldestKey !== undefined) {
+          duplicateCheckCache.delete(oldestKey);
+        }
+      }
+      duplicateCheckCache.set(cacheKey, {
+        expiresAt: Date.now() + DUPLICATE_CHECK_CACHE_TTL_MS,
+        values
+      });
+    }
+    return values;
+  } finally {
+    if (duplicateCheckInFlight.get(cacheKey) === promise) {
+      duplicateCheckInFlight.delete(cacheKey);
+    }
+  }
+}
+
 export type TextImportDuplicateCheckRow = {
   modelName: string;
   benchmarkName: string;
@@ -6086,67 +6225,16 @@ export async function checkTextImportPreviewDuplicates(
   const lowerCandidates = Array.from(new Set(sourceCandidates.map((c) => c.toLowerCase())));
   const dbClient = options?.db ?? db;
   const timeoutMs = options?.duplicateTimeoutMs ?? DEFAULT_PREVIEW_DUPLICATE_CHECK_TIMEOUT_MS;
-  const existingValuesBySlot = new Map<
-    string,
-    Array<{ valueRaw: string; valueNum: string | null; valueNum2: string | null }>
-  >();
 
+  let existingValuesBySlot: ExistingValuesBySlot;
   try {
-    const queryPromise = Promise.resolve(
-      dbClient
-        .select({
-          valueRaw: benchmarkValues.valueRaw,
-          valueNum: benchmarkValues.valueNum,
-          valueNum2: benchmarkValues.valueNum2,
-          source: benchmarkValues.source,
-          modelName: models.modelName,
-          modelAlias: models.modelAlias,
-          benchmarkName: benchmarks.benchmarkName,
-          benchmarkType: benchmarks.benchmarkType
-        })
-        .from(benchmarkValues)
-        .innerJoin(models, eq(benchmarkValues.modelId, models.id))
-        .innerJoin(benchmarks, eq(benchmarkValues.benchmarkId, benchmarks.id))
-        .where(
-          and(
-            isNull(models.mergedIntoModelId),
-            isNull(benchmarks.mergedIntoBenchmarkId),
-            or(
-              inArray(benchmarkValues.source, sourceCandidates),
-              inArray(sql<string>`lower(${benchmarkValues.source})`, lowerCandidates)
-            )
-          )
-        )
+    existingValuesBySlot = await loadExistingValuesBySlot(
+      buildDuplicateCheckCacheKey(rawSource),
+      sourceCandidates,
+      lowerCandidates,
+      dbClient,
+      timeoutMs
     );
-
-    // Attach catch handler to queryPromise to prevent unhandled rejection if timeout triggers before query finishes
-    queryPromise.catch(() => {});
-
-    const existingRows = await runWithTimeout(
-      queryPromise,
-      timeoutMs,
-      `Duplicate check timed out after ${timeoutMs}ms`
-    );
-
-    const addValueToSlot = (slotKey: string, row: (typeof existingRows)[number]) => {
-      const list = existingValuesBySlot.get(slotKey) ?? [];
-      list.push({
-        valueRaw: row.valueRaw,
-        valueNum: row.valueNum,
-        valueNum2: row.valueNum2
-      });
-      existingValuesBySlot.set(slotKey, list);
-    };
-
-    for (const row of existingRows) {
-      // 查重只看 model + benchmark 名称：benchmarkType 只是同一 benchmark 的分类标注，
-      // 同一个 benchmark 不应因为类型不同而被当成两条记录。
-      addValueToSlot(buildDuplicateNameSlotKey(row.modelName, row.benchmarkName), row);
-
-      if (row.modelAlias?.trim()) {
-        addValueToSlot(buildDuplicateNameSlotKey(row.modelAlias, row.benchmarkName), row);
-      }
-    }
   } catch (error) {
     // Ignored / fail-open for environments without DB connection or when DB query times out / jitters
     const message = error instanceof Error ? error.message : String(error);
@@ -6279,6 +6367,7 @@ export async function importBenchmarkCsv(inputText: string, sourceInput?: string
   const parseWarnings = parsed.warnings ?? [];
   const allWarnings = [...parseWarnings, ...directionWarnings];
   const { inserted } = await importNormalizedRows(parsed.rows);
+  clearTextImportDuplicateCheckCache();
 
   return {
     format: parsed.format,

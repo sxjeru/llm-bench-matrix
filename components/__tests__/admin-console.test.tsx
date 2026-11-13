@@ -4884,7 +4884,7 @@ describe("AdminConsole 预览矩阵编辑后刷新库内重复", () => {
     rows: Array<{ modelName: string; benchmarkName: string; rawValue: string }>;
   };
 
-  function createDuplicateCheckFetchMock() {
+  function createDuplicateCheckFetchMock(options?: { failFirstCheck?: boolean }) {
     const calls: DuplicateCheckRequest[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string"
@@ -4900,6 +4900,9 @@ describe("AdminConsole 预览矩阵编辑后刷新库内重复", () => {
       if (url === "/api/admin/import-csv/check-duplicates") {
         const body = JSON.parse(String(init?.body ?? "{}")) as DuplicateCheckRequest;
         calls.push(body);
+        if (options?.failFirstCheck && calls.length === 1) {
+          return createJsonResponse({ error: "临时查重失败" }, false, 500);
+        }
         // 模拟库内已有 88.0：只有编辑成 88.0 之后才应当被标记为重复
         const rows = body.rows.map((row) => row.rawValue.trim() === "88.0"
           ? { isDuplicate: true, duplicateSlotKey: "model a::mmlu" }
@@ -4937,6 +4940,8 @@ describe("AdminConsole 预览矩阵编辑后刷新库内重复", () => {
 
     const matrixTable = await setupPreview(user);
     expect(screen.getByText(/当前草稿：1 条可提交，忽略\/空值 0 条/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "刷新库内重复" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("修改后自动刷新")).not.toBeInTheDocument();
 
     const scoreInput = within(matrixTable).getByDisplayValue("85.0");
     await user.clear(scoreInput);
@@ -4960,33 +4965,27 @@ describe("AdminConsole 预览矩阵编辑后刷新库内重复", () => {
     expect(calls.some((call) => call.rows.some((row) => row.rawValue === "88.0"))).toBe(true);
   });
 
-  test("关闭自动刷新后编辑不发请求，点击手动刷新按钮可立即更新重复状态", async () => {
+  test("查重失败后，下一次失焦会自动重试，不依赖手动按钮", async () => {
     const user = userEvent.setup();
-    const calls = createDuplicateCheckFetchMock();
+    const calls = createDuplicateCheckFetchMock({ failFirstCheck: true });
     await renderReady(<AdminConsole {...buildProps()} />);
 
     const matrixTable = await setupPreview(user);
 
-    await waitFor(() => expect(calls.length).toBeGreaterThanOrEqual(1), { timeout: 3000 });
-    const initialCallCount = calls.length;
+    // 预览后的首次自动检查失败
+    await waitFor(() => {
+      expect(screen.getByText(/失焦时会自动重试/)).toBeInTheDocument();
+    }, { timeout: 3000 });
+    expect(calls).toHaveLength(1);
 
-    await user.click(screen.getByLabelText("修改后自动刷新"));
-
+    // 再次聚焦并失焦，同一内容应自动重试
     const scoreInput = within(matrixTable).getByDisplayValue("85.0");
-    await user.clear(scoreInput);
-    await user.type(scoreInput, "88.0");
-
-    await act(async () => {
-      await new Promise<void>((resolve) => setTimeout(resolve, 800));
-    });
-    expect(calls.length).toBe(initialCallCount);
-    expect(within(matrixTable).queryByText("已忽略不导入")).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "刷新库内重复" }));
+    await user.click(scoreInput);
+    fireEvent.focusOut(scoreInput);
 
     await waitFor(() => {
-      expect(within(matrixTable).getByText("已忽略不导入")).toBeInTheDocument();
+      expect(screen.getByText(/已按当前矩阵更新/)).toBeInTheDocument();
     }, { timeout: 3000 });
-    expect(calls.length).toBeGreaterThan(initialCallCount);
+    expect(calls).toHaveLength(2);
   });
 });
