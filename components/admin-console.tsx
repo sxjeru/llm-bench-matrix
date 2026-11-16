@@ -281,6 +281,8 @@ export function AdminConsole({
     status: "idle" | "loading" | "success" | "error";
     message: string;
   }>({ status: "idle", message: "" });
+  const [isImportDuplicateCheckPaused, setIsImportDuplicateCheckPaused] = useState(false);
+  const importDuplicateCheckPausedRef = useRef(false);
   const [importDuplicateRefreshReadyKey, setImportDuplicateRefreshReadyKey] = useState("");
   const [importDuplicateRefreshFocusVersion, setImportDuplicateRefreshFocusVersion] = useState(0);
   const importDuplicateRefreshLastKeyRef = useRef("");
@@ -453,6 +455,21 @@ export function AdminConsole({
     };
   }, [benchmarkPreviewValueOverlapTriggerKey]);
 
+  const pauseImportDuplicateCheck = useCallback(() => {
+    importDuplicateCheckPausedRef.current = true;
+    setIsImportDuplicateCheckPaused(true);
+    importDuplicateRefreshAbortRef.current?.abort();
+    importDuplicateRefreshLastKeyRef.current = "";
+    setImportDuplicateRefreshReadyKey("");
+    // 暂停提示由预览区徽章展示；这里清空状态文案，避免恢复后残留「已暂停」提示
+    setImportDuplicateRefreshState({ status: "idle", message: "" });
+  }, []);
+
+  const resumeImportDuplicateCheck = useCallback(() => {
+    importDuplicateCheckPausedRef.current = false;
+    setIsImportDuplicateCheckPaused(false);
+  }, []);
+
   useEffect(() => {
     importDuplicateRefreshKeyRef.current = textImportDuplicateCheckPayload.key;
   }, [textImportDuplicateCheckPayload.key]);
@@ -460,11 +477,13 @@ export function AdminConsole({
   useEffect(() => {
     // 内容一旦变化，旧请求的结果已过期，立即取消避免回写到新内容上
     importDuplicateRefreshAbortRef.current?.abort();
+    if (importDuplicateCheckPausedRef.current) return;
     const key = textImportDuplicateCheckPayload.key;
     const timer = setTimeout(() => {
       // 仍聚焦在预览矩阵输入框时不发请求，等失焦后按最新内容一次性刷新；
       // 这里只用于合并勾选/按钮/下拉等非输入类连续操作。
       if (importMatrixInputFocusedRef.current) return;
+      if (importDuplicateCheckPausedRef.current) return;
       setImportDuplicateRefreshReadyKey(key);
     }, 300);
 
@@ -498,6 +517,7 @@ export function AdminConsole({
 
       // 焦点真正离开编辑控件后按最新内容刷新；上次失败时借助本次失焦自动重试
       if (!stillEditing) {
+        if (importDuplicateCheckPausedRef.current) return;
         if (importDuplicateRefreshFailedRef.current) {
           importDuplicateRefreshLastKeyRef.current = "";
         }
@@ -516,6 +536,7 @@ export function AdminConsole({
   }, [activeTab]);
 
   const runImportDuplicateCheck = useCallback(async (payload: TextImportDuplicateCheckPayload) => {
+    if (importDuplicateCheckPausedRef.current) return;
     const key = payload.key;
     if (!key || payload.rows.length === 0) return;
 
@@ -541,7 +562,7 @@ export function AdminConsole({
         signal: controller.signal
       });
       const data = await response.json().catch(() => ({}));
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || importDuplicateCheckPausedRef.current) return;
       if (!response.ok) {
         throw new Error(typeof data?.error === "string" ? data.error : "库内重复检查失败");
       }
@@ -555,6 +576,8 @@ export function AdminConsole({
           : undefined;
         throw new Error(typeof skippedReason === "string" ? skippedReason : "库内重复检查未返回有效结果");
       }
+
+      if (controller.signal.aborted || importDuplicateCheckPausedRef.current) return;
 
       const nextFlags = new Map<number, { isDuplicate: boolean; duplicateSlotKey?: string }>();
       payload.rows.forEach((row, index) => {
@@ -601,7 +624,7 @@ export function AdminConsole({
         message: `已按当前矩阵更新：库内重复 ${duplicateCount} 条`
       });
     } catch (error) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || importDuplicateCheckPausedRef.current) return;
       if (error instanceof Error && error.name === "AbortError") return;
       // 保留已尝试的 key，避免无关状态变化反复重试；下次失焦或内容变化会自动重试
       importDuplicateRefreshFailedRef.current = true;
@@ -614,6 +637,7 @@ export function AdminConsole({
   }, []);
 
   useEffect(() => {
+    if (importDuplicateCheckPausedRef.current) return;
     const payload = textImportDuplicateCheckPayload;
 
     const setStatus = (
@@ -650,7 +674,8 @@ export function AdminConsole({
     importDuplicateRefreshReadyKey,
     importDuplicateRefreshFocusVersion,
     isImportSourceChangedAfterPreview,
-    runImportDuplicateCheck
+    runImportDuplicateCheck,
+    isImportDuplicateCheckPaused
   ]);
 
   useEffect(() => () => {
@@ -1220,6 +1245,7 @@ export function AdminConsole({
       skipped: skippedCount
     });
     setTextImportPreviewVisibleCount(200);
+    resumeImportDuplicateCheck();
     importDuplicateRefreshAbortRef.current?.abort();
     importDuplicateRefreshLastKeyRef.current = "";
     setImportDuplicateRefreshState({ status: "idle", message: "" });
@@ -1292,6 +1318,8 @@ export function AdminConsole({
       }
 
       const generatedCsvText = buildStructuredCsvText(finalizedTextImportRows);
+      // 校验通过、真正发起导入时才暂停失焦查重；校验失败不应留下暂停态
+      pauseImportDuplicateCheck();
       const result = await postJson("/api/admin/import-csv", {
         csvText: generatedCsvText,
         rows: finalizedTextImportRows,
@@ -1909,6 +1937,7 @@ export function AdminConsole({
   }
 
   async function onPreviewCsvImport() {
+    resumeImportDuplicateCheck();
     setIsPreviewingTextImport(true);
     try {
       const result = await postJson("/api/admin/import-csv/preview", {
@@ -1946,6 +1975,7 @@ export function AdminConsole({
       });
       setTextImportPreviewSource(csvSource.trim());
       setTextImportPreviewVisibleCount(200);
+      resumeImportDuplicateCheck();
       importDuplicateRefreshAbortRef.current?.abort();
       importDuplicateRefreshLastKeyRef.current = "";
       setImportDuplicateRefreshState({ status: "idle", message: "" });
@@ -2003,6 +2033,7 @@ export function AdminConsole({
       textImportProgressTimerRef.current = null;
     }
 
+    pauseImportDuplicateCheck();
     setIsImportingTextCsv(true);
     setTextImportStatus("running");
     setTextImportStatusText("正在导入文本...");
@@ -3391,14 +3422,21 @@ export function AdminConsole({
       <ConfirmImportWithoutPreviewDialog
         open={confirmImportWithoutPreviewOpen}
         isImportingTextCsv={isImportingTextCsv}
-        onClose={() => setConfirmImportWithoutPreviewOpen(false)}
+        onClose={() => {
+          setConfirmImportWithoutPreviewOpen(false);
+          // 取消导入确认后并未真正导入，恢复失焦查重
+          resumeImportDuplicateCheck();
+        }}
         onConfirm={onConfirmImportWithoutPreview}
       />
 
       <ConfirmImportWithoutSourceDialog
         open={confirmImportWithoutSourceOpen}
         isImportingTextCsv={isImportingTextCsv}
-        onClose={() => setConfirmImportWithoutSourceOpen(false)}
+        onClose={() => {
+          setConfirmImportWithoutSourceOpen(false);
+          resumeImportDuplicateCheck();
+        }}
         onConfirm={onConfirmImportWithoutSource}
       />
 
@@ -3407,7 +3445,10 @@ export function AdminConsole({
         isImportingTextCsv={isImportingTextCsv}
         previewSource={textImportPreviewSource}
         currentSource={csvSource}
-        onClose={() => setConfirmImportSourceChangedOpen(false)}
+        onClose={() => {
+          setConfirmImportSourceChangedOpen(false);
+          resumeImportDuplicateCheck();
+        }}
         onConfirm={onConfirmImportSourceChanged}
         onRePreview={onRePreviewFromSourceChanged}
       />
@@ -3482,6 +3523,8 @@ export function AdminConsole({
             finalizedTextImportRows={finalizedTextImportRows}
             skippedDuplicateRowIndices={skippedDuplicateRowIndices}
             importDuplicateRefreshState={importDuplicateRefreshState}
+            isImportDuplicateCheckPaused={isImportDuplicateCheckPaused}
+            onExecuteImportClick={pauseImportDuplicateCheck}
             ignoredTextImportCount={ignoredTextImportCount}
             pairValueRows={pairValueRows}
             pairRowsMissingNoteCount={pairRowsMissingNoteCount}

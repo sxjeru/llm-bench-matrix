@@ -4919,6 +4919,17 @@ describe("AdminConsole 预览矩阵编辑后刷新库内重复", () => {
         return createJsonResponse({ stats: [] });
       }
 
+      if (url === "/api/admin/import-csv") {
+        return createJsonResponse({
+          format: "structured-csv",
+          total: 1,
+          skipped: 0,
+          inserted: 1,
+          warningCount: 0,
+          warnings: []
+        });
+      }
+
       return createJsonResponse({});
     });
 
@@ -4987,5 +4998,103 @@ describe("AdminConsole 预览矩阵编辑后刷新库内重复", () => {
       expect(screen.getByText(/已按当前矩阵更新/)).toBeInTheDocument();
     }, { timeout: 3000 });
     expect(calls).toHaveLength(2);
+  });
+
+  test("点击执行导入后暂停失焦自动校验，输入框失焦不再请求 check-duplicates 直到重新预览恢复", async () => {
+    const user = userEvent.setup();
+    const calls = createDuplicateCheckFetchMock();
+    await renderReady(<AdminConsole {...buildProps()} />);
+
+    const matrixTable = await setupPreview(user);
+    expect(screen.getByText(/当前草稿：1 条可提交，忽略\/空值 0 条/)).toBeInTheDocument();
+
+    // 点击执行导入
+    const importButton = screen.getByRole("button", { name: "执行导入" });
+    await user.click(importButton);
+
+    // 提示已执行导入，失焦校验已暂停（刷新后恢复）
+    expect(await screen.findByText(/已执行导入，失焦校验已暂停（刷新后恢复）/)).toBeInTheDocument();
+
+    const callsCountBeforeBlur = calls.length;
+
+    // 修改数值并失焦
+    const scoreInput = within(matrixTable).getByDisplayValue("85.0");
+    await user.clear(scoreInput);
+    await user.type(scoreInput, "88.0");
+    fireEvent.focusOut(scoreInput);
+
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 500));
+    });
+
+    // 查重接口不应被调用
+    expect(calls.length).toBe(callsCountBeforeBlur);
+    expect(within(matrixTable).queryByText("已忽略不导入")).not.toBeInTheDocument();
+
+    // 重新点击“预览导入结果”（刷新预览）
+    await user.click(screen.getByRole("button", { name: "预览导入结果" }));
+    await waitFor(() => {
+      expect(screen.queryByText(/已执行导入，失焦校验已暂停/)).not.toBeInTheDocument();
+    });
+
+    // 恢复后失焦触发自动校验
+    const reloadedMatrixTable = await findMatrixPreviewTable();
+    const reloadedScoreInput = within(reloadedMatrixTable).getByDisplayValue("85.0");
+    await user.clear(reloadedScoreInput);
+    await user.type(reloadedScoreInput, "88.0");
+    fireEvent.focusOut(reloadedScoreInput);
+
+    await waitFor(() => {
+      expect(within(reloadedMatrixTable).getByText("已忽略不导入")).toBeInTheDocument();
+    }, { timeout: 3000 });
+    expect(calls.some((call) => call.rows.some((row) => row.rawValue === "88.0"))).toBe(true);
+  });
+
+  test("在输入框聚焦期间鼠标按下执行导入按钮，立即暂停失焦查库", async () => {
+    const user = userEvent.setup();
+    const calls = createDuplicateCheckFetchMock();
+    await renderReady(<AdminConsole {...buildProps()} />);
+
+    const matrixTable = await setupPreview(user);
+    const scoreInput = within(matrixTable).getByDisplayValue("85.0");
+    await user.clear(scoreInput);
+    await user.type(scoreInput, "88.0");
+    expect(scoreInput).toHaveFocus();
+
+    const importButton = screen.getByRole("button", { name: "执行导入" });
+    // 模拟鼠标按下执行导入（在 focusOut 触发前）
+    fireEvent.mouseDown(importButton);
+    fireEvent.focusOut(scoreInput);
+
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 500));
+    });
+
+    // 失焦查库被立即拦截，不会对 88.0 发送查重请求
+    expect(calls.some((call) => call.rows.some((row) => row.rawValue === "88.0"))).toBe(false);
+  });
+
+  test("取消导入确认弹窗后不会残留暂停态", async () => {
+    const user = userEvent.setup();
+    createDuplicateCheckFetchMock();
+    await renderReady(<AdminConsole {...buildProps()} />);
+
+    await setupPreview(user);
+
+    // 预览后修改来源，点击执行导入会先弹出来源变更确认
+    const sourceInput = screen.getByPlaceholderText(/source（可选/i);
+    await user.clear(sourceInput);
+    await user.type(sourceInput, "another-src");
+
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(screen.getByText(/已执行导入，失焦校验已暂停/)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "取消" }));
+
+    // 未真正导入，取消后暂停态应被解除
+    await waitFor(() => {
+      expect(screen.queryByText(/已执行导入，失焦校验已暂停/)).not.toBeInTheDocument();
+    });
   });
 });

@@ -448,6 +448,8 @@ type ImportTabProps = {
   textImportDraftRows: TextImportPreviewRow[];
   finalizedTextImportRows: StructuredCsvImportRow[];
   skippedDuplicateRowIndices?: Set<number>;
+  isImportDuplicateCheckPaused?: boolean;
+  onExecuteImportClick?: () => void;
   importDuplicateRefreshState: {
     status: "idle" | "loading" | "success" | "error";
     message: string;
@@ -577,6 +579,8 @@ export function ImportTab({
   textImportDraftRows,
   finalizedTextImportRows,
   skippedDuplicateRowIndices,
+  isImportDuplicateCheckPaused = false,
+  onExecuteImportClick,
   importDuplicateRefreshState,
   ignoredTextImportCount,
   pairValueRows,
@@ -927,7 +931,12 @@ export function ImportTab({
               {isPreviewingTextImport ? "预览中..." : "预览导入结果"}
             </button>
             <div className="inline-flex items-center gap-2">
-              <button type="submit" className="btn btn-primary" disabled={isImportingTextCsv}>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={isImportingTextCsv}
+                onMouseDown={onExecuteImportClick}
+              >
                 {isImportingTextCsv ? "导入中..." : "执行导入"}
               </button>
               {hasParsedHtmlTable ? (
@@ -973,12 +982,16 @@ export function ImportTab({
               {textImportDraftRows.length > 0 ? (
                 <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-info/20 pt-2 text-xs">
                   <span className="opacity-60">输入框失焦后自动校验库内重复</span>
-                  {importDuplicateRefreshState.message ? (
+                  {isImportDuplicateCheckPaused ? (
+                    <span className="badge badge-warning badge-outline badge-sm text-[11px]">
+                      已执行导入，失焦校验已暂停（刷新后恢复）
+                    </span>
+                  ) : importDuplicateRefreshState.message ? (
                     <span className={importDuplicateRefreshState.status === "error" ? "text-error" : "opacity-70"}>
                       {importDuplicateRefreshState.message}
                     </span>
                   ) : null}
-                  {!csvSource.trim() ? (
+                  {!isImportDuplicateCheckPaused && !csvSource.trim() ? (
                     <span className="opacity-60">未填写来源，暂不检查库内重复</span>
                   ) : null}
                 </div>
