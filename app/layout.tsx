@@ -5,6 +5,7 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import { GithubStarBadge } from "@/components/github-star-badge";
 import { TopbarActions } from "@/components/topbar-actions";
 import { UmamiAnalytics } from "@/components/umami-analytics";
+import { ActiveVisitors } from "@/components/active-visitors";
 import { VercountPageview } from "@/components/vercount-pageview";
 import { GITHUB_REPO_URL } from "@/lib/github-stars";
 import "./globals.css";
@@ -69,6 +70,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   <span className="site-footnote-divider" aria-hidden="true" />
                 </>
               )}
+
+              <ActiveVisitors />
 
               <span className="site-footnote-item">
                 Crafted with <span className="footnote-heart">♥</span> by {" "}

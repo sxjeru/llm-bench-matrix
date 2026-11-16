@@ -2,6 +2,7 @@ import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { describe, expect, test } from "vitest";
 
 import RootLayout from "@/app/layout";
+import { ActiveVisitors } from "@/components/active-visitors";
 import { GithubStarBadge } from "@/components/github-star-badge";
 
 function findElementByClassName(node: ReactNode, className: string): ReactElement<Record<string, unknown>> | null {
@@ -39,5 +40,19 @@ describe("RootLayout prefetch", () => {
 
     expect(brandGroup).not.toBeNull();
     expect(badge).toEqual(<GithubStarBadge />);
+  });
+
+  test("页脚挂载 ActiveVisitors 组件", () => {
+    const layout = RootLayout({ children: <div>content</div> });
+    const footnoteCard = findElementByClassName(layout, "site-footnote-card");
+    const children = Array.isArray(footnoteCard?.props.children)
+      ? footnoteCard.props.children
+      : [];
+    const activeVisitors = children.find(
+      (child) => isValidElement(child) && child.type === ActiveVisitors
+    );
+
+    expect(footnoteCard).not.toBeNull();
+    expect(activeVisitors).toEqual(<ActiveVisitors />);
   });
 });
