@@ -1,4 +1,5 @@
 import { composeImportPairValueRaw, parseImportPairValue } from "@/lib/import/pair-value";
+import { formatScaledAmountLike } from "@/lib/import/scaled-amount";
 
 export function formatPreviewNumericValue(
   rawValue: string,
@@ -13,6 +14,12 @@ export function formatPreviewNumericValue(
   const targetPart = position === "second"
     ? (normalizedRaw.split("/")[1] ?? "").trim()
     : (normalizedRaw.split("/")[0] ?? "").trim();
+
+  // 带量级后缀的值沿用原书写（`1.2M`），编辑后也保持同量级
+  const scaledDisplay = formatScaledAmountLike(targetPart, numericValue);
+  if (scaledDisplay) {
+    return scaledDisplay;
+  }
 
   const currencyMatch = targetPart.match(/^([$¥€£])/);
   if (!currencyMatch) {
@@ -49,7 +56,9 @@ export function parseSingleRawValue(rawValue: string): { value: string; tail: st
   if (parsePairRawValue(rawValue)) return null;
 
   const normalized = rawValue.trim();
-  const singleMatch = normalized.match(/^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/);
+  const singleMatch = normalized.match(
+    /^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[kKMBT](?![A-Za-z]))?)(.*)$/
+  );
   if (!singleMatch) return null;
 
   return {

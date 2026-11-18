@@ -200,9 +200,15 @@ export type MatrixCellPairDisplayParts = {
 };
 
 const DISPLAY_NUMERIC_TOKEN_REGEX =
-  /^\s*((?:[#＃]\s*)?(?:[$¥€£]\s*)?)([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/;
+  /^\s*((?:[#＃]\s*)?(?:[$¥€£]\s*)?)([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[kKMBT](?![A-Za-z]))?)(.*)$/;
+const DISPLAY_MAGNITUDE_SUFFIX_REGEX = /[kKMBT]$/;
 const STAR_MARKER_REGEX = /[*∗﹡✱✳✻]/;
 const CANONICAL_PAIR_SEPARATOR = " / ";
+
+/** `1.2M` 这类带量级后缀的值按原书写回显，不再展开成 1200000。 */
+function hasDisplayMagnitudeSuffix(value: string): boolean {
+  return DISPLAY_MAGNITUDE_SUFFIX_REGEX.test(value.trim());
+}
 
 function splitRawPairValue(raw: string): [string, string] | null {
   // 优先按 composeImportPairValueRaw 产出的 " / " 切分，
@@ -262,9 +268,10 @@ function formatPairSegment(
   const [, rawPrefix, rawNumber, rawTail] = match;
   const normalizedPrefix = rawPrefix.replace(/\s+/g, "");
   const hasCurrencySymbol = /[$¥€£]/.test(normalizedPrefix);
+  const hasMagnitudeSuffix = hasDisplayMagnitudeSuffix(rawNumber);
   const suffix = normalizeInlineSuffix(rawTail, valueNote, isLastSegment);
 
-  if (hasCurrencySymbol) {
+  if (hasCurrencySymbol || hasMagnitudeSuffix) {
     const currencyText = `${normalizedPrefix}${rawNumber.trim()}${suffix}`;
     return {
       text: currencyText,
@@ -324,7 +331,7 @@ export function getMatrixCellPairDisplayParts(
 }
 
 const MATRIX_CELL_PAIR_RAW_PATTERN =
-  /^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*\/\s*((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/;
+  /^((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[kKMBT](?![A-Za-z]))?)\s*\/\s*((?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[kKMBT](?![A-Za-z]))?)(.*)$/;
 
 /**
  * 判断原始值是不是「数值 / 数值」形式。斜杠两侧都必须是数字，
@@ -333,6 +340,26 @@ const MATRIX_CELL_PAIR_RAW_PATTERN =
 export function hasMatrixCellPairRawValue(rawValue: string | null | undefined): boolean {
   if (!rawValue) return false;
   return MATRIX_CELL_PAIR_RAW_PATTERN.test(rawValue.trim());
+}
+
+/**
+ * 货币符号与量级后缀都按原书写回显：`$1.03825M` / `128K` 不展开成完整数字。
+ */
+function formatRawNumericEcho(
+  value: string,
+  tail: string,
+  valueNote: string | null | undefined,
+  isXNote: boolean
+): string {
+  const tailText = tail.trim();
+  const suffix = isXNote ? "x" : "";
+  const valueText = value.trim();
+
+  if (!tailText) return `${valueText}${suffix}`;
+  if (tailText === "*" || tailText.startsWith("*")) return `${valueText}*`;
+  if (valueNote && valueNote.trim().length > 0) return `${valueText}${suffix}`;
+
+  return `${valueText}${tailText}${suffix}`;
 }
 
 export function getMatrixCellDisplayValue(
@@ -374,18 +401,21 @@ export function getMatrixCellDisplayValue(
     return `${first.trim()} / ${second.trim()}${suffix}`;
   }
 
-  const currencySingleMatch = raw.match(/^((?:[$¥€£]\s*)[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/);
+  const currencySingleMatch = raw.match(
+    /^((?:[$¥€£]\s*)[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[kKMBT](?![A-Za-z]))?)(.*)$/
+  );
   if (currencySingleMatch) {
     const [, value, tail] = currencySingleMatch;
-    const tailText = tail.trim();
+    return formatRawNumericEcho(value, tail, valueNote, isXNote);
+  }
 
-    const suffix = isXNote ? "x" : "";
-
-    if (!tailText) return `${value.trim()}${suffix}`;
-    if (tailText === "*" || tailText.startsWith("*")) return `${value.trim()}*`;
-    if (valueNote && valueNote.trim().length > 0) return `${value.trim()}${suffix}`;
-
-    return `${value.trim()}${tailText}${suffix}`;
+  // 无货币符号的量级值同样回显原书写，避免 `128K` 被展开成 `128000`
+  const magnitudeSingleMatch = raw.match(
+    /^((?:[#＃]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?[kKMBT](?![A-Za-z]))(.*)$/
+  );
+  if (magnitudeSingleMatch) {
+    const [, value, tail] = magnitudeSingleMatch;
+    return formatRawNumericEcho(value, tail, valueNote, isXNote);
   }
 
   const numericDisplay = formatValueNumForDisplay(valueNum);

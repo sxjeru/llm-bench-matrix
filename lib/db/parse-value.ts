@@ -1,4 +1,5 @@
 import { composeImportPairValueRaw, isStarMarkerOnly, parseImportPairValue } from "@/lib/import/pair-value";
+import { parseNumericTokenAmount } from "@/lib/import/scaled-amount";
 import { IMPORT_VALUE_SINGLE_REGEX } from "@/lib/import/value-patterns";
 
 export type ParsedBenchmarkValue = {
@@ -9,8 +10,7 @@ export type ParsedBenchmarkValue = {
 };
 
 function toNumber(input: string): number | null {
-  const parsed = Number.parseFloat(input.replace(/[$¥€£,#＃\s]/g, ""));
-  return Number.isFinite(parsed) ? parsed : null;
+  return parseNumericTokenAmount(input);
 }
 
 function normalizeStarPrefixedNote(tail: string): string | null {

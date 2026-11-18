@@ -1,5 +1,7 @@
+import { SCALED_NUMBER_TOKEN_SOURCE } from "@/lib/import/scaled-amount";
+
 const IMPORT_VALUE_NUMERIC_TOKEN_PATTERN =
-  "(?:[#＃]\\s*)?(?:[$¥€£]\\s*)?[+-]?(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d+)?";
+  `(?:[#＃]\\s*)?${SCALED_NUMBER_TOKEN_SOURCE}`;
 const IMPORT_VALUE_ATTACHED_MARKER_PATTERN = "(?:[*∗﹡✱✳✻](?!://)|\\^)(?:[0-9A-Za-z]*)?";
 
 /** 整格空值与双值段空占位的统一集合（含空字符串）。 */
@@ -33,7 +35,7 @@ export const IMPORT_VALUE_PAIR_REGEX =
   new RegExp(`^(${IMPORT_VALUE_PAIR_SEGMENT_PATTERN})\\s*\\/\\s*(${IMPORT_VALUE_PAIR_SEGMENT_PATTERN})(.*)$`, "i");
 
 export const IMPORT_VALUE_SINGLE_REGEX =
-  /^((?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(.*)$/;
+  new RegExp(`^(${IMPORT_VALUE_NUMERIC_TOKEN_PATTERN})(.*)$`);
 
 export const IMPORT_VALUE_RANK_PREFIX_REGEX = /^[#＃]/;
 

@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { type ClipboardEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EMPTY_SOURCE_OPTIONS } from "@/components/benchmark-matrix/constants";
+import { parseNumericTokenAmount } from "@/lib/import/scaled-amount";
 import { getJson, postFormData, postJson } from "./admin-console/api";
 import { useEntityLookups } from "./admin-console/hooks/use-entity-lookups";
 import { useImportPreviewState } from "./admin-console/hooks/use-import-preview-state";
@@ -110,8 +111,7 @@ function getBenchmarkPreviewValueOverlapStatsKey(previewBenchmarkKey: string, ca
 }
 
 function parseImportDraftNumericToken(input: string): number | null {
-  const parsed = Number.parseFloat(input.replace(/[$¥€£,#＃\s]/g, ""));
-  return Number.isFinite(parsed) ? parsed : null;
+  return parseNumericTokenAmount(input);
 }
 
 function formatBenchmarkPreviewValueOverlapStats(stats: BenchmarkPreviewValueOverlapStats) {

@@ -57,4 +57,28 @@ describe("benchmark matrix value display", () => {
     expect(getMatrixCellPairDisplayParts(null, null, "- / -", null)).toBeNull();
     expect(getMatrixCellDisplayValue(null, null, "- / -", null)).toBe("- / -");
   });
+
+  test("量级后缀按原书写回显，不展开成完整数字", () => {
+    expect(getMatrixCellDisplayValue(1_200_000, null, "1.2M", null)).toBe("1.2M");
+    expect(getMatrixCellDisplayValue(128_000, null, "128K", null)).toBe("128K");
+    expect(getMatrixCellDisplayValue(1_038_250, null, "$1.03825M", null)).toBe("$1.03825M");
+  });
+
+  test("双值量级后缀同样保留原书写", () => {
+    expect(getMatrixCellDisplayValue(1_038_250, 687_250, "$1.03825M / $687.25k", null))
+      .toBe("$1.03825M / $687.25k");
+    expect(getMatrixCellDisplayValue(128_000, 256_000, "128K / 256K", null))
+      .toBe("128K / 256K");
+
+    expect(getMatrixCellPairDisplayParts(1_038_250, 687_250, "$1.03825M / $687.25k", null)).toEqual({
+      first: "$1.03825M",
+      second: "$687.25k",
+      hasCurrencySymbol: true
+    });
+  });
+
+  test("小写脚注字母不会被当成量级", () => {
+    // 非货币数值的 note 一直不进单元格文本，这里只确认不会被展开成 85.3B
+    expect(getMatrixCellDisplayValue(85.3, null, "85.3b", "b")).toBe("85.3");
+  });
 });

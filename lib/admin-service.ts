@@ -21,6 +21,7 @@ import {
   isImportValueEmptyMarker
 } from "@/lib/import/value-patterns";
 import { composeImportPairValueRaw, isEmptyImportPairValue, parseImportPairValue } from "@/lib/import/pair-value";
+import { parseScaledAmount, SCALED_NUMBER_TOKEN_SOURCE } from "@/lib/import/scaled-amount";
 import {
   buildDuplicateNameSlotKey,
   normalizeNameParenthesisSpacing
@@ -127,9 +128,18 @@ export type DuplicateCheckSkippedWarning = {
   action: string;
 };
 
+type MixedMagnitudeImportValueWarning = {
+  type: "mixed-magnitude-import-value";
+  rowNumbers: number[];
+  benchmarkName: string;
+  reason: string;
+  action: string;
+};
+
 type TextParseWarning =
   | UnsupportedSpecialSymbolWarning
   | NonNumericImportValueWarning
+  | MixedMagnitudeImportValueWarning
   | DuplicateCheckSkippedWarning;
 
 /** Structural type covering the Drizzle methods used by entity-ensure helpers. */
@@ -148,7 +158,9 @@ const HTML_TABLE_TAG_REGEX = /<table[\s>]/i;
 const LOWER_IS_BETTER_BENCHMARK_RULES = [/omnidocbench\s*1\.5/i, /\b(?:r?mse)\b/i];
 const LOWER_IS_BETTER_ASR_TYPE_REGEX = /\basr\b/i;
 const OMNIDOCBENCH_15_MATCHER = /omnidocbench\s*1\.5/i;
-const PAPER_TABLE_VALUE_TOKEN_REGEX = /^(?:[#＃]\s*)?(?:[$¥€£]\s*)?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[%％])?(?:[*^][0-9A-Za-z]*)?$/;
+const PAPER_TABLE_VALUE_TOKEN_REGEX = new RegExp(
+  `^(?:[#＃]\\s*)?${SCALED_NUMBER_TOKEN_SOURCE}(?:[%％])?(?:[*^][0-9A-Za-z]*)?$`
+);
 const PAPER_HEADER_CONTINUATION_TOKENS = new Set([
   "high",
   "low",
@@ -1526,6 +1538,81 @@ function collectNonNumericImportValueWarnings(rows: NormalizedTextImportRow[]): 
       action: "请在预览表中核对该行，修正表格分隔/引号或编辑 Raw 值后再导入"
     }];
   });
+}
+
+/**
+ * 单个单元格里有没有量级后缀 / 裸值。
+ *
+ * 双值单元格两侧分别判定：`$1.2M / 500` 既算「带后缀」也算「裸值」，
+ * 因为裸的那一侧同样可能继承了表头单位。
+ */
+function classifyScaledValueSegments(rawValue: string): {
+  hasMagnitude: boolean;
+  hasBare: boolean;
+} {
+  const pairValue = parseImportPairValue(rawValue);
+  const segments = pairValue ? [pairValue.first, pairValue.second] : [rawValue];
+
+  let hasMagnitude = false;
+  let hasBare = false;
+
+  segments.forEach((segment) => {
+    const token = segment.trim().replace(/[*∗﹡✱✳✻^][0-9A-Za-z]*$/, "").trim();
+    if (!token || isImportValueEmptyMarker(token)) return;
+
+    const parsed = parseScaledAmount(token);
+    if (!parsed) return;
+
+    if (parsed.magnitude) {
+      hasMagnitude = true;
+    } else {
+      hasBare = true;
+    }
+  });
+
+  return { hasMagnitude, hasBare };
+}
+
+/**
+ * 同一 benchmark 内「带量级后缀」与「裸值」并存时给出告警。
+ *
+ * 后缀本身已经能正确换算，告警针对的是语义风险：裸值可能来自
+ * `Total estimated bounty ($M)` 这类表头已声明量级的列，落库后会差 10^n 倍。
+ */
+function collectMixedMagnitudeImportValueWarnings(rows: NormalizedTextImportRow[]): TextParseWarning[] {
+  const groups = new Map<string, {
+    benchmarkName: string;
+    magnitudeRows: Set<number>;
+    bareRows: Set<number>;
+  }>();
+
+  rows.forEach((row) => {
+    const benchmarkName = row.benchmarkName.trim();
+    const key = benchmarkName.toLowerCase();
+    if (!key) return;
+
+    const { hasMagnitude, hasBare } = classifyScaledValueSegments(row.valueRaw);
+    if (!hasMagnitude && !hasBare) return;
+
+    let group = groups.get(key);
+    if (!group) {
+      group = { benchmarkName, magnitudeRows: new Set(), bareRows: new Set() };
+      groups.set(key, group);
+    }
+
+    if (hasMagnitude) group.magnitudeRows.add(row.rowNumber);
+    if (hasBare) group.bareRows.add(row.rowNumber);
+  });
+
+  return [...groups.values()]
+    .filter((group) => group.magnitudeRows.size > 0 && group.bareRows.size > 0)
+    .map((group) => ({
+      type: "mixed-magnitude-import-value" as const,
+      rowNumbers: [...new Set([...group.magnitudeRows, ...group.bareRows])].sort((left, right) => left - right),
+      benchmarkName: group.benchmarkName,
+      reason: "同一指标内既有带量级后缀的数值，也有不带后缀的裸值；裸值可能继承了表头/单位里的 k/M/B，存在 10^n 倍的口径风险",
+      action: "请核对这些行的原始单位；若表头已声明量级，请把后缀显式写进 Raw 值后再导入"
+    }));
 }
 
 function looksLikeStructuredCsv(firstLine: string): boolean {
@@ -5894,12 +5981,18 @@ function parseBenchmarkTextRowsCore(inputText: string, defaultSource: string | n
   const sanitized = sanitizeUnsupportedValueSymbols(selectedParsed.rows);
   const expandedRows = expandMetricLabeledImportRows(sanitized.rows);
   const nonNumericWarnings = collectNonNumericImportValueWarnings(expandedRows);
+  const mixedMagnitudeWarnings = collectMixedMagnitudeImportValueWarnings(expandedRows);
 
   return {
     ...selectedParsed,
     rows: expandedRows,
     parseSource: "text",
-    warnings: [...(selectedParsed.warnings ?? []), ...sanitized.warnings, ...nonNumericWarnings]
+    warnings: [
+      ...(selectedParsed.warnings ?? []),
+      ...sanitized.warnings,
+      ...nonNumericWarnings,
+      ...mixedMagnitudeWarnings
+    ]
   };
 }
 

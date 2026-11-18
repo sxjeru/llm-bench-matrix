@@ -142,8 +142,8 @@ export const benchmarkValues = pgTable(
       .references(() => benchmarks.id, { onDelete: "cascade" }),
     benchTime: timestamp("bench_time", { withTimezone: true }).notNull(),
     valueRaw: text("value_raw").notNull(),
-    valueNum: numeric("value_num", { precision: 14, scale: 6 }),
-    valueNum2: numeric("value_num2", { precision: 14, scale: 6 }),
+    valueNum: numeric("value_num", { precision: 20, scale: 6 }),
+    valueNum2: numeric("value_num2", { precision: 20, scale: 6 }),
     valueNote: text("value_note"),
     source: text("source"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
