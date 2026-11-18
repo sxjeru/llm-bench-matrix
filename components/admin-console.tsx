@@ -81,7 +81,10 @@ import {
   inferProviderNameFromModelName,
   resolveProviderFromConfig,
 } from "./admin-console/utils/provider";
-import { extractTextImportWarningDetails } from "./admin-console/utils/warnings";
+import {
+  extractTextImportWarningDetails,
+  formatTextImportWarningSummary
+} from "./admin-console/utils/warnings";
 import {
   ClearDatabaseConfirmDialog,
   ConfirmImportSourceChangedDialog,
@@ -1327,12 +1330,12 @@ export function AdminConsole({
         source: csvSource || undefined
       });
 
-      const directionWarningCount = Number(result.warningCount ?? 0);
+      const warningSummary = formatTextImportWarningSummary("import", result.warnings, result.warningCount);
       const warningDetails = extractTextImportWarningDetails(result.warnings);
 
-      if (directionWarningCount > 0) {
+      if (warningSummary) {
         notifyError(
-          `工作簿导入完成：${result.inserted ?? 0}/${result.total ?? 0}（忽略 ${ignoredTextImportCount}，格式 ${result.format ?? "structured-csv"}）；已自动处理 ${directionWarningCount} 条解析警告`,
+          `工作簿导入完成：${result.inserted ?? 0}/${result.total ?? 0}（忽略 ${ignoredTextImportCount}，格式 ${result.format ?? "structured-csv"}）；${warningSummary}`,
           warningDetails
         );
       } else {
@@ -1981,13 +1984,13 @@ export function AdminConsole({
       importDuplicateRefreshLastKeyRef.current = "";
       setImportDuplicateRefreshState({ status: "idle", message: "" });
 
-      const directionWarningCount = Number(result.warningCount ?? 0);
       const duplicateCount = Number(result.duplicateCount ?? 0);
       const duplicateMsg = duplicateCount > 0 ? `（库内重复 ${duplicateCount} 条已忽略）` : "";
+      const warningSummary = formatTextImportWarningSummary("preview", result.warnings, result.warningCount);
       const warningDetails = extractTextImportWarningDetails(result.warnings);
-      if (directionWarningCount > 0) {
+      if (warningSummary) {
         notifyError(
-          `文本预览完成：可导入 ${result.total ?? 0} 条，跳过 ${result.skipped ?? 0} 条${duplicateMsg}；检测到 ${directionWarningCount} 条解析警告（导入时会自动清洗/修正）`,
+          `文本预览完成：可导入 ${result.total ?? 0} 条，跳过 ${result.skipped ?? 0} 条${duplicateMsg}；${warningSummary}`,
           warningDetails
         );
       } else {
@@ -2061,11 +2064,11 @@ export function AdminConsole({
           source: csvSource || undefined
         });
 
-        const directionWarningCount = Number(result.warningCount ?? 0);
+        const warningSummary = formatTextImportWarningSummary("import", result.warnings, result.warningCount);
         const warningDetails = extractTextImportWarningDetails(result.warnings);
-        if (directionWarningCount > 0) {
+        if (warningSummary) {
           notifyError(
-            `文本导入完成：${result.inserted ?? 0}/${result.total ?? 0}（忽略 ${ignoredTextImportCount}，格式 ${result.format ?? "structured-csv"}）；已自动处理 ${directionWarningCount} 条解析警告`,
+            `文本导入完成：${result.inserted ?? 0}/${result.total ?? 0}（忽略 ${ignoredTextImportCount}，格式 ${result.format ?? "structured-csv"}）；${warningSummary}`,
             warningDetails
           );
         } else {
@@ -2083,11 +2086,11 @@ export function AdminConsole({
           source: csvSource || undefined
         });
 
-        const directionWarningCount = Number(result.warningCount ?? 0);
+        const warningSummary = formatTextImportWarningSummary("import", result.warnings, result.warningCount);
         const warningDetails = extractTextImportWarningDetails(result.warnings);
-        if (directionWarningCount > 0) {
+        if (warningSummary) {
           notifyError(
-            `文本导入完成：${result.inserted ?? 0}/${result.total ?? 0}（跳过 ${result.skipped ?? 0}，格式 ${result.format ?? "auto"}）；已自动处理 ${directionWarningCount} 条解析警告`,
+            `文本导入完成：${result.inserted ?? 0}/${result.total ?? 0}（跳过 ${result.skipped ?? 0}，格式 ${result.format ?? "auto"}）；${warningSummary}`,
             warningDetails
           );
         } else {

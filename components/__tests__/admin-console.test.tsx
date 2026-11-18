@@ -1077,6 +1077,165 @@ describe("AdminConsole text import", () => {
     expect(await screen.findByText(/已自动处理 1 条解析警告/)).toBeInTheDocument();
   });
 
+  test("预览存在 mixed-magnitude-import-value 时提示需人工核对而非自动修正", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "matrix-table",
+      total: 2,
+      skipped: 0,
+      warningCount: 1,
+      warnings: [
+        {
+          type: "mixed-magnitude-import-value",
+          rowNumbers: [2],
+          benchmarkName: "Total estimated bounty",
+          benchmarkType: "general",
+          source: "unit-test",
+          magnitudeModels: ["M1"],
+          bareModels: ["M2"],
+          reason: "同一指标内既有带量级后缀的数值，也有不带后缀的裸值（带后缀：M1；裸值：M2）",
+          action: "请人工核对这些行的原始单位；导入不会自动修正"
+        }
+      ],
+      previewRows: [
+        {
+          rowNumber: 2,
+          providerName: "OpenAI",
+          modelName: "M1",
+          benchmarkName: "Total estimated bounty",
+          benchmarkType: "general",
+          rawValue: "$1.2M",
+          valueNum: 1200000,
+          valueNum2: null,
+          valueNote: null,
+          source: "unit-test",
+          valid: true
+        },
+        {
+          rowNumber: 2,
+          providerName: "OpenAI",
+          modelName: "M2",
+          benchmarkName: "Total estimated bounty",
+          benchmarkType: "general",
+          rawValue: "$1.2",
+          valueNum: 1.2,
+          valueNum2: null,
+          valueNote: null,
+          source: "unit-test",
+          valid: true
+        }
+      ]
+    };
+
+    mockFetchSequence(previewResponse);
+    await renderReady(<AdminConsole {...buildProps()} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    expect(await screen.findByText(/检测到 1 条解析警告（需人工核对，导入不会自动修正）/)).toBeInTheDocument();
+    expect(screen.queryByText(/导入时会自动清洗\/修正/)).not.toBeInTheDocument();
+    expect(screen.getByText(/来源 unit-test/)).toBeInTheDocument();
+  });
+
+  test("导入存在 mixed-magnitude-import-value 与自动处理警告并存时分别提示", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "matrix-table",
+      total: 1,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 2,
+          providerName: "OpenAI",
+          modelName: "M1",
+          benchmarkName: "Total estimated bounty",
+          benchmarkType: "general",
+          rawValue: "$1.2M",
+          valueNum: 1200000,
+          valueNum2: null,
+          valueNote: null,
+          source: "unit-test",
+          valid: true
+        }
+      ]
+    };
+
+    const importResponse = {
+      format: "structured-csv",
+      total: 1,
+      skipped: 0,
+      inserted: 1,
+      warningCount: 2,
+      warnings: [
+        {
+          type: "unsupported-special-symbol",
+          rowNumber: 2,
+          benchmarkName: "Total estimated bounty",
+          reason: "已移除特殊符号"
+        },
+        {
+          type: "mixed-magnitude-import-value",
+          rowNumbers: [2],
+          benchmarkName: "Total estimated bounty",
+          reason: "同一指标内既有带量级后缀的数值，也有不带后缀的裸值",
+          action: "请人工核对这些行的原始单位"
+        }
+      ]
+    };
+
+    mockFetchSequence(previewResponse, importResponse);
+    await renderReady(<AdminConsole {...buildProps()} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
+
+    expect(
+      await screen.findByText(/检测到 2 条解析警告（已自动处理 1 条，另有 1 条未自动修正，请人工核对）/)
+    ).toBeInTheDocument();
+  });
+
+  test("直接导入仅返回 mixed-magnitude-import-value 时不提示已自动处理", async () => {
+    const user = userEvent.setup();
+
+    const importResponse = {
+      format: "matrix-table",
+      total: 2,
+      skipped: 0,
+      inserted: 2,
+      warningCount: 1,
+      warnings: [
+        {
+          type: "mixed-magnitude-import-value",
+          rowNumbers: [2],
+          benchmarkName: "Total estimated bounty",
+          reason: "同一指标内既有带量级后缀的数值，也有不带后缀的裸值",
+          action: "请人工核对这些行的原始单位"
+        }
+      ]
+    };
+
+    mockFetchSequence(importResponse);
+    await renderReady(<AdminConsole {...buildProps()} />);
+
+    await user.type(
+      screen.getByPlaceholderText("source（可选，指明该 benchmark 数据来源）"),
+      "unit-test"
+    );
+    await fillCsvText(user, "Benchmark\tM1\tM2\nTotal estimated bounty\t$1.2M\t$1.2");
+    await user.click(screen.getByRole("button", { name: "执行导入" }));
+    await user.click(await screen.findByRole("button", { name: "仍然导入" }));
+
+    expect(
+      await screen.findByText(/存在 1 条需人工核对的解析警告（未自动修正，请人工核对）/)
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/已自动处理 1 条解析警告/)).not.toBeInTheDocument();
+  });
+
   test("同名 benchmark 导入时保留导入 type 与 modality", async () => {
     const user = userEvent.setup();
 

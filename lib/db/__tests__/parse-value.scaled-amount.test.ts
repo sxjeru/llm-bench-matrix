@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import { parseBenchmarkValue } from "@/lib/db/parse-value";
 import {
   formatScaledAmountLike,
+  hasMagnitudeSuffix,
   parseNumericTokenAmount,
   parseScaledAmount
 } from "@/lib/import/scaled-amount";
@@ -116,9 +117,14 @@ describe("parseNumericTokenAmount", () => {
     expect(parseNumericTokenAmount("1.2M*paper")).toBeCloseTo(1_200_000);
   });
 
-  test("保持旧的后备解析行为", () => {
+  test("保持旧的后备解析行为，并支持 # 前缀与量级后缀组合", () => {
     expect(parseNumericTokenAmount("$4,432.12")).toBeCloseTo(4432.12);
     expect(parseNumericTokenAmount("#3.4")).toBeCloseTo(3.4);
+    expect(parseNumericTokenAmount("#1.2M")).toBeCloseTo(1_200_000);
+    expect(parseNumericTokenAmount("＃128K*")).toBeCloseTo(128_000);
+    expect(parseBenchmarkValue("#1.2M").valueNum).toBeCloseTo(1_200_000);
+    expect(hasMagnitudeSuffix("#1.2M")).toBe(true);
+    expect(hasMagnitudeSuffix("#3.4")).toBe(false);
     expect(parseNumericTokenAmount("none")).toBeNull();
   });
 });

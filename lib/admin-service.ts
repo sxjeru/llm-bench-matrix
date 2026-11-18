@@ -133,6 +133,10 @@ type MixedMagnitudeImportValueWarning = {
   type: "mixed-magnitude-import-value";
   rowNumbers: number[];
   benchmarkName: string;
+  benchmarkType: string;
+  source: string | null;
+  magnitudeModels: string[];
+  bareModels: string[];
   reason: string;
   action: string;
 };
@@ -1541,32 +1545,62 @@ function collectNonNumericImportValueWarnings(rows: NormalizedTextImportRow[]): 
   });
 }
 
+function formatModelListSnippet(models: string[], limit = 5): string {
+  if (models.length <= limit) {
+    return models.join("、");
+  }
+  return `${models.slice(0, limit).join("、")} 等 ${models.length} 个模型`;
+}
+
+function classifyScaledSegmentToken(segment: string): "magnitude" | "bare" | "ignore" {
+  const trimmed = segment.trim();
+  if (!trimmed || isImportValueEmptyMarker(trimmed)) {
+    return "ignore";
+  }
+
+  const singleMatch = trimmed.match(IMPORT_VALUE_SINGLE_REGEX);
+  if (!singleMatch) {
+    return "ignore";
+  }
+
+  const [, numericToken] = singleMatch;
+  const scaledInput = numericToken.trim().replace(IMPORT_VALUE_RANK_PREFIX_REGEX, "").trim();
+  const parsed = parseScaledAmount(scaledInput);
+  if (!parsed) {
+    return "ignore";
+  }
+
+  if (parsed.magnitude) {
+    return "magnitude";
+  }
+
+  // 0 在任意量级下数值都等价（0 === 0k === 0M），不视为存在口径风险的裸值
+  return parsed.amount === 0 ? "ignore" : "bare";
+}
+
 /**
  * 单个单元格里有没有量级后缀 / 裸值。
  *
  * 双值单元格两侧分别判定：`$1.2M / 500` 既算「带后缀」也算「裸值」，
- * 因为裸的那一侧同样可能继承了表头单位。
+ * 因为裸的那一侧同样可能继承了表头单位；`$1.2M / 0` 则忽略 0。
  */
 function classifyScaledValueSegments(rawValue: string): {
   hasMagnitude: boolean;
   hasBare: boolean;
 } {
-  const pairValue = parseImportPairValue(rawValue);
-  const segments = pairValue ? [pairValue.first, pairValue.second] : [rawValue];
+  // 先去掉百分号（85.3%、85.3% / $1.2M），避免双值切分或单值匹配被 % 阻断
+  const normalizedRaw = rawValue.replace(/[％%]/g, "").trim();
+  const pairValue = parseImportPairValue(normalizedRaw);
+  const segments = pairValue ? [pairValue.first, pairValue.second] : [normalizedRaw];
 
   let hasMagnitude = false;
   let hasBare = false;
 
   segments.forEach((segment) => {
-    const token = segment.trim().replace(/[*∗﹡✱✳✻^][0-9A-Za-z]*$/, "").trim();
-    if (!token || isImportValueEmptyMarker(token)) return;
-
-    const parsed = parseScaledAmount(token);
-    if (!parsed) return;
-
-    if (parsed.magnitude) {
+    const kind = classifyScaledSegmentToken(segment);
+    if (kind === "magnitude") {
       hasMagnitude = true;
-    } else {
+    } else if (kind === "bare") {
       hasBare = true;
     }
   });
@@ -1575,7 +1609,8 @@ function classifyScaledValueSegments(rawValue: string): {
 }
 
 /**
- * 同一 benchmark 内「带量级后缀」与「裸值」并存时给出告警。
+ * 同一指标（同 benchmarkName + benchmarkType + source + unit）内
+ * 「带量级后缀」与「非零裸值」并存时给出告警。
  *
  * 后缀本身已经能正确换算，告警针对的是语义风险：裸值可能来自
  * `Total estimated bounty ($M)` 这类表头已声明量级的列，落库后会差 10^n 倍。
@@ -1583,37 +1618,78 @@ function classifyScaledValueSegments(rawValue: string): {
 function collectMixedMagnitudeImportValueWarnings(rows: NormalizedTextImportRow[]): TextParseWarning[] {
   const groups = new Map<string, {
     benchmarkName: string;
+    benchmarkType: string;
+    source: string | null;
     magnitudeRows: Set<number>;
     bareRows: Set<number>;
+    magnitudeModels: Set<string>;
+    bareModels: Set<string>;
   }>();
 
   rows.forEach((row) => {
     const benchmarkName = row.benchmarkName.trim();
-    const key = benchmarkName.toLowerCase();
-    if (!key) return;
+    const benchmarkKey = benchmarkName.toLowerCase();
+    if (!benchmarkKey) return;
+
+    const benchmarkType = (row.benchmarkType || "general").trim() || "general";
+    const source = row.source?.trim() || null;
+    const unit = (row.unit || "score").trim() || "score";
+    const key = [
+      benchmarkKey,
+      benchmarkType.toLowerCase(),
+      (source ?? "").toLowerCase(),
+      unit.toLowerCase()
+    ].join("\u0000");
 
     const { hasMagnitude, hasBare } = classifyScaledValueSegments(row.valueRaw);
     if (!hasMagnitude && !hasBare) return;
 
     let group = groups.get(key);
     if (!group) {
-      group = { benchmarkName, magnitudeRows: new Set(), bareRows: new Set() };
+      group = {
+        benchmarkName,
+        benchmarkType,
+        source,
+        magnitudeRows: new Set(),
+        bareRows: new Set(),
+        magnitudeModels: new Set(),
+        bareModels: new Set()
+      };
       groups.set(key, group);
     }
 
-    if (hasMagnitude) group.magnitudeRows.add(row.rowNumber);
-    if (hasBare) group.bareRows.add(row.rowNumber);
+    const modelName = row.modelName.trim();
+    if (hasMagnitude) {
+      group.magnitudeRows.add(row.rowNumber);
+      if (modelName) group.magnitudeModels.add(modelName);
+    }
+    if (hasBare) {
+      group.bareRows.add(row.rowNumber);
+      if (modelName) group.bareModels.add(modelName);
+    }
   });
 
   return [...groups.values()]
     .filter((group) => group.magnitudeRows.size > 0 && group.bareRows.size > 0)
-    .map((group) => ({
-      type: "mixed-magnitude-import-value" as const,
-      rowNumbers: [...new Set([...group.magnitudeRows, ...group.bareRows])].sort((left, right) => left - right),
-      benchmarkName: group.benchmarkName,
-      reason: "同一指标内既有带量级后缀的数值，也有不带后缀的裸值；裸值可能继承了表头/单位里的 k/M/B，存在 10^n 倍的口径风险",
-      action: "请核对这些行的原始单位；若表头已声明量级，请把后缀显式写进 Raw 值后再导入"
-    }));
+    .map((group) => {
+      const magnitudeModels = [...group.magnitudeModels];
+      const bareModels = [...group.bareModels];
+      const modelDetail = magnitudeModels.length > 0 && bareModels.length > 0
+        ? `（带后缀：${formatModelListSnippet(magnitudeModels)}；裸值：${formatModelListSnippet(bareModels)}）`
+        : "";
+
+      return {
+        type: "mixed-magnitude-import-value" as const,
+        rowNumbers: [...new Set([...group.magnitudeRows, ...group.bareRows])].sort((left, right) => left - right),
+        benchmarkName: group.benchmarkName,
+        benchmarkType: group.benchmarkType,
+        source: group.source,
+        magnitudeModels,
+        bareModels,
+        reason: `同一指标内既有带量级后缀的数值，也有不带后缀的裸值${modelDetail}；裸值可能继承了表头/单位里的 k/M/B，存在 10^n 倍的口径风险`,
+        action: "请人工核对这些行的原始单位；导入不会自动修正，若表头已声明量级，请把后缀显式写进 Raw 值后再导入"
+      };
+    });
 }
 
 function looksLikeStructuredCsv(firstLine: string): boolean {
@@ -8292,4 +8368,33 @@ export function __invalidateDuplicateCandidatesCacheForTest() {
 
 export function __sanitizeHtmlTableForImportForTest(inputHtml: string): string {
   return sanitizeHtmlTableForImport(inputHtml);
+}
+
+export function __collectMixedMagnitudeImportValueWarningsForTest(
+  rows: Array<{
+    rowNumber: number;
+    modelName: string;
+    benchmarkName: string;
+    benchmarkType?: string;
+    valueRaw: string;
+    unit?: string;
+    source?: string | null;
+  }>
+): TextParseWarning[] {
+  const normalizedRows: NormalizedTextImportRow[] = rows.map((row) => ({
+    rowNumber: row.rowNumber,
+    providerName: "Unknown",
+    modelName: row.modelName,
+    benchmarkName: row.benchmarkName,
+    benchmarkType: row.benchmarkType ?? "general",
+    benchmarkTypeProvided: Boolean(row.benchmarkType),
+    valueRaw: row.valueRaw,
+    valueNote: null,
+    benchTime: new Date("2026-01-01T00:00:00.000Z"),
+    unit: row.unit ?? "score",
+    higherIsBetter: true,
+    modalities: ["Text"],
+    source: row.source ?? null
+  }));
+  return collectMixedMagnitudeImportValueWarnings(normalizedRows);
 }

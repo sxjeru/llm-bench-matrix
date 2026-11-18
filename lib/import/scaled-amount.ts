@@ -77,14 +77,16 @@ export function parseScaledAmount(rawInput: string): ParsedScaledAmount | null {
 }
 
 const ATTACHED_MARKER_SUFFIX_REGEX = /[*∗﹡✱✳✻^][0-9A-Za-z]*$/;
+const RANK_PREFIX_REGEX = /^[#＃]\s*/;
 
 /**
  * 宽松解析：先按量级规则解析，失败再退回旧的「去符号 + parseFloat」。
  * 用于 `valueNum` 计算这类「必须给出一个数」的场景。
  */
 export function parseNumericTokenAmount(rawInput: string): number | null {
-  const scaled = parseScaledAmount(rawInput)
-    ?? parseScaledAmount(rawInput.replace(ATTACHED_MARKER_SUFFIX_REGEX, ""));
+  const normalized = rawInput.trim().replace(RANK_PREFIX_REGEX, "");
+  const scaled = parseScaledAmount(normalized)
+    ?? parseScaledAmount(normalized.replace(ATTACHED_MARKER_SUFFIX_REGEX, ""));
   if (scaled) return scaled.amount;
 
   const parsed = Number.parseFloat(rawInput.replace(/[$¥€£,#＃\s]/g, ""));
@@ -95,7 +97,8 @@ export function parseNumericTokenAmount(rawInput: string): number | null {
  * 判断单个数值片段（可带尾随标记或注释）是否含 k/K/M/B/T 量级后缀。
  */
 export function hasMagnitudeSuffix(rawInput: string): boolean {
-  const leadingToken = rawInput.match(LEADING_SCALED_TOKEN_REGEX)?.[1];
+  const normalized = rawInput.trim().replace(RANK_PREFIX_REGEX, "");
+  const leadingToken = normalized.match(LEADING_SCALED_TOKEN_REGEX)?.[1];
   if (!leadingToken) return false;
   return Boolean(parseScaledAmount(leadingToken)?.magnitude);
 }
