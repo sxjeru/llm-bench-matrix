@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { hasEloCandidateValue } from "@/lib/import/elo-value";
 import { BENCHMARK_SUSPECT_KEYWORDS } from "../constants";
 import type {
   BenchmarkOption,
@@ -284,7 +285,7 @@ export function useImportPreviewState({
         });
       }
 
-      if ((item.valueNum !== null && item.valueNum > 100) || (item.valueNum2 !== null && item.valueNum2 > 100)) {
+      if (hasEloCandidateValue(item)) {
         importedBenchmarkHasEloValue.set(key, true);
       }
     });
@@ -455,13 +456,10 @@ export function useImportPreviewState({
       }
 
       // 4. Elo 目标（检测 >100 值的 Elo 变体）
-      const importedBenchmarkHasEloValue = Array.from(importedBenchmarks.entries()).some(
-        ([k]) => k === key && (
-          textImportDraftRows.some(row => 
-            getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType) === key &&
-            ((row.valueNum !== null && row.valueNum > 100) || (row.valueNum2 !== null && row.valueNum2 > 100))
-          )
-        )
+      const importedBenchmarkHasEloValue = textImportDraftRows.some(
+        (row) =>
+          getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType) === key
+          && hasEloCandidateValue(row)
       );
 
       if (importedBenchmarkHasEloValue && !hasEloBenchmarkSuffix(benchmarkName)) {

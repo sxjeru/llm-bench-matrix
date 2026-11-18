@@ -122,6 +122,113 @@ describe("useImportPreviewState Hook - benchmarkPreviewValueOverlapPayload", () 
     );
   });
 
+  test("带量级后缀的数值（$1.2M / 128K / 1.5B / 双值量级）不触发 Elo 告警，混含裸 >100 的双值仍告警", () => {
+    const draftRows: TextImportPreviewRow[] = [
+      {
+        rowNumber: 1,
+        providerName: "OpenAI",
+        modelName: "Model A",
+        benchmarkName: "Bounty",
+        benchmarkType: "General",
+        rawValue: "$1.2M",
+        valueNum: 1_200_000,
+        valueNum2: null,
+        valueNote: null,
+        source: null,
+        valid: true
+      },
+      {
+        rowNumber: 2,
+        providerName: "OpenAI",
+        modelName: "Model B",
+        benchmarkName: "Context",
+        benchmarkType: "General",
+        rawValue: "128K",
+        valueNum: 128_000,
+        valueNum2: null,
+        valueNote: null,
+        source: null,
+        valid: true
+      },
+      {
+        rowNumber: 3,
+        providerName: "OpenAI",
+        modelName: "Model C",
+        benchmarkName: "Params",
+        benchmarkType: "General",
+        rawValue: "n/a / 1.5B",
+        valueNum: null,
+        valueNum2: 1_500_000_000,
+        valueNote: null,
+        source: null,
+        valid: true
+      },
+      {
+        rowNumber: 4,
+        providerName: "OpenAI",
+        modelName: "Model D",
+        benchmarkName: "MixedBench",
+        benchmarkType: "General",
+        rawValue: "$1.2M / 1215",
+        valueNum: 1_200_000,
+        valueNum2: 1215,
+        valueNote: null,
+        source: null,
+        valid: true
+      }
+    ];
+
+    const bountyBenchmark: BenchmarkOption = {
+      id: 201,
+      benchmarkName: "Bounty",
+      benchmarkType: "General",
+      modalities: ["Text"]
+    };
+    const contextBenchmark: BenchmarkOption = {
+      id: 203,
+      benchmarkName: "Context",
+      benchmarkType: "General",
+      modalities: ["Text"]
+    };
+    const paramsBenchmark: BenchmarkOption = {
+      id: 204,
+      benchmarkName: "Params",
+      benchmarkType: "General",
+      modalities: ["Text"]
+    };
+    const mixedBenchmark: BenchmarkOption = {
+      id: 205,
+      benchmarkName: "MixedBench",
+      benchmarkType: "General",
+      modalities: ["Text"]
+    };
+
+    const options = createMockOptions({
+      benchmarks: [bountyBenchmark, contextBenchmark, paramsBenchmark, mixedBenchmark],
+      textImportDraftRows: draftRows,
+      existingBenchmarkExactMap: new Map([
+        ["bounty@@general", bountyBenchmark],
+        ["context@@general", contextBenchmark],
+        ["params@@general", paramsBenchmark],
+        ["mixedbench@@general", mixedBenchmark]
+      ]),
+      existingBenchmarkByNameMap: new Map([
+        ["bounty", [bountyBenchmark]],
+        ["context", [contextBenchmark]],
+        ["params", [paramsBenchmark]],
+        ["mixedbench", [mixedBenchmark]]
+      ])
+    });
+
+    const { result } = renderHook(() => useImportPreviewState(options));
+
+    expect(result.current.benchmarkWarnings).toHaveLength(1);
+    expect(result.current.benchmarkWarnings[0].benchmarkName).toBe("MixedBench");
+    expect(result.current.benchmarkWarnings[0].reasons).toContain(
+      "检测到 >100 Elo 数值，但库内不存在 MixedBench (Elo)"
+    );
+  });
+
   test("在没有输入行或 benchmarks 时，返回空的 overlap 负载", () => {
     const options = createMockOptions({
       benchmarks: [],

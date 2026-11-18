@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { type ClipboardEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EMPTY_SOURCE_OPTIONS } from "@/components/benchmark-matrix/constants";
+import { hasEloCandidateValue } from "@/lib/import/elo-value";
 import { parseNumericTokenAmount } from "@/lib/import/scaled-amount";
 import { getJson, postFormData, postJson } from "./admin-console/api";
 import { useEntityLookups } from "./admin-console/hooks/use-entity-lookups";
@@ -693,7 +694,7 @@ export function AdminConsole({
 
   function resolveExistingEloBenchmark(row: TextImportPreviewRow) {
     if (hasBenchmarkEloSuffix(row.benchmarkName)) return null;
-    if (!((row.valueNum !== null && row.valueNum > 100) || (row.valueNum2 !== null && row.valueNum2 > 100))) return null;
+    if (!hasEloCandidateValue(row)) return null;
 
     const eloBenchmarkName = toBenchmarkEloName(row.benchmarkName);
     const sameNameBenchmarks = existingBenchmarkByNameMap.get(eloBenchmarkName.trim().toLowerCase()) ?? [];

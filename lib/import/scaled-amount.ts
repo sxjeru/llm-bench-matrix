@@ -92,6 +92,15 @@ export function parseNumericTokenAmount(rawInput: string): number | null {
 }
 
 /**
+ * 判断单个数值片段（可带尾随标记或注释）是否含 k/K/M/B/T 量级后缀。
+ */
+export function hasMagnitudeSuffix(rawInput: string): boolean {
+  const leadingToken = rawInput.match(LEADING_SCALED_TOKEN_REGEX)?.[1];
+  if (!leadingToken) return false;
+  return Boolean(parseScaledAmount(leadingToken)?.magnitude);
+}
+
+/**
  * 按原书写风格格式化：`$1.03825M` 编辑后仍是 `$1.03825M`，
  * 而不是展开成 `$1,038,250`。无法用原量级表达时返回 null，由调用方回退。
  */

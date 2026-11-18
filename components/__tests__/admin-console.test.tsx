@@ -4417,6 +4417,75 @@ describe("AdminConsole rename tab", () => {
     });
   });
 
+  test("带量级后缀的数值（$1.2M / 128K / 1.5B）不会误触发同名 (Elo) 改写与 Elo 警告", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 3,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "Model A",
+          benchmarkName: "SomeBench",
+          benchmarkType: "General",
+          rawValue: "$1.2M",
+          valueNum: 1_200_000,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        },
+        {
+          rowNumber: 2,
+          providerName: "OpenAI",
+          modelName: "Model B",
+          benchmarkName: "SomeBench",
+          benchmarkType: "General",
+          rawValue: "128K",
+          valueNum: 128_000,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        },
+        {
+          rowNumber: 3,
+          providerName: "OpenAI",
+          modelName: "Model C",
+          benchmarkName: "SomeBench",
+          benchmarkType: "General",
+          rawValue: "1.5B",
+          valueNum: 1_500_000_000,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        }
+      ]
+    };
+
+    mockFetchSequence(previewResponse);
+    const props = buildProps();
+    props.benchmarks = [
+      { id: 10, benchmarkName: "SomeBench", benchmarkType: "General", modalities: ["Text"] },
+      { id: 11, benchmarkName: "SomeBench (Elo)", benchmarkType: "General", modalities: ["Text"] }
+    ];
+
+    await renderReady(<AdminConsole {...props} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const matrixTable = await findMatrixPreviewTable();
+    expect(within(matrixTable).getByDisplayValue("SomeBench")).toBeInTheDocument();
+    expect(within(matrixTable).queryByDisplayValue("SomeBench (Elo)")).not.toBeInTheDocument();
+    expect(screen.queryByText(/检测到 >100 Elo 数值/)).not.toBeInTheDocument();
+  });
+
   test("矩阵 benchmark 输入时可搜索全量库内 benchmark", async () => {
     const user = userEvent.setup();
 

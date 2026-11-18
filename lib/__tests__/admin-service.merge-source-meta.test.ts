@@ -1030,6 +1030,109 @@ describe("mergeEntity benchmark source meta migration", () => {
     }
   });
 
+  test("导入带量级后缀的数值（$1.2M）时不会误路由到同名 Elo benchmark", async () => {
+    const inputText = [
+      "Category\tBenchmark\tGPT-5.4",
+      "Professional\tGDPval-AA\t$1.2M"
+    ].join("\n");
+
+    const dbSelectSpy = vi.spyOn(dbForTest, "select").mockImplementation(() => {
+      throw new Error("connect ECONNREFUSED 127.0.0.1:5432");
+    });
+
+    const activeBenchmarks = [
+      {
+        id: 41,
+        benchmarkName: "GDPval-AA",
+        benchmarkType: "General",
+        unit: "score",
+        higherIsBetter: true,
+        modalities: ["Text"],
+        canonicalKey: "gdpvalaa:general",
+        sourceBenchmarkId: null,
+        mergedIntoBenchmarkId: null,
+        createdAt: new Date("2026-04-01T00:00:00.000Z")
+      },
+      {
+        id: 42,
+        benchmarkName: "GDPval-AA (Elo)",
+        benchmarkType: "General",
+        unit: "score",
+        higherIsBetter: true,
+        modalities: ["Text"],
+        canonicalKey: "gdpvalaaelo:general",
+        sourceBenchmarkId: null,
+        mergedIntoBenchmarkId: null,
+        createdAt: new Date("2026-04-01T00:00:00.000Z")
+      }
+    ];
+
+    const createdProvider = { id: 1, name: "OpenAI", slug: "openai", createdAt: new Date("2026-04-01T00:00:00.000Z") };
+    const createdModel = {
+      id: 2,
+      providerId: 1,
+      modelName: "GPT-5.4",
+      modelAlias: null,
+      canonicalKey: "gpt54",
+      sourceModelId: null,
+      mergedIntoModelId: null,
+      createdAt: new Date("2026-04-01T00:00:00.000Z")
+    };
+
+    const txSelect = vi.fn()
+      .mockReturnValueOnce({ from: createSelectFromMock(activeBenchmarks) })
+      .mockReturnValueOnce({ from: createSelectFromMock([]) })
+      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([createdProvider]) }) }) })
+      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }) }) });
+
+    const providerReturning = vi.fn().mockResolvedValue([createdProvider]);
+    const modelReturning = vi.fn().mockResolvedValue([createdModel]);
+    const valueRowsInsert = vi.fn().mockResolvedValue(undefined);
+    const sourceMetaOnConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
+    const sourceMetaValues = vi.fn(() => ({ onConflictDoUpdate: sourceMetaOnConflictDoUpdate }));
+
+    const txInsert = vi.fn()
+      .mockReturnValueOnce({ values: vi.fn(() => ({ onConflictDoUpdate: vi.fn(() => ({ returning: providerReturning })) })) })
+      .mockReturnValueOnce({ values: vi.fn(() => ({ returning: modelReturning })) })
+      .mockReturnValueOnce({ values: valueRowsInsert })
+      .mockReturnValueOnce({ values: sourceMetaValues });
+
+    const tx = {
+      select: txSelect,
+      insert: txInsert,
+      update: vi.fn(() => ({ set: vi.fn() })),
+      delete: vi.fn()
+    };
+
+    const transactionSpy = vi
+      .spyOn(dbForTest, "transaction")
+      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+
+    try {
+      const result = await importBenchmarkCsvForTest(inputText, "text:gdpval-aa");
+
+      expect(result.inserted).toBe(1);
+      expect(valueRowsInsert).toHaveBeenCalledWith([
+        expect.objectContaining({
+          benchmarkId: 41,
+          valueRaw: "$1.2M",
+          valueNum: "1200000",
+          source: "text:gdpval-aa"
+        })
+      ]);
+      expect(sourceMetaValues).toHaveBeenCalledWith([
+        expect.objectContaining({
+          benchmarkId: 41,
+          source: "text:gdpval-aa",
+          benchmarkType: "Professional"
+        })
+      ]);
+    } finally {
+      transactionSpy.mockRestore();
+      dbSelectSpy.mockRestore();
+    }
+  });
+
   test("测试环境下 settings 查询不可用时会回退默认 dedupe 规则继续导入", async () => {
     const inputText = [
       "Category\tBenchmark\tGPT-5.4",

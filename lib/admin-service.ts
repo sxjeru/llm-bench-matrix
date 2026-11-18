@@ -21,6 +21,7 @@ import {
   isImportValueEmptyMarker
 } from "@/lib/import/value-patterns";
 import { composeImportPairValueRaw, isEmptyImportPairValue, parseImportPairValue } from "@/lib/import/pair-value";
+import { hasEloCandidateValue } from "@/lib/import/elo-value";
 import { parseScaledAmount, SCALED_NUMBER_TOKEN_SOURCE } from "@/lib/import/scaled-amount";
 import {
   buildDuplicateNameSlotKey,
@@ -2263,7 +2264,11 @@ function shouldPreferExistingEloBenchmarkForImport(benchmarkName: string, parsed
     return false;
   }
 
-  return isEloScaleValue(parsedValue.valueNum) || isEloScaleValue(parsedValue.valueNum2);
+  return hasEloCandidateValue({
+    rawValue: parsedValue.valueRaw,
+    valueNum: parsedValue.valueNum,
+    valueNum2: parsedValue.valueNum2
+  });
 }
 
 function mergeNumericBounds(values: number[]): { minValue: number | null; maxValue: number | null } {
