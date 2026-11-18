@@ -11,9 +11,10 @@ export function formatPreviewNumericValue(
   }
 
   const normalizedRaw = rawValue.trim();
-  const targetPart = position === "second"
-    ? (normalizedRaw.split("/")[1] ?? "").trim()
-    : (normalizedRaw.split("/")[0] ?? "").trim();
+  const pair = parsePairRawValue(normalizedRaw);
+  const targetPart = pair
+    ? (position === "second" ? pair.second : pair.first)
+    : normalizedRaw;
 
   // 带量级后缀的值沿用原书写（`1.2M`），编辑后也保持同量级
   const scaledDisplay = formatScaledAmountLike(targetPart, numericValue);

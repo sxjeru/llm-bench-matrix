@@ -96,6 +96,12 @@ describe("admin console import value helpers", () => {
     expect(formatPreviewNumericValue("$438k", 438_500)).toBe("$438.5k");
   });
 
+  test("双值含 n/a 空占位时仍按成对结构取段", () => {
+    expect(formatPreviewNumericValue("n/a / $317.5k", 317_500, "second")).toBe("$317.5k");
+    expect(formatPreviewNumericValue("N/A / $317.5k", 317_500, "second")).toBe("$317.5k");
+    expect(formatPreviewNumericValue("n/a / $317.5k", 317_500, "first")).toBe("317500");
+  });
+
   test("无后缀的货币预览保持原有补零行为", () => {
     expect(formatPreviewNumericValue("$4,432.12", 4432.12)).toBe("$4,432.12");
   });
