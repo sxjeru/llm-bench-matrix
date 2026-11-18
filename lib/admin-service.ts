@@ -5292,27 +5292,30 @@ function isMatrixValueLikeCell(cell: string): boolean {
 
 function getTrailingMatrixValueCellCount(cells: string[]): number {
   let count = 0;
+  let hasRealValueCell = false;
 
   for (let index = cells.length - 1; index >= 0; index -= 1) {
     const currentCell = (cells[index] ?? "").trim();
     if (!currentCell) {
-      if (count > 0) {
+      // 矩阵数据行首列（index === 0）通常是 benchmark 或 category 标签，空首列不能吞入值列统计
+      if (index === 0) {
         break;
       }
+
+      count += 1;
       continue;
     }
 
     if (isMatrixValueLikeCell(currentCell)) {
       count += 1;
+      hasRealValueCell = true;
       continue;
     }
 
-    if (count > 0) {
-      break;
-    }
+    break;
   }
 
-  return count;
+  return hasRealValueCell ? count : 0;
 }
 
 function joinMatrixLabelFragments(fragments: string[]): string {
@@ -5322,10 +5325,9 @@ function joinMatrixLabelFragments(fragments: string[]): string {
     .join(", ");
 }
 
-function inferMatrixModelCountFromDataLines(lines: string[], startLineIndex: number): number | null {
-  const trailingValueCounts = lines
-    .slice(startLineIndex)
-    .map((line) => getTrailingMatrixValueCellCount(splitTableLine(line)))
+function inferMatrixModelCountFromDataRows(dataRowsCells: string[][]): number | null {
+  const trailingValueCounts = dataRowsCells
+    .map((cells) => getTrailingMatrixValueCellCount(cells))
     .filter((count) => count >= 2);
 
   if (trailingValueCounts.length === 0) {
@@ -5355,8 +5357,7 @@ function inferMatrixModelCountFromDataLines(lines: string[], startLineIndex: num
  * 这样既能修正 benchmark 列名不含关键词时起点偏移的问题，也不会被表头里未加引号的逗号带偏。
  */
 function hasMatrixDataRowsSupportingModelStart(
-  lines: string[],
-  startLineIndex: number,
+  dataRowsCells: string[][],
   expectedModelCount: number,
   startIndex: number
 ): boolean {
@@ -5366,8 +5367,7 @@ function hasMatrixDataRowsSupportingModelStart(
 
   let matchedRowCount = 0;
 
-  for (let index = startLineIndex; index < lines.length; index += 1) {
-    const cells = splitTableLine(lines[index] ?? "");
+  for (const cells of dataRowsCells) {
     if (getTrailingMatrixValueCellCount(cells) !== expectedModelCount) {
       continue;
     }
@@ -5382,8 +5382,7 @@ function hasMatrixDataRowsSupportingModelStart(
 }
 
 function hasImplicitMatrixBenchmarkColumn(
-  lines: string[],
-  startLineIndex: number,
+  dataRowsCells: string[][],
   expectedModelCount: number,
   headerColumnCount: number
 ): boolean {
@@ -5391,18 +5390,15 @@ function hasImplicitMatrixBenchmarkColumn(
     return false;
   }
 
-  return lines
-    .slice(startLineIndex)
-    .some((line) => {
-      const cells = splitTableLine(line);
-      const trailingValueCount = getTrailingMatrixValueCellCount(cells);
-      if (trailingValueCount !== expectedModelCount || cells.length < expectedModelCount + 1) {
-        return false;
-      }
+  return dataRowsCells.some((cells) => {
+    const trailingValueCount = getTrailingMatrixValueCellCount(cells);
+    if (trailingValueCount !== expectedModelCount || cells.length < expectedModelCount + 1) {
+      return false;
+    }
 
-      const leadingCell = joinMatrixLabelFragments(cells.slice(0, cells.length - expectedModelCount));
-      return Boolean(leadingCell) && !isMatrixValueLikeCell(leadingCell);
-    });
+    const leadingCell = joinMatrixLabelFragments(cells.slice(0, cells.length - expectedModelCount));
+    return Boolean(leadingCell) && !isMatrixValueLikeCell(leadingCell);
+  });
 }
 
 function isMatrixBenchmarkContinuationFragment(label: string): boolean {
@@ -5546,8 +5542,32 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
     }
   }
 
-  const headerCells = splitTableLine(rawLines[headerLineIndex]);
-  const inferredModelCountFromData = inferMatrixModelCountFromDataLines(rawLines, headerLineIndex + 1);
+  const rawHeaderCells = splitTableLine(rawLines[headerLineIndex]);
+  const rawDataRowsCells = rawLines
+    .slice(headerLineIndex + 1)
+    .map((line) => splitTableLine(line));
+
+  let effectiveHeaderLength = rawHeaderCells.length;
+  while (effectiveHeaderLength > 0 && !(rawHeaderCells[effectiveHeaderLength - 1] ?? "").trim()) {
+    effectiveHeaderLength -= 1;
+  }
+
+  const canTrimTrailingBlankColumns = effectiveHeaderLength > 0
+    && effectiveHeaderLength < rawHeaderCells.length
+    && rawDataRowsCells.every((cells) =>
+      cells.slice(effectiveHeaderLength).every((cell) => !cell.trim())
+    );
+
+  const headerCells = canTrimTrailingBlankColumns
+    ? rawHeaderCells.slice(0, effectiveHeaderLength)
+    : rawHeaderCells;
+  const dataRowsCells = canTrimTrailingBlankColumns
+    ? rawDataRowsCells.map((cells) =>
+        cells.length > effectiveHeaderLength ? cells.slice(0, effectiveHeaderLength) : cells
+      )
+    : rawDataRowsCells;
+
+  const inferredModelCountFromData = inferMatrixModelCountFromDataRows(dataRowsCells);
   const inferredModelHeaderStartIndex = inferredModelCountFromData !== null
     && inferredModelCountFromData <= headerCells.length
     ? headerCells.length - inferredModelCountFromData
@@ -5563,8 +5583,7 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
     && categoryLabelIndex < 0
     && inferredModelCountFromData !== null
     && hasImplicitMatrixBenchmarkColumn(
-      rawLines,
-      headerLineIndex + 1,
+      dataRowsCells,
       inferredModelCountFromData,
       headerCells.length
     );
@@ -5618,12 +5637,13 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
       : (startsWithBenchmarkLabel ? 1 : 0));
   // 表头只认出分类列（如 `Category,Name,...`）时，基于关键词的起点会落在 benchmark 列上，
   // 让 benchmark 名被未加引号的逗号截断、数值列整体左移；此时改以数据行尾部数值列数推定的起点为准。
-  const resolvedModelHeaderStartIndex = inferredModelHeaderStartIndex !== null
+  // 已显式识别出 Benchmark 列时不再右移起点，避免首列模型脏值或稀疏行误吞模型列。
+  const resolvedModelHeaderStartIndex = !hasExplicitBenchmarkColumn
+    && inferredModelHeaderStartIndex !== null
     && inferredModelCountFromData !== null
     && inferredModelHeaderStartIndex > modelHeaderStartIndex
     && hasMatrixDataRowsSupportingModelStart(
-      rawLines,
-      headerLineIndex + 1,
+      dataRowsCells,
       inferredModelCountFromData,
       inferredModelHeaderStartIndex
     )
@@ -5659,8 +5679,9 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
     modelCount: modelNames.length
   };
 
-  for (let lineIndex = headerLineIndex + 1; lineIndex < rawLines.length; lineIndex += 1) {
-    const cells = rebalanceMatrixRowCells(splitTableLine(rawLines[lineIndex]), matrixRowLayout);
+  for (let dataRowIndex = 0; dataRowIndex < dataRowsCells.length; dataRowIndex += 1) {
+    const lineIndex = headerLineIndex + 1 + dataRowIndex;
+    const cells = rebalanceMatrixRowCells(dataRowsCells[dataRowIndex] ?? [], matrixRowLayout);
     const categoryInput = categoryColumnIndex >= 0
       ? normalizeNameParenthesisSpacing(cells[categoryColumnIndex] || "")
       : "";
@@ -5687,9 +5708,9 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
     const knownTypeMarker = inferTypeFromPreambleLine(rawBenchmarkInput);
 
     if (allModelValuesEmpty && !categoryInput && rawBenchmarkInput && !knownTypeMarker) {
-      const nextRawLine = rawLines[lineIndex + 1];
-      if (nextRawLine) {
-        const nextCells = rebalanceMatrixRowCells(splitTableLine(nextRawLine), matrixRowLayout);
+      const nextRawCells = dataRowsCells[dataRowIndex + 1];
+      if (nextRawCells) {
+        const nextCells = rebalanceMatrixRowCells(nextRawCells, matrixRowLayout);
         const nextBenchmarkInput = normalizeNameParenthesisSpacing(nextCells[benchmarkColumnIndex] || "");
         const nextHasAnyModelValue = hasAnyMatrixValue(
           getMatrixRowValues(nextCells, modelValueStartIndex, modelNames.length)
@@ -5729,7 +5750,7 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
       continue;
     }
 
-    if (allModelValuesEmpty && isMatrixTypeMarker(benchmarkName)) {
+    if (allModelValuesEmpty && categoryColumnIndex < 0 && isMatrixTypeMarker(benchmarkName)) {
       pendingBenchmarkPrefix = null;
       currentBenchmarkType = benchmarkName;
       currentBenchmarkTypeProvided = true;
@@ -6012,6 +6033,39 @@ function parsePaperCopiedTableRows(inputText: string, defaultSource: string | nu
   };
 }
 
+function looksLikeCommaSeparatedMatrixTable(inputText: string): boolean {
+  const rawLines = inputText
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\r/g, "").trim())
+    .filter(Boolean);
+
+  if (rawLines.length < 2) {
+    return false;
+  }
+
+  let headerLineIndex = rawLines.findIndex((line) => looksLikeModelHeaderRow(splitTableLine(line)));
+  if (headerLineIndex < 0) {
+    headerLineIndex = 0;
+  }
+
+  const headerCells = splitCommaSeparatedLine(rawLines[headerLineIndex] ?? "");
+  if (!headerCells || headerCells.length < 2) {
+    return false;
+  }
+
+  const bodyLines = rawLines.slice(headerLineIndex + 1);
+  if (bodyLines.length === 0) {
+    return false;
+  }
+
+  const commaBodyLineCount = bodyLines.filter((line) => {
+    const cells = splitCommaSeparatedLine(line);
+    return Boolean(cells && cells.length >= 2);
+  }).length;
+
+  return commaBodyLineCount > 0 && commaBodyLineCount / bodyLines.length >= 0.5;
+}
+
 function parseBenchmarkTextRowsCore(inputText: string, defaultSource: string | null): ParsedTextImportResult {
   const firstLine = inputText
     .split(/\r?\n/)
@@ -6026,6 +6080,7 @@ function parseBenchmarkTextRowsCore(inputText: string, defaultSource: string | n
     const paperParsed = parsePaperCopiedTableRows(inputText, defaultSource);
     const matrixParsed = parseMatrixTextRows(inputText, defaultSource);
     const hasTabSeparatedLayout = inputText.includes("\t");
+    const hasCommaSeparatedLayout = !hasTabSeparatedLayout && looksLikeCommaSeparatedMatrixTable(inputText);
 
     if (paperParsed.rows.length === 0) {
       return matrixParsed;
@@ -6035,7 +6090,7 @@ function parseBenchmarkTextRowsCore(inputText: string, defaultSource: string | n
       return paperParsed;
     }
 
-    if (hasTabSeparatedLayout) {
+    if (hasTabSeparatedLayout || hasCommaSeparatedLayout) {
       return matrixParsed;
     }
 

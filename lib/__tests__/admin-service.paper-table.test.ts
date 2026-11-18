@@ -1195,4 +1195,212 @@ describe("paper-table 文本解析", () => {
     const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
     expect(parsed.modelColumns).toEqual(["Model X", "Model Y", "Model Z"]);
   });
+
+  test("逗号分隔矩阵支持末尾/中间/首列空缺以及单值稀疏行", async () => {
+    const inputText = [
+      "Category,Benchmark,Model A,Model B,Model C,Model D,Model E,Model F",
+      "CBRN Weapons,GPQA,90.34%,93.43%,,,,",
+      ",BioQA,81.2%,,84.5%,,,",
+      ",ChemQA,,77.1%,,,,",
+      ",RadQA,66.0%,,,,,"
+    ].join("\n");
+
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+
+    expect(parsed.format).toBe("matrix-table");
+    expect(parsed.modelColumns).toEqual([
+      "Model A",
+      "Model B",
+      "Model C",
+      "Model D",
+      "Model E",
+      "Model F"
+    ]);
+    expect(parsed.rows).toHaveLength(6);
+
+    const byKey = new Map(
+      parsed.rows.map((row) => [`${row.benchmarkName}::${row.modelName}`, row])
+    );
+
+    expect(byKey.get("GPQA::Model A")?.valueRaw).toBe("90.34");
+    expect(byKey.get("GPQA::Model B")?.valueRaw).toBe("93.43");
+    expect(byKey.get("GPQA::Model A")?.benchmarkType).toBe("CBRN Weapons");
+    expect(byKey.get("BioQA::Model A")?.valueRaw).toBe("81.2");
+    expect(byKey.get("BioQA::Model C")?.valueRaw).toBe("84.5");
+    expect(byKey.has("BioQA::Model B")).toBe(false);
+    expect(byKey.get("ChemQA::Model B")?.valueRaw).toBe("77.1");
+    expect(byKey.has("ChemQA::Model A")).toBe(false);
+    expect(byKey.get("RadQA::Model A")?.valueRaw).toBe("66.0");
+    expect(parsed.rows.every((row) => row.benchmarkType === "CBRN Weapons")).toBe(true);
+  });
+
+  test("带末尾空缺的 CSV 在非标准表头与隐式基准列下均能正确对齐", async () => {
+    const nonKeywordBenchmark = [
+      "Category,Name,Model A,Model B,Model C,Model D,Model E,Model F",
+      "CBRN Weapons,GPQA,90.34%,93.43%,,,,"
+    ].join("\n");
+
+    const parsedNonKeyword = await parseBenchmarkTextRowsForTest(nonKeywordBenchmark, "text:unit-test");
+    expect(parsedNonKeyword.format).toBe("matrix-table");
+    expect(parsedNonKeyword.modelColumns).toEqual([
+      "Model A",
+      "Model B",
+      "Model C",
+      "Model D",
+      "Model E",
+      "Model F"
+    ]);
+    expect(parsedNonKeyword.rows).toHaveLength(2);
+    expect(parsedNonKeyword.rows[0]?.benchmarkName).toBe("GPQA");
+    expect(parsedNonKeyword.rows[0]?.benchmarkType).toBe("CBRN Weapons");
+    expect(parsedNonKeyword.rows[0]?.modelName).toBe("Model A");
+    expect(parsedNonKeyword.rows[1]?.modelName).toBe("Model B");
+
+    const implicitBenchmark = [
+      "Model A,Model B,Model C,Model D,Model E,Model F",
+      "GPQA,90.34%,93.43%,,,,"
+    ].join("\n");
+
+    const parsedImplicit = await parseBenchmarkTextRowsForTest(implicitBenchmark, "text:unit-test");
+    expect(parsedImplicit.format).toBe("matrix-table");
+    expect(parsedImplicit.modelColumns).toEqual([
+      "Model A",
+      "Model B",
+      "Model C",
+      "Model D",
+      "Model E",
+      "Model F"
+    ]);
+    expect(parsedImplicit.rows).toHaveLength(2);
+    expect(parsedImplicit.rows[0]?.benchmarkName).toBe("GPQA");
+    expect(parsedImplicit.rows[0]?.modelName).toBe("Model A");
+    expect(parsedImplicit.rows[0]?.valueRaw).toBe("90.34");
+    expect(parsedImplicit.rows[1]?.modelName).toBe("Model B");
+    expect(parsedImplicit.rows[1]?.valueRaw).toBe("93.43");
+  });
+
+  test("带末尾空缺的 CSV 遇到未加引号逗号或多余空列不会错位或污染 benchmark 名", async () => {
+    const unquotedCommaWithGaps = [
+      "Category,Benchmark,Model A,Model B,Model C,Model D,Model E,Model F",
+      "CBRN Weapons,GPQA, Diamond,90.34%,93.43%,,,,"
+    ].join("\n");
+
+    const parsedUnquoted = await parseBenchmarkTextRowsForTest(unquotedCommaWithGaps, "text:unit-test");
+    expect(parsedUnquoted.format).toBe("matrix-table");
+    expect(parsedUnquoted.rows).toHaveLength(2);
+    expect(parsedUnquoted.rows[0]?.benchmarkName).toBe("GPQA, Diamond");
+    expect(parsedUnquoted.rows[0]?.modelName).toBe("Model A");
+    expect(parsedUnquoted.rows[0]?.valueRaw).toBe("90.34");
+    expect(parsedUnquoted.rows[1]?.modelName).toBe("Model B");
+    expect(parsedUnquoted.rows[1]?.valueRaw).toBe("93.43");
+
+    const extraTrailingCommasOnData = [
+      "Category,Benchmark,Model A,Model B",
+      "CBRN Weapons,GPQA,90.34%,93.43%,,"
+    ].join("\n");
+
+    const parsedExtraData = await parseBenchmarkTextRowsForTest(extraTrailingCommasOnData, "text:unit-test");
+    expect(parsedExtraData.format).toBe("matrix-table");
+    expect(parsedExtraData.rows).toHaveLength(2);
+    expect(parsedExtraData.rows[0]?.benchmarkName).toBe("GPQA");
+    expect(parsedExtraData.rows[0]?.modelName).toBe("Model A");
+    expect(parsedExtraData.rows[0]?.valueRaw).toBe("90.34");
+    expect(parsedExtraData.rows[1]?.modelName).toBe("Model B");
+    expect(parsedExtraData.rows[1]?.valueRaw).toBe("93.43");
+
+    const trailingBlankColumnsEverywhere = [
+      "Domain,Eval,Model A,Model B,,",
+      "CBRN Weapons,GPQA,90.34%,93.43%,,"
+    ].join("\n");
+
+    const parsedBlankCols = await parseBenchmarkTextRowsForTest(trailingBlankColumnsEverywhere, "text:unit-test");
+    expect(parsedBlankCols.format).toBe("matrix-table");
+    expect(parsedBlankCols.modelColumns).toEqual(["Model A", "Model B"]);
+    expect(parsedBlankCols.rows).toHaveLength(2);
+    expect(parsedBlankCols.rows[0]?.benchmarkType).toBe("CBRN Weapons");
+    expect(parsedBlankCols.rows[0]?.benchmarkName).toBe("GPQA");
+    expect(parsedBlankCols.rows[0]?.modelName).toBe("Model A");
+    expect(parsedBlankCols.rows[1]?.modelName).toBe("Model B");
+  });
+
+  test("含分类列时纯空值 benchmark 行不会覆盖当前分类，纯分类分隔行不会污染模型列数", async () => {
+    const inputText = [
+      "Category,Benchmark,Model A,Model B,Model C,Model D,Model E,Model F",
+      "CBRN Weapons,,,,,,,",
+      ",BioQA,,,,,,",
+      ",GPQA,90.34%,93.43%,,,,"
+    ].join("\n");
+
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+
+    expect(parsed.format).toBe("matrix-table");
+    expect(parsed.modelColumns).toEqual([
+      "Model A",
+      "Model B",
+      "Model C",
+      "Model D",
+      "Model E",
+      "Model F"
+    ]);
+    expect(parsed.rows).toHaveLength(2);
+    expect(parsed.rows.every((row) => row.benchmarkName === "GPQA")).toBe(true);
+    expect(parsed.rows.every((row) => row.benchmarkType === "CBRN Weapons")).toBe(true);
+  });
+
+  test("逗号后带空格的空缺 CSV 优先按 matrix-table 解析而不被 paper-table 误抢", async () => {
+    const inputText = [
+      "Benchmark, Model A, Model B, Model C, Model D, Model E, Model F",
+      "GPQA, 90.34%, 93.43%, , , ,"
+    ].join("\n");
+
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+
+    expect(parsed.format).toBe("matrix-table");
+    expect(parsed.modelColumns).toEqual([
+      "Model A",
+      "Model B",
+      "Model C",
+      "Model D",
+      "Model E",
+      "Model F"
+    ]);
+    expect(parsed.rows).toHaveLength(2);
+    expect(parsed.rows[0]?.benchmarkName).toBe("GPQA");
+    expect(parsed.rows[0]?.modelName).toBe("Model A");
+    expect(parsed.rows[0]?.valueRaw).toBe("90.34");
+    expect(parsed.rows[1]?.modelName).toBe("Model B");
+    expect(parsed.rows[1]?.valueRaw).toBe("93.43");
+  });
+
+  test("显式 Benchmark 表头下首列模型存在非数值文本时不会右移丢列并保留告警", async () => {
+    const inputText = [
+      "Benchmark,M1,M2,M3",
+      "BrokenBench,text-only),45.3,50.1"
+    ].join("\n");
+
+    const preview = await previewBenchmarkTextImportForTest(inputText, "text:unit-test");
+
+    expect(preview.format).toBe("matrix-table");
+    expect(preview.modelColumns).toEqual(["M1", "M2", "M3"]);
+    expect(preview.warnings?.some((w) => w.type === "non-numeric-import-value" && w.modelName === "M1")).toBe(true);
+  });
+
+  test("隐式基准列的 Tab 矩阵数据行带尾部多余 Tab 时仍能正确对齐", async () => {
+    const inputText = [
+      "Model A\tModel B",
+      "GPQA\t90\t93\t"
+    ].join("\n");
+
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+
+    expect(parsed.format).toBe("matrix-table");
+    expect(parsed.modelColumns).toEqual(["Model A", "Model B"]);
+    expect(parsed.rows).toHaveLength(2);
+    expect(parsed.rows[0]?.benchmarkName).toBe("GPQA");
+    expect(parsed.rows[0]?.modelName).toBe("Model A");
+    expect(parsed.rows[0]?.valueRaw).toBe("90");
+    expect(parsed.rows[1]?.benchmarkName).toBe("GPQA");
+    expect(parsed.rows[1]?.modelName).toBe("Model B");
+    expect(parsed.rows[1]?.valueRaw).toBe("93");
+  });
 });
