@@ -89,20 +89,23 @@ describe("admin console import value helpers", () => {
     expect(parseSingleRawValue("1.2MB")).toEqual({ value: "1.2", tail: "MB" });
   });
 
-  test("预览数值保持量级书写", () => {
-    expect(formatPreviewNumericValue("$1.03825M", 1_038_250, "first")).toBe("$1.03825M");
-    expect(formatPreviewNumericValue("$687.25k / $438k", 438_000, "second")).toBe("$438k");
-    expect(formatPreviewNumericValue("128K", 128_000)).toBe("128K");
-    expect(formatPreviewNumericValue("$438k", 438_500)).toBe("$438.5k");
+  test("带量级后缀的预览数值展示换算后的实际入库值", () => {
+    expect(formatPreviewNumericValue("$1.03825M", 1_038_250, "first")).toBe("$1,038,250");
+    expect(formatPreviewNumericValue("$687.25k / $438k", 687_250, "first")).toBe("$687,250");
+    expect(formatPreviewNumericValue("$687.25k / $438k", 438_000, "second")).toBe("$438,000");
+    expect(formatPreviewNumericValue("$1.2345k", 1_234.5)).toBe("$1,234.5");
+    expect(formatPreviewNumericValue("128K", 128_000)).toBe("128000");
+    expect(formatPreviewNumericValue("$438k", 438_500)).toBe("$438,500");
   });
 
   test("双值含 n/a 空占位时仍按成对结构取段", () => {
-    expect(formatPreviewNumericValue("n/a / $317.5k", 317_500, "second")).toBe("$317.5k");
-    expect(formatPreviewNumericValue("N/A / $317.5k", 317_500, "second")).toBe("$317.5k");
+    expect(formatPreviewNumericValue("n/a / $317.5k", 317_500, "second")).toBe("$317,500");
+    expect(formatPreviewNumericValue("N/A / $317.5k", 317_500, "second")).toBe("$317,500");
     expect(formatPreviewNumericValue("n/a / $317.5k", 317_500, "first")).toBe("317500");
   });
 
-  test("无后缀的货币预览保持原有补零行为", () => {
+  test("无后缀或小写非量级后缀的货币预览保持原有小数位补零行为", () => {
     expect(formatPreviewNumericValue("$4,432.12", 4432.12)).toBe("$4,432.12");
+    expect(formatPreviewNumericValue("$1.03825m", 1.03825)).toBe("$1.03825");
   });
 });

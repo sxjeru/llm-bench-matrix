@@ -4645,6 +4645,82 @@ describe("AdminConsole rename tab", () => {
     expect(screen.queryByText(/检测到 >100 Elo 数值/)).not.toBeInTheDocument();
   });
 
+  test("文本导入预览表的 Num / Num2 列实时展示换算后的实际入库数值", async () => {
+    const user = userEvent.setup();
+
+    const previewResponse: PreviewResponse = {
+      format: "paper-table",
+      total: 2,
+      skipped: 0,
+      warningCount: 0,
+      previewRows: [
+        {
+          rowNumber: 1,
+          providerName: "OpenAI",
+          modelName: "GPT-6.2 Astra",
+          benchmarkName: "DeepBinary",
+          benchmarkType: "General",
+          rawValue: "$1.03825M",
+          valueNum: 1_038_250,
+          valueNum2: null,
+          valueNote: null,
+          source: "GPT-6.2 Astra / Sol",
+          valid: true
+        },
+        {
+          rowNumber: 2,
+          providerName: "OpenAI",
+          modelName: "GPT-6.2 Sol",
+          benchmarkName: "DeepBinary",
+          benchmarkType: "General",
+          rawValue: "$687.25k / $317.5k",
+          valueNum: 687_250,
+          valueNum2: 317_500,
+          valueNote: null,
+          source: "GPT-6.2 Astra / Sol",
+          valid: true
+        }
+      ]
+    };
+
+    mockFetchSequence(previewResponse);
+    await renderReady(<AdminConsole {...buildProps()} />);
+
+    await fillCsvText(user, "dummy");
+    await triggerPreview(user);
+
+    const previewHeading = await screen.findByText("文本导入预览");
+    const previewContainer = previewHeading.closest("div");
+    expect(previewContainer).not.toBeNull();
+
+    const previewTable = within(previewContainer!).getByRole("table");
+    const initialBodyRows = within(previewTable).getAllByRole("row").slice(1);
+    expect(initialBodyRows).toHaveLength(2);
+
+    const firstRowCells = within(initialBodyRows[0]).getAllByRole("cell");
+    expect(firstRowCells[5]).toHaveTextContent("$1.03825M");
+    expect(firstRowCells[6]).toHaveTextContent("$1,038,250");
+    expect(firstRowCells[7]).toHaveTextContent("-");
+
+    const secondRowCells = within(initialBodyRows[1]).getAllByRole("cell");
+    expect(secondRowCells[5]).toHaveTextContent("$687.25k / $317.5k");
+    expect(secondRowCells[6]).toHaveTextContent("$687,250");
+    expect(secondRowCells[7]).toHaveTextContent("$317,500");
+
+    // 矩阵单元格编辑后，文本导入预览的 Num 应同步更新为新换算值
+    const matrixTable = await findMatrixPreviewTable();
+    const firstInput = within(matrixTable).getByDisplayValue("$1.03825M");
+    await user.clear(firstInput);
+    await user.type(firstInput, "$438k");
+
+    await waitFor(() => {
+      const updatedRows = within(previewTable).getAllByRole("row").slice(1);
+      const updatedFirstCells = within(updatedRows[0]).getAllByRole("cell");
+      expect(updatedFirstCells[5]).toHaveTextContent("$438k");
+      expect(updatedFirstCells[6]).toHaveTextContent("$438,000");
+    });
+  });
+
   test("矩阵 benchmark 输入时可搜索全量库内 benchmark", async () => {
     const user = userEvent.setup();
 

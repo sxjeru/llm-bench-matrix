@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { parseBenchmarkValue } from "@/lib/db/parse-value";
 import { hasEloCandidateValue } from "@/lib/import/elo-value";
 import { BENCHMARK_SUSPECT_KEYWORDS } from "../constants";
 import type {
@@ -1035,22 +1036,25 @@ export function useImportPreviewState({
       return textImportPreviewRows;
     }
 
-    return finalizedTextImportRows.map((row, index) => ({
-      rowNumber: index + 1,
-      providerName: row.providerDisplayName || row.providerName,
-      modelName: row.modelName,
-      benchmarkName: row.benchmarkName,
-      benchmarkType: row.benchmarkType,
-      benchmarkTypeProvided: row.benchmarkTypeProvided,
-      higherIsBetter: row.higherIsBetter,
-      modalities: row.modalities,
-      rawValue: row.rawValue,
-      valueNum: null,
-      valueNum2: null,
-      valueNote: row.valueNote,
-      source: row.source,
-      valid: row.rawValue.trim().length > 0
-    }));
+    return finalizedTextImportRows.map((row, index) => {
+      const parsedValue = parseBenchmarkValue(row.rawValue);
+      return {
+        rowNumber: index + 1,
+        providerName: row.providerDisplayName || row.providerName,
+        modelName: row.modelName,
+        benchmarkName: row.benchmarkName,
+        benchmarkType: row.benchmarkType,
+        benchmarkTypeProvided: row.benchmarkTypeProvided,
+        higherIsBetter: row.higherIsBetter,
+        modalities: row.modalities,
+        rawValue: row.rawValue,
+        valueNum: parsedValue.valueNum,
+        valueNum2: parsedValue.valueNum2,
+        valueNote: row.valueNote,
+        source: row.source,
+        valid: parsedValue.valueRaw.length > 0 && (parsedValue.valueNum !== null || parsedValue.valueNum2 !== null)
+      };
+    });
   }, [textImportDraftRows.length, textImportPreviewRows, finalizedTextImportRows]);
 
   const visibleResolvedTextImportPreviewRows = useMemo(

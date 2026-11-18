@@ -1,5 +1,5 @@
 import { composeImportPairValueRaw, parseImportPairValue } from "@/lib/import/pair-value";
-import { formatScaledAmountLike } from "@/lib/import/scaled-amount";
+import { hasMagnitudeSuffix } from "@/lib/import/scaled-amount";
 
 export function formatPreviewNumericValue(
   rawValue: string,
@@ -16,18 +16,15 @@ export function formatPreviewNumericValue(
     ? (position === "second" ? pair.second : pair.first)
     : normalizedRaw;
 
-  // 带量级后缀的值沿用原书写（`1.2M`），编辑后也保持同量级
-  const scaledDisplay = formatScaledAmountLike(targetPart, numericValue);
-  if (scaledDisplay) {
-    return scaledDisplay;
-  }
-
   const currencyMatch = targetPart.match(/^([$¥€£])/);
   if (!currencyMatch) {
     return String(numericValue);
   }
 
-  const fractionDigits = targetPart.match(/\.(\d+)/)?.[1]?.length ?? 0;
+  // 带量级后缀的值在导入预览中展示换算后的实际入库数值，尾数小数位不再沿用到换算结果上
+  const fractionDigits = hasMagnitudeSuffix(targetPart)
+    ? 0
+    : (targetPart.match(/\.(\d+)/)?.[1]?.length ?? 0);
   const formatted = numericValue.toLocaleString("en-US", {
     minimumFractionDigits: fractionDigits,
     maximumFractionDigits: Math.max(fractionDigits, 6)

@@ -1245,3 +1245,93 @@ describe("useImportPreviewState Hook - textImportDuplicateCheckPayload", () => {
   });
 });
 
+describe("useImportPreviewState Hook - textImportPreviewTableRows", () => {
+  test("预览表行根据 finalized rawValue 实时解析 valueNum、valueNum2 与 valid", () => {
+    const draftRows: TextImportPreviewRow[] = [
+      {
+        rowNumber: 1,
+        providerName: "OpenAI",
+        modelName: "GPT-6.2 Astra",
+        benchmarkName: "DeepBinary",
+        benchmarkType: "General",
+        rawValue: "$1.03825M",
+        valueNum: 1_038_250,
+        valueNum2: null,
+        valueNote: null,
+        source: "GPT-6.2 Astra / Sol",
+        valid: true
+      },
+      {
+        rowNumber: 2,
+        providerName: "OpenAI",
+        modelName: "GPT-6.2 Sol",
+        benchmarkName: "DeepBinary",
+        benchmarkType: "General",
+        rawValue: "$687.25k / $438k",
+        valueNum: 687_250,
+        valueNum2: 438_000,
+        valueNote: null,
+        source: "GPT-6.2 Astra / Sol",
+        valid: true
+      },
+      {
+        rowNumber: 3,
+        providerName: "OpenAI",
+        modelName: "GPT-6 Astra",
+        benchmarkName: "DeepBinary",
+        benchmarkType: "General",
+        rawValue: "n/a / $317.5k",
+        valueNum: null,
+        valueNum2: 317_500,
+        valueNote: null,
+        source: "GPT-6.2 Astra / Sol",
+        valid: true
+      },
+      {
+        rowNumber: 4,
+        providerName: "OpenAI",
+        modelName: "GPT-6.1 Sol",
+        benchmarkName: "DeepBinary",
+        benchmarkType: "General",
+        rawValue: "TBD",
+        valueNum: null,
+        valueNum2: null,
+        valueNote: null,
+        source: "GPT-6.2 Astra / Sol",
+        valid: false
+      }
+    ];
+
+    const { result } = renderHook(() =>
+      useImportPreviewState(createMockOptions({ textImportDraftRows: draftRows }))
+    );
+
+    expect(result.current.textImportPreviewTableRows).toMatchObject([
+      {
+        rawValue: "$1.03825M",
+        valueNum: 1_038_250,
+        valueNum2: null,
+        valid: true
+      },
+      {
+        rawValue: "$687.25k / $438k",
+        valueNum: 687_250,
+        valueNum2: 438_000,
+        valid: true
+      },
+      {
+        rawValue: "n/a / $317.5k",
+        valueNum: null,
+        valueNum2: 317_500,
+        valid: true
+      },
+      {
+        rawValue: "TBD",
+        valueNum: null,
+        valueNum2: null,
+        valid: false
+      }
+    ]);
+  });
+});
+
