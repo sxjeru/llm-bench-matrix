@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { hasEloCandidateValue } from "@/lib/import/elo-value";
+import {
+  hasEloCandidateValue,
+  resolveEloCandidateSlots,
+  resolveValueMagnitudeFlags
+} from "@/lib/import/elo-value";
 import { hasMagnitudeSuffix } from "@/lib/import/scaled-amount";
 
 describe("hasMagnitudeSuffix", () => {
@@ -30,17 +34,22 @@ describe("hasMagnitudeSuffix", () => {
 });
 
 describe("hasEloCandidateValue", () => {
-  test("排除带量级后缀的 >100 换算值", () => {
+  test("排除带量级后缀的 >100 换算值（含 # 前缀、百分号与脚注标记）", () => {
     expect(hasEloCandidateValue({ rawValue: "$1.2M", valueNum: 1_200_000, valueNum2: null })).toBe(false);
     expect(hasEloCandidateValue({ rawValue: "128K", valueNum: 128_000, valueNum2: null })).toBe(false);
     expect(hasEloCandidateValue({ rawValue: "1.5B", valueNum: 1_500_000_000, valueNum2: null })).toBe(false);
     expect(hasEloCandidateValue({ rawValue: "2T", valueNum: 2_000_000_000_000, valueNum2: null })).toBe(false);
     expect(hasEloCandidateValue({ rawValue: "$687.25k*", valueNum: 687_250, valueNum2: null })).toBe(false);
+    expect(hasEloCandidateValue({ rawValue: "#1.2M", valueNum: 1_200_000, valueNum2: null })).toBe(false);
+    expect(hasEloCandidateValue({ rawValue: "＃128K*", valueNum: 128_000, valueNum2: null })).toBe(false);
+    expect(hasEloCandidateValue({ rawValue: "1.2M%", valueNum: 1_200_000, valueNum2: null })).toBe(false);
+    expect(hasEloCandidateValue({ rawValue: "1.2M*paper", valueNum: 1_200_000, valueNum2: null })).toBe(false);
   });
 
   test("普通 >100 数值仍判定为 Elo 候选", () => {
     expect(hasEloCandidateValue({ rawValue: "1215", valueNum: 1215, valueNum2: null })).toBe(true);
     expect(hasEloCandidateValue({ rawValue: "1,215*", valueNum: 1215, valueNum2: null })).toBe(true);
+    expect(hasEloCandidateValue({ rawValue: "#1215", valueNum: 1215, valueNum2: null })).toBe(true);
     expect(hasEloCandidateValue({ rawValue: "100", valueNum: 100, valueNum2: null })).toBe(false);
     expect(hasEloCandidateValue({ rawValue: "85.3", valueNum: 85.3, valueNum2: null })).toBe(false);
   });
@@ -81,5 +90,39 @@ describe("hasEloCandidateValue", () => {
       valueNum: 85,
       valueNum2: 1215
     })).toBe(true);
+  });
+});
+
+describe("resolveValueMagnitudeFlags / resolveEloCandidateSlots", () => {
+  test("按段返回量级后缀与 Elo 槽位判定", () => {
+    expect(resolveValueMagnitudeFlags("$1.2M / 1215")).toEqual({
+      firstHasMagnitude: true,
+      secondHasMagnitude: false
+    });
+    expect(resolveValueMagnitudeFlags("n/a / $317.5k")).toEqual({
+      firstHasMagnitude: false,
+      secondHasMagnitude: true
+    });
+    expect(resolveValueMagnitudeFlags(null)).toEqual({
+      firstHasMagnitude: false,
+      secondHasMagnitude: false
+    });
+
+    expect(resolveEloCandidateSlots({
+      rawValue: "$1.2M / 1215",
+      valueNum: 1_200_000,
+      valueNum2: 1215
+    })).toEqual({
+      firstIsElo: false,
+      secondIsElo: true
+    });
+    expect(resolveEloCandidateSlots({
+      rawValue: "#1.2M / 1215",
+      valueNum: 1_200_000,
+      valueNum2: 1215
+    })).toEqual({
+      firstIsElo: false,
+      secondIsElo: true
+    });
   });
 });

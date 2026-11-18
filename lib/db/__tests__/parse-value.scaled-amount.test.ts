@@ -2,7 +2,6 @@ import { describe, expect, test } from "vitest";
 
 import { parseBenchmarkValue } from "@/lib/db/parse-value";
 import {
-  formatScaledAmountLike,
   hasMagnitudeSuffix,
   parseNumericTokenAmount,
   parseScaledAmount
@@ -126,22 +125,5 @@ describe("parseNumericTokenAmount", () => {
     expect(hasMagnitudeSuffix("#1.2M")).toBe(true);
     expect(hasMagnitudeSuffix("#3.4")).toBe(false);
     expect(parseNumericTokenAmount("none")).toBeNull();
-  });
-});
-
-describe("formatScaledAmountLike", () => {
-  test("数值未变化时保持原书写", () => {
-    expect(formatScaledAmountLike("$1.03825M", 1_038_250)).toBe("$1.03825M");
-    expect(formatScaledAmountLike("128K", 128_000)).toBe("128K");
-  });
-
-  test("数值变化后沿用原量级", () => {
-    expect(formatScaledAmountLike("$438k", 438_500)).toBe("$438.5k");
-    expect(formatScaledAmountLike("$1.2M", 2_000_000)).toBe("$2M");
-  });
-
-  test("无法同量级表达时返回 null，由调用方回退", () => {
-    expect(formatScaledAmountLike("$1.2M", 1)).toBeNull();
-    expect(formatScaledAmountLike("$4,432.12", 5000)).toBeNull();
   });
 });

@@ -102,29 +102,3 @@ export function hasMagnitudeSuffix(rawInput: string): boolean {
   if (!leadingToken) return false;
   return Boolean(parseScaledAmount(leadingToken)?.magnitude);
 }
-
-/**
- * 按原书写风格格式化：`$1.03825M` 编辑后仍是 `$1.03825M`，
- * 而不是展开成 `$1,038,250`。无法用原量级表达时返回 null，由调用方回退。
- */
-export function formatScaledAmountLike(rawInput: string, amount: number): string | null {
-  const leadingToken = rawInput.match(LEADING_SCALED_TOKEN_REGEX)?.[1];
-  if (!leadingToken) return null;
-
-  const parsed = parseScaledAmount(leadingToken);
-  if (!parsed || !parsed.magnitude) return null;
-
-  if (parsed.amount === roundToStoredScale(amount)) {
-    return leadingToken.trim();
-  }
-
-  const multiplier = MAGNITUDE_MULTIPLIERS[parsed.magnitude] ?? 1;
-  const mantissa = amount / multiplier;
-  // 太小会被写成 `$0.000001M` 这类无意义形式，让调用方改用完整数字
-  if (mantissa !== 0 && Math.abs(mantissa) < 0.01) return null;
-
-  const roundedMantissa = Number(mantissa.toFixed(6));
-  if (!Number.isFinite(roundedMantissa)) return null;
-
-  return `${parsed.symbol ?? ""}${roundedMantissa}${parsed.magnitude}`;
-}

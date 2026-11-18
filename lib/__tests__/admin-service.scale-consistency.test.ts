@@ -352,15 +352,7 @@ describe("benchmark scale consistency", () => {
     ]);
     const dbSelectFrom = vi.fn(() => ({ where: dbSelectWhere }));
     vi.spyOn(dbForTest, "select").mockImplementation(() => ({ from: dbSelectFrom }));
-
-    const executeSpy = vi.spyOn(dbForTest, "execute").mockResolvedValue({
-      rows: [
-        {
-          small_count: "2",
-          large_count: "2"
-        }
-      ]
-    });
+    const executeSpy = vi.spyOn(dbForTest, "execute");
 
     const txSelectWhere = createSelectWhereMock([
       [
@@ -407,7 +399,7 @@ describe("benchmark scale consistency", () => {
       targetScale: 1
     });
 
-    expect(executeSpy).toHaveBeenCalledTimes(1);
+    expect(executeSpy).not.toHaveBeenCalled();
     expect(result).toEqual({
       ok: true,
       benchmarkId: 11,
@@ -974,5 +966,496 @@ describe("benchmark scale consistency", () => {
       }
     ]);
     expect(onConflictDoNothing).toHaveBeenCalledTimes(1);
+  });
+
+  test("detectBenchmarkScaleConsistencyIssues 排除带 k/M/B/T 量级后缀的 >100 数值，不误报 100-vs-elo 或 0-1-vs-100", async () => {
+    vi.spyOn(dbForTest, "execute")
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            benchmark_id: 51,
+            benchmark_name: "Token Cost",
+            benchmark_type: "General",
+            value_count: "3",
+            small_count: "0",
+            large_count: "3",
+            zero_to_hundred_count: "2",
+            over_hundred_count: "1",
+            min_value: "80",
+            max_value: "1200000"
+          },
+          {
+            benchmark_id: 52,
+            benchmark_name: "Cost Spread",
+            benchmark_type: "General",
+            value_count: "2",
+            small_count: "1",
+            large_count: "1",
+            zero_to_hundred_count: "1",
+            over_hundred_count: "1",
+            min_value: "0.5",
+            max_value: "1200000"
+          }
+        ]
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            benchmark_id: 51,
+            value_raw: "80",
+            value_num: "80",
+            value_num2: null,
+            model_name: "Model A",
+            source: "text:seed",
+            bench_time: "2026-04-18T09:00:00.000Z"
+          },
+          {
+            benchmark_id: 51,
+            value_raw: "90",
+            value_num: "90",
+            value_num2: null,
+            model_name: "Model B",
+            source: "text:seed",
+            bench_time: "2026-04-18T09:05:00.000Z"
+          },
+          {
+            benchmark_id: 51,
+            value_raw: "$1.2M",
+            value_num: "1200000",
+            value_num2: null,
+            model_name: "Model C",
+            source: "text:seed",
+            bench_time: "2026-04-18T09:10:00.000Z"
+          },
+          {
+            benchmark_id: 52,
+            value_raw: "$0.5",
+            value_num: "0.5",
+            value_num2: null,
+            model_name: "Model A",
+            source: "text:seed",
+            bench_time: "2026-04-18T09:00:00.000Z"
+          },
+          {
+            benchmark_id: 52,
+            value_raw: "$1.2M",
+            value_num: "1200000",
+            value_num2: null,
+            model_name: "Model B",
+            source: "text:seed",
+            bench_time: "2026-04-18T09:05:00.000Z"
+          }
+        ]
+      });
+
+    const result = await detectScaleIssuesForTest();
+
+    expect(result.issues).toEqual([]);
+  });
+
+  test("detectBenchmarkScaleConsistencyIssues 在量级值与真实 Elo 共存时仅统计真实 Elo 并排除量级段范围", async () => {
+    vi.spyOn(dbForTest, "execute")
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            benchmark_id: 53,
+            benchmark_name: "Mixed Arena",
+            benchmark_type: "arena",
+            value_count: "3",
+            small_count: "0",
+            large_count: "3",
+            zero_to_hundred_count: "1",
+            over_hundred_count: "2",
+            min_value: "80",
+            max_value: "1200000"
+          }
+        ]
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            benchmark_id: 53,
+            value_raw: "80",
+            value_num: "80",
+            value_num2: null,
+            model_name: "Model A",
+            source: "text:seed",
+            bench_time: "2026-04-18T09:00:00.000Z"
+          },
+          {
+            benchmark_id: 53,
+            value_raw: "$1.2M / 1215",
+            value_num: "1200000",
+            value_num2: "1215",
+            model_name: "Model B",
+            source: "text:seed",
+            bench_time: "2026-04-18T09:05:00.000Z"
+          }
+        ]
+      });
+
+    const result = await detectScaleIssuesForTest();
+
+    expect(result.issues).toEqual([
+      expect.objectContaining({
+        issueType: "mixed-scale-100-vs-elo",
+        benchmarkId: 53,
+        zeroToHundredCount: 1,
+        overHundredCount: 1,
+        segments: [
+          {
+            key: "base",
+            label: "0-100",
+            count: 1,
+            minValue: 80,
+            maxValue: 80
+          },
+          {
+            key: "elo",
+            label: ">100 (Elo)",
+            count: 1,
+            minValue: 1215,
+            maxValue: 1215
+          }
+        ]
+      })
+    ]);
+  });
+
+  test("normalizeBenchmarkScaleByTarget 会跳过带量级后缀的单元格，且仅有 <1 与量级值或无数据行时拒绝同化", async () => {
+    const dbSelectWhere = createSelectWhereMock([
+      [
+        {
+          id: 52,
+          benchmarkName: "Cost Spread",
+          benchmarkType: "General"
+        }
+      ],
+      [
+        {
+          id: 55,
+          benchmarkName: "Empty Bench",
+          benchmarkType: "General"
+        }
+      ],
+      [
+        {
+          id: 54,
+          benchmarkName: "Mixed Bench",
+          benchmarkType: "General"
+        }
+      ]
+    ]);
+    const dbSelectFrom = vi.fn(() => ({ where: dbSelectWhere }));
+    vi.spyOn(dbForTest, "select").mockImplementation(() => ({ from: dbSelectFrom }));
+
+    const txSelectWhere1 = createSelectWhereMock([
+      [
+        { id: 1, valueRaw: "$0.5", valueNum: "0.5", valueNum2: null, valueNote: null },
+        { id: 2, valueRaw: "$1.2M", valueNum: "1200000", valueNum2: null, valueNote: null }
+      ]
+    ]);
+    const tx1 = {
+      select: vi.fn(() => ({ from: vi.fn(() => ({ where: txSelectWhere1 })) })),
+      update: vi.fn()
+    };
+
+    const txSelectWhereEmpty = createSelectWhereMock([[]]);
+    const txEmpty = {
+      select: vi.fn(() => ({ from: vi.fn(() => ({ where: txSelectWhereEmpty })) })),
+      update: vi.fn()
+    };
+
+    const txSelectWhere2 = createSelectWhereMock([
+      [
+        { id: 11, valueRaw: "0.5", valueNum: "0.5", valueNum2: null, valueNote: null },
+        { id: 12, valueRaw: "85", valueNum: "85", valueNum2: null, valueNote: null },
+        { id: 13, valueRaw: "$1.2M", valueNum: "1200000", valueNum2: null, valueNote: null }
+      ]
+    ]);
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const updateSet = vi.fn(() => ({ where: updateWhere }));
+    const tx2 = {
+      select: vi.fn(() => ({ from: vi.fn(() => ({ where: txSelectWhere2 })) })),
+      update: vi.fn(() => ({ set: updateSet }))
+    };
+
+    vi.spyOn(dbForTest, "transaction")
+      .mockImplementationOnce(async (callback: TransactionCallback) => callback(tx1))
+      .mockImplementationOnce(async (callback: TransactionCallback) => callback(txEmpty))
+      .mockImplementationOnce(async (callback: TransactionCallback) => callback(tx2));
+
+    await expect(
+      normalizeScaleByTargetForTest({ benchmarkId: 52, targetScale: 1 })
+    ).rejects.toThrow("无需同化");
+
+    await expect(
+      normalizeScaleByTargetForTest({ benchmarkId: 55, targetScale: 1 })
+    ).rejects.toThrow("无需同化");
+
+    const normalized = await normalizeScaleByTargetForTest({ benchmarkId: 54, targetScale: 1 });
+    expect(normalized.updatedRows).toBe(1);
+    expect(normalized.updatedCells).toBe(1);
+    expect(updateSet).toHaveBeenCalledTimes(1);
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        valueNum: "0.85",
+        valueNum2: null
+      })
+    );
+  });
+
+  test("splitBenchmarkScaleByMode 拒绝仅含 0-100 与量级值的 benchmark 拆分", async () => {
+    const dbSelectWhere = createSelectWhereMock([
+      [
+        {
+          id: 51,
+          benchmarkName: "Token Cost",
+          benchmarkType: "General",
+          unit: "usd",
+          higherIsBetter: false,
+          modalities: ["Text"],
+          sourceBenchmarkId: null
+        }
+      ]
+    ]);
+    const dbSelectFrom = vi.fn(() => ({ where: dbSelectWhere }));
+    vi.spyOn(dbForTest, "select").mockImplementation(() => ({ from: dbSelectFrom }));
+
+    vi.spyOn(dbForTest, "execute")
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            benchmark_id: 51,
+            benchmark_name: "Token Cost",
+            benchmark_type: "General",
+            value_count: "2",
+            small_count: "0",
+            large_count: "2",
+            zero_to_hundred_count: "1",
+            over_hundred_count: "1",
+            min_value: "80",
+            max_value: "1200000"
+          }
+        ]
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            benchmark_id: 51,
+            value_raw: "80",
+            value_num: "80",
+            value_num2: null,
+            model_name: "Model A",
+            source: "text:seed",
+            bench_time: "2026-04-18T09:00:00.000Z"
+          },
+          {
+            benchmark_id: 51,
+            value_raw: "$1.2M",
+            value_num: "1200000",
+            value_num2: null,
+            model_name: "Model B",
+            source: "text:seed",
+            bench_time: "2026-04-18T09:05:00.000Z"
+          }
+        ]
+      });
+
+    await expect(
+      splitBenchmarkScaleByModeForTest({
+        benchmarkId: 51,
+        splitMode: "hundred-vs-elo",
+        baseBenchmarkName: "Token Cost",
+        eloBenchmarkName: "Token Cost (Elo)"
+      })
+    ).rejects.toThrow("无需拆分");
+  });
+
+  test("splitBenchmarkScaleByMode 拆分真实 Elo 时保留量级值在原 benchmark，并按段拆分 $1.2M / 1215", async () => {
+    const dbSelectWhere = createSelectWhereMock([
+      [
+        {
+          id: 21,
+          benchmarkName: "Arena Hard",
+          benchmarkType: "arena",
+          unit: "score",
+          higherIsBetter: true,
+          modalities: ["Text"],
+          sourceBenchmarkId: null
+        }
+      ]
+    ]);
+    const dbSelectFrom = vi.fn(() => ({ where: dbSelectWhere }));
+    vi.spyOn(dbForTest, "select").mockImplementation(() => ({ from: dbSelectFrom }));
+
+    vi.spyOn(dbForTest, "execute")
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            benchmark_id: 21,
+            benchmark_name: "Arena Hard",
+            benchmark_type: "arena",
+            value_count: "4",
+            small_count: "0",
+            large_count: "4",
+            zero_to_hundred_count: "1",
+            over_hundred_count: "3",
+            min_value: "87",
+            max_value: "1200000"
+          }
+        ]
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            benchmark_id: 21,
+            value_raw: "87",
+            value_num: "87",
+            value_num2: null,
+            model_name: "Model A",
+            source: "text:seed",
+            bench_time: "2026-04-18T09:00:00.000Z"
+          },
+          {
+            benchmark_id: 21,
+            value_raw: "$1.2M",
+            value_num: "1200000",
+            value_num2: null,
+            model_name: "Model B",
+            source: "text:seed",
+            bench_time: "2026-04-18T09:05:00.000Z"
+          },
+          {
+            benchmark_id: 21,
+            value_raw: "$1.2M / 1215",
+            value_num: "1200000",
+            value_num2: "1215",
+            model_name: "Model C",
+            source: "text:seed",
+            bench_time: "2026-04-18T09:10:00.000Z"
+          }
+        ]
+      });
+
+    const txSelectWhere = vi.fn()
+      .mockImplementationOnce(() => createResolvedQueryMock([]))
+      .mockImplementationOnce(() => createResolvedQueryMock([]))
+      .mockImplementationOnce(() => createResolvedQueryMock([
+        {
+          id: 201,
+          modelId: 1,
+          benchmarkId: 21,
+          benchTime: new Date("2026-04-18T09:00:00.000Z"),
+          valueRaw: "87",
+          valueNum: "87",
+          valueNum2: null,
+          valueNote: null,
+          source: "text:seed"
+        },
+        {
+          id: 202,
+          modelId: 2,
+          benchmarkId: 21,
+          benchTime: new Date("2026-04-18T09:05:00.000Z"),
+          valueRaw: "$1.2M",
+          valueNum: "1200000",
+          valueNum2: null,
+          valueNote: null,
+          source: "text:seed"
+        },
+        {
+          id: 203,
+          modelId: 3,
+          benchmarkId: 21,
+          benchTime: new Date("2026-04-18T09:10:00.000Z"),
+          valueRaw: "$1.2M / 1215",
+          valueNum: "1200000",
+          valueNum2: "1215",
+          valueNote: null,
+          source: "text:seed"
+        }
+      ]))
+      .mockImplementationOnce(() => Promise.resolve([]));
+    const txSelectFrom = vi.fn(() => ({ where: txSelectWhere }));
+    const txSelect = vi.fn(() => ({ from: txSelectFrom }));
+
+    const splitUpdatePayloads: Array<Record<string, unknown>> = [];
+    const splitInsertPayloads: Array<Record<string, unknown>> = [];
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const updateReturning = vi.fn().mockResolvedValue([{ id: 21 }]);
+    const updateSet = vi.fn((payload: Record<string, unknown>) => {
+      if ("canonicalKey" in payload || "benchmarkName" in payload) {
+        return {
+          where: vi.fn(() => ({ returning: updateReturning })),
+          returning: updateReturning
+        };
+      }
+      if ("benchmarkId" in payload) {
+        splitUpdatePayloads.push(payload);
+      }
+      return { where: updateWhere };
+    });
+    const update = vi.fn(() => ({ set: updateSet }));
+
+    const onConflictDoNothing = vi.fn().mockResolvedValue(undefined);
+    const insertValues = vi.fn((payload: Record<string, unknown> | Array<Record<string, unknown>>) => {
+      const rows = Array.isArray(payload) ? payload : [payload];
+      const firstRow = rows[0];
+      if (firstRow && "benchmarkName" in firstRow) {
+        return {
+          onConflictDoUpdate: vi.fn(() => ({
+            returning: vi.fn().mockResolvedValue([
+              { id: 31, benchmarkName: "Arena Hard (Elo)", benchmarkType: "arena" }
+            ])
+          })),
+          returning: vi.fn().mockResolvedValue([
+            { id: 31, benchmarkName: "Arena Hard (Elo)", benchmarkType: "arena" }
+          ])
+        };
+      }
+      if (firstRow && "source" in firstRow && "modalities" in firstRow) {
+        return { onConflictDoNothing };
+      }
+      if (firstRow && "modelId" in firstRow) {
+        splitInsertPayloads.push(...rows);
+      }
+      return Promise.resolve(undefined);
+    });
+    const insert = vi.fn(() => ({ values: insertValues }));
+
+    const tx = { select: txSelect, update, insert };
+    vi.spyOn(dbForTest, "transaction").mockImplementation(async (callback: TransactionCallback) => callback(tx));
+
+    const result = await splitBenchmarkScaleByModeForTest({
+      benchmarkId: 21,
+      splitMode: "hundred-vs-elo",
+      baseBenchmarkName: "Arena Hard",
+      eloBenchmarkName: "Arena Hard (Elo)"
+    });
+
+    expect(result.ok).toBe(true);
+    // 单值 `$1.2M` 与 `87` 都留在原 benchmark，不迁移；仅 `$1.2M / 1215` 被拆分
+    expect(result.movedRows).toBe(0);
+    expect(result.splitRows).toBe(1);
+    expect(result.createdRows).toBe(1);
+    expect(splitUpdatePayloads).toEqual([
+      expect.objectContaining({
+        benchmarkId: 21,
+        valueRaw: "$1.2M",
+        valueNum: "1200000",
+        valueNum2: null,
+        valueNote: "split-benchmark-base"
+      })
+    ]);
+    expect(splitInsertPayloads).toEqual([
+      expect.objectContaining({
+        benchmarkId: 31,
+        valueRaw: "1215",
+        valueNum: "1215",
+        valueNum2: null,
+        valueNote: "split-benchmark-elo"
+      })
+    ]);
   });
 });
