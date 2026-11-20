@@ -52,6 +52,23 @@ let dbForTest: {
   transaction: (callback: TransactionCallback) => Promise<unknown>;
 };
 
+
+/** Settings reads are independent of the entity-query queues in these fixtures. */
+function withDefaultRuleRead(client: unknown) {
+  const tx = client as { select?: (...args: unknown[]) => unknown };
+  const select = tx.select;
+  if (!select) return client;
+  return {
+    ...tx,
+    select: (selection?: Record<string, unknown>, ...args: unknown[]) => {
+      if (selection && "valueJson" in selection) {
+        return { from: () => ({ where: () => ({ limit: async () => [] }) }) };
+      }
+      return select(selection, ...args);
+    }
+  };
+}
+
 beforeAll(async () => {
   process.env.DATABASE_URL ??= "postgres://test:test@127.0.0.1:5432/test";
 
@@ -225,7 +242,7 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(withDefaultRuleRead(tx)));
 
     await mergeEntityForTest({
       entityType: "benchmark",
@@ -278,7 +295,7 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(withDefaultRuleRead(tx)));
 
     await mergeEntityForTest({
       entityType: "benchmark",
@@ -331,7 +348,7 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(withDefaultRuleRead(tx)));
 
     await mergeEntityForTest({
       entityType: "benchmark",
@@ -400,7 +417,7 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(withDefaultRuleRead(tx)));
 
     const result = await rebuildBenchmarkCanonicalKeysByRuleForTest({
       lowercase: true,
@@ -464,7 +481,7 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(withDefaultRuleRead(tx)));
 
     await mergeEntityForTest({
       entityType: "benchmark",
@@ -593,7 +610,7 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(withDefaultRuleRead(tx)));
 
     try {
       const result = await importBenchmarkCsvForTest(inputText, "text:unit-test");
@@ -682,7 +699,7 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(withDefaultRuleRead(tx)));
 
     try {
       const result = await importBenchmarkCsvForTest(inputText, "text:Qwen3.6");
@@ -784,7 +801,7 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(withDefaultRuleRead(tx)));
 
     try {
       const result = await importBenchmarkCsvForTest(inputText, "text:claude-opus-4.6");
@@ -886,7 +903,7 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(withDefaultRuleRead(tx)));
 
     try {
       const result = await importBenchmarkCsvForTest(inputText, "text:gdpval-aa");
@@ -1002,7 +1019,7 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(withDefaultRuleRead(tx)));
 
     try {
       const result = await importBenchmarkCsvForTest(inputText, "text:gdpval-aa");
@@ -1106,7 +1123,7 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(withDefaultRuleRead(tx)));
 
     try {
       const result = await importBenchmarkCsvForTest(inputText, "text:gdpval-aa");
@@ -1133,81 +1150,20 @@ describe("mergeEntity benchmark source meta migration", () => {
     }
   });
 
-  test("测试环境下 settings 查询不可用时会回退默认 dedupe 规则继续导入", async () => {
-    const inputText = [
-      "Category\tBenchmark\tGPT-5.4",
-      "Professional\tOfficeQA Pro\t68.1"
-    ].join("\n");
-
-    const dbSelectSpy = vi.spyOn(dbForTest, "select").mockImplementation(() => {
-      throw new Error("connect ECONNREFUSED 127.0.0.1:5432");
-    });
-
-    const createdProvider = { id: 1, name: "OpenAI", slug: "openai", createdAt: new Date("2026-04-01T00:00:00.000Z") };
-    const createdModel = {
-      id: 2,
-      providerId: 1,
-      modelName: "GPT-5.4",
-      modelAlias: null,
-      canonicalKey: "gpt54",
-      sourceModelId: null,
-      mergedIntoModelId: null,
-      createdAt: new Date("2026-04-01T00:00:00.000Z")
-    };
-    const createdBenchmark = {
-      id: 22,
-      benchmarkName: "OfficeQA Pro",
-      benchmarkType: "Professional",
-      unit: "score",
-      higherIsBetter: true,
-      modalities: ["Professional"],
-      canonicalKey: "officeqapro:professional",
-      sourceBenchmarkId: null,
-      mergedIntoBenchmarkId: null,
-      createdAt: new Date("2026-04-24T00:00:00.000Z")
-    };
-
-    const txSelect = vi.fn()
-      .mockReturnValueOnce({ from: createSelectFromMock([]) })
-      .mockReturnValueOnce({ from: createSelectFromMock([]) })
-      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([createdProvider]) }) }) })
-      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }) }) })
-      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }) }) })
-      .mockReturnValueOnce({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }) }) });
-
-    const providerReturning = vi.fn().mockResolvedValue([createdProvider]);
-    const providerOnConflictDoUpdate = vi.fn(() => ({ returning: providerReturning }));
-    const modelReturning = vi.fn().mockResolvedValue([createdModel]);
-    const benchmarkReturning = vi.fn().mockResolvedValue([createdBenchmark]);
-    const valueRowsInsert = vi.fn().mockResolvedValue(undefined);
-    const sourceMetaOnConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
-
-    const txInsert = vi.fn()
-      .mockReturnValueOnce({ values: vi.fn(() => ({ onConflictDoUpdate: providerOnConflictDoUpdate })) })
-      .mockReturnValueOnce({ values: vi.fn(() => ({ returning: modelReturning })) })
-      .mockReturnValueOnce({ values: vi.fn(() => ({ returning: benchmarkReturning })) })
-      .mockReturnValueOnce({ values: vi.fn(() => valueRowsInsert) })
-      .mockReturnValueOnce({ values: vi.fn(() => ({ onConflictDoUpdate: sourceMetaOnConflictDoUpdate })) });
-
-    const tx = {
-      select: txSelect,
-      insert: txInsert,
-      update: vi.fn(() => ({ set: vi.fn() })),
-      delete: vi.fn()
-    };
-
-    const transactionSpy = vi
-      .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
-
-    try {
-      const result = await importBenchmarkCsvForTest(inputText, "text:unit-test");
-      expect(result.inserted).toBe(1);
-      expect(txInsert).toHaveBeenCalled();
-    } finally {
-      transactionSpy.mockRestore();
-      dbSelectSpy.mockRestore();
-    }
+  test("事务内 settings 查询失败会中止导入，不使用默认规则继续写入", async () => {
+    const inputText = ["Category\tBenchmark\tGPT-5.4", "Professional\tOfficeQA Pro\t68.1"].join("\n");
+    const error = new Error("connect ECONNREFUSED 127.0.0.1:5432");
+    const insert = vi.fn();
+    const { bumpCacheVersions } = await import("@/lib/cache-versions");
+    vi.mocked(bumpCacheVersions).mockClear();
+    const transactionSpy = vi.spyOn(dbForTest, "transaction").mockImplementation(async (callback) => callback({
+      select: () => ({ from: () => ({ where: () => ({ limit: async () => { throw error; } }) }) }),
+      insert
+    }));
+    await expect(importBenchmarkCsvForTest(inputText, "text:unit-test")).rejects.toBe(error);
+    expect(insert).not.toHaveBeenCalled();
+    expect(bumpCacheVersions).not.toHaveBeenCalled();
+    transactionSpy.mockRestore();
   });
 
   test("合并 model 时会同步迁移 benchmark_values 的 modelId 并展平下游已合并 model", async () => {
@@ -1226,7 +1182,7 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(withDefaultRuleRead(tx)));
 
     try {
       await mergeEntityForTest({
@@ -1259,7 +1215,7 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(withDefaultRuleRead(tx)));
 
     try {
       const result = await updateMergedEntityRecordForTest({
@@ -1293,7 +1249,7 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(withDefaultRuleRead(tx)));
 
     try {
       const result = await updateMergedEntityRecordForTest({
@@ -1381,7 +1337,7 @@ describe("mergeEntity benchmark source meta migration", () => {
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(withDefaultRuleRead(tx)));
 
     try {
       const result = await importBenchmarkCsvForTest(inputText, "text:merged-model-test");

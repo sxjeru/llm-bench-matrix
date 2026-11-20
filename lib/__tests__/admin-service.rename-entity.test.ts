@@ -46,6 +46,23 @@ function createSelectWhereMock(results: unknown[]) {
   });
 }
 
+
+/** Settings reads are independent of the entity-query queues in these fixtures. */
+function withDefaultRuleRead(client: unknown) {
+  const tx = client as { select?: (...args: unknown[]) => unknown };
+  const select = tx.select;
+  if (!select) return client;
+  return {
+    ...tx,
+    select: (selection?: Record<string, unknown>, ...args: unknown[]) => {
+      if (selection && "valueJson" in selection) {
+        return { from: () => ({ where: () => ({ limit: async () => [] }) }) };
+      }
+      return select(selection, ...args);
+    }
+  };
+}
+
 beforeAll(async () => {
   process.env.DATABASE_URL ??= "postgres://test:test@127.0.0.1:5432/test";
 
@@ -105,7 +122,7 @@ describe("renameEntity", () => {
 
     vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(withDefaultRuleRead(tx)));
 
     const result = await renameEntityForTest({
       entityType: "model",
@@ -282,7 +299,7 @@ describe("renameEntity", () => {
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(withDefaultRuleRead(tx)));
 
     const result = await renameEntityForTest({
       entityType: "benchmark",
@@ -331,7 +348,7 @@ describe("renameEntity", () => {
 
     const transactionSpy = vi
       .spyOn(dbForTest, "transaction")
-      .mockImplementation(async (callback: TransactionCallback) => callback(tx));
+      .mockImplementation(async (callback: TransactionCallback) => callback(withDefaultRuleRead(tx)));
 
     const result = await renameEntityForTest({
       entityType: "source",

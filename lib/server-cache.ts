@@ -54,12 +54,20 @@ export async function withTimedCache<T>(
   store: TimedCacheStore<T>,
   key: string,
   ttlMs: number,
-  loader: () => Promise<T>
+  loader: () => Promise<T>,
+  options?: { refresh?: boolean }
 ): Promise<T> {
+  // A validating probe must start after its caller's data read, so it cannot
+  // join an older query. Fence earlier writers, retaining good cached values
+  // until this refresh succeeds (or their original TTL expires).
+  if (options?.refresh) {
+    store.generation += 1;
+    store.inFlight.clear();
+  }
   const now = Date.now();
   const cached = store.cache.get(key);
 
-  if (cached && cached.expiresAt > now) {
+  if (!options?.refresh && cached && cached.expiresAt > now) {
     return cached.value;
   }
 
@@ -96,7 +104,7 @@ export async function withVersionedCache<T>(
     versionProbeTtlMs: number;
     staleIfErrorMs: number;
     getVersion: () => Promise<string>;
-    loader: () => Promise<T>;
+    loader: (version: string) => Promise<T>;
     forceVersion?: string;
   }
 ): Promise<T> {
@@ -132,7 +140,7 @@ export async function withVersionedCache<T>(
         return latestCached.value;
       }
 
-      const value = await options.loader();
+      const value = await options.loader(version);
       if (store.generation === generation) {
         store.cache.set(key, {
           value,

@@ -934,7 +934,7 @@ export async function reassignRecordBenchmark(input: {
     }
     targetBenchmark = existing;
   } else if (targetName) {
-    const dedupeRule = await getModelDedupeRule();
+    const dedupeRule = await getModelDedupeRule(executor);
     const targetType = input.target.benchmarkType?.trim() || fromBenchmark.benchmarkType;
     createdTarget = !(await hasBenchmarkByCanonicalKey(
       buildBenchmarkCanonicalKey(targetName, targetType, dedupeRule), executor
@@ -1100,7 +1100,7 @@ export async function reassignRecordModel(input: {
   } else if (targetName) {
     const providerName = input.target.providerName?.trim();
     const providerId = providerName ? (await ensureProvider(providerName, { db: executor })).id : fromModel.providerId;
-    const dedupeRule = await getModelDedupeRule();
+    const dedupeRule = await getModelDedupeRule(executor);
     createdTarget = !(await hasModelByCanonicalKey(buildModelCanonicalKey(targetName, dedupeRule), executor));
     targetModel = await ensureModelByProviderId({ providerId, modelName: targetName }, { dedupeRule, db: executor });
   } else {

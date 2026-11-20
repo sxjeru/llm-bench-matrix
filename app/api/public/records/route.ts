@@ -4,6 +4,7 @@ import { toMatrixInputRow } from "@/components/benchmark-matrix/map-row";
 import { getDashboardRows } from "@/lib/db/queries";
 import { createRateLimiter, getRateLimitKey } from "@/lib/rate-limit";
 import { getCacheVersions } from "@/lib/cache-versions";
+import { CacheVersionChangedError } from "@/lib/cache-version-changed";
 import { ifNoneMatchMatches } from "@/lib/http-etag";
 import {
   PUBLIC_CACHE_CONTROL_BROWSER,
@@ -78,14 +79,18 @@ export async function GET(request: Request) {
     });
   }
 
-  let cachedRows = await getDashboardRows(cachedLimit, null, dashboardVersion);
+  let cachedRows: Awaited<ReturnType<typeof getDashboardRows>>;
   for (let attempt = 0; ; attempt += 1) {
-    const current = await getCacheVersions({ fresh: true });
-    if (current.dashboard === dashboardVersion && current.pricing === pricingVersion) break;
-    if (attempt >= 2) throw new Error("Records changed repeatedly while loading; retry later");
-    dashboardVersion = current.dashboard;
-    pricingVersion = current.pricing;
-    cachedRows = await getDashboardRows(cachedLimit, null, dashboardVersion);
+    try {
+      // Only live row loads validate against the database. A cache hit already
+      // holds rows validated for its version, including an allowed older one.
+      cachedRows = await getDashboardRows(cachedLimit, null, dashboardVersion);
+      break;
+    } catch (error) {
+      if (!(error instanceof CacheVersionChangedError) || attempt >= 2) throw error;
+      dashboardVersion = error.versions.dashboard;
+      pricingVersion = error.versions.pricing;
+    }
   }
   etag = createRecordsEtag(dashboardVersion, pricingVersion, limit);
   headers.ETag = etag;

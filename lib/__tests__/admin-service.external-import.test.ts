@@ -266,6 +266,58 @@ function existingValue(overrides: Partial<ExistingValueRow> = {}): ExistingValue
 }
 
 describe("importExternalBenchmarkRows", () => {
+  test("外层 executor 内的规则查询不申请全局连接", async () => {
+    const { mock, importExternalBenchmarkRows } = await setup();
+    const tx = { ...mock.db };
+    const globalSelect = vi.fn(() => {
+      throw new Error("global pool must not be used inside this transaction");
+    });
+    mock.db.select = globalSelect;
+    const result = await importExternalBenchmarkRows([{ ...BASE_ROW, rawValue: "79.1" }], {
+      source: "Artificial Analysis", executor: tx as never
+    });
+    expect(result.inserted).toBe(1);
+    expect(globalSelect).not.toHaveBeenCalled();
+  });
+
+  test("executor + dryRun 回滚保存点，外层提交也不会保留预览写入", async () => {
+    const { mock, importExternalBenchmarkRows, bumpCacheVersions } = await setup();
+    const savepointEvents: string[] = [];
+    const tx = {
+      ...mock.db,
+      transaction: vi.fn(async <T,>(write: (nested: unknown) => Promise<T>): Promise<T> => {
+        savepointEvents.push("savepoint");
+        const before = structuredClone(mock.captured);
+        try {
+          const result = await write(tx);
+          savepointEvents.push("release");
+          return result;
+        } catch (error) {
+          Object.assign(mock.captured, before);
+          savepointEvents.push("rollback to savepoint");
+          throw error;
+        }
+      })
+    };
+    const onChanged = vi.fn();
+    let outerCommitted = false;
+    const result = await mock.db.transaction(async () => {
+      const preview = await importExternalBenchmarkRows([{ ...BASE_ROW, rawValue: "79.1" }], {
+        source: "Artificial Analysis", dryRun: true, executor: tx as never, onChanged
+      });
+      outerCommitted = true;
+      return preview;
+    });
+    expect(result).toMatchObject({ dryRun: true, inserted: 1 });
+    expect(outerCommitted).toBe(true);
+    expect(savepointEvents).toEqual(["savepoint", "rollback to savepoint"]);
+    expect(mock.captured.insertedValues).toHaveLength(0);
+    expect(mock.captured.createdBenchmarkNames).toHaveLength(0);
+    expect(mock.captured.sourceMetaRows).toHaveLength(0);
+    expect(onChanged).not.toHaveBeenCalled();
+    expect(bumpCacheVersions).not.toHaveBeenCalled();
+  });
+
   test("同源没有旧值时插入新行", async () => {
     const { mock, importExternalBenchmarkRows } = await setup();
 

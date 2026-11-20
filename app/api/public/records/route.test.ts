@@ -8,6 +8,7 @@ import {
 } from "@/app/api/public/cache-headers";
 import { getDashboardRows } from "@/lib/db/queries";
 import { getCacheVersions } from "@/lib/cache-versions";
+import { CacheVersionChangedError } from "@/lib/cache-version-changed";
 
 vi.mock("@/lib/db/queries", () => ({
   getDashboardRows: vi.fn()
@@ -198,16 +199,22 @@ describe("GET /api/public/records", () => {
   });
 
   test("读取行数据期间提交新版本时重试，响应使用新版本 ETag", async () => {
-    vi.mocked(getCacheVersions)
-      .mockResolvedValueOnce({ dashboard: "old", pricing: "pricing", settings: "settings", admin_entities: "admin" })
-      .mockResolvedValue({ dashboard: "new", pricing: "pricing", settings: "settings", admin_entities: "admin" });
-    vi.mocked(getDashboardRows).mockResolvedValue([]);
+    const newer = { dashboard: "new", pricing: "pricing", settings: "settings", admin_entities: "admin" };
+    vi.mocked(getCacheVersions).mockResolvedValue({ ...newer, dashboard: "old" });
+    vi.mocked(getDashboardRows).mockRejectedValueOnce(new CacheVersionChangedError(newer)).mockResolvedValue([]);
     const response = await GET(new Request("https://example.com/api/public/records"));
     expect(getDashboardRows).toHaveBeenNthCalledWith(1, 300, null, "old");
     expect(getDashboardRows).toHaveBeenNthCalledWith(2, 300, null, "new");
-    expect(getCacheVersions).toHaveBeenCalledWith({ fresh: true });
+    expect(getCacheVersions).toHaveBeenCalledTimes(1);
     expect(response.headers.get("X-Dashboard-Version")).toBe("new");
     expect(response.headers.get("ETag")).toContain("records:new:pricing:");
+  });
+
+  test("版本连续变化时最多加载三次，并保留原错误", async () => {
+    const drift = new CacheVersionChangedError({ dashboard: "changing", pricing: "pricing", settings: "settings", admin_entities: "admin" });
+    vi.mocked(getDashboardRows).mockRejectedValue(drift);
+    await expect(GET(new Request("https://example.com/api/public/records"))).rejects.toBe(drift);
+    expect(getDashboardRows).toHaveBeenCalledTimes(3);
   });
 
   test("限流响应明确不进入公共缓存", async () => {

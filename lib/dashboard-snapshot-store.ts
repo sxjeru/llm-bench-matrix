@@ -6,13 +6,15 @@ import {
   PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION,
   createPublicDashboardSnapshotEtag,
   encodePublicDashboardSnapshot,
-  type PublicDashboardSnapshotVersions
+  type PublicDashboardSnapshotVersions,
+  type PublicDashboardSnapshot
 } from "@/lib/dashboard-snapshot-cache";
 import {
   getPublicDashboardSnapshotVersions,
   loadPublicDashboardSnapshot
 } from "@/lib/dashboard-snapshot";
 import { registerCacheInvalidator } from "@/lib/db/queries";
+import { CacheVersionChangedError } from "@/lib/cache-version-changed";
 
 export const DEFAULT_SNAPSHOT_KEY = `default:v${PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION}`;
 
@@ -240,15 +242,16 @@ async function buildAndPersistSnapshotRecord(
   // A reader can obtain its version just before a writer commits. Validate live
   // builds against an uncached version read, so that current rows are never
   // published under the reader's older ETag. Existing immutable snapshots are safe.
-  const snapshot = await loadPublicDashboardSnapshot(versions);
+  let snapshot: PublicDashboardSnapshot;
+  try {
+    snapshot = await loadPublicDashboardSnapshot(versions);
+  } catch (error) {
+    if (!(error instanceof CacheVersionChangedError)) throw error;
+    return retrySnapshotRecord(error.versions, generation, attempt);
+  }
   const current = await getPublicDashboardSnapshotVersions({ fresh: true });
   if (getVersionsKey(current) !== versionsKey) {
-    if (attempt >= 2) throw new Error("Dashboard changed repeatedly while building snapshot; retry later");
-    if (generation === cacheGeneration) {
-      latestVersionsKey = getVersionsKey(current);
-      if (inMemoryRecord && isSnapshotRecordMatch(inMemoryRecord, current)) return inMemoryRecord;
-    }
-    return rebuildSnapshotRecord(current, generation, attempt + 1);
+    return retrySnapshotRecord(current, generation, attempt);
   }
   const wire = encodePublicDashboardSnapshot(snapshot);
   const payloadJson = JSON.stringify(wire);
@@ -276,6 +279,19 @@ async function buildAndPersistSnapshotRecord(
   }
 
   return record;
+}
+
+function retrySnapshotRecord(
+  current: PublicDashboardSnapshotVersions,
+  generation: number,
+  attempt: number
+): Promise<PublicDashboardSnapshotRecord> {
+  if (attempt >= 2) throw new Error("Dashboard changed repeatedly while building snapshot; retry later");
+  if (generation === cacheGeneration) {
+    latestVersionsKey = getVersionsKey(current);
+    if (inMemoryRecord && isSnapshotRecordMatch(inMemoryRecord, current)) return Promise.resolve(inMemoryRecord);
+  }
+  return rebuildSnapshotRecord(current, generation, attempt + 1);
 }
 
 /**

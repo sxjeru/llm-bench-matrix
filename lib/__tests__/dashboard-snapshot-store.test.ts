@@ -16,6 +16,7 @@ import * as snapshotModule from "@/lib/dashboard-snapshot";
 import * as cacheModule from "@/lib/dashboard-snapshot-cache";
 import type { PublicDashboardSnapshot } from "@/lib/dashboard-snapshot-cache";
 import { db } from "@/lib/db/client";
+import { CacheVersionChangedError } from "@/lib/cache-version-changed";
 
 vi.mock("@/lib/db/client", () => ({
   db: { select: vi.fn(), insert: vi.fn() }
@@ -293,6 +294,20 @@ describe("dashboard-snapshot-store", () => {
     expect(olderRecord).toBe(newerRecord);
     expect(persist).toHaveBeenCalledTimes(1);
     expect(values.mock.calls[0][0].dashboardVersion).toBe(newerVersions.dashboard);
+  });
+
+  test("行数据加载报告版本漂移时重试完整快照，持久化新版本一次", async () => {
+    const current = { ...VERSIONS, dashboard: "new-dashboard", admin_entities: "admin" };
+    vi.mocked(snapshotModule.loadPublicDashboardSnapshot)
+      .mockRejectedValueOnce(new CacheVersionChangedError(current))
+      .mockResolvedValueOnce(createSnapshot(current, 99));
+    vi.mocked(snapshotModule.getPublicDashboardSnapshotVersions).mockResolvedValue(current);
+    const record = await getOrBuildPublicDashboardSnapshotRecord(VERSIONS);
+    expect(record.dashboardVersion).toBe("new-dashboard");
+    expect(snapshotModule.loadPublicDashboardSnapshot).toHaveBeenNthCalledWith(1, VERSIONS);
+    expect(snapshotModule.loadPublicDashboardSnapshot).toHaveBeenNthCalledWith(2, current);
+    expect(persist).toHaveBeenCalledTimes(1);
+    expect(values.mock.calls[0][0].dashboardVersion).toBe("new-dashboard");
   });
 
   test("重建期间版本持续变化时停止重试，不持久化错误版本", async () => {

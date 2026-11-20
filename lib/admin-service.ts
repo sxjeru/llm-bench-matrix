@@ -1923,7 +1923,7 @@ export async function getProviderNameForModel(modelName: string, options?: { db?
   const cleanName = normalizeNameParenthesisSpacing(modelName);
   if (!cleanName) return "Unknown";
 
-  const canonicalKey = buildModelCanonicalKey(cleanName, await getModelDedupeRule());
+  const canonicalKey = buildModelCanonicalKey(cleanName, await getModelDedupeRule(executor));
   const [exactModel] = await executor.select().from(models).where(eq(models.canonicalKey, canonicalKey)).limit(1);
 
   if (exactModel) {
@@ -1968,23 +1968,7 @@ async function buildProviderCanonicalNameResolver(
     return (modelName: string) => inferProviderNameFromModel(modelName);
   }
 
-  const dedupeRule = await (async () => {
-    try {
-      const [setting] = await executor
-        .select({ valueJson: settings.valueJson })
-        .from(settings)
-        .where(eq(settings.key, "model_dedupe_rule"))
-        .limit(1);
-
-      return normalizeModelDedupeRule(setting?.valueJson);
-    } catch (error) {
-      if (shouldFallbackToDefaultModelDedupeRule(error)) {
-        return normalizeModelDedupeRule(null);
-      }
-
-      throw error;
-    }
-  })();
+  const dedupeRule = await getModelDedupeRule(executor);
   const providerRows = await executor.select().from(providers);
 
   const uniqueCanonicalKeys = Array.from(new Set(
@@ -2402,36 +2386,15 @@ function normalizeSplitBenchmarkPair(
   };
 }
 
-function shouldFallbackToDefaultModelDedupeRule(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
+/** Missing configuration uses defaults; database failures must abort the caller. */
+export async function getModelDedupeRule(executor: Pick<typeof db, "select"> = db) {
+  const [setting] = await executor
+    .select({ valueJson: settings.valueJson })
+    .from(settings)
+    .where(eq(settings.key, "model_dedupe_rule"))
+    .limit(1);
 
-  const fallbackHints = [
-    "ECONNREFUSED",
-    "connect ECONNREFUSED",
-    "Failed query: select \"value_json\" from \"settings\""
-  ];
-
-  return fallbackHints.some((hint) => error.message.includes(hint));
-}
-
-export async function getModelDedupeRule() {
-  try {
-    const [setting] = await db
-      .select({ valueJson: settings.valueJson })
-      .from(settings)
-      .where(eq(settings.key, "model_dedupe_rule"))
-      .limit(1);
-
-    return normalizeModelDedupeRule(setting?.valueJson);
-  } catch (error) {
-    if (shouldFallbackToDefaultModelDedupeRule(error)) {
-      return normalizeModelDedupeRule(null);
-    }
-
-    throw error;
-  }
+  return normalizeModelDedupeRule(setting?.valueJson);
 }
 
 export async function rebuildModelCanonicalKeysByRule(rawRule: unknown, executor?: DbTransactionClient): Promise<{ ok: boolean; totalModels: number; canonicalGroups: number; mergedCount: number }> {
@@ -2908,7 +2871,7 @@ export async function ensureModelByProviderId(input: {
     throw new Error(`provider not found: ${input.providerId}`);
   }
 
-  const rule = options?.dedupeRule ?? await getModelDedupeRule();
+  const rule = options?.dedupeRule ?? await getModelDedupeRule(executor);
   const canonicalKey = buildModelCanonicalKey(cleanName, rule);
   const [existing] = await executor.select().from(models).where(eq(models.canonicalKey, canonicalKey)).limit(1);
 
@@ -2976,13 +2939,12 @@ export async function ensureBenchmark(
     throw new Error("benchmarkName is required");
   }
 
-  const dedupeRule = options?.dedupeRule ?? await getModelDedupeRule();
+  const executor = options?.db ?? db;
+  const dedupeRule = options?.dedupeRule ?? await getModelDedupeRule(executor);
   const canonicalKey = buildBenchmarkCanonicalKey(cleanName, cleanType, dedupeRule);
   const modalities = normalizeModalities(input.modalities);
   const forceLowerIsBetter = isLowerBetterBenchmark(cleanName, cleanType) || input.higherIsBetter === false;
   const higherIsBetter = forceLowerIsBetter ? false : (input.higherIsBetter ?? true);
-  const executor = options?.db ?? db;
-
   const [existing] = await executor
     .select()
     .from(benchmarks)
@@ -3497,7 +3459,7 @@ export async function mergeEntity(input: {
         ? normalizedTargetBenchmarkType
         : targetBenchmark.benchmarkType;
 
-      const dedupeRule = await getModelDedupeRule();
+      const dedupeRule = await getModelDedupeRule(tx);
       const nextCanonicalKey = buildBenchmarkCanonicalKey(
         nextBenchmarkName,
         nextBenchmarkType,
@@ -3820,7 +3782,7 @@ export async function renameEntity(input: RenameEntityInput, executor?: DbTransa
     throw new Error("nextName is required");
   }
 
-  const dedupeRule = await getModelDedupeRule();
+  const dedupeRule = await getModelDedupeRule(executor);
 
   if (input.entityType === "benchmark") {
     const [current] = await executor
@@ -4279,10 +4241,9 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
     return { inserted: 0 };
   }
 
-  const dedupeRule = await getModelDedupeRule();
-
   let pricingChanged = false;
   const result = await withCacheMutation(() => pricingChanged ? ENTITY_CACHE_DOMAINS : RECORD_CACHE_DOMAINS, async (tx: DbTransactionClient) => {
+    const dedupeRule = await getModelDedupeRule(tx);
     const providerCache = new Map<string, Awaited<ReturnType<typeof ensureProvider>>>();
     const modelCache = new Map<string, Awaited<ReturnType<typeof ensureModelByProviderId>>>();
     const benchmarkByNameCache = new Map<string, Array<typeof benchmarks.$inferSelect>>();
@@ -4792,7 +4753,6 @@ export async function importExternalBenchmarkRows(
 
   const benchTime = options.benchTime ?? new Date();
   const dryRun = options.dryRun === true;
-  const dedupeRule = await getModelDedupeRule();
   const sourceCandidates = buildSourceLookupCandidates(source);
 
   const emptyResult: ExternalImportResult = {
@@ -4815,6 +4775,7 @@ export async function importExternalBenchmarkRows(
 
   let pricingChanged = false;
   const write = async (tx: DbTransactionClient): Promise<ExternalImportResult> => {
+      const dedupeRule = await getModelDedupeRule(tx);
       const providerCache = new Map<string, Awaited<ReturnType<typeof ensureProvider>>>();
       const modelCache = new Map<string, Awaited<ReturnType<typeof ensureModelByProviderId>>>();
       const benchmarkCache = new Map<string, typeof benchmarks.$inferSelect>();
@@ -5170,7 +5131,10 @@ export async function importExternalBenchmarkRows(
 
   try {
     const result = options.executor
-      ? await write(options.executor)
+      ? await (dryRun
+        // The sentinel must leave the savepoint callback before it is caught below.
+        ? options.executor.transaction(write)
+        : write(options.executor))
       : await withCacheMutation((result) => result.publicChanged ? (pricingChanged ? ENTITY_CACHE_DOMAINS : RECORD_CACHE_DOMAINS) : [], write);
     return result;
   } catch (error) {

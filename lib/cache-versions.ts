@@ -51,7 +51,9 @@ export async function getCacheVersions(options?: { fresh?: boolean }): Promise<R
       domain, parseCacheVersion(values.get(getCacheVersionKey(domain)))
     ])) as Record<CacheVersionDomain, string>;
   };
-  return options?.fresh ? load() : withTimedCache(cacheVersionStore, "all", CACHE_VERSION_TTL_MS, load);
+  return withTimedCache(cacheVersionStore, "all", CACHE_VERSION_TTL_MS, load, {
+    refresh: options?.fresh
+  });
 }
 
 export async function getCacheVersion(domain: CacheVersionDomain): Promise<string> {

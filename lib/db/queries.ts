@@ -2,7 +2,8 @@ import { and, count, countDistinct, desc, eq, inArray, isNotNull, isNull, or, sq
 import { db } from "@/lib/db/client";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 import { normalizeProviderConfig } from "@/lib/provider-config";
-import { getCacheVersion } from "@/lib/cache-versions";
+import { getCacheVersion, getCacheVersions } from "@/lib/cache-versions";
+import { CacheVersionChangedError } from "@/lib/cache-version-changed";
 import { createVersionedCacheStore, invalidateVersionedCacheStore, withVersionedCache } from "@/lib/server-cache";
 import { ALL_CACHE_DOMAINS, registerCacheInvalidator } from "@/lib/cache-invalidation";
 import { withCacheMutation } from "@/lib/cache-mutation";
@@ -202,7 +203,12 @@ export async function getDashboardRows(
       versionProbeTtlMs: CACHE_VERSION_PROBE_TTL_MS,
       staleIfErrorMs: CACHE_STALE_IF_ERROR_MS,
       getVersion: getDashboardCacheVersion,
-      loader: () => loadDashboardRows(normalizedLimit, normalizedSourceFilter),
+      loader: async (version) => {
+        const rows = await loadDashboardRows(normalizedLimit, normalizedSourceFilter);
+        const current = await getCacheVersions({ fresh: true });
+        if (current.dashboard !== version) throw new CacheVersionChangedError(current);
+        return rows;
+      },
       forceVersion
     }
   );
