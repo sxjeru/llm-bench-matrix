@@ -197,14 +197,21 @@ a {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0 5px;
+  justify-content: center;
+  gap: 2px 5px;
   font-variant-numeric: tabular-nums;
+}
+
+.site-footnote-total {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
 }
 
 .site-footnote-total .site-footnote-value {
   display: inline-block;
-  min-inline-size: 4ch;
-  text-align: end;
+  min-inline-size: 7ch;
+  text-align: center;
 }
 
 .site-footnote-value {

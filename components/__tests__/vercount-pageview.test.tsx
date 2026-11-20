@@ -150,6 +150,22 @@ describe("VercountPageview", () => {
     expect(localStorage.getItem("bench-matrix:pageview:https://count.example.com/api/v2/log:/")).toBeNull();
   });
 
+  test("等待接口返回时展示 Loading", async () => {
+    fetchMock.mockResolvedValueOnce(counterResponse(1));
+    render(<VercountPageview />);
+
+    expect(screen.getByText("Loading")).toBeInTheDocument();
+    expect(await screen.findByText("1")).toBeInTheDocument();
+  });
+
+  test("请求失败且无缓存时不会一直停在 Loading", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("network unavailable"));
+    render(<VercountPageview />);
+
+    expect(await screen.findByText("—")).toBeInTheDocument();
+    expect(screen.queryByText("Loading")).not.toBeInTheDocument();
+  });
+
   test("未配置 Vercount 时隐藏访问量", () => {
     vi.stubEnv("NEXT_PUBLIC_VERCOUNT_SCRIPT_URL", "");
     render(<VercountPageview />);

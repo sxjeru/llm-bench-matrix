@@ -30,6 +30,7 @@ function PageviewCounter({ scriptUrl, isHome }: { scriptUrl: string; isHome: boo
   const totalRef = useRef<HTMLSpanElement>(null);
   const increaseRef = useRef<HTMLSpanElement>(null);
   const [count, setCount] = useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   // Only a live result can create or acknowledge a delta.
   const [sample, setSample] = useState<{ count: number; baseline: number; canReset: boolean } | null>(null);
 
@@ -48,12 +49,14 @@ function PageviewCounter({ scriptUrl, isHome }: { scriptUrl: string; isHome: boo
       if (!active) return;
       if (!data) {
         setCount(readCount(cacheKey) ?? (isHome ? readCount(HOME_BASELINE_KEY) : null));
+        setIsLoading(false);
         return;
       }
 
       const count = data.page_pv;
       writeCount(cacheKey, count);
       setCount(count);
+      setIsLoading(false);
       if (isHome) {
         const baseline = readCount(HOME_BASELINE_KEY);
         if (baseline === null) writeCount(HOME_BASELINE_KEY, count);
@@ -112,7 +115,14 @@ function PageviewCounter({ scriptUrl, isHome }: { scriptUrl: string; isHome: boo
         <span className="site-footnote-label">本页总访问量</span>
         <span className="site-footnote-count">
           <span ref={totalRef} className="site-footnote-total">
-            <span className="site-footnote-value">{count ?? "—"}</span>{" "}次
+            {count === null ? (
+              <span className="site-footnote-value">{isLoading ? "Loading" : "—"}</span>
+            ) : (
+              <>
+                <span className="site-footnote-value">{count}</span>
+                <span className="site-footnote-unit">次</span>
+              </>
+            )}
           </span>
           {increase > 0 && <span ref={increaseRef} className="site-footnote-increase">(+{increase})</span>}
         </span>
