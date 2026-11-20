@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { Calendar, Check, DollarSign, Pencil, RefreshCw, RotateCcw, Save, X } from "lucide-react";
 import type { ModelPricingDraft, ModelPricingRow, ModelPricingSyncResult } from "../types";
 import { formatReleaseDateInput, isPricingDraftDirty } from "../utils/pricing-draft";
@@ -35,6 +35,11 @@ type ModelPricingCostDraftKey =
   | "cacheWriteCost"
   | "inputAudioCost"
   | "outputAudioCost";
+
+const PRICING_ROW_HEIGHT = 104;
+const PRICING_HEADER_HEIGHT = 40;
+const PRICING_VIEWPORT_HEIGHT = 560;
+const PRICING_OVERSCAN = 4;
 
 function formatCost(value: number | null) {
   if (value === null || !Number.isFinite(value)) return "--";
@@ -88,6 +93,18 @@ export function PricingTab({
   syncResult
 }: PricingTabProps) {
   const [editingDateModelId, setEditingDateModelId] = useState<number | null>(null);
+  const headingId = useId();
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(PRICING_VIEWPORT_HEIGHT);
+  const [previousView, setPreviousView] = useState({ prices, pricingSearchQuery, pricingStatusFilter, loadingPrices });
+
+  if (previousView.prices !== prices || previousView.pricingSearchQuery !== pricingSearchQuery
+    || previousView.pricingStatusFilter !== pricingStatusFilter || previousView.loadingPrices !== loadingPrices) {
+    setPreviousView({ prices, pricingSearchQuery, pricingStatusFilter, loadingPrices });
+    setScrollTop(0);
+    setEditingDateModelId(null);
+  }
 
   function updatePricingCostDraft(modelId: number, field: ModelPricingCostDraftKey, value: string) {
     updatePricingDraft(modelId, (current) => ({ ...current, [field]: value, manualOverride: true }));
@@ -106,28 +123,69 @@ export function PricingTab({
     }
   }
 
-  const filteredPrices = prices
-    .filter((price) => {
-      const draft = pricingDrafts[price.modelId];
-      const draftAwareStatus = getDraftAwareStatus(price, draft);
-      const query = pricingSearchQuery.trim().toLowerCase();
-      const releaseDateForSearch = draft ? draft.releaseDate : (price.releaseDate ?? "");
-      const matchesQuery = !query
-        || price.modelName.toLowerCase().includes(query)
-        || price.providerName.toLowerCase().includes(query)
-        || (price.sourceModelId ?? "").toLowerCase().includes(query)
-        || (price.sourceProviderId ?? "").toLowerCase().includes(query)
-        || releaseDateForSearch.toLowerCase().includes(query);
+  const filteredPrices = useMemo(() => {
+    const query = pricingSearchQuery.trim().toLowerCase();
+    return prices
+      .filter((price) => {
+        const draft = pricingDrafts[price.modelId];
+        if (!draft) return false;
+        const draftAwareStatus = getDraftAwareStatus(price, draft);
+        const matchesQuery = !query
+          || price.modelName.toLowerCase().includes(query)
+          || price.providerName.toLowerCase().includes(query)
+          || (price.sourceModelId ?? "").toLowerCase().includes(query)
+          || (price.sourceProviderId ?? "").toLowerCase().includes(query)
+          || draft.releaseDate.toLowerCase().includes(query);
 
-      if (!matchesQuery) return false;
-      if (pricingStatusFilter === "all") return true;
-      if (pricingStatusFilter === "manual") return draftAwareStatus === "manual";
-      if (pricingStatusFilter === "missing") {
-        return price.inputCost === null || price.outputCost === null || price.cacheReadCost === null;
-      }
-      return draftAwareStatus === pricingStatusFilter;
-    })
-    .sort((a, b) => getPricingSortTime(b) - getPricingSortTime(a));
+        if (!matchesQuery) return false;
+        if (pricingStatusFilter === "all") return true;
+        if (pricingStatusFilter === "manual") return draftAwareStatus === "manual";
+        if (pricingStatusFilter === "missing") {
+          return price.inputCost === null || price.outputCost === null || price.cacheReadCost === null;
+        }
+        return draftAwareStatus === pricingStatusFilter;
+      })
+      .sort((a, b) => getPricingSortTime(b) - getPricingSortTime(a));
+  }, [prices, pricingDrafts, pricingSearchQuery, pricingStatusFilter]);
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const measure = () => setViewportHeight(viewport.clientHeight || PRICING_VIEWPORT_HEIGHT);
+    measure();
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(measure);
+      observer.observe(viewport);
+      return () => observer.disconnect();
+    }
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [loadingPrices]);
+
+  useLayoutEffect(() => {
+    if (viewportRef.current) viewportRef.current.scrollTop = 0;
+  }, [prices, pricingSearchQuery, pricingStatusFilter, loadingPrices]);
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    // A draft can remove its own row from the active status filter.
+    const maxScrollTop = Math.max(0, PRICING_HEADER_HEIGHT + filteredPrices.length * PRICING_ROW_HEIGHT - viewportHeight);
+    if (viewport.scrollTop > maxScrollTop) {
+      viewport.scrollTop = maxScrollTop;
+      setScrollTop(maxScrollTop);
+    }
+  }, [filteredPrices.length, viewportHeight]);
+
+  const visibleCount = Math.ceil(Math.max(0, viewportHeight - PRICING_HEADER_HEIGHT) / PRICING_ROW_HEIGHT);
+  const firstVisible = Math.min(Math.floor(scrollTop / PRICING_ROW_HEIGHT), Math.max(0, filteredPrices.length - 1));
+  const windowStart = Math.max(0, firstVisible - PRICING_OVERSCAN);
+  const windowEnd = Math.min(filteredPrices.length, firstVisible + visibleCount + PRICING_OVERSCAN);
+  const visiblePrices = useMemo(() => filteredPrices.slice(windowStart, windowEnd), [filteredPrices, windowStart, windowEnd]);
+
+  if (editingDateModelId !== null && !visiblePrices.some((price) => price.modelId === editingDateModelId)) {
+    setEditingDateModelId(null);
+  }
 
   const matchedCount = prices.filter((item) => item.matchStatus === "matched" || item.matchStatus === "manual").length;
   const missingCoreCount = prices.filter((item) => item.inputCost === null || item.outputCost === null || item.cacheReadCost === null).length;
@@ -137,7 +195,7 @@ export function PricingTab({
   return (
     <section className="rounded-box border border-base-300 bg-base-100 p-5 shadow-sm">
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <h3 className="flex items-center gap-2 text-lg font-semibold">
+        <h3 id={headingId} className="flex items-center gap-2 text-lg font-semibold">
           <DollarSign size={18} />
           价格管理
         </h3>
@@ -224,11 +282,13 @@ export function PricingTab({
           value={pricingSearchQuery}
           onChange={(event) => setPricingSearchQuery(event.target.value)}
           placeholder="搜索模型、Provider 或 models.dev ID"
+          aria-label="搜索模型价格"
         />
         <select
           className="select select-bordered w-full"
           value={pricingStatusFilter}
           onChange={(event) => setPricingStatusFilter(event.target.value as typeof pricingStatusFilter)}
+          aria-label="价格匹配状态筛选"
         >
           <option value="all">全部</option>
           <option value="matched">已匹配</option>
@@ -244,9 +304,19 @@ export function PricingTab({
           正在加载价格…
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-box border border-base-300">
-          <table className="table table-zebra table-sm min-w-[1180px]">
-            <thead>
+        <div
+          ref={viewportRef}
+          className="admin-pricing-viewport rounded-box border border-base-300"
+          role="region"
+          aria-labelledby={headingId}
+          tabIndex={0}
+          onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+        >
+          <table className="admin-pricing-table table table-sm w-full min-w-[1292px] table-fixed" aria-label="模型价格" aria-rowcount={filteredPrices.length + 1}>
+            <colgroup>
+              {[240, 220, 112, 112, 128, 240, 144, 96].map((width, index) => <col key={index} style={{ width }} />)}
+            </colgroup>
+            <thead className="sticky top-0 z-10 bg-base-100" style={{ height: PRICING_HEADER_HEIGHT }}>
               <tr>
                 <th>模型</th>
                 <th>models.dev</th>
@@ -259,7 +329,13 @@ export function PricingTab({
               </tr>
             </thead>
             <tbody>
-              {filteredPrices.map((price) => {
+              {windowStart > 0 ? (
+                <tr aria-hidden="true">
+                  <td colSpan={8} style={{ height: windowStart * PRICING_ROW_HEIGHT, padding: 0, border: 0 }} />
+                </tr>
+              ) : null}
+              {visiblePrices.map((price, visibleIndex) => {
+                const index = windowStart + visibleIndex;
                 const draft = pricingDrafts[price.modelId];
                 const isSaving = savingPriceModelId === price.modelId;
                 if (!draft) return null;
@@ -267,13 +343,13 @@ export function PricingTab({
                 const isDirty = isPricingDraftDirty(price, draft);
 
                 return (
-                  <tr key={price.modelId}>
+                  <tr key={price.modelId} data-pricing-row={price.modelId} aria-rowindex={index + 2} className={index % 2 === 1 ? "bg-base-200/50" : ""} style={{ height: PRICING_ROW_HEIGHT }}>
                     <td className="min-w-[220px]">
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold">{price.modelName}</span>
+                        <span className="min-w-0 truncate font-semibold" title={price.modelName}>{price.modelName}</span>
                         {isDirty ? <span className="badge badge-warning badge-xs whitespace-nowrap">未保存</span> : null}
                       </div>
-                      <div className="text-xs opacity-60">{price.providerName}</div>
+                      <div className="truncate text-xs opacity-60" title={price.providerName}>{price.providerName}</div>
                       {editingDateModelId === price.modelId ? (
                         <div className="relative mt-1 inline-flex items-center gap-1">
                           <div className="relative inline-flex items-center">
@@ -424,6 +500,11 @@ export function PricingTab({
                   </tr>
                 );
               })}
+              {windowEnd < filteredPrices.length ? (
+                <tr aria-hidden="true">
+                  <td colSpan={8} style={{ height: (filteredPrices.length - windowEnd) * PRICING_ROW_HEIGHT, padding: 0, border: 0 }} />
+                </tr>
+              ) : null}
               {filteredPrices.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="py-8 text-center text-sm opacity-60">无匹配价格记录</td>

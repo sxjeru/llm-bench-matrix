@@ -2231,6 +2231,24 @@ input.heatmap-alpha-range::-moz-range-track {
   }
 }
 
+/* 后台价格管理：限制列表视口，配合固定行高虚拟滚动。 */
+.admin-pricing-viewport {
+  overflow: auto;
+  overscroll-behavior: contain;
+  max-block-size: 70vh;
+  max-block-size: 70dvh;
+  overflow-anchor: none;
+}
+
+.admin-pricing-viewport:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.admin-pricing-table td {
+  overflow: hidden;
+}
+
 /* 后台外部数据源：模型匹配虚拟列表，固定行高且只渲染可视窗口内的行 */
 .admin-mapping-viewport {
   position: relative;
