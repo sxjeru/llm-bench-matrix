@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { logApiEvent, withApiLogging } from "@/lib/api-logging";
 import { fetchGithubStarCount } from "@/lib/github-stars";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +20,11 @@ export function _setLastKnownStarCountForTest(count: number | null): void {
   lastKnownStarCount = count;
 }
 
-export async function GET(request: Request) {
+export function GET(request: Request) {
+  return withApiLogging(request, "api.public.github_stars", () => handleGithubStarsRequest(request));
+}
+
+async function handleGithubStarsRequest(request: Request) {
   const count = await fetchGithubStarCount(request.signal);
 
   if (count !== null) {
@@ -31,6 +36,10 @@ export async function GET(request: Request) {
   }
 
   // Graceful fallback to last known star count if GitHub rate limits or fails
+  logApiEvent(request, "warn", "api.public.github_stars.upstream_fallback", {
+    fallbackUsed: true,
+    fallbackSource: lastKnownStarCount !== null ? "last_known" : "empty"
+  });
   if (lastKnownStarCount !== null) {
     return NextResponse.json(
       { count: lastKnownStarCount, stargazers_count: lastKnownStarCount },

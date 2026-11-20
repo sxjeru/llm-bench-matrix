@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
+import { logApiError, logApiEvent, withApiLogging } from "@/lib/api-logging";
 import { requireAdmin } from "../../../../../lib/admin-auth";
 import { importParsedRecords } from "../../../../../lib/admin-service";
 import { parseWorkbookBuffer } from "../../../../../lib/import/xlsm";
 
 export const runtime = "nodejs";
 
-export async function POST(request: Request) {
+export function POST(request: Request) {
+  return withApiLogging(request, "api.admin.import-xlsm.commit", () => handlePOST(request));
+}
+
+async function handlePOST(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
 
@@ -40,6 +45,10 @@ export async function POST(request: Request) {
     const result = await importParsedRecords(validRecords, {
       source: `xlsm:${parsed.selectedSheet}`
     });
+    logApiEvent(request, "info", "admin.import.xlsm.completed", {
+      recordCount: result.inserted,
+      warningCount: parsed.warnings.length
+    });
 
     return NextResponse.json({
       ...result,
@@ -48,6 +57,7 @@ export async function POST(request: Request) {
       warnings: parsed.warnings.slice(0, 200)
     });
   } catch (error) {
+    logApiError(request, "admin.import.xlsm.failed", error);
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Failed to import workbook"

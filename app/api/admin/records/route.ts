@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/api-logging";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/admin-auth";
@@ -42,7 +43,11 @@ function parsePositiveInt(raw: string | null): number | undefined {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
-export async function GET(request: Request) {
+export function GET(request: Request) {
+  return withApiLogging(request, "api.admin.records", () => handleGET(request));
+}
+
+async function handleGET(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
 
@@ -72,7 +77,11 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
+export function POST(request: Request) {
+  return withApiLogging(request, "api.admin.records", () => handlePOST(request));
+}
+
+async function handlePOST(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
 

@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/api-logging";
 import { NextResponse } from "next/server";
 import { ADMIN_COOKIE_NAME } from "@/lib/admin-constants";
 import { invalidateAdminSessionToken } from "@/lib/admin-auth";
@@ -19,7 +20,11 @@ function parseCookieHeader(cookieHeader: string | null): Record<string, string> 
   }, {});
 }
 
-export async function POST(request: Request) {
+export function POST(request: Request) {
+  return withApiLogging(request, "api.admin.logout", () => handlePOST(request));
+}
+
+async function handlePOST(request: Request) {
   const cookies = parseCookieHeader(request.headers.get("cookie"));
   const sessionToken = cookies[ADMIN_COOKIE_NAME];
   await invalidateAdminSessionToken(sessionToken);

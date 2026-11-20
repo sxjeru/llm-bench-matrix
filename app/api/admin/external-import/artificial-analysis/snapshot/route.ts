@@ -1,8 +1,13 @@
+import { withApiLogging } from "@/lib/api-logging";
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-auth";
 import { getArtificialAnalysisAdminSnapshot } from "@/lib/external-providers/artificial-analysis-service";
 
-export async function GET(request: Request) {
+export function GET(request: Request) {
+  return withApiLogging(request, "api.admin.external-import.artificial-analysis.snapshot", () => handleGET(request));
+}
+
+async function handleGET(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
 

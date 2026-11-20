@@ -1,8 +1,13 @@
+import { withApiLogging } from "@/lib/api-logging";
 import { NextResponse } from "next/server";
 import { requireAdmin } from "../../../../../lib/admin-auth";
 import { migrateOrphanedMergedEntityValues } from "../../../../../lib/admin-service";
 
-export async function POST(request: Request) {
+export function POST(request: Request) {
+  return withApiLogging(request, "api.admin.data-maintenance.migrate-merged-values", () => handlePOST(request));
+}
+
+async function handlePOST(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
 

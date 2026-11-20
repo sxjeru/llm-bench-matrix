@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/api-logging";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
@@ -14,7 +15,11 @@ const schema = z.object({
   newPassword: z.string().min(8)
 });
 
-export async function POST(request: Request) {
+export function POST(request: Request) {
+  return withApiLogging(request, "api.admin.change-password", () => handlePOST(request));
+}
+
+async function handlePOST(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
 

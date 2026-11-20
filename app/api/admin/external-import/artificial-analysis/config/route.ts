@@ -1,8 +1,13 @@
+import { withApiLogging } from "@/lib/api-logging";
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-auth";
 import { saveArtificialAnalysisConfig } from "@/lib/external-providers/artificial-analysis-service";
 
-export async function PATCH(request: Request) {
+export function PATCH(request: Request) {
+  return withApiLogging(request, "api.admin.external-import.artificial-analysis.config", () => handlePATCH(request));
+}
+
+async function handlePATCH(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
 

@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/api-logging";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "../../../../../lib/admin-auth";
@@ -12,7 +13,11 @@ const schema = z.object({
   eloBenchmarkName: z.string().trim().min(1)
 });
 
-export async function POST(request: Request) {
+export function POST(request: Request) {
+  return withApiLogging(request, "api.admin.data-maintenance.split-benchmark-scale", () => handlePOST(request));
+}
+
+async function handlePOST(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
 

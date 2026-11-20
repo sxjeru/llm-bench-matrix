@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/api-logging";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "../../../../lib/admin-auth";
@@ -41,7 +42,11 @@ const deleteSchema = z.object({
   transferTargetProviderId: z.number().int().positive()
 });
 
-export async function POST(request: Request) {
+export function POST(request: Request) {
+  return withApiLogging(request, "api.admin.providers", () => handlePOST(request));
+}
+
+async function handlePOST(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
 
@@ -55,7 +60,11 @@ export async function POST(request: Request) {
   return NextResponse.json({ provider });
 }
 
-export async function PATCH(request: Request) {
+export function PATCH(request: Request) {
+  return withApiLogging(request, "api.admin.providers", () => handlePATCH(request));
+}
+
+async function handlePATCH(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
 
@@ -76,7 +85,11 @@ export async function PATCH(request: Request) {
   }
 }
 
-export async function DELETE(request: Request) {
+export function DELETE(request: Request) {
+  return withApiLogging(request, "api.admin.providers", () => handleDELETE(request));
+}
+
+async function handleDELETE(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
 

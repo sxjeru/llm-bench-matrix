@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/api-logging";
 import { NextResponse } from "next/server";
 import { requireAdmin } from "../../../../lib/admin-auth";
 import { getAdminModelPricingRows, updateModelPricing, updateModelPricingBatch } from "../../../../lib/model-pricing";
@@ -9,7 +10,11 @@ function readBatchUpdates(body: unknown): unknown[] | null {
   return Array.isArray(updates) ? updates : null;
 }
 
-export async function GET(request: Request) {
+export function GET(request: Request) {
+  return withApiLogging(request, "api.admin.model-prices", () => handleGET(request));
+}
+
+async function handleGET(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
 
@@ -17,7 +22,11 @@ export async function GET(request: Request) {
   return NextResponse.json({ prices });
 }
 
-export async function PATCH(request: Request) {
+export function PATCH(request: Request) {
+  return withApiLogging(request, "api.admin.model-prices", () => handlePATCH(request));
+}
+
+async function handlePATCH(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
 

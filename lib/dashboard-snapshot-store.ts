@@ -15,6 +15,7 @@ import {
 } from "@/lib/dashboard-snapshot";
 import { registerCacheInvalidator } from "@/lib/db/queries";
 import { CacheVersionChangedError } from "@/lib/cache-version-changed";
+import { getErrorFields, log } from "@/lib/logger";
 
 export const DEFAULT_SNAPSHOT_KEY = `default:v${PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION}`;
 
@@ -275,7 +276,11 @@ async function buildAndPersistSnapshotRecord(
   try {
     await persistSnapshotRecord(record, generation, versionsKey);
   } catch (persistError) {
-    console.warn("[dashboard-snapshot-store] Failed to persist snapshot to table:", persistError);
+    log("warn", "dashboard.snapshot.persist_fallback", {
+      ...getErrorFields(persistError),
+      snapshotSource: "in_memory",
+      fallbackUsed: true
+    });
   }
 
   return record;
@@ -369,7 +374,11 @@ async function readOrBuildSnapshotRecord(
             try {
               await persistSnapshotRecord(record, generation, versionsKey);
             } catch (persistError) {
-              console.warn("[dashboard-snapshot-store] Failed to backfill compressed snapshot:", persistError);
+              log("warn", "dashboard.snapshot.backfill_fallback", {
+                ...getErrorFields(persistError),
+                snapshotSource: "database_backfill",
+                fallbackUsed: true
+              });
             }
           }
         }
@@ -377,7 +386,11 @@ async function readOrBuildSnapshotRecord(
       }
     }
   } catch (queryError) {
-    console.warn("[dashboard-snapshot-store] Failed to read from snapshot table, falling back to build:", queryError);
+    log("warn", "dashboard.snapshot.read_fallback", {
+      ...getErrorFields(queryError),
+      snapshotSource: "live_rebuild",
+      fallbackUsed: true
+    });
   }
 
   // 3. 缺失或版本过期，重新构建并持久化

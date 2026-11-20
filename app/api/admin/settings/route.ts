@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/api-logging";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "../../../../lib/admin-auth";
@@ -17,7 +18,11 @@ const schema = z.object({
   updatedBy: z.string().optional()
 });
 
-export async function GET(request: Request) {
+export function GET(request: Request) {
+  return withApiLogging(request, "api.admin.settings", () => handleGET(request));
+}
+
+async function handleGET(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
 
@@ -29,7 +34,11 @@ export async function GET(request: Request) {
   return NextResponse.json({ settings: safeSettings });
 }
 
-export async function POST(request: Request) {
+export function POST(request: Request) {
+  return withApiLogging(request, "api.admin.settings", () => handlePOST(request));
+}
+
+async function handlePOST(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
 

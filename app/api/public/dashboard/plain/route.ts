@@ -1,4 +1,5 @@
 import { handleDashboardRequest } from "../handler";
+import { withApiLogging } from "@/lib/api-logging";
 
 /**
  * 明文逃生舱。
@@ -8,5 +9,5 @@ import { handleDashboardRequest } from "../handler";
  * 或把 3.6 MB 明文塞进公共缓存。
  */
 export function GET(request: Request) {
-  return handleDashboardRequest(request, { plain: true });
+  return withApiLogging(request, "api.public.dashboard.plain", () => handleDashboardRequest(request, { plain: true }));
 }

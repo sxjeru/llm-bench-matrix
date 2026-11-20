@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/api-logging";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "../../../../lib/admin-auth";
@@ -19,7 +20,11 @@ function readBatchUpdates(body: unknown): unknown[] | null {
   return Array.isArray(updates) ? updates : null;
 }
 
-export async function GET(request: Request) {
+export function GET(request: Request) {
+  return withApiLogging(request, "api.admin.model-params", () => handleGET(request));
+}
+
+async function handleGET(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
 
@@ -27,7 +32,11 @@ export async function GET(request: Request) {
   return NextResponse.json({ params });
 }
 
-export async function PATCH(request: Request) {
+export function PATCH(request: Request) {
+  return withApiLogging(request, "api.admin.model-params", () => handlePATCH(request));
+}
+
+async function handlePATCH(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
 
@@ -50,7 +59,11 @@ export async function PATCH(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
+export function POST(request: Request) {
+  return withApiLogging(request, "api.admin.model-params", () => handlePOST(request));
+}
+
+async function handlePOST(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
 

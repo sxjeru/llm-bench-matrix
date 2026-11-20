@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { logApiEvent, withApiLogging } from "@/lib/api-logging";
 import { fetchUmamiActiveVisitors, getUmamiActiveConfig } from "@/lib/umami-active-server";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +22,11 @@ export function _resetLastKnownActiveCountForTest(): void {
   lastKnownActiveCount = null;
 }
 
-export async function GET(request: Request) {
+export function GET(request: Request) {
+  return withApiLogging(request, "api.public.active_visitors", () => handleActiveVisitorsRequest(request));
+}
+
+async function handleActiveVisitorsRequest(request: Request) {
   // If env not provided, return null without errors
   if (!getUmamiActiveConfig()) {
     return NextResponse.json(
@@ -41,6 +46,10 @@ export async function GET(request: Request) {
   }
 
   // Graceful fallback to last known count if transient failure
+  logApiEvent(request, "warn", "api.public.active_visitors.upstream_fallback", {
+    fallbackUsed: true,
+    fallbackSource: lastKnownActiveCount !== null ? "last_known" : "empty"
+  });
   if (lastKnownActiveCount !== null) {
     return NextResponse.json(
       { active: lastKnownActiveCount, enabled: true },

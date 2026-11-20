@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { logApiError, logApiEvent, withApiLogging } from "@/lib/api-logging";
 import { requireAdmin } from "../../../../lib/admin-auth";
 import { importBenchmarkCsv, importStructuredRows } from "../../../../lib/admin-service";
 
@@ -24,7 +25,11 @@ const schema = z.object({
   message: "csvText 或 rows 至少提供一种"
 });
 
-export async function POST(request: Request) {
+export function POST(request: Request) {
+  return withApiLogging(request, "api.admin.import-csv", () => handlePOST(request));
+}
+
+async function handlePOST(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
 
@@ -39,8 +44,15 @@ export async function POST(request: Request) {
     const result = parsed.data.rows?.length
       ? await importStructuredRows(parsed.data.rows, { source: parsed.data.source })
       : await importBenchmarkCsv(parsed.data.csvText ?? "", parsed.data.source, parsed.data.htmlText);
+    logApiEvent(request, "info", "admin.import.csv.completed", {
+      recordCount: result.inserted,
+      warningCount: "warningCount" in result && typeof result.warningCount === "number"
+        ? result.warningCount
+        : undefined
+    });
     return NextResponse.json(result);
   } catch (error) {
+    logApiError(request, "admin.import.csv.failed", error);
     const message = error instanceof Error ? error.message : "文本导入失败";
     return NextResponse.json({ error: message }, { status: 500 });
   }

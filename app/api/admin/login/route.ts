@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/api-logging";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
@@ -22,7 +23,11 @@ const loginSchema = z.object({
     .nullable()
 });
 
-export async function POST(request: Request) {
+export function POST(request: Request) {
+  return withApiLogging(request, "api.admin.login", () => handlePOST(request));
+}
+
+async function handlePOST(request: Request) {
   const clientKey = getLoginClientKey(request);
 
   // 1. 安全解析请求体 JSON

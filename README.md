@@ -39,6 +39,8 @@
 | `DATABASE_POOL_IDLE_TIMEOUT_MS` | 空闲连接超时（ms） | `10000` |
 | `DATABASE_POOL_CONNECTION_TIMEOUT_MS` | 获取连接超时（ms） | `5000` |
 | `DATABASE_POOL_MAX_USES` | 单连接最大复用次数 | `7500` |
+| `LOG_LEVEL` | 服务端结构化日志级别（`debug` / `info` / `warn` / `error`） | 生产环境 `info` |
+| `LOG_SLOW_REQUEST_MS` | 超过该时长的 API 请求记录为慢请求（毫秒） | `1000` |
 | `NEXT_PUBLIC_UMAMI_SCRIPT_URL` | Umami 自托管脚本地址 | 无 |
 | `NEXT_PUBLIC_UMAMI_WEBSITE_ID` | Umami 网站 ID | 无 |
 | `UMAMI_API_TOKEN` | Umami API 凭据（自建版 API Key 或登录 token），用于页脚"当前在看"；未配置则不展示 | 无 |

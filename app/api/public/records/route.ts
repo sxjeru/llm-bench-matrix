@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import { NextResponse } from "next/server";
+import { withApiLogging } from "@/lib/api-logging";
 import { toMatrixInputRow } from "@/components/benchmark-matrix/map-row";
 import { getDashboardRows } from "@/lib/db/queries";
 import { createRateLimiter, getRateLimitKey } from "@/lib/rate-limit";
@@ -36,7 +37,11 @@ function createRecordsEtag(dashboardVersion: string, pricingVersion: string, req
   return `"records:${dashboardVersion}:${pricingVersion}:limit:${requestedLimit}:${hash}"`;
 }
 
-export async function GET(request: Request) {
+export function GET(request: Request) {
+  return withApiLogging(request, "api.public.records", () => handleRecordsRequest(request));
+}
+
+async function handleRecordsRequest(request: Request) {
   const clientKey = getRateLimitKey(request);
   const rateLimit = limiter.check(clientKey);
 

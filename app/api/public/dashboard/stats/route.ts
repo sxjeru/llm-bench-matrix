@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { withApiLogging } from "@/lib/api-logging";
 import { getDashboardStats } from "@/lib/db/queries";
 import { createRateLimiter, getRateLimitKey } from "@/lib/rate-limit";
 import { ifNoneMatchMatches } from "@/lib/http-etag";
@@ -25,7 +26,11 @@ import {
 // 60 requests per IP per 60-second window
 const limiter = createRateLimiter(60, 60_000);
 
-export async function GET(request: Request) {
+export function GET(request: Request) {
+  return withApiLogging(request, "api.public.dashboard.stats", () => handleDashboardStatsRequest(request));
+}
+
+async function handleDashboardStatsRequest(request: Request) {
   const clientKey = getRateLimitKey(request);
   const rateLimit = limiter.check(clientKey);
 
