@@ -205,7 +205,7 @@ export function BenchmarkMatrixTopControls({
   );
 
   return (
-    <div className="space-y-2">
+    <div className="benchmark-matrix-controls space-y-2">
       <div className="flex items-center gap-2 mb-2">
         <div
           className="relative z-[70] min-w-0 flex-1"
@@ -384,7 +384,7 @@ export function BenchmarkMatrixTopControls({
         </button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 px-3 mt-4">
+      <div className="benchmark-matrix-secondary-controls flex flex-wrap items-center gap-2 px-3 mt-4">
         <div className="mr-auto flex min-w-0 flex-wrap items-center gap-2 text-xs">
           {compareModelOrderLength > 0 ? (
             <>

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import type { Viewport } from "next";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { GithubStarBadge } from "@/components/github-star-badge";
@@ -27,6 +28,14 @@ export const metadata: Metadata = {
     shortcut: "/icon.svg",
     apple: "/icon.svg"
   }
+};
+
+// Keep mobile browsers from using a wider virtual layout viewport than the device.
+// This only adds the viewport contract; desktop rendering is unchanged.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -1853,7 +1853,7 @@ export function BenchmarkMatrix({
   }
 
   return (
-    <section className="card" ref={sectionRef} style={isFullscreen ? { paddingTop: 8 } : undefined}>
+    <section className="card benchmark-matrix-card" ref={sectionRef} style={isFullscreen ? { paddingTop: 8 } : undefined}>
       {copyNotice ? (
         <div className="pointer-events-none fixed right-6 top-20 z-[140]">
           <div
@@ -2008,6 +2008,7 @@ export function BenchmarkMatrix({
 
       <div
         ref={tableViewportRef}
+        className="matrix-table-viewport"
         data-export-footnote={exportIncludeFootnote ? exportFootnoteText : undefined}
         style={{
           overflow: "auto",

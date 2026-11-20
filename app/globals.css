@@ -205,13 +205,7 @@ a {
 .site-footnote-total {
   display: inline-flex;
   align-items: baseline;
-  gap: 4px;
-}
-
-.site-footnote-total .site-footnote-value {
-  display: inline-block;
-  min-inline-size: 7ch;
-  text-align: center;
+  gap: 7px;
 }
 
 .site-footnote-value {
@@ -458,7 +452,22 @@ h3 {
 
 @media (max-width: 560px) {
   .home-metrics-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .home-metric-card {
+    padding: 14px 13px;
+    border-radius: 14px;
+  }
+
+  .home-metric-title {
+    font-size: 13px;
+    margin-bottom: 7px;
+  }
+
+  .home-metric-value {
+    font-size: clamp(22px, 7vw, 30px);
   }
 }
 
@@ -2022,12 +2031,203 @@ input.heatmap-alpha-range::-moz-range-track {
   }
 
   .scatter-swap-btn {
-    display: none;
+    display: inline-flex;
+    width: 40px;
+    height: 40px;
+    align-self: center;
+    margin: -2px auto;
   }
 
   .scatter-export-group {
     margin-left: 0;
     width: 100%;
+  }
+}
+
+/* Mobile-only layout refinements. Desktop declarations above remain untouched. */
+@media (max-width: 640px) {
+  html,
+  body {
+    overflow-x: clip;
+  }
+
+  .container {
+    width: min(1280px, calc(100vw - 24px));
+  }
+
+  .topbar-inner {
+    height: auto;
+    min-height: 64px;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-block: 10px;
+  }
+
+  .brand {
+    font-size: 16px;
+  }
+
+  .brand-group {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .nav {
+    margin-left: auto;
+    gap: 6px;
+  }
+
+  .nav-link {
+    min-height: 40px;
+    height: 40px;
+    padding-inline: 12px;
+  }
+
+  .nav-icon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .page {
+    padding-top: 18px;
+  }
+
+  .benchmark-matrix-card {
+    padding: 10px;
+  }
+
+  .benchmark-matrix-controls > div:first-child {
+    align-items: stretch;
+  }
+
+  .benchmark-matrix-controls > div:first-child > div:first-child {
+    flex: 1 1 100%;
+  }
+
+  .benchmark-matrix-controls > div:first-child > button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .benchmark-matrix-secondary-controls {
+    align-items: stretch;
+    padding-inline: 0;
+  }
+
+  .benchmark-matrix-secondary-controls > * {
+    max-width: 100%;
+  }
+
+  .benchmark-matrix-secondary-controls > .relative {
+    width: 100%;
+  }
+
+  .benchmark-matrix-secondary-controls > button {
+    min-height: 34px;
+  }
+
+  .benchmark-model-filter {
+    padding: 10px;
+  }
+
+  .benchmark-model-filter > div:first-child {
+    align-items: stretch;
+  }
+
+  .benchmark-model-filter > div:first-child > div:first-child,
+  .benchmark-model-filter > div:first-child > div:last-child {
+    width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .benchmark-model-filter input[placeholder="筛选 Benchmark"] {
+    width: 100%;
+  }
+
+  .benchmark-model-filter .mr-2 {
+    width: 100%;
+    margin-right: 0;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .benchmark-model-filter .mr-2 > .relative {
+    flex: 1 1 180px;
+    min-width: 0;
+  }
+
+  .benchmark-model-filter .mr-2 > .relative + .relative {
+    flex: 0 0 auto;
+  }
+
+  .matrix-table-viewport {
+    max-height: calc(100dvh - 220px) !important;
+    min-height: 260px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #benchmark-search-syntax {
+    position: fixed !important;
+    top: 86px !important;
+    left: 8px !important;
+    right: 8px !important;
+    width: auto !important;
+    max-width: calc(100vw - 16px) !important;
+    z-index: 300 !important;
+  }
+
+  .scatter-card {
+    padding: 10px 10px 12px;
+  }
+
+  .scatter-controls {
+    gap: 8px;
+    padding-bottom: 10px;
+  }
+
+  .scatter-controls-row,
+  .scatter-controls-row-secondary,
+  .scatter-toggle-group {
+    gap: 8px;
+  }
+
+  .scatter-controls-row-secondary > .scatter-toggle-group,
+  .scatter-export-group {
+    width: 100%;
+  }
+
+  .scatter-toggle-group {
+    justify-content: flex-start;
+  }
+
+  .scatter-segment-btn {
+    min-height: 36px;
+    padding-inline: 9px;
+  }
+
+  .scatter-toggle {
+    min-height: 40px;
+    padding-inline: 8px;
+  }
+
+  .scatter-export-group {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .scatter-export-group > button {
+    min-height: 34px;
+  }
+
+  .scatter-export-select {
+    width: 100%;
+    min-height: 34px;
+    height: 34px;
+  }
+
+  .scatter-chart-capture {
+    padding-inline: 0;
   }
 }
 

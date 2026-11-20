@@ -228,7 +228,7 @@ export function ModelFilterPanel({
   setBenchmarkSearchInputValue
 }: ModelFilterPanelProps) {
   return (
-    <div className={`${isFullscreen ? "mt-2" : ""} relative z-30 rounded-box border border-base-300/70 bg-base-200/35 p-3`} data-nosnippet>
+    <div className={`benchmark-model-filter ${isFullscreen ? "mt-2" : ""} relative z-30 rounded-box border border-base-300/70 bg-base-200/35 p-3`} data-nosnippet>
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
         <div className="flex items-center gap-2 opacity-80">
           <Layers size={14} />
