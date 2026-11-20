@@ -801,7 +801,7 @@ export function ModelScatter({
 
     const countByProvider = new Map<
       string,
-      { color: string; candidateCount: number; defaultCount: number }
+      { color: string; defaultCount: number }
     >();
 
     baseModelColumns.forEach((modelName) => {
@@ -820,14 +820,12 @@ export function ModelScatter({
 
       const existing = countByProvider.get(providerName);
       if (existing) {
-        existing.candidateCount += 1;
         if (isPlottable) existing.defaultCount += 1;
         return;
       }
 
       countByProvider.set(providerName, {
         color: colorByModel.get(modelName) ?? "#5da7ff",
-        candidateCount: 1,
         defaultCount: isPlottable ? 1 : 0
       });
     });
@@ -845,12 +843,11 @@ export function ModelScatter({
       .map(([providerName, meta]) => ({
         providerName,
         color: meta.color,
-        count: visibleCountByProvider.get(providerName) ?? 0,
-        candidateCount: meta.candidateCount
+        count: visibleCountByProvider.get(providerName) ?? 0
       }))
       .sort(
         (left, right) =>
-          right.candidateCount - left.candidateCount || left.providerName.localeCompare(right.providerName)
+          right.count - left.count || left.providerName.localeCompare(right.providerName)
       );
   }, [
     baseModelColumns,
