@@ -58,18 +58,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <footer className="site-footnote" data-nosnippet>
           <div className="container">
             <div className="site-footnote-card">
-              {process.env.NEXT_PUBLIC_VERCOUNT_SCRIPT_URL && (
-                <>
-                  <span className="site-footnote-item">
-                    <span className="site-footnote-label">本页总访问量</span>
-                    <span className="site-footnote-value">
-                      <span id="vercount_value_page_pv" suppressHydrationWarning>Loading</span>
-                    </span> 次
-                  </span>
-
-                  <span className="site-footnote-divider" aria-hidden="true" />
-                </>
-              )}
+              {process.env.NEXT_PUBLIC_VERCOUNT_SCRIPT_URL && <VercountPageview />}
 
               <ActiveVisitors />
 
@@ -89,12 +78,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </footer>
 
-        {process.env.NEXT_PUBLIC_VERCOUNT_SCRIPT_URL && (
-          <>
-            <script defer src={process.env.NEXT_PUBLIC_VERCOUNT_SCRIPT_URL} />
-            <VercountPageview />
-          </>
-        )}
         <Analytics />
         <SpeedInsights />
         <UmamiAnalytics />

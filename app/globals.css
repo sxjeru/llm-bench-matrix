@@ -189,9 +189,31 @@ a {
   color: #95a8cd;
 }
 
+.site-footnote-traffic {
+  white-space: nowrap;
+}
+
+.site-footnote-count {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.site-footnote-total .site-footnote-value {
+  display: inline-block;
+  min-inline-size: 4ch;
+  text-align: end;
+}
+
 .site-footnote-value {
   color: #dce8ff;
   font-weight: 650;
+}
+
+.site-footnote-increase {
+  opacity: 0.8;
 }
 
 .site-footnote-divider {
@@ -271,15 +293,11 @@ a {
     border-radius: 14px;
     padding: 9px 12px;
     gap: 8px;
+    flex-direction: column;
   }
 
   .site-footnote-divider {
     display: none;
-  }
-
-  .site-footnote-item {
-    width: 100%;
-    justify-content: center;
   }
 }
 

@@ -1,17 +1,13 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
-  applyVercountCounterData,
   extractVercountCounterData,
   reportVercountPageview,
   resolveVercountApiUrl
 } from "@/lib/vercount-client";
 
 describe("vercount-client", () => {
-  afterEach(() => {
-    document.body.innerHTML = "";
-    localStorage.clear();
-  });
+  afterEach(() => vi.unstubAllGlobals());
 
   test("从 script URL 推导自部署 API 地址", () => {
     expect(resolveVercountApiUrl("https://count.example.com/js")).toBe(
@@ -21,6 +17,9 @@ describe("vercount-client", () => {
       "https://count.example.com/api/v2/log"
     );
     expect(resolveVercountApiUrl("not-a-url")).toBeNull();
+    expect(resolveVercountApiUrl("/vercount.js", "https://bench.example.com/")).toBe(
+      "https://bench.example.com/api/v2/log"
+    );
   });
 
   test("解析 success/error 响应中的计数", () => {
@@ -40,9 +39,7 @@ describe("vercount-client", () => {
     ).toEqual({ site_pv: 1, page_pv: 1, site_uv: 1 });
   });
 
-  test("客户端上报后更新底部 page_pv 节点", async () => {
-    document.body.innerHTML = `<span id="vercount_value_page_pv">882</span>`;
-
+  test("客户端上报后返回该页面的访问量", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -65,18 +62,12 @@ describe("vercount-client", () => {
       })
     );
     expect(data).toEqual({ site_pv: 900, page_pv: 883, site_uv: 100 });
-    expect(document.getElementById("vercount_value_page_pv")?.textContent).toBe("883");
   });
 
-  test("直接写入 DOM 计数节点", () => {
-    document.body.innerHTML = `
-      <span id="vercount_value_page_pv">1</span>
-      <span id="busuanzi_value_site_pv">2</span>
-    `;
-
-    applyVercountCounterData({ site_pv: 12, page_pv: 34, site_uv: 5 });
-
-    expect(document.getElementById("vercount_value_page_pv")?.textContent).toBe("34");
-    expect(document.getElementById("busuanzi_value_site_pv")?.textContent).toBe("12");
+  test("缺失或无效的 page_pv 不会被误认为总量归零", () => {
+    for (const page_pv of [undefined, null, "", false, "abc", -1, 12.5]) {
+      expect(extractVercountCounterData({ status: "success", data: { page_pv } })).toBeNull();
+    }
+    expect(extractVercountCounterData({ page_pv: "883" })?.page_pv).toBe(883);
   });
 });

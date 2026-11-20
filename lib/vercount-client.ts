@@ -4,13 +4,12 @@ export type VercountCounterData = {
   site_uv: number;
 };
 
-const COUNTER_IDS = ["site_pv", "page_pv", "site_uv"] as const;
 const REQUEST_TIMEOUT_MS = 5000;
-const CACHE_KEY = "visitorCountData";
 
-export function resolveVercountApiUrl(scriptUrl: string): string | null {
+export function resolveVercountApiUrl(scriptUrl: string, pageUrl?: string): string | null {
   try {
-    return `${new URL(scriptUrl).origin}/api/v2/log`;
+    const url = new URL(scriptUrl, pageUrl);
+    return url.protocol === "https:" || url.protocol === "http:" ? `${url.origin}/api/v2/log` : null;
   } catch {
     return null;
   }
@@ -40,29 +39,17 @@ export function extractVercountCounterData(response: unknown): VercountCounterDa
     return null;
   }
 
+  const rawPagePv = source.page_pv;
+  const pagePv = typeof rawPagePv === "number" || (typeof rawPagePv === "string" && /^\d+$/.test(rawPagePv))
+    ? Number(rawPagePv)
+    : NaN;
+  if (!Number.isSafeInteger(pagePv) || pagePv < 0) return null;
+
   return {
     site_pv: Number(source.site_pv ?? 0),
-    page_pv: Number(source.page_pv ?? 0),
+    page_pv: pagePv,
     site_uv: Number(source.site_uv ?? 0)
   };
-}
-
-export function applyVercountCounterData(data: VercountCounterData): void {
-  for (const id of COUNTER_IDS) {
-    const value = String(data[id] ?? 0);
-    const vercountEl = document.getElementById(`vercount_value_${id}`);
-    const busuanziEl = document.getElementById(`busuanzi_value_${id}`);
-    if (vercountEl) vercountEl.textContent = value;
-    if (busuanziEl) busuanziEl.textContent = value;
-  }
-}
-
-function cacheVercountCounterData(data: VercountCounterData): void {
-  try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(data));
-  } catch {
-    // localStorage may be unavailable
-  }
 }
 
 export async function reportVercountPageview(options: {
@@ -70,7 +57,7 @@ export async function reportVercountPageview(options: {
   pageUrl: string;
   signal?: AbortSignal;
 }): Promise<VercountCounterData | null> {
-  if (!options.pageUrl.startsWith("http")) {
+  if (!options.pageUrl.startsWith("http") || options.signal?.aborted) {
     return null;
   }
 
@@ -94,12 +81,7 @@ export async function reportVercountPageview(options: {
       throw new Error(`HTTP ${response.status}`);
     }
 
-    const data = extractVercountCounterData(await response.json());
-    if (data) {
-      applyVercountCounterData(data);
-      cacheVercountCounterData(data);
-    }
-    return data;
+    return extractVercountCounterData(await response.json());
   } catch {
     return null;
   } finally {
