@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { withApiLogging } from "@/lib/api-logging";
+import { logApiEvent, withApiLogging } from "@/lib/api-logging";
 
 describe("withApiLogging", () => {
   afterEach(() => {
@@ -44,13 +44,54 @@ describe("withApiLogging", () => {
     });
   });
 
-  test("rethrows handler errors for the global Next.js error hook to report once", async () => {
+  test("reuses one request ID for business events and the API summary outside Vercel", async () => {
+    vi.stubEnv("LOG_LEVEL", "info");
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const request = new Request("https://example.test/api/admin/model-prices/sync", { method: "POST" });
+
+    await withApiLogging(request, "api.admin.model-prices.sync", () => {
+      logApiEvent(request, "info", "admin.model_prices.sync.completed", { changedCount: 2 });
+      return Response.json({ ok: true });
+    });
+
+    const entries = info.mock.calls.map(([entry]) => JSON.parse(entry as string));
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({ event: "admin.model_prices.sync.completed", changedCount: 2 });
+    expect(entries[1]).toMatchObject({ event: "api.admin.model-prices.sync", statusCode: 200 });
+    expect(entries[0].requestId).toEqual(expect.any(String));
+    expect(entries[1].requestId).toBe(entries[0].requestId);
+  });
+
+  test("logs a 500 request summary with duration before rethrowing handler errors", async () => {
+    vi.stubEnv("LOG_LEVEL", "info");
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
     const failure = new Error("private password or request body");
+    Object.assign(failure, { code: "ECONNRESET" });
+    const request = new Request("https://example.test/api/public/records");
+    let businessEventRequestId: string | undefined;
 
     await expect(withApiLogging(
-      new Request("https://example.test/api/public/records"),
+      request,
       "api.public.records",
-      () => { throw failure; }
+      () => {
+        logApiEvent(request, "info", "api.public.records.before_failure");
+        businessEventRequestId = JSON.parse(info.mock.calls[0][0] as string).requestId;
+        throw failure;
+      }
     )).rejects.toBe(failure);
+
+    expect(errorLog).toHaveBeenCalledOnce();
+    const entry = JSON.parse(errorLog.mock.calls[0][0] as string);
+    expect(entry).toMatchObject({
+      event: "api.public.records.exception",
+      level: "error",
+      requestId: businessEventRequestId,
+      statusCode: 500,
+      errorName: "Error",
+      errorCode: "ECONNRESET"
+    });
+    expect(entry.durationMs).toEqual(expect.any(Number));
+    expect(JSON.stringify(entry)).not.toContain("private");
   });
 });

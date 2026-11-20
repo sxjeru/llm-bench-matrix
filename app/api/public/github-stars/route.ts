@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { logApiEvent, withApiLogging } from "@/lib/api-logging";
+import { createWarningThrottle } from "@/lib/log-throttle";
 import { fetchGithubStarCount } from "@/lib/github-stars";
 
 export const dynamic = "force-dynamic";
 
 let lastKnownStarCount: number | null = null;
+const shouldLogFallbackWarning = createWarningThrottle();
 
 export const GITHUB_STARS_CACHE_HEADERS = {
   "Cache-Control": "public, max-age=300, stale-while-revalidate=86400",
@@ -36,10 +38,13 @@ async function handleGithubStarsRequest(request: Request) {
   }
 
   // Graceful fallback to last known star count if GitHub rate limits or fails
-  logApiEvent(request, "warn", "api.public.github_stars.upstream_fallback", {
-    fallbackUsed: true,
-    fallbackSource: lastKnownStarCount !== null ? "last_known" : "empty"
-  });
+  const fallbackSource = lastKnownStarCount !== null ? "last_known" : "empty";
+  if (shouldLogFallbackWarning("api.public.github_stars.upstream_fallback", fallbackSource)) {
+    logApiEvent(request, "warn", "api.public.github_stars.upstream_fallback", {
+      fallbackUsed: true,
+      fallbackSource
+    });
+  }
   if (lastKnownStarCount !== null) {
     return NextResponse.json(
       { count: lastKnownStarCount, stargazers_count: lastKnownStarCount },

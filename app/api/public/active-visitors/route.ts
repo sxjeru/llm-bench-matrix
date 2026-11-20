@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { logApiEvent, withApiLogging } from "@/lib/api-logging";
+import { createWarningThrottle } from "@/lib/log-throttle";
 import { fetchUmamiActiveVisitors, getUmamiActiveConfig } from "@/lib/umami-active-server";
 
 export const dynamic = "force-dynamic";
 
 let lastKnownActiveCount: number | null = null;
+const shouldLogFallbackWarning = createWarningThrottle();
 
 export const ACTIVE_VISITORS_CACHE_HEADERS = {
   "Cache-Control": "public, max-age=30, stale-while-revalidate=60",
@@ -46,10 +48,13 @@ async function handleActiveVisitorsRequest(request: Request) {
   }
 
   // Graceful fallback to last known count if transient failure
-  logApiEvent(request, "warn", "api.public.active_visitors.upstream_fallback", {
-    fallbackUsed: true,
-    fallbackSource: lastKnownActiveCount !== null ? "last_known" : "empty"
-  });
+  const fallbackSource = lastKnownActiveCount !== null ? "last_known" : "empty";
+  if (shouldLogFallbackWarning("api.public.active_visitors.upstream_fallback", fallbackSource)) {
+    logApiEvent(request, "warn", "api.public.active_visitors.upstream_fallback", {
+      fallbackUsed: true,
+      fallbackSource
+    });
+  }
   if (lastKnownActiveCount !== null) {
     return NextResponse.json(
       { active: lastKnownActiveCount, enabled: true },

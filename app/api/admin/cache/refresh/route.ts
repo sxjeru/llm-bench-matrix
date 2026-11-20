@@ -16,7 +16,7 @@ async function handlePOST(request: Request) {
     await invalidateAllCaches();
     const snapshot = await rebuildAndPersistPublicDashboardSnapshotRecord();
     logApiEvent(request, "info", "admin.cache.refresh.completed", {
-      payloadBytes: snapshot.payloadBr?.byteLength
+      payloadBytes: snapshot.payloadBr.byteLength
     });
     return NextResponse.json({
       ok: true,

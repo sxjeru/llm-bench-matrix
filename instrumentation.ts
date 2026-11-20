@@ -1,5 +1,5 @@
 import type { Instrumentation } from "next";
-import { getErrorFields, log } from "@/lib/logger";
+import { getErrorFields, getErrorRequestId, log } from "@/lib/logger";
 
 export const onRequestError: Instrumentation.onRequestError = async (
   error,
@@ -14,8 +14,9 @@ export const onRequestError: Instrumentation.onRequestError = async (
   }
 
   const vercelRequestId = getInstrumentationRequestId(request.headers);
+  const requestId = getErrorRequestId(error) ?? vercelRequestId ?? crypto.randomUUID();
   log("error", "server.request.unhandled_error", {
-    ...(vercelRequestId ? { requestId: vercelRequestId } : { requestId: crypto.randomUUID() }),
+    requestId,
     method: request.method,
     path,
     routerKind: context.routerKind,

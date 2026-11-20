@@ -25,10 +25,13 @@ describe("POST /api/admin/cache/refresh", () => {
     vi.mocked(rebuildAndPersistPublicDashboardSnapshotRecord).mockReset();
     vi.mocked(requireAdmin).mockResolvedValue(null);
     vi.mocked(invalidateAllCaches).mockResolvedValue(undefined);
-    vi.mocked(rebuildAndPersistPublicDashboardSnapshotRecord).mockResolvedValue({} as never);
+    vi.mocked(rebuildAndPersistPublicDashboardSnapshotRecord).mockResolvedValue({
+      payloadBr: new Uint8Array([1, 2, 3])
+    } as never);
   });
 
   test("鉴权通过时会更新缓存", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const response = await POST(
       new Request("https://example.com/api/admin/cache/refresh", {
         method: "POST"
@@ -42,6 +45,10 @@ describe("POST /api/admin/cache/refresh", () => {
     });
     expect(invalidateAllCaches).toHaveBeenCalledTimes(1);
     expect(rebuildAndPersistPublicDashboardSnapshotRecord).toHaveBeenCalledTimes(1);
+    expect(info.mock.calls.map(([entry]) => JSON.parse(entry as string))).toEqual(expect.arrayContaining([
+      expect.objectContaining({ event: "admin.cache.refresh.completed", payloadBytes: 3 }),
+      expect.objectContaining({ event: "api.admin.cache.refresh", statusCode: 200 })
+    ]));
   });
 
   test("未授权请求不会更新缓存", async () => {

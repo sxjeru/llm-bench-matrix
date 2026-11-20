@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { onRequestError } from "@/instrumentation";
+import { associateErrorWithRequestId } from "@/lib/logger";
 
 describe("Next.js request instrumentation", () => {
   afterEach(() => {
@@ -29,6 +30,23 @@ describe("Next.js request instrumentation", () => {
       errorName: "Error"
     });
     expect(JSON.stringify(entry)).not.toMatch(/private|password|token|query|cookie|secret-session/i);
-    expect(onRequestError).toBeTypeOf("function");
+  });
+
+  test("reuses the API request ID when Next handles a rethrown route error", async () => {
+    vi.stubEnv("LOG_LEVEL", "error");
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const error = new Error("safe to omit");
+    associateErrorWithRequestId(error, "self-hosted-request-id");
+
+    await onRequestError(
+      error,
+      { path: "/api/public/records", method: "GET", headers: {} },
+      { routerKind: "App Router", routePath: "/api/public/records", routeType: "route", revalidateReason: undefined }
+    );
+
+    expect(JSON.parse(errorLog.mock.calls[0][0] as string)).toMatchObject({
+      event: "server.request.unhandled_error",
+      requestId: "self-hosted-request-id"
+    });
   });
 });

@@ -1,34 +1,47 @@
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
-export type LogFields = Readonly<{
-  requestId?: string;
-  method?: string;
-  path?: string;
-  statusCode?: number;
-  durationMs?: number;
-  slow?: boolean;
-  errorName?: string;
-  errorCode?: string;
-  routerKind?: string;
-  routeType?: string;
-  snapshotSource?: string;
-  fallbackUsed?: boolean;
-  fallbackSource?: string;
-  attempt?: number;
-  cacheStatus?: string;
-  payloadBytes?: number;
-  recordCount?: number;
-  warningCount?: number;
-  changedCount?: number;
-  changedModelCount?: number;
-  providerCount?: number;
-  sourceModelCount?: number;
-  matchedCount?: number;
-  unmatchedCount?: number;
-  skippedManualCount?: number;
-  skippedCount?: number;
-  dryRun?: boolean;
-}>;
+/** The runtime serializer and TypeScript field types derive from this one schema. */
+export const LOG_FIELD_SCHEMA = {
+  strings: [
+    "requestId",
+    "method",
+    "path",
+    "errorName",
+    "errorCode",
+    "routerKind",
+    "routeType",
+    "snapshotSource",
+    "fallbackSource",
+    "cacheStatus"
+  ],
+  numbers: [
+    "statusCode",
+    "durationMs",
+    "attempt",
+    "payloadBytes",
+    "recordCount",
+    "warningCount",
+    "changedCount",
+    "changedModelCount",
+    "providerCount",
+    "sourceModelCount",
+    "matchedCount",
+    "unmatchedCount",
+    "skippedManualCount",
+    "skippedCount"
+  ],
+  booleans: ["slow", "fallbackUsed", "dryRun"]
+} as const;
+
+type StringLogField = typeof LOG_FIELD_SCHEMA.strings[number];
+type NumberLogField = typeof LOG_FIELD_SCHEMA.numbers[number];
+type BooleanLogField = typeof LOG_FIELD_SCHEMA.booleans[number];
+
+export type LogFields = Readonly<
+  Partial<Record<StringLogField, string>>
+  & Partial<Record<NumberLogField, number>>
+  & Partial<Record<BooleanLogField, boolean>>
+>;
 
 type RequestLogContext = Readonly<{
   requestId: string;
@@ -43,6 +56,10 @@ const LEVEL_SEVERITY: Record<LogLevel, number> = {
   error: 40
 };
 
+const STRING_LOG_FIELDS = new Set<string>(LOG_FIELD_SCHEMA.strings);
+const NUMBER_LOG_FIELDS = new Set<string>(LOG_FIELD_SCHEMA.numbers);
+const BOOLEAN_LOG_FIELDS = new Set<string>(LOG_FIELD_SCHEMA.booleans);
+
 function configuredLevel(): LogLevel {
   const configured = process.env.LOG_LEVEL?.trim().toLowerCase();
   if (configured === "debug" || configured === "info" || configured === "warn" || configured === "error") {
@@ -54,7 +71,7 @@ function configuredLevel(): LogLevel {
 
 function getString(value: unknown, maxLength = 160): string | undefined {
   if (typeof value !== "string") return undefined;
-  const trimmed = value.replace(/[\r\n\t]/g, " ").trim();
+  const trimmed = value.replace(/[\r\n\t\u2028\u2029]/g, " ").trim();
   return trimmed ? trimmed.slice(0, maxLength) : undefined;
 }
 
@@ -64,23 +81,18 @@ function serializeFields(fields: LogFields): Record<string, string | number | bo
   for (const [key, value] of Object.entries(fields)) {
     if (value === undefined) continue;
 
-    if (["statusCode", "durationMs", "payloadBytes", "recordCount", "warningCount", "changedCount", "changedModelCount", "providerCount", "sourceModelCount", "matchedCount", "unmatchedCount", "skippedManualCount", "skippedCount", "attempt"].includes(key)) {
+    if (NUMBER_LOG_FIELDS.has(key)) {
       if (typeof value === "number" && Number.isFinite(value)) serialized[key] = Math.round(value * 100) / 100;
       continue;
     }
 
-    if (["fallbackUsed", "dryRun"].includes(key)) {
-      if (typeof value === "boolean") serialized[key] = value;
-      continue;
-    }
-
-    if (["slow"].includes(key)) {
+    if (BOOLEAN_LOG_FIELDS.has(key)) {
       if (typeof value === "boolean") serialized[key] = value;
       continue;
     }
 
     const stringValue = getString(value, key === "path" ? 300 : 160);
-    if (stringValue && ["requestId", "method", "path", "errorName", "errorCode", "routerKind", "routeType", "snapshotSource", "fallbackSource", "cacheStatus"].includes(key)) {
+    if (stringValue && STRING_LOG_FIELDS.has(key)) {
       serialized[key] = stringValue;
     }
   }
@@ -116,6 +128,39 @@ export function getErrorFields(error: unknown): Pick<LogFields, "errorName" | "e
     ...(errorName ? { errorName } : {}),
     ...(errorCode ? { errorCode } : {})
   };
+}
+
+const REQUEST_ID_FOR_ERROR = Symbol.for("bench-matrix.request-id");
+const requestIdsByError = new WeakMap<Error, string>();
+
+/** Keep the API request ID attached to an exception for Next's later error hook. */
+export function associateErrorWithRequestId(error: unknown, requestId: string): void {
+  if (!(error instanceof Error)) return;
+  requestIdsByError.set(error, requestId);
+
+  try {
+    Object.defineProperty(error, REQUEST_ID_FOR_ERROR, {
+      configurable: true,
+      value: requestId
+    });
+  } catch {
+    // Frozen errors still get logged; the framework hook can use the Vercel ID.
+  }
+}
+
+export function getErrorRequestId(error: unknown): string | undefined {
+  if (!(error instanceof Error)) return undefined;
+  let requestId: unknown = requestIdsByError.get(error);
+  if (requestId === undefined) {
+    try {
+      requestId = Reflect.get(error, REQUEST_ID_FOR_ERROR);
+    } catch {
+      return undefined;
+    }
+  }
+  return typeof requestId === "string" && /^[a-zA-Z0-9:._-]{1,128}$/.test(requestId)
+    ? requestId
+    : undefined;
 }
 
 /**
