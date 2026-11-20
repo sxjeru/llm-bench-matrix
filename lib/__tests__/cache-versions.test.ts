@@ -1,80 +1,59 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-
-// tests/setup.ts 默认把这个模块整体 mock 掉（避免用例碰库），这里要测真实实现。
 vi.unmock("@/lib/cache-versions");
+const state = vi.hoisted(() => ({ version: "v1", reads: 0, writes: vi.fn() }));
+vi.mock("@/lib/db/client", () => ({ db: {
+  select: () => ({ from: () => ({ where: async () => {
+    state.reads++;
+    return ["dashboard", "pricing", "admin_entities", "settings"].map(domain => ({
+      key: `cache_version:${domain}`, valueJson: { version: `${domain}-${state.version}` }
+    }));
+  } }) }),
+  insert: () => ({ values: (rows: unknown) => ({ onConflictDoUpdate: async () => state.writes(rows) }) })
+} }));
+import { bumpCacheVersions, getCacheVersion, getCacheVersions, invalidateCacheVersions } from "@/lib/cache-versions";
 
-const state = vi.hoisted(() => ({
-  version: "v1",
-  selectCalls: 0,
-  insertCalls: 0
-}));
-
-vi.mock("@/lib/db/client", () => ({
-  db: {
-    select: vi.fn(() => ({
-      from: () => ({
-        where: () => ({
-          limit: async () => {
-            state.selectCalls += 1;
-            return [{ valueJson: { version: state.version } }];
-          }
-        })
-      })
-    })),
-    insert: vi.fn(() => ({
-      values: () => ({
-        onConflictDoUpdate: async () => {
-          state.insertCalls += 1;
-        }
-      })
-    }))
-  }
-}));
-
-import { bumpCacheVersions, getCacheVersion, invalidateCacheVersions } from "@/lib/cache-versions";
-
-describe("缓存版本号的进程内 TTL 缓存", () => {
-  beforeEach(() => {
-    invalidateCacheVersions();
-    state.version = "v1";
-    state.selectCalls = 0;
-    state.insertCalls = 0;
+describe("coherent cache versions", () => {
+  beforeEach(() => { invalidateCacheVersions(); state.version = "v1"; state.reads = 0; state.writes.mockReset(); });
+  test("concurrent domains share one query and one TTL entry", async () => {
+    expect(await Promise.all([getCacheVersion("dashboard"), getCacheVersion("pricing"), getCacheVersions()]))
+      .toEqual(["dashboard-v1", "pricing-v1", {
+        dashboard: "dashboard-v1", pricing: "pricing-v1", admin_entities: "admin_entities-v1", settings: "settings-v1"
+      }]);
+    expect(state.reads).toBe(1);
   });
-
-  test("TTL 内重复读取只查一次库", async () => {
-    expect(await getCacheVersion("dashboard")).toBe("v1");
-    expect(await getCacheVersion("dashboard")).toBe("v1");
-    expect(await getCacheVersion("dashboard")).toBe("v1");
-
-    expect(state.selectCalls).toBe(1);
+  test("all changed domains use one upsert, with duplicates removed and stable lock order", async () => {
+    await bumpCacheVersions(["settings", "dashboard", "settings"]);
+    expect(state.writes).toHaveBeenCalledTimes(1);
+    expect(state.writes.mock.calls[0][0].map((row: { key: string }) => row.key))
+      .toEqual(["cache_version:dashboard", "cache_version:settings"]);
   });
-
-  test("并发读取共用同一个查询", async () => {
-    const values = await Promise.all([
-      getCacheVersion("dashboard"),
-      getCacheVersion("dashboard"),
-      getCacheVersion("dashboard")
-    ]);
-
-    expect(values).toEqual(["v1", "v1", "v1"]);
-    expect(state.selectCalls).toBe(1);
-  });
-
-  test("不同版本域各查各的", async () => {
-    await getCacheVersion("dashboard");
-    await getCacheVersion("pricing");
-
-    expect(state.selectCalls).toBe(2);
-  });
-
-  test("bump 后立刻失效，写后读拿到新版本", async () => {
-    await getCacheVersion("dashboard");
-
-    state.version = "v2";
+  test("standalone bump expires the vector after the write", async () => {
+    await getCacheVersions(); state.version = "v2";
     await bumpCacheVersions(["dashboard"]);
-
-    expect(state.insertCalls).toBe(1);
-    expect(await getCacheVersion("dashboard")).toBe("v2");
-    expect(state.selectCalls).toBe(2);
+    expect(await getCacheVersion("dashboard")).toBe("dashboard-v2");
+    expect(state.reads).toBe(2);
+  });
+  test("transaction bump does not expose uncommitted versions through local invalidation", async () => {
+    await getCacheVersions(); state.version = "v2";
+    const writer = { insert: vi.fn(() => ({ values: () => ({ onConflictDoUpdate: async () => undefined }) })) };
+    await bumpCacheVersions(["dashboard"], writer as never);
+    expect(await getCacheVersion("dashboard")).toBe("dashboard-v1");
+    invalidateCacheVersions();
+    expect(await getCacheVersion("dashboard")).toBe("dashboard-v2");
+  });
+  test("fresh read bypasses TTL without publishing into another request's cached vector", async () => {
+    await getCacheVersions(); state.version = "v2";
+    expect((await getCacheVersions({ fresh: true })).dashboard).toBe("dashboard-v2");
+    expect((await getCacheVersions()).dashboard).toBe("dashboard-v1");
+    expect(state.reads).toBe(2);
+  });
+  test("expired TTL reloads all domains together", async () => {
+    vi.useFakeTimers();
+    try {
+      await getCacheVersions(); state.version = "v2";
+      await vi.advanceTimersByTimeAsync(5_001);
+      expect((await getCacheVersions()).pricing).toBe("pricing-v2");
+      expect(state.reads).toBe(2);
+    } finally { vi.useRealTimers(); }
   });
 });

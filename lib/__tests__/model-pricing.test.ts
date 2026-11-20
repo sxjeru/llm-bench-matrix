@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { bumpCacheVersions } from "@/lib/cache-versions";
 
 const dbClientMock = vi.hoisted(() => ({ db: {} as unknown }));
 
@@ -173,6 +174,105 @@ describe("model pricing module", () => {
     expect(typeof pricingModule.getModelPricingRows).toBe("function");
     expect(typeof pricingModule.syncModelsDevPricing).toBe("function");
     expect(typeof pricingModule.updateModelPricing).toBe("function");
+  });
+
+  test("价格不变但发布日期变化时也只在价格事务内更新一次 pricing 版本", async () => {
+    const mock = createDbMock([{
+      id: 1, modelName: "GPT-5", sourceModelId: "gpt-5", providerName: "OpenAI", providerSlug: "openai", providerConfig: {}
+    }], [{
+      modelId: 1, manualOverride: false, inputCost: "1", outputCost: "2",
+      releaseDate: "2026-10-01", sourceProviderId: "openai", sourceModelId: "gpt-5"
+    }]);
+    mockModelsDevResponse({ openai: {
+      id: "openai", name: "OpenAI", models: { "gpt-5": {
+        id: "gpt-5", name: "GPT-5", release_date: "2026-11-20", cost: { input: 1, output: 2 }
+      } }
+    } });
+    const pricing = await importPricingModule(mock.db);
+    const result = await pricing.syncModelsDevPricing();
+    expect(result.changedCount).toBe(0);
+    expect(mock.values).toHaveBeenCalledWith([expect.objectContaining({ releaseDate: "2026-11-20" })]);
+    expect(bumpCacheVersions).toHaveBeenCalledTimes(1);
+    expect(bumpCacheVersions).toHaveBeenCalledWith(["pricing"], { insert: mock.insert });
+    expect(mock.transaction).toHaveBeenCalledTimes(1);
+  });
+
+  test("价格和匹配状态不变时，同步时间变化也应刷新公开和后台价格缓存", async () => {
+    const oldTime = "2026-05-01T00:00:00.000Z";
+    const pricingRow: PricingSelectRow = {
+      modelId: 1,
+      modelName: "GPT-5",
+      modelCreatedAt: new Date("2026-01-01T00:00:00.000Z"),
+      providerName: "OpenAI",
+      source: "models.dev",
+      sourceProviderId: "openai",
+      sourceProviderName: "OpenAI",
+      sourceModelId: "gpt-5",
+      sourceModelName: "GPT-5",
+      releaseDate: "2026-04-01",
+      inputCost: "1",
+      outputCost: "2",
+      reasoningCost: null,
+      cacheReadCost: null,
+      cacheWriteCost: null,
+      inputAudioCost: null,
+      outputAudioCost: null,
+      currency: "USD",
+      unit: "per_1m_tokens",
+      matchConfidence: 100,
+      matchStatus: "matched",
+      manualOverride: false,
+      note: "bound-source-model",
+      lastSyncedAt: new Date(oldTime),
+      updatedAt: new Date(oldTime)
+    };
+    const mock = createDbMock([{
+      id: 1, modelName: "GPT-5", sourceModelId: "gpt-5", providerName: "OpenAI", providerSlug: "openai", providerConfig: {}
+    }], [pricingRow], [pricingRow]);
+    mockModelsDevResponse({ openai: {
+      id: "openai", name: "OpenAI", models: { "gpt-5": {
+        id: "gpt-5", name: "GPT-5", release_date: pricingRow.releaseDate, cost: { input: 1, output: 2 }
+      } }
+    } });
+    const pricing = await importPricingModule(mock.db);
+    const publicBefore = await pricing.getModelPricingRows();
+    const adminBefore = await pricing.getAdminModelPricingRows();
+    expect(publicBefore[0]?.lastSyncedAt).toBe(oldTime);
+    expect(adminBefore[0]?.lastSyncedAt).toBe(oldTime);
+
+    const result = await pricing.syncModelsDevPricing();
+    expect(result.changedCount).toBe(0);
+    expect(result.changedModels).toEqual([]);
+    expect(mock.values).toHaveBeenCalledWith([expect.objectContaining({
+      lastSyncedAt: new Date(result.syncedAt),
+      updatedAt: new Date(result.syncedAt)
+    })]);
+    // 模拟后续查询读取到本次同步已提交的时间戳。
+    pricingRow.lastSyncedAt = new Date(result.syncedAt);
+    pricingRow.updatedAt = new Date(result.syncedAt);
+
+    const publicAfter = await pricing.getModelPricingRows();
+    const adminAfter = await pricing.getAdminModelPricingRows();
+    expect(publicAfter).not.toBe(publicBefore);
+    expect(adminAfter).not.toBe(adminBefore);
+    expect(publicAfter[0]).toMatchObject({ lastSyncedAt: result.syncedAt, updatedAt: result.syncedAt });
+    expect(adminAfter[0]).toMatchObject({ lastSyncedAt: result.syncedAt, updatedAt: result.syncedAt });
+    expect(bumpCacheVersions).toHaveBeenCalledTimes(1);
+    expect(bumpCacheVersions).toHaveBeenCalledWith(["pricing"], { insert: mock.insert });
+    expect(mock.transaction).toHaveBeenCalledTimes(1);
+  });
+
+  test("没有待同步模型时不写入价格或更新缓存版本", async () => {
+    const mock = createDbMock([], []);
+    mockModelsDevResponse({});
+    const pricing = await importPricingModule(mock.db);
+
+    const result = await pricing.syncModelsDevPricing();
+
+    expect(result.changedCount).toBe(0);
+    expect(mock.insert).not.toHaveBeenCalled();
+    expect(mock.transaction).not.toHaveBeenCalled();
+    expect(bumpCacheVersions).not.toHaveBeenCalled();
   });
 
   test("getModelPricingRows 使用进程内缓存并在手动失效后重新读取", async () => {
@@ -1816,6 +1916,7 @@ describe("model pricing module", () => {
     const result = await pricingModule.syncModelsDevPricing();
 
     expect(db.insert).not.toHaveBeenCalled();
+    expect(bumpCacheVersions).not.toHaveBeenCalled();
     expect(result.skippedManualCount).toBe(1);
     expect(result.matchedCount).toBe(0);
     expect(result.unmatchedCount).toBe(0);

@@ -19,6 +19,7 @@
  * 没有 TypeScript 编译与 Next.js 运行时的环境下直接跑。
  */
 import "dotenv/config";
+import { withCacheVersionTransaction } from "./cache-mutation.mjs";
 import { pathToFileURL } from "node:url";
 
 const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL || "";
@@ -79,7 +80,11 @@ async function createClient() {
     const { WebSocket } = await import("ws");
     neonConfig.webSocketConstructor = WebSocket;
     const pool = new Pool({ connectionString });
-    return { query: (text, params) => pool.query(text, params), end: () => pool.end() };
+    return {
+      query: (text, params) => pool.query(text, params),
+      mutate: (domains, write) => withCacheVersionTransaction(pool, domains, write),
+      end: () => pool.end()
+    };
   }
 
   const pg = await import("pg");
@@ -89,7 +94,11 @@ async function createClient() {
     ssl: sslOptions,
     max: 2
   });
-  return { query: (text, params) => pool.query(text, params), end: () => pool.end() };
+  return {
+    query: (text, params) => pool.query(text, params),
+    mutate: (domains, write) => withCacheVersionTransaction(pool, domains, write),
+    end: () => pool.end()
+  };
 }
 
 function toNumber(value) {
@@ -307,53 +316,48 @@ async function run() {
       return;
     }
 
-    if (planned.length === 0) {
-      console.log("[backfill-params] 没有需要写入的参数量。");
-    } else {
-      for (const item of planned) {
-        await client.query(
-          `UPDATE models
-             SET total_params_b = $1,
-                 activated_params_b = $2,
-                 params_note = COALESCE(params_note, $3)
-           WHERE id = $4`,
-          [item.total, item.activated, `迁移自 benchmark「${item.valueRaw}」`, item.modelId]
-        );
+    // Pin one connection for the entire operation, including its version upsert.
+    // Any failure rolls back parameter updates, benchmark deletions, and versions.
+    const applied = await client.mutate(
+      (result) => result.deletedBenchmarkCount > 0
+        ? ["dashboard", "admin_entities"]
+        : result.updatedModels > 0 ? ["dashboard"] : [],
+      async (tx) => {
+        let updatedModels = 0;
+        let deletedBenchmarkCount = 0;
+        let deletedValueCount = 0;
+        const deletedLabels = [];
+        for (const item of planned) {
+          const result = await tx.query(
+            `UPDATE models
+                SET total_params_b = $1, activated_params_b = $2,
+                    params_note = COALESCE(params_note, $3)
+              WHERE id = $4 RETURNING id`,
+            [item.total, item.activated, `迁移自 benchmark「${item.valueRaw}」`, item.modelId]
+          );
+          updatedModels += result.rows.length;
+        }
+        for (const plan of deletionPlans) {
+          if (plan.blocking.length > 0 && !shouldForce) continue;
+          const { rows } = await tx.query(
+            "DELETE FROM benchmarks WHERE id = $1 RETURNING id, benchmark_name", [plan.benchmarkId]
+          );
+          if (rows.length > 0) {
+            deletedBenchmarkCount += 1;
+            deletedValueCount += plan.totalValueCount;
+            deletedLabels.push(rows[0].benchmark_name);
+          }
+        }
+        return { updatedModels, deletedBenchmarkCount, deletedValueCount, deletedLabels };
       }
-
-      console.log(`[backfill-params] 已写入 ${planned.length} 个模型的参数量。`);
-    }
-
+    );
+    console.log(`[backfill-params] 已写入 ${applied.updatedModels} 个模型的参数量。`);
     if (!shouldDeleteBenchmark) {
       console.log("[backfill-params] 提示：旧的 Params benchmark 仍在库中，可加 --delete-benchmark 或在后台「数据库设置 → 删除单个 benchmark」清理。");
-      return;
+    } else {
+      for (const label of applied.deletedLabels) console.log(`[backfill-params] 已删除 benchmark：${label}`);
+      console.log(`[backfill-params] 共删除 ${applied.deletedBenchmarkCount} 个 benchmark、${applied.deletedValueCount} 条 benchmark_values。`);
     }
-
-    let deletedBenchmarkCount = 0;
-    let deletedValueCount = 0;
-
-    for (const plan of deletionPlans) {
-      if (plan.blocking.length > 0 && !shouldForce) {
-        console.log(`[backfill-params] 跳过删除 ${plan.benchmarkName}：存在 ${plan.blocking.length} 个模型的记录未迁移。`);
-        continue;
-      }
-
-      // merged_into_benchmark_id 是 ON DELETE SET NULL，benchmark_values 与
-      // benchmark_source_meta 是 ON DELETE CASCADE，单条 DELETE 即可原子完成，
-      // 不必在连接池上手动开事务
-      const { rows } = await client.query(
-        "DELETE FROM benchmarks WHERE id = $1 RETURNING id, benchmark_name",
-        [plan.benchmarkId]
-      );
-
-      if (rows.length > 0) {
-        deletedBenchmarkCount += 1;
-        deletedValueCount += plan.totalValueCount;
-        console.log(`[backfill-params] 已删除 benchmark：${rows[0].benchmark_name}（连带 ${plan.totalValueCount} 条记录）`);
-      }
-    }
-
-    console.log(`[backfill-params] 共删除 ${deletedBenchmarkCount} 个 benchmark、${deletedValueCount} 条 benchmark_values。`);
   } finally {
     await client.end();
   }

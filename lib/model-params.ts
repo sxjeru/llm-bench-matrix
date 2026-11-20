@@ -1,5 +1,6 @@
 import { eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
+import { withCacheMutation } from "@/lib/cache-mutation";
 import { db } from "@/lib/db/client";
 import { models, providers } from "@/lib/db/schema";
 import {
@@ -151,17 +152,19 @@ export async function updateModelParams(input: ModelParamsUpdateInput) {
     return { ok: true, modelId: parsed.modelId, updated: false };
   }
 
-  const [updated] = await db
-    .update(models)
-    .set(updateValues)
-    .where(eq(models.id, parsed.modelId))
-    .returning({ id: models.id, modelName: models.modelName });
+  return withCacheMutation(["dashboard"], async (tx) => {
+    const [updated] = await tx
+      .update(models)
+      .set(updateValues)
+      .where(eq(models.id, parsed.modelId))
+      .returning({ id: models.id, modelName: models.modelName });
 
-  if (!updated) {
-    throw new Error(`model not found: ${parsed.modelId}`);
-  }
+    if (!updated) {
+      throw new Error(`model not found: ${parsed.modelId}`);
+    }
 
-  return { ok: true, modelId: updated.id, modelName: updated.modelName, updated: true };
+    return { ok: true, modelId: updated.id, modelName: updated.modelName, updated: true };
+  });
 }
 
 /** 后台「保存全部修改」一次最多提交的条数 */
@@ -205,7 +208,7 @@ export async function updateModelParamsBatch(inputs: ModelParamsUpdateInput[]) {
     return { ok: true, updatedCount: 0 };
   }
 
-  await db.transaction(async (tx) => {
+  await withCacheMutation(["dashboard"], async (tx) => {
     for (const item of pending) {
       const [updated] = await tx
         .update(models)
@@ -263,7 +266,7 @@ export async function applyModelParamsSuggestions(
   }
 
   if (updates.length > 0) {
-    await db.transaction(async (tx) => {
+    await withCacheMutation(["dashboard"], async (tx) => {
       for (const update of updates) {
         await tx
           .update(models)

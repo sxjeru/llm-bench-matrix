@@ -2,7 +2,8 @@ import { and, asc, count, countDistinct, desc, eq, ilike, inArray, isNotNull, is
 import { db } from "@/lib/db/client";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers } from "@/lib/db/schema";
 import { buildBenchmarkCanonicalKey, buildModelCanonicalKey } from "@/lib/db/normalize";
-import { invalidateAllCaches } from "@/lib/db/queries";
+import { RECORD_CACHE_DOMAINS, ENTITY_CACHE_DOMAINS } from "@/lib/cache-invalidation";
+import { withCacheMutation } from "@/lib/cache-mutation";
 import { normalizeProviderConfig } from "@/lib/provider-config";
 import { isArtificialAnalysisSource } from "@/lib/source-utils";
 import {
@@ -648,7 +649,7 @@ export async function batchSaveRecordDrafts(input: {
 
   const now = new Date();
 
-  const applied = await db.transaction(async (tx: DbTransactionClient) => {
+  const applied = await withCacheMutation(() => plan.updates.length + plan.inserts.length + plan.deleteRecordIds.length > 0 ? RECORD_CACHE_DOMAINS : [], async (tx: DbTransactionClient) => {
     let deleted = 0;
     const orphanCandidates: Array<{ benchmarkId: number; source: string | null }> = [];
 
@@ -723,7 +724,6 @@ export async function batchSaveRecordDrafts(input: {
     return { deleted, inserted, prunedSourceMeta };
   });
 
-  await invalidateAllCaches();
 
   return {
     ok: true,
@@ -804,7 +804,7 @@ export async function updateAdminRecordDetails(input: {
   let updated = 0;
   let deleted = 0;
 
-  await db.transaction(async (tx: DbTransactionClient) => {
+  await withCacheMutation(RECORD_CACHE_DOMAINS, async (tx: DbTransactionClient) => {
     const orphanCandidates: Array<{ benchmarkId: number; source: string | null }> = [];
     const sourceMetaRows = new Map<string, SourceMetaUpsertRow>();
     for (const record of records) {
@@ -867,7 +867,6 @@ export async function updateAdminRecordDetails(input: {
     await pruneOrphanRecordSourceMeta(tx, orphanCandidates);
   });
 
-  await invalidateAllCaches();
   return { ok: true, updated, deleted, nonNumeric };
 }
 
@@ -892,11 +891,12 @@ export async function reassignRecordBenchmark(input: {
   target: { benchmarkId?: number; benchmarkName?: string; benchmarkType?: string };
   scope?: RecordMutationScope;
   conflictStrategy?: RecordReassignConflictStrategy;
-}): Promise<ReassignRecordsResult> {
+}, executor?: DbTransactionClient): Promise<ReassignRecordsResult> {
+  if (!executor) return withCacheMutation(RECORD_CACHE_DOMAINS, (tx) => reassignRecordBenchmark(input, tx));
   const conflictStrategy = input.conflictStrategy ?? "keep-both";
   const scope = input.scope ?? {};
 
-  const [fromBenchmark] = await db
+  const [fromBenchmark] = await executor
     .select({
       id: benchmarks.id,
       benchmarkName: benchmarks.benchmarkName,
@@ -918,7 +918,7 @@ export async function reassignRecordBenchmark(input: {
   let targetBenchmark: { id: number; benchmarkName: string; benchmarkType: string; modalities: string[] | null };
 
   if (typeof input.target.benchmarkId === "number") {
-    const [existing] = await db
+    const [existing] = await executor
       .select({
         id: benchmarks.id,
         benchmarkName: benchmarks.benchmarkName,
@@ -937,7 +937,7 @@ export async function reassignRecordBenchmark(input: {
     const dedupeRule = await getModelDedupeRule();
     const targetType = input.target.benchmarkType?.trim() || fromBenchmark.benchmarkType;
     createdTarget = !(await hasBenchmarkByCanonicalKey(
-      buildBenchmarkCanonicalKey(targetName, targetType, dedupeRule)
+      buildBenchmarkCanonicalKey(targetName, targetType, dedupeRule), executor
     ));
     targetBenchmark = await ensureBenchmark(
       {
@@ -947,7 +947,7 @@ export async function reassignRecordBenchmark(input: {
         higherIsBetter: fromBenchmark.higherIsBetter,
         modalities: fromBenchmark.modalities ?? undefined
       },
-      { dedupeRule }
+      { dedupeRule, db: executor }
     );
   } else {
     throw new Error("目标 benchmark 不能为空");
@@ -957,7 +957,7 @@ export async function reassignRecordBenchmark(input: {
     throw new Error("目标 benchmark 与当前列相同，无需变更归属");
   }
 
-  const sourceRecords = await db
+  const sourceRecords = await executor
     .select({
       id: benchmarkValues.id,
       otherAxisId: benchmarkValues.modelId,
@@ -976,7 +976,7 @@ export async function reassignRecordBenchmark(input: {
   }
 
   const affectedModelIds = Array.from(new Set(sourceRecords.map((row) => row.otherAxisId)));
-  const targetRecords = await db
+  const targetRecords = await executor
     .select({
       id: benchmarkValues.id,
       otherAxisId: benchmarkValues.modelId,
@@ -998,7 +998,7 @@ export async function reassignRecordBenchmark(input: {
       .filter((source): source is string => source !== null)
   );
 
-  await db.transaction(async (tx: DbTransactionClient) => {
+  await (async (tx: DbTransactionClient) => {
     if (plan.deleteTargetRecordIds.length > 0) {
       for (const batch of chunk(plan.deleteTargetRecordIds, DELETE_CHUNK_SIZE)) {
         await tx.delete(benchmarkValues).where(inArray(benchmarkValues.id, batch));
@@ -1026,9 +1026,7 @@ export async function reassignRecordBenchmark(input: {
       tx,
       Array.from(movedSources).map((source) => ({ benchmarkId: fromBenchmark.id, source }))
     );
-  });
-
-  await invalidateAllCaches();
+  })(executor);
 
   return {
     ok: true,
@@ -1046,8 +1044,8 @@ export async function reassignRecordBenchmark(input: {
 }
 
 /** 归属变更前先判断目标实体是否已存在，仅用于给前端「新建了目标实体」的提示 */
-async function hasBenchmarkByCanonicalKey(canonicalKey: string): Promise<boolean> {
-  const [row] = await db
+async function hasBenchmarkByCanonicalKey(canonicalKey: string, executor: Pick<typeof db, "select"> = db): Promise<boolean> {
+  const [row] = await executor
     .select({ id: benchmarks.id })
     .from(benchmarks)
     .where(eq(benchmarks.canonicalKey, canonicalKey))
@@ -1055,8 +1053,8 @@ async function hasBenchmarkByCanonicalKey(canonicalKey: string): Promise<boolean
   return Boolean(row);
 }
 
-async function hasModelByCanonicalKey(canonicalKey: string): Promise<boolean> {
-  const [row] = await db
+async function hasModelByCanonicalKey(canonicalKey: string, executor: Pick<typeof db, "select"> = db): Promise<boolean> {
+  const [row] = await executor
     .select({ id: models.id })
     .from(models)
     .where(eq(models.canonicalKey, canonicalKey))
@@ -1069,11 +1067,12 @@ export async function reassignRecordModel(input: {
   target: { modelId?: number; modelName?: string; providerName?: string };
   scope?: RecordMutationScope;
   conflictStrategy?: RecordReassignConflictStrategy;
-}): Promise<ReassignRecordsResult> {
+}, executor?: DbTransactionClient): Promise<ReassignRecordsResult> {
+  if (!executor) return withCacheMutation(input.target.modelId === undefined ? ENTITY_CACHE_DOMAINS : RECORD_CACHE_DOMAINS, (tx) => reassignRecordModel(input, tx));
   const conflictStrategy = input.conflictStrategy ?? "keep-both";
   const scope = input.scope ?? {};
 
-  const [fromModel] = await db
+  const [fromModel] = await executor
     .select({ id: models.id, modelName: models.modelName, providerId: models.providerId })
     .from(models)
     .where(and(eq(models.id, input.fromModelId), isNull(models.mergedIntoModelId)))
@@ -1088,7 +1087,7 @@ export async function reassignRecordModel(input: {
   let targetModel: { id: number; modelName: string };
 
   if (typeof input.target.modelId === "number") {
-    const [existing] = await db
+    const [existing] = await executor
       .select({ id: models.id, modelName: models.modelName })
       .from(models)
       .where(and(eq(models.id, input.target.modelId), isNull(models.mergedIntoModelId)))
@@ -1100,10 +1099,10 @@ export async function reassignRecordModel(input: {
     targetModel = existing;
   } else if (targetName) {
     const providerName = input.target.providerName?.trim();
-    const providerId = providerName ? (await ensureProvider(providerName)).id : fromModel.providerId;
+    const providerId = providerName ? (await ensureProvider(providerName, { db: executor })).id : fromModel.providerId;
     const dedupeRule = await getModelDedupeRule();
-    createdTarget = !(await hasModelByCanonicalKey(buildModelCanonicalKey(targetName, dedupeRule)));
-    targetModel = await ensureModelByProviderId({ providerId, modelName: targetName }, { dedupeRule });
+    createdTarget = !(await hasModelByCanonicalKey(buildModelCanonicalKey(targetName, dedupeRule), executor));
+    targetModel = await ensureModelByProviderId({ providerId, modelName: targetName }, { dedupeRule, db: executor });
   } else {
     throw new Error("目标 model 不能为空");
   }
@@ -1112,7 +1111,7 @@ export async function reassignRecordModel(input: {
     throw new Error("目标 model 与当前行相同，无需变更归属");
   }
 
-  const sourceRecords = await db
+  const sourceRecords = await executor
     .select({
       id: benchmarkValues.id,
       otherAxisId: benchmarkValues.benchmarkId,
@@ -1131,7 +1130,7 @@ export async function reassignRecordModel(input: {
   }
 
   const affectedBenchmarkIds = Array.from(new Set(sourceRecords.map((row) => row.otherAxisId)));
-  const targetRecords = await db
+  const targetRecords = await executor
     .select({
       id: benchmarkValues.id,
       otherAxisId: benchmarkValues.benchmarkId,
@@ -1147,7 +1146,7 @@ export async function reassignRecordModel(input: {
 
   const plan = planRecordReassign({ sourceRecords, targetRecords, conflictStrategy });
 
-  await db.transaction(async (tx: DbTransactionClient) => {
+  await (async (tx: DbTransactionClient) => {
     if (plan.deleteTargetRecordIds.length > 0) {
       for (const batch of chunk(plan.deleteTargetRecordIds, DELETE_CHUNK_SIZE)) {
         await tx.delete(benchmarkValues).where(inArray(benchmarkValues.id, batch));
@@ -1160,9 +1159,7 @@ export async function reassignRecordModel(input: {
         .set({ modelId: targetModel.id })
         .where(inArray(benchmarkValues.id, batch));
     }
-  });
-
-  await invalidateAllCaches();
+  })(executor);
 
   return {
     ok: true,
@@ -1229,7 +1226,7 @@ export async function reassignRecordSource(input: {
     });
   });
 
-  const applied = await db.transaction(async (tx: DbTransactionClient) => {
+  const applied = await withCacheMutation(RECORD_CACHE_DOMAINS, async (tx: DbTransactionClient) => {
     let moved = 0;
     for (const batch of chunk(recordIds, DELETE_CHUNK_SIZE)) {
       const updatedRows = await tx
@@ -1260,7 +1257,6 @@ export async function reassignRecordSource(input: {
     return { moved, prunedSourceMeta };
   });
 
-  await invalidateAllCaches();
 
   return {
     ok: true,
@@ -1314,7 +1310,7 @@ export async function batchDeleteRecords(input: {
     throw new Error(`匹配记录超过 ${MAX_RECORD_BATCH_DELETE} 条，请缩小筛选范围后再删除`);
   }
 
-  const applied = await db.transaction(async (tx: DbTransactionClient) => {
+  const applied = await withCacheMutation((result) => result.deleted > 0 || result.prunedSourceMeta > 0 ? RECORD_CACHE_DOMAINS : [], async (tx: DbTransactionClient) => {
     let deleted = 0;
     for (const batch of chunk(targetRows.map((row) => row.id), DELETE_CHUNK_SIZE)) {
       const deletedRows = await tx
@@ -1332,7 +1328,6 @@ export async function batchDeleteRecords(input: {
     return { deleted, prunedSourceMeta };
   });
 
-  await invalidateAllCaches();
 
   return { ok: true, deleted: applied.deleted, prunedSourceMeta: applied.prunedSourceMeta };
 }
@@ -1396,7 +1391,7 @@ export async function batchNormalizeRecordScale(input: {
     throw new Error("当前筛选范围内的数值已经是目标量纲，无需归一化");
   }
 
-  await db.transaction(async (tx: DbTransactionClient) => {
+  await withCacheMutation(RECORD_CACHE_DOMAINS, async (tx: DbTransactionClient) => {
     for (const update of plan.updates) {
       await tx
         .update(benchmarkValues)
@@ -1410,7 +1405,6 @@ export async function batchNormalizeRecordScale(input: {
     }
   });
 
-  await invalidateAllCaches();
 
   return {
     ok: true,
@@ -1559,7 +1553,7 @@ export async function splitDualValueRecords(input: {
 
   const dedupeRule = await getModelDedupeRule();
 
-  const applied = await db.transaction(async (tx: DbTransactionClient) => {
+  const applied = await withCacheMutation(RECORD_CACHE_DOMAINS, async (tx: DbTransactionClient) => {
     const resolveTarget = async (
       target: { benchmarkId?: number; benchmarkName?: string; benchmarkType?: string },
       label: string
@@ -1724,7 +1718,6 @@ export async function splitDualValueRecords(input: {
     return { createdCount, firstBenchmark, secondBenchmark, plan };
   });
 
-  await invalidateAllCaches();
 
   return {
     ok: true,

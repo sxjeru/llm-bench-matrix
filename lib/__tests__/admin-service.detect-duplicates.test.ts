@@ -2,7 +2,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 
 let detectDuplicateEntityCandidates: any;
-let invalidateAllCaches: any;
+let invalidateLocalCaches: any;
 let db: any;
 let getCacheVersion: any;
 let invalidateDuplicateCandidatesCacheForTest: any;
@@ -29,7 +29,7 @@ beforeAll(async () => {
   invalidateDuplicateCandidatesCacheForTest = adminServiceModule.__invalidateDuplicateCandidatesCacheForTest;
 
   const dbQueriesModule = await import("@/lib/db/queries");
-  invalidateAllCaches = dbQueriesModule.invalidateAllCaches;
+  invalidateLocalCaches = dbQueriesModule.invalidateLocalCaches;
 
   const dbClientModule = await import("@/lib/db/client");
   db = dbClientModule.db;
@@ -122,7 +122,7 @@ describe("detectDuplicateEntityCandidates with caching", () => {
     expect(selectSpy.mock.calls.length).toBe(totalSelectCallsAfterFirst); // 没有发生任何数据库查询
   });
 
-  test("调用 invalidateAllCaches 后，缓存应当失效并重新计算", async () => {
+  test("调用 invalidateLocalCaches 后，缓存应当失效并重新计算", async () => {
     let currentVersion = "V1";
 
     vi.mocked(getCacheVersion).mockImplementation(async () => currentVersion);
@@ -150,8 +150,8 @@ describe("detectDuplicateEntityCandidates with caching", () => {
     const result1 = await detectDuplicateEntityCandidates();
     expect(selectSpy.mock.calls.length).toBe(5);
 
-    // 2. 模拟数据写变更，调用 invalidateAllCaches
-    await invalidateAllCaches();
+    // 2. 模拟数据写变更，调用 invalidateLocalCaches
+    await invalidateLocalCaches();
     currentVersion = "V2"; // 手动更新版本号，模拟 bumpCacheVersions 成功后的效果
 
     // 3. 再次调用，此时版本探针检测到 V2，版本更新导致 Cache Miss，触发重新计算

@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   History,
@@ -24,6 +25,7 @@ export function ImportBatchDeletionSection({
   notifyError,
   onRefreshCaches
 }: ImportBatchDeletionSectionProps) {
+  const router = useRouter();
   const [batches, setBatches] = useState<ImportBatchSummary[]>([]);
   const [isLoadingBatches, setIsLoadingBatches] = useState(true);
   const [selectedBatchKey, setSelectedBatchKey] = useState<string>("");
@@ -198,8 +200,8 @@ export function ImportBatchDeletionSection({
 
       if (serverCacheInvalidated) {
         notifyDeleted();
+        router.refresh();
         await loadBatches(true);
-        await onRefreshCaches();
       } else {
         // 服务端缓存失效失败时，先静默补偿重试，避免出现“先报失败、又自动恢复”的自相矛盾提示
         await loadBatches(true);

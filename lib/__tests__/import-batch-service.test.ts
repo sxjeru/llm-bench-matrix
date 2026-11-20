@@ -206,9 +206,9 @@ describe("import-batch-service", () => {
       });
     });
 
-    test("当事务已提交但缓存失效或版本写入失败时，不应抛出异常，仍返回删除成功并附带 warning 与 cacheInvalidated=false", async () => {
-      const { invalidateAllCaches } = await import("@/lib/db/queries");
-      vi.mocked(invalidateAllCaches).mockRejectedValueOnce(new Error("Redis connection timed out"));
+    test("版本写入失败时删除事务失败，不返回已删除成功", async () => {
+      const { bumpCacheVersions } = await import("@/lib/cache-versions");
+      vi.mocked(bumpCacheVersions).mockRejectedValueOnce(new Error("version write failed"));
 
       const mockReturningValues = vi.fn().mockResolvedValue([{ id: 101 }]);
       const mockDeleteWhere = vi.fn(() => ({ returning: mockReturningValues }));
@@ -231,17 +231,11 @@ describe("import-batch-service", () => {
         transaction: vi.fn(async (cb) => cb(mockTx))
       };
 
-      const result = await deleteImportBatch({
+      await expect(deleteImportBatch({
         batchTime: "2026-10-23T15:10:25.000Z",
         source: "text:test",
         executor: mockDb as unknown as DbClient
-      });
-
-      expect(result.ok).toBe(true);
-      expect(result.deleted).toBe(1);
-      expect(result.cacheInvalidated).toBe(false);
-      expect(result.warning).toContain("缓存刷新失败");
-      expect(result.warning).toContain("Redis connection timed out");
+      })).rejects.toThrow("version write failed");
     });
   });
 

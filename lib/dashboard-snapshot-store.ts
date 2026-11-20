@@ -102,7 +102,7 @@ function resetSnapshotCache() {
   inFlightBuilds.clear();
 }
 
-registerCacheInvalidator(resetSnapshotCache);
+registerCacheInvalidator(resetSnapshotCache, ["dashboard", "pricing", "settings"]);
 
 export function _getInMemoryRecordForTest(): PublicDashboardSnapshotRecord | null {
   return inMemoryRecord;
@@ -179,13 +179,15 @@ export async function rebuildAndPersistPublicDashboardSnapshotRecord(
 
 function rebuildSnapshotRecord(
   versions: PublicDashboardSnapshotVersions,
-  generation: number
+  generation: number,
+  attempt = 0
 ): Promise<PublicDashboardSnapshotRecord> {
   const versionsKey = getVersionsKey(versions);
   return withInFlightRecord(inFlightBuilds, versionsKey, generation, () => buildAndPersistSnapshotRecord(
     versions,
     generation,
-    versionsKey
+    versionsKey,
+    attempt
   ));
 }
 
@@ -232,9 +234,22 @@ function persistSnapshotRecord(
 async function buildAndPersistSnapshotRecord(
   versions: PublicDashboardSnapshotVersions,
   generation: number,
-  versionsKey: string
+  versionsKey: string,
+  attempt: number
 ): Promise<PublicDashboardSnapshotRecord> {
+  // A reader can obtain its version just before a writer commits. Validate live
+  // builds against an uncached version read, so that current rows are never
+  // published under the reader's older ETag. Existing immutable snapshots are safe.
   const snapshot = await loadPublicDashboardSnapshot(versions);
+  const current = await getPublicDashboardSnapshotVersions({ fresh: true });
+  if (getVersionsKey(current) !== versionsKey) {
+    if (attempt >= 2) throw new Error("Dashboard changed repeatedly while building snapshot; retry later");
+    if (generation === cacheGeneration) {
+      latestVersionsKey = getVersionsKey(current);
+      if (inMemoryRecord && isSnapshotRecordMatch(inMemoryRecord, current)) return inMemoryRecord;
+    }
+    return rebuildSnapshotRecord(current, generation, attempt + 1);
+  }
   const wire = encodePublicDashboardSnapshot(snapshot);
   const payloadJson = JSON.stringify(wire);
   const payloadBr = await compressSnapshotPayload(payloadJson);

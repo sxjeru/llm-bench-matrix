@@ -103,7 +103,7 @@ describe("ensureBenchmark with merged target resolution", () => {
 
     const result = await ensureBenchmarkForTest(
       { benchmarkName: "MATH-Vision", benchmarkType: "Vision" },
-      { dedupeRule: DEFAULT_DEDUPE_RULE } // bypass getModelDedupeRule() DB call
+      { dedupeRule: DEFAULT_DEDUPE_RULE, db: dbForTest } // bypass getModelDedupeRule() DB call
     );
 
     expect(result.id).toBe(120);
@@ -137,7 +137,7 @@ describe("ensureBenchmark with merged target resolution", () => {
 
     const result = await ensureBenchmarkForTest(
       { benchmarkName: "MathVision", benchmarkType: "STEM and Puzzle" },
-      { dedupeRule: DEFAULT_DEDUPE_RULE } // bypass getModelDedupeRule() DB call
+      { dedupeRule: DEFAULT_DEDUPE_RULE, db: dbForTest } // bypass getModelDedupeRule() DB call
     );
 
     expect(result.id).toBe(120);
@@ -196,7 +196,7 @@ describe("ensureBenchmark with merged target resolution", () => {
 
     const result = await ensureBenchmarkForTest(
       { benchmarkName: "A", benchmarkType: "Type" },
-      { dedupeRule: DEFAULT_DEDUPE_RULE }
+      { dedupeRule: DEFAULT_DEDUPE_RULE, db: dbForTest }
     );
 
     expect(result.id).toBe(3);
@@ -243,7 +243,7 @@ describe("ensureBenchmark with merged target resolution", () => {
 
     const result = await ensureBenchmarkForTest(
       { benchmarkName: "A", benchmarkType: "Type" },
-      { dedupeRule: DEFAULT_DEDUPE_RULE }
+      { dedupeRule: DEFAULT_DEDUPE_RULE, db: dbForTest }
     );
 
     // Breaks loop at nextId=1, returns current which is B (id: 2)
@@ -304,7 +304,7 @@ describe("ensureBenchmark with merged target resolution", () => {
 
     const result = await ensureBenchmarkForTest(
       { benchmarkName: "A", benchmarkType: "Type", higherIsBetter: false },
-      { dedupeRule: DEFAULT_DEDUPE_RULE }
+      { dedupeRule: DEFAULT_DEDUPE_RULE, db: dbForTest }
     );
 
     // Should resolve to B, but sync higherIsBetter=false to B (id: 2)
@@ -368,7 +368,7 @@ describe("ensureBenchmark with merged target resolution", () => {
 
     const result = await ensureBenchmarkForTest(
       { benchmarkName: "A", benchmarkType: "Type", higherIsBetter: false },
-      { dedupeRule: DEFAULT_DEDUPE_RULE }
+      { dedupeRule: DEFAULT_DEDUPE_RULE, db: dbForTest }
     );
 
     // Should resolve to B, but sync higherIsBetter=false to B (id: 2)

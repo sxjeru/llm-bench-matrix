@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { toMatrixInputRow } from "@/components/benchmark-matrix/map-row";
 import { getDashboardRows } from "@/lib/db/queries";
 import { createRateLimiter, getRateLimitKey } from "@/lib/rate-limit";
-import { getCacheVersion } from "@/lib/cache-versions";
+import { getCacheVersions } from "@/lib/cache-versions";
 import { ifNoneMatchMatches } from "@/lib/http-etag";
 import {
   PUBLIC_CACHE_CONTROL_BROWSER,
@@ -58,11 +58,8 @@ export async function GET(request: Request) {
   const cachedLimit = normalizeCachedLimit(limit);
 
   // Retrieve lightweight cache versions before loading rows.
-  const [dashboardVersion, pricingVersion] = await Promise.all([
-    getCacheVersion("dashboard"),
-    getCacheVersion("pricing")
-  ]);
-  const etag = createRecordsEtag(dashboardVersion, pricingVersion, limit);
+  let { dashboard: dashboardVersion, pricing: pricingVersion } = await getCacheVersions();
+  let etag = createRecordsEtag(dashboardVersion, pricingVersion, limit);
 
   const headers = {
     "Cache-Control": PUBLIC_CACHE_CONTROL_BROWSER,
@@ -81,7 +78,19 @@ export async function GET(request: Request) {
     });
   }
 
-  const cachedRows = await getDashboardRows(cachedLimit, null, dashboardVersion);
+  let cachedRows = await getDashboardRows(cachedLimit, null, dashboardVersion);
+  for (let attempt = 0; ; attempt += 1) {
+    const current = await getCacheVersions({ fresh: true });
+    if (current.dashboard === dashboardVersion && current.pricing === pricingVersion) break;
+    if (attempt >= 2) throw new Error("Records changed repeatedly while loading; retry later");
+    dashboardVersion = current.dashboard;
+    pricingVersion = current.pricing;
+    cachedRows = await getDashboardRows(cachedLimit, null, dashboardVersion);
+  }
+  etag = createRecordsEtag(dashboardVersion, pricingVersion, limit);
+  headers.ETag = etag;
+  headers["X-Dashboard-Version"] = dashboardVersion;
+  headers["X-Pricing-Version"] = pricingVersion;
   const rows = cachedRows.slice(0, limit).map(toMatrixInputRow);
 
   return NextResponse.json(

@@ -249,6 +249,15 @@ describe("GET /api/public/dashboard", () => {
     expect(getOrBuildPublicDashboardSnapshotRecord).toHaveBeenCalledTimes(1);
   });
 
+  test("重建重试到新版本后，响应头与实际快照版本保持一致", async () => {
+    const record = await vi.mocked(getOrBuildPublicDashboardSnapshotRecord).getMockImplementation()?.(SNAPSHOT.versions);
+    if (!record) throw new Error("Missing record fixture");
+    vi.mocked(getOrBuildPublicDashboardSnapshotRecord).mockResolvedValue({ ...record, dashboardVersion: "new-dashboard" });
+    const response = await GET(new Request(DASHBOARD_URL));
+    expect(response.headers.get("X-Dashboard-Version")).toBe("new-dashboard");
+    expect(response.headers.get("ETag")).toContain(":new-dashboard:");
+  });
+
   test("限流响应明确不进入公共缓存", async () => {
     let response = await GET(new Request(DASHBOARD_URL, {
       headers: { "x-forwarded-for": "203.0.113.430" }

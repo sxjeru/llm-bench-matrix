@@ -1,6 +1,8 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { bumpCacheVersions, getCacheVersion } from "@/lib/cache-versions";
+import { getCacheVersion } from "@/lib/cache-versions";
+import { withCacheMutation } from "@/lib/cache-mutation";
+import { registerCacheInvalidator } from "@/lib/cache-invalidation";
 import { db } from "@/lib/db/client";
 import { modelPricing, models, providers } from "@/lib/db/schema";
 import { normalizeProviderConfig } from "@/lib/provider-config";
@@ -25,11 +27,7 @@ function getModelPricingCacheVersion() {
   return getCacheVersion("pricing");
 }
 
-async function invalidateChangedModelPricingCaches() {
-  invalidateModelPricingCaches();
-  if (process.env.NODE_ENV === "test") return;
-  await bumpCacheVersions(["pricing"]);
-}
+registerCacheInvalidator(invalidateModelPricingCaches, ["pricing"]);
 
 type DbModel = {
   id: number;
@@ -943,8 +941,6 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
     }
   }
 
-  let hasAnyStatusOrDateChanged = false;
-
   for (const model of activeModels) {
     const existing = existingByModelId.get(model.id);
 
@@ -1046,7 +1042,6 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
           updatedAt: syncedAt
         });
         matchedCount += 1;
-        hasAnyStatusOrDateChanged = true;
         continue;
       }
 
@@ -1080,7 +1075,6 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
           lastSyncedAt: syncedAt,
           updatedAt: syncedAt
         });
-        hasAnyStatusOrDateChanged = true;
       }
 
       skippedManualCount += 1;
@@ -1139,42 +1133,42 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
   }
 
   if (pricingUpserts.length > 0) {
-    await db
-      .insert(modelPricing)
-      .values(pricingUpserts)
-      .onConflictDoUpdate({
-        target: modelPricing.modelId,
-        set: {
-          source: sql.raw("excluded.source"),
-          sourceProviderId: sql.raw("excluded.source_provider_id"),
-          sourceProviderName: sql.raw("excluded.source_provider_name"),
-          sourceModelId: sql.raw("excluded.source_model_id"),
-          sourceModelName: sql.raw("excluded.source_model_name"),
-          releaseDate: sql.raw("excluded.release_date"),
-          inputCost: sql.raw("excluded.input_cost"),
-          outputCost: sql.raw("excluded.output_cost"),
-          reasoningCost: sql.raw("excluded.reasoning_cost"),
-          cacheReadCost: sql.raw("excluded.cache_read_cost"),
-          cacheWriteCost: sql.raw("excluded.cache_write_cost"),
-          inputAudioCost: sql.raw("excluded.input_audio_cost"),
-          outputAudioCost: sql.raw("excluded.output_audio_cost"),
-          currency: sql.raw("excluded.currency"),
-          unit: sql.raw("excluded.unit"),
-          matchConfidence: sql.raw("excluded.match_confidence"),
-          matchStatus: sql.raw("excluded.match_status"),
-          manualOverride: sql.raw("excluded.manual_override"),
-          rawJson: sql.raw("excluded.raw_json"),
-          note: sql.raw("excluded.note"),
-          lastSyncedAt: sql.raw("excluded.last_synced_at"),
-          updatedAt: sql.raw("excluded.updated_at")
-        }
-      });
-  }
-
-  if (changedModels.length > 0 || hasAnyStatusOrDateChanged) {
-    await invalidateChangedModelPricingCaches();
-  } else {
-    invalidateVersionedCacheStore(adminModelPricingRowsStore);
+    // Public snapshots include sync timestamps, even when prices do not change.
+    await withCacheMutation(
+      ["pricing"],
+      async (tx) => {
+        await tx
+          .insert(modelPricing)
+          .values(pricingUpserts)
+          .onConflictDoUpdate({
+            target: modelPricing.modelId,
+            set: {
+              source: sql.raw("excluded.source"),
+              sourceProviderId: sql.raw("excluded.source_provider_id"),
+              sourceProviderName: sql.raw("excluded.source_provider_name"),
+              sourceModelId: sql.raw("excluded.source_model_id"),
+              sourceModelName: sql.raw("excluded.source_model_name"),
+              releaseDate: sql.raw("excluded.release_date"),
+              inputCost: sql.raw("excluded.input_cost"),
+              outputCost: sql.raw("excluded.output_cost"),
+              reasoningCost: sql.raw("excluded.reasoning_cost"),
+              cacheReadCost: sql.raw("excluded.cache_read_cost"),
+              cacheWriteCost: sql.raw("excluded.cache_write_cost"),
+              inputAudioCost: sql.raw("excluded.input_audio_cost"),
+              outputAudioCost: sql.raw("excluded.output_audio_cost"),
+              currency: sql.raw("excluded.currency"),
+              unit: sql.raw("excluded.unit"),
+              matchConfidence: sql.raw("excluded.match_confidence"),
+              matchStatus: sql.raw("excluded.match_status"),
+              manualOverride: sql.raw("excluded.manual_override"),
+              rawJson: sql.raw("excluded.raw_json"),
+              note: sql.raw("excluded.note"),
+              lastSyncedAt: sql.raw("excluded.last_synced_at"),
+              updatedAt: sql.raw("excluded.updated_at")
+            }
+          });
+      }
+    );
   }
 
   const sourceModelCount = Array.from(sourceProviders.values()).reduce(
@@ -1307,7 +1301,7 @@ async function writeModelPricingUpserts(parsedList: ParsedModelPricingUpdate[]) 
   const updatedAt = new Date();
   const upserts = parsedList.map((parsed) => buildModelPricingUpsert(parsed, updatedAt));
 
-  await db.transaction(async (tx) => {
+  await withCacheMutation(["pricing"], async (tx) => {
     for (const { values, updateValues } of upserts) {
       await tx
         .insert(modelPricing)
@@ -1319,7 +1313,6 @@ async function writeModelPricingUpserts(parsedList: ParsedModelPricingUpdate[]) 
     }
   });
 
-  await invalidateChangedModelPricingCaches();
   return upserts.length;
 }
 
@@ -1363,11 +1356,12 @@ export async function updateModelPricingBatch(inputs: ModelPricingUpdateInput[])
 }
 
 export async function clearModelPricingManualOverride(modelId: number) {
-  await db
-    .update(modelPricing)
-    .set({ manualOverride: false, matchStatus: "matched", updatedAt: new Date() })
-    .where(and(eq(modelPricing.modelId, modelId), eq(modelPricing.manualOverride, true)));
-  await invalidateChangedModelPricingCaches();
+  await withCacheMutation(["pricing"], async (tx) => {
+    await tx
+      .update(modelPricing)
+      .set({ manualOverride: false, matchStatus: "matched", updatedAt: new Date() })
+      .where(and(eq(modelPricing.modelId, modelId), eq(modelPricing.manualOverride, true)));
+  });
 }
 
 export async function getModelPricingCount(): Promise<number> {

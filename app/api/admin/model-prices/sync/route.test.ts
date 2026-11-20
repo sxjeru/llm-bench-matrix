@@ -35,7 +35,7 @@ describe("POST /api/admin/model-prices/sync", () => {
     vi.mocked(invalidateAllCaches).mockResolvedValue(undefined);
   });
 
-  test("价格未变化时不失效公开页面", async () => {
+  test("价格未变化时由同步服务管理缓存失效，路由不重复失效", async () => {
     vi.mocked(syncModelsDevPricing).mockResolvedValue(baseResult);
 
     const response = await POST(new Request("https://example.com/api/admin/model-prices/sync", {
@@ -46,7 +46,7 @@ describe("POST /api/admin/model-prices/sync", () => {
     expect(invalidateAllCaches).not.toHaveBeenCalled();
   });
 
-  test("价格变化时失效公开页面且不重复 bump pricing 版本", async () => {
+  test("价格变化时由同步服务管理缓存失效，路由不重复失效", async () => {
     vi.mocked(syncModelsDevPricing).mockResolvedValue({
       ...baseResult,
       changedCount: 1,
@@ -58,6 +58,6 @@ describe("POST /api/admin/model-prices/sync", () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(invalidateAllCaches).toHaveBeenCalledWith({ skipVersionBump: ["pricing"] });
+    expect(invalidateAllCaches).not.toHaveBeenCalled();
   });
 });

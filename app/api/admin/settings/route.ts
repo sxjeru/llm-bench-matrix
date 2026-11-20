@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "../../../../lib/admin-auth";
-import { rebuildBenchmarkCanonicalKeysByRule, rebuildModelCanonicalKeysByRule } from "../../../../lib/admin-service";
-import { getSettings, invalidateAllCaches, saveSetting } from "../../../../lib/db/queries";
+import { updateAdminSetting } from "@/lib/admin-settings-service";
+import { getSettings } from "../../../../lib/db/queries";
 
 const SENSITIVE_SETTING_KEYS = new Set([
   "admin_password_hash",
@@ -40,24 +40,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  await saveSetting(parsed.data);
-  await invalidateAllCaches();
-
-  if (parsed.data.key === "model_dedupe_rule") {
-    const [modelRebuildResult, benchmarkRebuildResult] = await Promise.all([
-      rebuildModelCanonicalKeysByRule(parsed.data.valueJson),
-      rebuildBenchmarkCanonicalKeysByRule(parsed.data.valueJson)
-    ]);
-
-    const rebuildResult = {
-      model: modelRebuildResult,
-      benchmark: benchmarkRebuildResult,
-      mergedCount: modelRebuildResult.mergedCount,
-      benchmarkMergedCount: benchmarkRebuildResult.mergedCount
-    };
-
-    return NextResponse.json({ ok: true, rebuildResult });
+  try {
+    return NextResponse.json(await updateAdminSetting(parsed.data));
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "保存设置失败" }, { status: 400 });
   }
-
-  return NextResponse.json({ ok: true });
 }

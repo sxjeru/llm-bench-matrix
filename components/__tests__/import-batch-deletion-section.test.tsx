@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { ImportBatchDeletionSection } from "../admin-console/views/import-batch-deletion-section";
 import * as api from "../admin-console/api";
 
+const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
+
 describe("ImportBatchDeletionSection", () => {
   const notifySuccess = vi.fn();
   const notifyError = vi.fn();
@@ -326,6 +329,15 @@ describe("ImportBatchDeletionSection", () => {
       await user.click(screen.getByRole("button", { name: /删除此批次/ }));
       await user.click(screen.getByRole("button", { name: "确认删除" }));
     }
+
+    test("服务端已原子提交缓存版本时只刷新页面，不再次请求全量缓存失效", async () => {
+      mockApis();
+      vi.mocked(api.postJson).mockResolvedValue({ ok: true, deleted: 15, cacheInvalidated: true });
+      await deleteSelectedBatch();
+      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+      expect(onRefreshCaches).not.toHaveBeenCalled();
+      expect(notifySuccess).toHaveBeenCalledTimes(1);
+    });
 
     test("先静默重试刷新缓存，重试成功时只提示删除成功，不报缓存错误", async () => {
       mockApis();

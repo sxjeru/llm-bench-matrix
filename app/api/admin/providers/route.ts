@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "../../../../lib/admin-auth";
 import { deleteProviderAndTransferModels, ensureProvider, updateProviderConfig } from "../../../../lib/admin-service";
-import { invalidateAllCaches } from "../../../../lib/db/queries";
 
 const schema = z.object({
   name: z.string().min(1)
@@ -53,7 +52,6 @@ export async function POST(request: Request) {
   }
 
   const provider = await ensureProvider(parsed.data.name);
-  await invalidateAllCaches();
   return NextResponse.json({ provider });
 }
 

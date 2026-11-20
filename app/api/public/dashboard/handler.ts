@@ -49,10 +49,10 @@ export async function handleDashboardRequest(
   }
 
   const wantsPlain = options.plain === true;
-  const versions = await getPublicDashboardSnapshotVersions();
+  let versions = await getPublicDashboardSnapshotVersions();
   // 统一用 identity 变体：与线上旧的 br 副本 ETag 不同，避免条件请求复用二进制副本
-  const etag = createPublicDashboardSnapshotEtag(versions, "identity");
-  const headers: Record<string, string> = {
+  let etag = createPublicDashboardSnapshotEtag(versions, "identity");
+  let headers: Record<string, string> = {
     ...buildHeaders({
       versions,
       etag,
@@ -68,6 +68,17 @@ export async function handleDashboardRequest(
   }
 
   const record = await getOrBuildPublicDashboardSnapshotRecord(versions);
+  // A live rebuild may have retried against a newer committed version.
+  versions = {
+    dashboard: record.dashboardVersion,
+    pricing: record.pricingVersion,
+    settings: record.settingsVersion
+  };
+  etag = createPublicDashboardSnapshotEtag(versions, "identity");
+  headers = {
+    ...headers,
+    ...buildHeaders({ versions, etag, wantsPlain, remaining: rateLimit.remaining })
+  };
   // payloadJson 是惰性 getter：同一进程内只解压一次，DB 出站始终只有 payloadBr
   return new Response(record.payloadJson, { headers });
 }

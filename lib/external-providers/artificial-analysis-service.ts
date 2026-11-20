@@ -1,7 +1,10 @@
 import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
+import { withCacheMutation, type MutationTransaction } from "@/lib/cache-mutation";
+import type { CacheVersionDomain } from "@/lib/cache-versions";
+import { ENTITY_CACHE_DOMAINS } from "@/lib/cache-invalidation";
 import { db } from "@/lib/db/client";
-import { getSettings, invalidateAllCaches, saveSetting } from "@/lib/db/queries";
+import { getSettings, saveSetting } from "@/lib/db/queries";
 import { externalModelMappings, models, providers } from "@/lib/db/schema";
 import { normalizeProviderConfig } from "@/lib/provider-config";
 import {
@@ -81,8 +84,8 @@ export type ArtificialAnalysisAdminSnapshot = {
   freePageCount: number;
 };
 
-async function getLocalModels(): Promise<Array<LocalModelInput & { providerDisplayName: string | null }>> {
-  const rows = await db
+async function getLocalModels(executor: Pick<typeof db, "select"> = db): Promise<Array<LocalModelInput & { providerDisplayName: string | null }>> {
+  const rows = await executor
     .select({
       id: models.id,
       modelName: models.modelName,
@@ -107,24 +110,24 @@ async function getLocalModels(): Promise<Array<LocalModelInput & { providerDispl
   }));
 }
 
-async function getStoredMappings() {
-  return db
+async function getStoredMappings(executor: Pick<typeof db, "select"> = db) {
+  return executor
     .select()
     .from(externalModelMappings)
     .where(eq(externalModelMappings.source, ARTIFICIAL_ANALYSIS_SOURCE_ID));
 }
 
 /** 已合并模型 -> 最终活跃模型，用来归一化历史上残留的外部映射。 */
-async function getMergedModelTargets(): Promise<Map<number, number>> {
-  const rows = await db
+async function getMergedModelTargets(executor: Pick<typeof db, "select"> = db): Promise<Map<number, number>> {
+  const rows = await executor
     .select({ id: models.id, mergedIntoModelId: models.mergedIntoModelId })
     .from(models)
     .where(isNotNull(models.mergedIntoModelId));
   return resolveMergedModelTargets(rows);
 }
 
-export async function getArtificialAnalysisConfig(): Promise<ArtificialAnalysisImportConfig> {
-  const settingsMap = await getSettings();
+export async function getArtificialAnalysisConfig(executor?: Pick<typeof db, "select">): Promise<ArtificialAnalysisImportConfig> {
+  const settingsMap = await getSettings(executor);
   return normalizeImportConfig(settingsMap[ARTIFICIAL_ANALYSIS_SETTINGS_KEY]);
 }
 
@@ -145,12 +148,14 @@ function toUpstreamOption(model: ArtificialAnalysisModel): UpstreamOnlyModel {
  */
 export async function getArtificialAnalysisAdminSnapshot(options?: {
   forceRefresh?: boolean;
+  executor?: MutationTransaction;
+  snapshot?: Awaited<ReturnType<typeof getArtificialAnalysisSnapshot>>;
 }): Promise<ArtificialAnalysisAdminSnapshot> {
   const [config, localModels, storedMappings, mergedTargets] = await Promise.all([
-    getArtificialAnalysisConfig(),
-    getLocalModels(),
-    getStoredMappings(),
-    getMergedModelTargets()
+    getArtificialAnalysisConfig(options?.executor),
+    getLocalModels(options?.executor),
+    getStoredMappings(options?.executor),
+    getMergedModelTargets(options?.executor)
   ]);
 
   if (!hasArtificialAnalysisApiKey()) {
@@ -170,7 +175,7 @@ export async function getArtificialAnalysisAdminSnapshot(options?: {
     };
   }
 
-  const snapshot = await getArtificialAnalysisSnapshot({ forceRefresh: options?.forceRefresh });
+  const snapshot = options?.snapshot ?? await getArtificialAnalysisSnapshot({ forceRefresh: options?.forceRefresh });
   const upstreamById = new Map(snapshot.models.map((model) => [model.id, model]));
 
   // 模型合并后旧映射可能仍挂在已弃用的 model_id 上。读取时按最终活跃模型归一化：
@@ -462,22 +467,23 @@ export async function saveArtificialAnalysisMappings(inputs: unknown) {
 }
 
 export async function saveArtificialAnalysisConfig(input: unknown) {
-  const existingConfig = await getArtificialAnalysisConfig();
-  const config = normalizeImportConfig(input);
-  const mergedConfig = {
-    ...config,
-    intelligenceIndexVersion: config.intelligenceIndexVersion ?? existingConfig.intelligenceIndexVersion ?? null,
-    intelligenceIndexVersionHistory:
-      config.intelligenceIndexVersionHistory ?? existingConfig.intelligenceIndexVersionHistory
-  };
-  await saveSetting({
-    key: ARTIFICIAL_ANALYSIS_SETTINGS_KEY,
-    valueJson: mergedConfig,
-    updatedBy: "admin",
-    note: "Artificial Analysis 导入配置"
+  return withCacheMutation(["settings"], async (tx) => {
+    const existingConfig = await getArtificialAnalysisConfig(tx);
+    const config = normalizeImportConfig(input);
+    const mergedConfig = {
+      ...config,
+      intelligenceIndexVersion: config.intelligenceIndexVersion ?? existingConfig.intelligenceIndexVersion ?? null,
+      intelligenceIndexVersionHistory:
+        config.intelligenceIndexVersionHistory ?? existingConfig.intelligenceIndexVersionHistory
+    };
+    await saveSetting({
+      key: ARTIFICIAL_ANALYSIS_SETTINGS_KEY,
+      valueJson: mergedConfig,
+      updatedBy: "admin",
+      note: "Artificial Analysis 导入配置"
+    }, tx);
+    return mergedConfig;
   });
-  await invalidateAllCaches();
-  return mergedConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -507,147 +513,162 @@ export async function runArtificialAnalysisImport(options: {
   const dryRun = options.dryRun === true;
   const createIds = Array.from(new Set(options.createExternalModelIds ?? []));
   const snapshot = await getArtificialAnalysisSnapshot();
-  const config = await getArtificialAnalysisConfig();
+  let historyChanged = false;
+  let importedDomains: CacheVersionDomain[] = [];
+  let entitiesChanged = false;
+  try {
+    return await withCacheMutation<ArtificialAnalysisImportSummary>(() => [
+      ...importedDomains,
+      ...(entitiesChanged ? ENTITY_CACHE_DOMAINS : []),
+      ...(historyChanged ? ["settings" as const] : [])
+    ], async (tx) => {
+      const config = await getArtificialAnalysisConfig(tx);
+      if (config.selectedMetrics.length === 0) throw new Error("请先勾选至少一个要导入的数据项");
+      const createdModels: string[] = [];
 
-  if (config.selectedMetrics.length === 0) {
-    throw new Error("请先勾选至少一个要导入的数据项");
-  }
+      // 预览沿用原有行为，不创建用户勾选的模型；模拟写入统一随事务回滚
+      if (!dryRun && createIds.length > 0) {
+        const upstreamById = new Map(snapshot.models.map((model) => [model.id, model]));
+        const now = new Date();
 
-  const createdModels: string[] = [];
+        for (const externalModelId of createIds) {
+          const upstream = upstreamById.get(externalModelId);
+          if (!upstream) continue;
 
-  // 预览阶段不建模型：新建实体属于不可回滚的副作用，不该被「看一眼」触发
-  if (!dryRun && createIds.length > 0) {
-    const upstreamById = new Map(snapshot.models.map((model) => [model.id, model]));
-    const now = new Date();
+          const modelName = upstream.name;
+          const providerName = upstream.creatorName?.trim() || "Unknown";
+          const provider = await ensureProvider(providerName, { db: tx });
+          const created = await ensureModelByProviderId({
+            providerId: provider.id,
+            modelName,
+            sourceModelId: upstream.slug ?? upstream.id
+          }, { db: tx });
 
-    for (const externalModelId of createIds) {
-      const upstream = upstreamById.get(externalModelId);
-      if (!upstream) continue;
+          await tx
+            .insert(externalModelMappings)
+            .values({
+              source: ARTIFICIAL_ANALYSIS_SOURCE_ID,
+              modelId: created.id,
+              externalModelId: upstream.id,
+              externalModelName: modelName,
+              externalModelSlug: upstream.slug,
+              externalCreator: upstream.creatorName,
+              matchStatus: "manual",
+              matchConfidence: 100,
+              matchReason: "created-from-upstream",
+              manualOverride: true,
+              rawJson: {},
+              lastSyncedAt: now,
+              updatedAt: now
+            })
+            .onConflictDoUpdate({
+              target: [externalModelMappings.source, externalModelMappings.modelId],
+              set: {
+                externalModelId: sql`excluded.external_model_id`,
+                externalModelName: sql`excluded.external_model_name`,
+                externalModelSlug: sql`excluded.external_model_slug`,
+                externalCreator: sql`excluded.external_creator`,
+                matchStatus: sql`excluded.match_status`,
+                matchConfidence: sql`excluded.match_confidence`,
+                matchReason: sql`excluded.match_reason`,
+                manualOverride: sql`excluded.manual_override`,
+                lastSyncedAt: sql`excluded.last_synced_at`,
+                updatedAt: sql`excluded.updated_at`
+              }
+            });
 
-      const modelName = upstream.name;
-      const providerName = upstream.creatorName?.trim() || "Unknown";
-      const provider = await ensureProvider(providerName);
-      const created = await ensureModelByProviderId({
-        providerId: provider.id,
-        modelName,
-        sourceModelId: upstream.slug ?? upstream.id
+          createdModels.push(modelName);
+          entitiesChanged = true;
+        }
+      }
+
+      const adminSnapshot = await getArtificialAnalysisAdminSnapshot({ executor: tx, snapshot });
+      const localModelsById = new Map(
+        adminSnapshot.mappings.map((mapping) => [
+          mapping.modelId,
+          { modelName: mapping.modelName, providerName: mapping.providerName }
+        ])
+      );
+
+      const matches: ModelMatchResult[] = adminSnapshot.mappings.map((mapping) => ({
+        modelId: mapping.modelId,
+        externalModelId: mapping.externalModelId,
+        externalModelName: mapping.externalModelName,
+        externalModelSlug: null,
+        externalCreator: mapping.externalCreator,
+        reasoningEffort: mapping.reasoningEffort,
+        matchStatus: mapping.matchStatus,
+        matchConfidence: mapping.matchConfidence,
+        matchReason: mapping.matchReason
+      }));
+
+      const rows = buildImportRows({
+        upstreamModels: snapshot.models,
+        catalog: snapshot.catalog,
+        config,
+        matches,
+        localModelsById,
+        intelligenceIndexVersion: snapshot.intelligenceIndexVersion
       });
 
-      await db
-        .insert(externalModelMappings)
-        .values({
-          source: ARTIFICIAL_ANALYSIS_SOURCE_ID,
-          modelId: created.id,
-          externalModelId: upstream.id,
-          externalModelName: modelName,
-          externalModelSlug: upstream.slug,
-          externalCreator: upstream.creatorName,
-          matchStatus: "manual",
-          matchConfidence: 100,
-          matchReason: "created-from-upstream",
-          manualOverride: true,
-          rawJson: {},
-          lastSyncedAt: now,
-          updatedAt: now
-        })
-        .onConflictDoUpdate({
-          target: [externalModelMappings.source, externalModelMappings.modelId],
-          set: {
-            externalModelId: sql`excluded.external_model_id`,
-            externalModelName: sql`excluded.external_model_name`,
-            externalModelSlug: sql`excluded.external_model_slug`,
-            externalCreator: sql`excluded.external_creator`,
-            matchStatus: sql`excluded.match_status`,
-            matchConfidence: sql`excluded.match_confidence`,
-            matchReason: sql`excluded.match_reason`,
-            manualOverride: sql`excluded.manual_override`,
-            lastSyncedAt: sql`excluded.last_synced_at`,
-            updatedAt: sql`excluded.updated_at`
-          }
-        });
+      const result = await importExternalBenchmarkRows(rows, {
+        source: ARTIFICIAL_ANALYSIS_SOURCE_LABEL,
+        dryRun: false,
+        executor: tx,
+        onChanged: (domains) => { importedDomains = domains; },
+        // 导入时用同一份时间轴识别「库里那行属于哪个版本」，
+        // 否则没有版本注释的老行会被全部误判成跨版本，重复追加一遍。
+        versionCutoffs: config.intelligenceIndexVersionHistory === undefined
+          ? undefined
+          : toAaVersionCutoffs(config.intelligenceIndexVersionHistory)
+      });
 
-      createdModels.push(modelName);
-    }
-  }
+      const publicChanged = result.publicChanged || createdModels.length > 0;
 
-  const adminSnapshot = await getArtificialAnalysisAdminSnapshot();
-  const localModelsById = new Map(
-    adminSnapshot.mappings.map((mapping) => [
-      mapping.modelId,
-      { modelName: mapping.modelName, providerName: mapping.providerName }
-    ])
-  );
+      if (!dryRun) {
+        const currentVersion = snapshot.intelligenceIndexVersion;
+        const merged = mergeIntelligenceIndexVersionHistory(
+          config.intelligenceIndexVersionHistory ?? [],
+          currentVersion,
+          result.benchTime
+        );
+        const nextVersionHistory = merged.history;
+        historyChanged = merged.changed;
 
-  const matches: ModelMatchResult[] = adminSnapshot.mappings.map((mapping) => ({
-    modelId: mapping.modelId,
-    externalModelId: mapping.externalModelId,
-    externalModelName: mapping.externalModelName,
-    externalModelSlug: null,
-    externalCreator: mapping.externalCreator,
-    reasoningEffort: mapping.reasoningEffort,
-    matchStatus: mapping.matchStatus,
-    matchConfidence: mapping.matchConfidence,
-    matchReason: mapping.matchReason
-  }));
+        await saveSetting({
+          key: ARTIFICIAL_ANALYSIS_SETTINGS_KEY,
+          valueJson: {
+            ...config,
+            intelligenceIndexVersion: currentVersion ?? config.intelligenceIndexVersion ?? null,
+            intelligenceIndexVersionHistory: nextVersionHistory.length > 0 ? nextVersionHistory : undefined,
+            lastImportedAt: new Date().toISOString()
+          },
+          updatedBy: "admin",
+          note: "Artificial Analysis 导入配置"
+        }, tx);
+      }
 
-  const rows = buildImportRows({
-    upstreamModels: snapshot.models,
-    catalog: snapshot.catalog,
-    config,
-    matches,
-    localModelsById,
-    intelligenceIndexVersion: snapshot.intelligenceIndexVersion
-  });
-
-  const result = await importExternalBenchmarkRows(rows, {
-    source: ARTIFICIAL_ANALYSIS_SOURCE_LABEL,
-    dryRun,
-    // 导入时用同一份时间轴识别「库里那行属于哪个版本」，
-    // 否则没有版本注释的老行会被全部误判成跨版本，重复追加一遍。
-    versionCutoffs: config.intelligenceIndexVersionHistory === undefined
-      ? undefined
-      : toAaVersionCutoffs(config.intelligenceIndexVersionHistory)
-  });
-
-  const publicChanged = result.publicChanged || createdModels.length > 0;
-  if (!dryRun && createdModels.length > 0 && !result.publicChanged) {
-    await invalidateAllCaches();
-  }
-
-  if (!dryRun) {
-    const currentVersion = snapshot.intelligenceIndexVersion;
-    const merged = mergeIntelligenceIndexVersionHistory(
-      config.intelligenceIndexVersionHistory ?? [],
-      currentVersion,
-      result.benchTime
-    );
-    const nextVersionHistory = merged.history;
-    const versionHistoryChanged = merged.changed;
-
-    await saveSetting({
-      key: ARTIFICIAL_ANALYSIS_SETTINGS_KEY,
-      valueJson: {
-        ...config,
-        intelligenceIndexVersion: currentVersion ?? config.intelligenceIndexVersion ?? null,
-        intelligenceIndexVersionHistory: nextVersionHistory.length > 0 ? nextVersionHistory : undefined,
-        lastImportedAt: new Date().toISOString()
-      },
-      updatedBy: "admin",
-      note: "Artificial Analysis 导入配置"
+      const summary: ArtificialAnalysisImportSummary = {
+        ...result,
+        dryRun,
+        publicChanged,
+        createdModels,
+        matchedModelCount: matches.filter(
+          (match) => match.matchStatus === "matched" || match.matchStatus === "manual"
+        ).length,
+        metricCount: config.selectedMetrics.length
+      };
+      if (dryRun) throw new ArtificialAnalysisPreviewRollback(summary);
+      return summary;
     });
-
-    if (versionHistoryChanged) {
-      await invalidateAllCaches();
-    }
+  } catch (error) {
+    if (error instanceof ArtificialAnalysisPreviewRollback) return error.result;
+    throw error;
   }
+}
 
-  return {
-    ...result,
-    publicChanged,
-    createdModels,
-    matchedModelCount: matches.filter(
-      (match) => match.matchStatus === "matched" || match.matchStatus === "manual"
-    ).length,
-    metricCount: config.selectedMetrics.length
-  };
+class ArtificialAnalysisPreviewRollback extends Error {
+  constructor(readonly result: ArtificialAnalysisImportSummary) {
+    super("Artificial Analysis preview rollback");
+  }
 }

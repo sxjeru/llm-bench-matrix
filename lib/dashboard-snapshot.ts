@@ -1,6 +1,6 @@
 import { toMatrixInputRow } from "@/components/benchmark-matrix/map-row";
 import { hasPublicModelPriceData, type ModelPriceInfo } from "@/components/benchmark-matrix/types";
-import { getCacheVersion } from "@/lib/cache-versions";
+import { getCacheVersions } from "@/lib/cache-versions";
 import {
   getDashboardRows,
   getDashboardStats,
@@ -82,12 +82,8 @@ export function toPublicModelPrice(row: Pick<
   return mapped;
 }
 
-export async function getPublicDashboardSnapshotVersions(): Promise<PublicDashboardSnapshotVersions> {
-  const [dashboard, pricing, settings] = await Promise.all([
-    getCacheVersion("dashboard"),
-    getCacheVersion("pricing"),
-    getCacheVersion("settings")
-  ]);
+export async function getPublicDashboardSnapshotVersions(options?: { fresh?: boolean }): Promise<PublicDashboardSnapshotVersions> {
+  const { dashboard, pricing, settings } = await getCacheVersions(options);
 
   return { dashboard, pricing, settings };
 }

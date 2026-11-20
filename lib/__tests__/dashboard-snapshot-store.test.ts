@@ -11,7 +11,7 @@ import {
   _resetInMemoryRecordForTest,
   type PublicDashboardSnapshotRecord
 } from "@/lib/dashboard-snapshot-store";
-import { invalidateAllCaches } from "@/lib/db/queries";
+import { invalidateLocalCaches } from "@/lib/db/queries";
 import * as snapshotModule from "@/lib/dashboard-snapshot";
 import * as cacheModule from "@/lib/dashboard-snapshot-cache";
 import type { PublicDashboardSnapshot } from "@/lib/dashboard-snapshot-cache";
@@ -76,7 +76,7 @@ function deferred<T>() {
 }
 
 async function invalidateSnapshotCache() {
-  await invalidateAllCaches({ skipVersionBump: ["dashboard", "pricing", "admin_entities", "settings"] });
+  invalidateLocalCaches();
 }
 
 const readRows = vi.fn<() => Promise<PublicDashboardSnapshotRecord[]>>();
@@ -263,7 +263,7 @@ describe("dashboard-snapshot-store", () => {
     expect(persist).toHaveBeenCalledTimes(1);
   });
 
-  test("不同版本各自重建，较早启动的慢任务不能覆盖后来的版本", async () => {
+  test("不同版本并发重建时，旧任务必须重试当前版本", async () => {
     const newerVersions = { ...VERSIONS, dashboard: "d-v2" };
     const olderBuild = deferred<PublicDashboardSnapshot>();
     const newerBuild = deferred<PublicDashboardSnapshot>();
@@ -281,16 +281,27 @@ describe("dashboard-snapshot-store", () => {
     const olderRequest = getOrBuildPublicDashboardSnapshotRecord(VERSIONS);
     const newerRequest = getOrBuildPublicDashboardSnapshotRecord(newerVersions);
     await Promise.all([olderStarted.promise, newerStarted.promise]);
+    vi.mocked(snapshotModule.getPublicDashboardSnapshotVersions).mockResolvedValue(newerVersions);
     newerBuild.resolve(createSnapshot(newerVersions, 99));
     const newerRecord = await newerRequest;
     olderBuild.resolve(createSnapshot());
     const olderRecord = await olderRequest;
 
-    expect(olderRecord.dashboardVersion).toBe(VERSIONS.dashboard);
+    expect(olderRecord.dashboardVersion).toBe(newerVersions.dashboard);
     expect(newerRecord.dashboardVersion).toBe(newerVersions.dashboard);
     expect(_getInMemoryRecordForTest()).toBe(newerRecord);
+    expect(olderRecord).toBe(newerRecord);
     expect(persist).toHaveBeenCalledTimes(1);
     expect(values.mock.calls[0][0].dashboardVersion).toBe(newerVersions.dashboard);
+  });
+
+  test("重建期间版本持续变化时停止重试，不持久化错误版本", async () => {
+    let version = 0;
+    vi.mocked(snapshotModule.getPublicDashboardSnapshotVersions).mockImplementation(async () => ({ ...VERSIONS, dashboard: `changed-${++version}` }));
+    await expect(getOrBuildPublicDashboardSnapshotRecord(VERSIONS)).rejects.toThrow("changed repeatedly");
+    expect(snapshotModule.loadPublicDashboardSnapshot).toHaveBeenCalledTimes(3);
+    expect(persist).not.toHaveBeenCalled();
+    expect(_getInMemoryRecordForTest()).toBeNull();
   });
 
   test("失效前的构建完成后不能回填缓存或清掉同版本的新任务", async () => {
@@ -420,7 +431,8 @@ describe("dashboard-snapshot-store", () => {
 
     const record = await rebuildAndPersistPublicDashboardSnapshotRecord();
 
-    expect(snapshotModule.getPublicDashboardSnapshotVersions).toHaveBeenCalledTimes(1);
+    expect(snapshotModule.getPublicDashboardSnapshotVersions).toHaveBeenCalledWith();
+    expect(snapshotModule.getPublicDashboardSnapshotVersions).toHaveBeenCalledWith({ fresh: true });
     expect(snapshotModule.loadPublicDashboardSnapshot).toHaveBeenCalledWith(VERSIONS);
     expect(record.payloadJson).not.toBe(saved.payloadJson);
     expect(_getInMemoryRecordForTest()).toBe(record);

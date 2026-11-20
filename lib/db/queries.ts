@@ -2,9 +2,11 @@ import { and, count, countDistinct, desc, eq, inArray, isNotNull, isNull, or, sq
 import { db } from "@/lib/db/client";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models, providers, settings } from "@/lib/db/schema";
 import { normalizeProviderConfig } from "@/lib/provider-config";
-import { bumpCacheVersions, getCacheVersion, type CacheVersionDomain } from "@/lib/cache-versions";
+import { getCacheVersion } from "@/lib/cache-versions";
 import { createVersionedCacheStore, invalidateVersionedCacheStore, withVersionedCache } from "@/lib/server-cache";
-import { invalidateModelPricingCaches } from "@/lib/model-pricing";
+import { ALL_CACHE_DOMAINS, registerCacheInvalidator } from "@/lib/cache-invalidation";
+import { withCacheMutation } from "@/lib/cache-mutation";
+export { invalidateLocalCaches, registerCacheInvalidator } from "@/lib/cache-invalidation";
 
 function toNullableNumber(value: unknown): number | null {
   if (value === null || value === undefined) return null;
@@ -49,39 +51,16 @@ const dashboardStatsStore = createVersionedCacheStore<DashboardStats>();
 const sourceOptionsStore = createVersionedCacheStore<string[]>();
 const modelParamsStore = createVersionedCacheStore<ModelParamsInfo[]>();
 
-const cacheInvalidators: Array<() => void> = [];
-
-export function registerCacheInvalidator(fn: () => void) {
-  cacheInvalidators.push(fn);
-}
-
-/** invalidateAllCaches 默认会 bump 的缓存版本域 */
-const ALL_CACHE_VERSION_DOMAINS: CacheVersionDomain[] = ["dashboard", "pricing", "admin_entities", "settings"];
-
-/**
- * Clear dashboard caches after admin write operations
- * (import, merge, delete, etc.) so subsequent reads reflect updated data.
- *
- * 公开页已是静态壳 + 客户端拉 `/api/public/dashboard`，新鲜度靠版本号 / ETag。
- * 不要再 revalidatePath 公开 layout：Vercel ISR 会把 `revalidate = false` 的首页
- * 打进按需重生锁，导入后访问 `/` 会卡死。
- *
- * skipVersionBump 用于调用链上已经 bump 过的域：lib/model-pricing 的写函数内部会
- * 自行 bump "pricing"，价格相关路由再无条件走这里就会重复写一次 settings 表。
- * 只跳过版本号 bump，进程内缓存仍然照常清空（清 Map 是幂等的，成本可忽略）。
- */
-export async function invalidateAllCaches(options?: { skipVersionBump?: CacheVersionDomain[] }) {
+registerCacheInvalidator(() => {
   invalidateVersionedCacheStore(dashboardRowsStore);
   invalidateVersionedCacheStore(dashboardStatsStore);
   invalidateVersionedCacheStore(sourceOptionsStore);
   invalidateVersionedCacheStore(modelParamsStore);
-  invalidateModelPricingCaches();
-  for (const fn of cacheInvalidators) {
-    fn();
-  }
+}, ["dashboard"]);
 
-  const skipped = new Set(options?.skipVersionBump ?? []);
-  await bumpCacheVersions(ALL_CACHE_VERSION_DOMAINS.filter((domain) => !skipped.has(domain)));
+/** Explicit manual refresh; business writers use withCacheMutation instead. */
+export async function invalidateAllCaches() {
+  await withCacheMutation(ALL_CACHE_DOMAINS, async () => undefined);
 }
 
 function normalizeSourceFilterKey(sourceFilter?: string | null): string {
@@ -409,8 +388,8 @@ export async function getModelParamsRows(forceVersion?: string): Promise<ModelPa
   );
 }
 
-export async function getSettings() {
-  const rows = await db.select().from(settings);
+export async function getSettings(executor: Pick<typeof db, "select"> = db) {
+  const rows = await executor.select().from(settings);
 
   return rows.reduce<Record<string, unknown>>((acc, row) => {
     acc[row.key] = row.valueJson;
@@ -494,8 +473,8 @@ export async function saveSetting(input: {
   valueJson: unknown;
   updatedBy?: string;
   note?: string;
-}) {
-  await db
+}, executor: Pick<typeof db, "insert"> = db) {
+  await executor
     .insert(settings)
     .values({
       key: input.key,

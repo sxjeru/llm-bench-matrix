@@ -380,7 +380,7 @@ describe("mergeEntity benchmark source meta migration", () => {
       [{ benchmarkId: 202, source: "text:A" }],
       [{ benchmarkId: 202, source: "text:A", benchmarkType: "Imported Vision", modalities: ["Vision"] }]
     ]);
-    const selectFrom = vi.fn(() => ({ where: selectWhere }));
+    const selectFrom = vi.fn(() => ({ where: selectWhere, orderBy: dbSelectOrderBy }));
     const select = vi.fn(() => ({ from: selectFrom }));
 
     const onConflictDoNothing = vi.fn().mockResolvedValue(undefined);

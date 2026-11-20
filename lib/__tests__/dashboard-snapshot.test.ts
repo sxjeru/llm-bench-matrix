@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { getCacheVersion } from "@/lib/cache-versions";
+import { getCacheVersions } from "@/lib/cache-versions";
 import { PUBLIC_DASHBOARD_SNAPSHOT_FORMAT_VERSION, createPublicDashboardSnapshotEtag } from "@/lib/dashboard-snapshot-cache";
 import { loadPublicDashboardSnapshot, parseExportFootnote, toPublicModelPrice } from "@/lib/dashboard-snapshot";
 import { getDashboardRows, getDashboardStats, getModelParamsRows, getSettings, getSourceOptions } from "@/lib/db/queries";
 import { getModelPricingRows } from "@/lib/model-pricing";
 
 vi.mock("@/lib/cache-versions", () => ({
-  getCacheVersion: vi.fn()
+  getCacheVersions: vi.fn()
 }));
 
 vi.mock("@/lib/db/queries", () => ({
@@ -104,14 +104,14 @@ describe("toPublicModelPrice", () => {
 
 describe("loadPublicDashboardSnapshot", () => {
   beforeEach(() => {
-    vi.mocked(getCacheVersion).mockReset();
+    vi.mocked(getCacheVersions).mockReset();
     vi.mocked(getDashboardRows).mockClear();
     vi.mocked(getDashboardStats).mockClear();
     vi.mocked(getSourceOptions).mockClear();
     vi.mocked(getModelParamsRows).mockClear();
     vi.mocked(getModelPricingRows).mockClear();
     vi.mocked(getSettings).mockClear();
-    vi.mocked(getCacheVersion).mockImplementation(async (domain) => `${domain}-version`);
+    vi.mocked(getCacheVersions).mockResolvedValue({ dashboard: "dashboard-version", pricing: "pricing-version", settings: "settings-version", admin_entities: "admin-version" });
   });
 
   test("把各域版本作为 forceVersion 传给对应 loader，避免 probe TTL 返回旧 body", async () => {
@@ -122,7 +122,7 @@ describe("loadPublicDashboardSnapshot", () => {
     expect(getDashboardStats).toHaveBeenCalledWith(null, "dashboard-version");
     expect(getModelPricingRows).toHaveBeenCalledWith("pricing-version");
     expect(getModelParamsRows).toHaveBeenCalledWith("dashboard-version");
-    expect(getCacheVersion).toHaveBeenCalledWith("settings");
+    expect(getCacheVersions).toHaveBeenCalledTimes(1);
   });
 
   test("把 AA 导入配置里的版本历史投影为前端切分点，并过滤非法时间", async () => {
@@ -174,7 +174,7 @@ describe("loadPublicDashboardSnapshot", () => {
       settings: "forced-settings"
     });
 
-    expect(getCacheVersion).not.toHaveBeenCalled();
+    expect(getCacheVersions).not.toHaveBeenCalled();
     expect(getDashboardRows).toHaveBeenCalledWith(null, null, "forced-dashboard");
     expect(getModelPricingRows).toHaveBeenCalledWith("forced-pricing");
   });

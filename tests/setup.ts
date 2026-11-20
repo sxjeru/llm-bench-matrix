@@ -4,6 +4,8 @@ import { afterEach, vi } from "vitest";
 
 vi.mock("@/lib/cache-versions", () => ({
   bumpCacheVersions: vi.fn().mockResolvedValue(undefined),
+  invalidateCacheVersions: vi.fn(),
+  getCacheVersions: vi.fn().mockResolvedValue({ dashboard: "1", pricing: "1", admin_entities: "1", settings: "1" }),
   getCacheVersion: vi.fn().mockResolvedValue("1")
 }));
 

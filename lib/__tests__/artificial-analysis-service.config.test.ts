@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { bumpCacheVersions } from "@/lib/cache-versions";
 import { saveArtificialAnalysisConfig } from "@/lib/external-providers/artificial-analysis-service";
-import { getSettings, saveSetting, invalidateAllCaches } from "@/lib/db/queries";
+import { getSettings, saveSetting } from "@/lib/db/queries";
 
 vi.mock("@/lib/db/client", () => ({
   db: {
     select: vi.fn(),
-    transaction: vi.fn()
+    transaction: vi.fn(async (callback) => callback({ insert: vi.fn() }))
   }
 }));
 
@@ -52,9 +53,10 @@ describe("saveArtificialAnalysisConfig", () => {
             expect.objectContaining({ version: 5 })
           ])
         })
-      })
+      }), expect.anything()
     );
-    expect(invalidateAllCaches).toHaveBeenCalled();
+    expect(bumpCacheVersions).toHaveBeenCalledTimes(1);
+    expect(bumpCacheVersions).toHaveBeenCalledWith(["settings"], expect.anything());
   });
 });
 

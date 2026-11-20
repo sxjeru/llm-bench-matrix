@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "../../../../lib/admin-auth";
 import { ensureBenchmark } from "../../../../lib/admin-service";
-import { invalidateAllCaches } from "../../../../lib/db/queries";
 
 const schema = z.object({
   benchmarkName: z.string().min(1),
@@ -25,6 +24,5 @@ export async function POST(request: Request) {
   }
 
   const benchmark = await ensureBenchmark(parsed.data);
-  await invalidateAllCaches();
   return NextResponse.json({ benchmark });
 }

@@ -7,21 +7,21 @@ import {
   PUBLIC_CACHE_CONTROL_VERCEL
 } from "@/app/api/public/cache-headers";
 import { getDashboardRows } from "@/lib/db/queries";
-import { getCacheVersion } from "@/lib/cache-versions";
+import { getCacheVersions } from "@/lib/cache-versions";
 
 vi.mock("@/lib/db/queries", () => ({
   getDashboardRows: vi.fn()
 }));
 
 vi.mock("@/lib/cache-versions", () => ({
-  getCacheVersion: vi.fn()
+  getCacheVersions: vi.fn()
 }));
 
 describe("GET /api/public/records", () => {
   beforeEach(() => {
     vi.mocked(getDashboardRows).mockReset();
-    vi.mocked(getCacheVersion).mockReset();
-    vi.mocked(getCacheVersion).mockImplementation(async (domain) => `${domain}-version`);
+    vi.mocked(getCacheVersions).mockReset();
+    vi.mocked(getCacheVersions).mockResolvedValue({ dashboard: "dashboard-version", pricing: "pricing-version", settings: "settings-version", admin_entities: "admin-version" });
   });
 
   test("默认 limit=300，并返回缓存头和版本号", async () => {
@@ -29,8 +29,7 @@ describe("GET /api/public/records", () => {
 
     const response = await GET(new Request("https://example.com/api/public/records"));
 
-    expect(getCacheVersion).toHaveBeenCalledWith("dashboard");
-    expect(getCacheVersion).toHaveBeenCalledWith("pricing");
+    expect(getCacheVersions).toHaveBeenCalledWith();
     expect(getDashboardRows).toHaveBeenCalledWith(300, null, "dashboard-version");
     expect(response.headers.get("Cache-Control")).toBe(PUBLIC_CACHE_CONTROL_BROWSER);
     expect(response.headers.get("CDN-Cache-Control")).toBe(PUBLIC_CACHE_CONTROL_CDN);
@@ -139,7 +138,7 @@ describe("GET /api/public/records", () => {
   });
 
   test("If-None-Match 命中时返回 304", async () => {
-    vi.mocked(getCacheVersion).mockImplementation(async (domain) => domain === "dashboard" ? "v-test-1" : "p-test-1");
+    vi.mocked(getCacheVersions).mockResolvedValue({ dashboard: "v-test-1", pricing: "p-test-1", settings: "s-test-1", admin_entities: "a-test-1" });
 
     const response = await GET(new Request("https://example.com/api/public/records", {
       headers: { "If-None-Match": '"records:v-test-1:p-test-1:limit:300:5294d236f1071417"' }
@@ -150,20 +149,19 @@ describe("GET /api/public/records", () => {
   });
 
   test("If-None-Match 命中 304 时，完全不调用获取行数据的数据库方法", async () => {
-    vi.mocked(getCacheVersion).mockImplementation(async (domain) => domain === "dashboard" ? "v-test-1" : "p-test-1");
+    vi.mocked(getCacheVersions).mockResolvedValue({ dashboard: "v-test-1", pricing: "p-test-1", settings: "s-test-1", admin_entities: "a-test-1" });
 
     const response = await GET(new Request("https://example.com/api/public/records", {
       headers: { "If-None-Match": '"records:v-test-1:p-test-1:limit:300:5294d236f1071417"' }
     }));
 
     expect(response.status).toBe(304);
-    expect(getCacheVersion).toHaveBeenCalledWith("dashboard");
-    expect(getCacheVersion).toHaveBeenCalledWith("pricing");
+    expect(getCacheVersions).toHaveBeenCalledWith();
     expect(getDashboardRows).not.toHaveBeenCalled();
   });
 
   test("If-None-Match 为弱 ETag（W/ 前缀）时同样返回 304 并避开行查询", async () => {
-    vi.mocked(getCacheVersion).mockImplementation(async (domain) => domain === "dashboard" ? "v-test-1" : "p-test-1");
+    vi.mocked(getCacheVersions).mockResolvedValue({ dashboard: "v-test-1", pricing: "p-test-1", settings: "s-test-1", admin_entities: "a-test-1" });
 
     const response = await GET(new Request("https://example.com/api/public/records", {
       headers: { "If-None-Match": 'W/"records:v-test-1:p-test-1:limit:300:5294d236f1071417"' }
@@ -174,7 +172,7 @@ describe("GET /api/public/records", () => {
   });
 
   test("If-None-Match 为逗号分隔多个 ETag，命中任一值时返回 304", async () => {
-    vi.mocked(getCacheVersion).mockImplementation(async (domain) => domain === "dashboard" ? "v-test-1" : "p-test-1");
+    vi.mocked(getCacheVersions).mockResolvedValue({ dashboard: "v-test-1", pricing: "p-test-1", settings: "s-test-1", admin_entities: "a-test-1" });
 
     const response = await GET(new Request("https://example.com/api/public/records", {
       headers: {
@@ -188,7 +186,7 @@ describe("GET /api/public/records", () => {
   });
 
   test("If-None-Match 为通配符 * 时返回 304", async () => {
-    vi.mocked(getCacheVersion).mockImplementation(async (domain) => domain === "dashboard" ? "v-test-1" : "p-test-1");
+    vi.mocked(getCacheVersions).mockResolvedValue({ dashboard: "v-test-1", pricing: "p-test-1", settings: "s-test-1", admin_entities: "a-test-1" });
 
     const response = await GET(new Request("https://example.com/api/public/records", {
       headers: { "If-None-Match": "*" }
@@ -197,6 +195,19 @@ describe("GET /api/public/records", () => {
     expect(response.status).toBe(304);
     expect(response.headers.get("ETag")).toBe('"records:v-test-1:p-test-1:limit:300:5294d236f1071417"');
     expect(getDashboardRows).not.toHaveBeenCalled();
+  });
+
+  test("读取行数据期间提交新版本时重试，响应使用新版本 ETag", async () => {
+    vi.mocked(getCacheVersions)
+      .mockResolvedValueOnce({ dashboard: "old", pricing: "pricing", settings: "settings", admin_entities: "admin" })
+      .mockResolvedValue({ dashboard: "new", pricing: "pricing", settings: "settings", admin_entities: "admin" });
+    vi.mocked(getDashboardRows).mockResolvedValue([]);
+    const response = await GET(new Request("https://example.com/api/public/records"));
+    expect(getDashboardRows).toHaveBeenNthCalledWith(1, 300, null, "old");
+    expect(getDashboardRows).toHaveBeenNthCalledWith(2, 300, null, "new");
+    expect(getCacheVersions).toHaveBeenCalledWith({ fresh: true });
+    expect(response.headers.get("X-Dashboard-Version")).toBe("new");
+    expect(response.headers.get("ETag")).toContain("records:new:pricing:");
   });
 
   test("限流响应明确不进入公共缓存", async () => {

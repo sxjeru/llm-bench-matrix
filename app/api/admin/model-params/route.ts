@@ -7,7 +7,6 @@ import {
   updateModelParams,
   updateModelParamsBatch
 } from "../../../../lib/model-params";
-import { invalidateAllCaches } from "../../../../lib/db/queries";
 
 const applySchema = z.object({
   modelIds: z.array(z.number().int().positive()).optional()
@@ -38,16 +37,10 @@ export async function PATCH(request: Request) {
   try {
     if (batchUpdates) {
       const result = await updateModelParamsBatch(batchUpdates as Parameters<typeof updateModelParamsBatch>[0]);
-      if (result.updatedCount > 0) {
-        await invalidateAllCaches();
-      }
       return NextResponse.json(result);
     }
 
     const result = await updateModelParams(body);
-    if (result.updated) {
-      await invalidateAllCaches();
-    }
     return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json(
@@ -70,7 +63,6 @@ export async function POST(request: Request) {
 
   try {
     const result = await applyModelParamsSuggestions(parsed.data.modelIds);
-    await invalidateAllCaches();
     return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json(

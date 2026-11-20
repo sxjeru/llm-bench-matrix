@@ -428,7 +428,7 @@ describe("deleteProviderAndTransferModels", () => {
       .mockReturnValueOnce({ from: fromSourceModels })
       .mockReturnValueOnce({ from: fromProviderRows });
 
-    const tx = { execute, select, update, delete: deleteFn };
+    const tx = { insert: vi.fn(), execute, select, update, delete: deleteFn };
     const transactionExecutor = {
       transaction<T>(callback: (value: typeof tx) => Promise<T>): Promise<T> {
         return callback(tx);
@@ -639,7 +639,7 @@ describe("updateProviderConfig", () => {
     const whereUpdate = vi.fn().mockReturnValue({ returning });
     const set = vi.fn().mockReturnValue({ where: whereUpdate });
     const update = vi.fn().mockReturnValue({ set });
-    const tx = { execute, select, update };
+    const tx = { insert: vi.fn(), execute, select, update };
     const transactionExecutor = {
       transaction<T>(callback: (value: typeof tx) => Promise<T>): Promise<T> {
         return callback(tx);
@@ -739,7 +739,7 @@ describe("deleteProviderAndTransferModels", () => {
       })
       .mockReturnValueOnce({ from: fromProviderRows });
 
-    const tx = { execute, select, update, delete: deleteFn };
+    const tx = { insert: vi.fn(), execute, select, update, delete: deleteFn };
     const transactionExecutor = {
       transaction<T>(callback: (value: typeof tx) => Promise<T>): Promise<T> {
         return callback(tx);

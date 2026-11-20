@@ -1,8 +1,9 @@
 import { and, desc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, models } from "@/lib/db/schema";
-import { invalidateAllCaches } from "@/lib/db/queries";
-import { getSourceKey, getSourceLabel, SOURCE_ALL, SOURCE_EMPTY } from "@/lib/source-utils";
+import { withCacheMutation } from "@/lib/cache-mutation";
+import { RECORD_CACHE_DOMAINS } from "@/lib/cache-invalidation";
+import { getSourceKey, getSourceLabel, SOURCE_ALL } from "@/lib/source-utils";
 
 export type ImportBatchSummary = {
   batchKey: string;
@@ -406,7 +407,7 @@ export async function deleteImportBatch(input: {
 
   type TransactionCallback = Parameters<DbClient["transaction"]>[0];
 
-  const result = await client.transaction(async (tx: Parameters<TransactionCallback>[0]) => {
+  const result = await withCacheMutation((result) => result.deleted > 0 || result.prunedSourceMeta > 0 ? RECORD_CACHE_DOMAINS : [], async (tx: Parameters<TransactionCallback>[0]) => {
     // 1. 查询待删除的目标记录及关联的 (benchmarkId, source)
     const targetRows = await tx
       .select({
@@ -478,23 +479,7 @@ export async function deleteImportBatch(input: {
       deleted: deletedCount,
       prunedSourceMeta
     };
-  });
-
-  // 4. 级联刷新所有缓存
-  // 事务已成功提交，删除记录已持久化。缓存失效失败不应导致删除操作被误报为失败。
-  let cacheInvalidated = true;
-  let warning: string | undefined;
-
-  if (result.deleted > 0 || result.prunedSourceMeta > 0) {
-    try {
-      await invalidateAllCaches();
-    } catch (cacheError) {
-      cacheInvalidated = false;
-      const errorMsg = cacheError instanceof Error ? cacheError.message : String(cacheError);
-      warning = `批次数据已成功删除，但缓存刷新失败: ${errorMsg}`;
-      console.error("[deleteImportBatch] 批次数据删除成功，但缓存失效失败:", cacheError);
-    }
-  }
+  }, client);
 
   return {
     ok: true,
@@ -502,8 +487,7 @@ export async function deleteImportBatch(input: {
     prunedSourceMeta: result.prunedSourceMeta,
     batchTime: isoString,
     source: input.matchAllSources ? null : (input.source ?? null),
-    cacheInvalidated,
-    ...(warning ? { warning } : {})
+    cacheInvalidated: true
   };
 }
 

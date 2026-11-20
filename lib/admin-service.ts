@@ -34,9 +34,10 @@ import {
 import type { ParsedImportRecord } from "@/lib/import/xlsm";
 import { benchmarkSourceMeta, benchmarkValues, benchmarks, externalModelMappings, models, providers, settings } from "@/lib/db/schema";
 import type { ProviderConfig } from "@/lib/db/schema";
-import { invalidateAllCaches, registerCacheInvalidator } from "@/lib/db/queries";
+import { registerCacheInvalidator, RECORD_CACHE_DOMAINS, ENTITY_CACHE_DOMAINS } from "@/lib/cache-invalidation";
+import { withCacheMutation } from "@/lib/cache-mutation";
 import { createVersionedCacheStore, withVersionedCache, invalidateVersionedCacheStore } from "@/lib/server-cache";
-import { getCacheVersion } from "@/lib/cache-versions";
+import { getCacheVersion, type CacheVersionDomain } from "@/lib/cache-versions";
 import { isValidHexColor, normalizeProviderConfig, normalizeProviderConfigPrefix } from "@/lib/provider-config";
 import {
   inferModalitiesFromCategory,
@@ -153,8 +154,8 @@ type TextParseWarning =
 
 /** Structural type covering the Drizzle methods used by entity-ensure helpers. */
 type DbExecutor = Pick<typeof db, "select" | "insert" | "update" | "delete" | "execute">;
-type ProviderConfigTx = Pick<DbTransactionClient, "execute" | "select" | "update">;
-type ProviderDeleteTx = Pick<DbTransactionClient, "execute" | "select" | "update" | "delete">;
+type ProviderConfigTx = Pick<DbTransactionClient, "execute" | "select" | "update" | "insert">;
+type ProviderDeleteTx = Pick<DbTransactionClient, "execute" | "select" | "update" | "delete" | "insert">;
 type ProviderConfigTransactionExecutor = {
   transaction<T>(callback: (tx: ProviderConfigTx) => Promise<T>): Promise<T>;
 };
@@ -2045,7 +2046,7 @@ export async function updateProviderConfig(
   options?: { db?: DbExecutor; transactionExecutor?: ProviderConfigTransactionExecutor }
 ) {
   const transactionExecutor = options?.transactionExecutor ?? db;
-  const updatedResult = await transactionExecutor.transaction(async (tx) => {
+  const updatedResult = await withCacheMutation(ENTITY_CACHE_DOMAINS, async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${sql.raw("2147483001")})`);
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${input.providerId})`);
 
@@ -2066,14 +2067,13 @@ export async function updateProviderConfig(
       })
       .where(eq(providers.id, input.providerId))
       .returning();
-  });
+  }, transactionExecutor);
 
   const updatedProvider = firstResultRow<typeof providers.$inferSelect>(updatedResult);
   if (!updatedProvider) {
     throw new Error("failed to update provider config");
   }
 
-  await invalidateAllCaches();
   return updatedProvider;
 }
 
@@ -2086,7 +2086,7 @@ export async function deleteProviderAndTransferModels(
   }
 
   const transactionExecutor = options?.transactionExecutor ?? db;
-  const deletedResult = await transactionExecutor.transaction(async (tx) => {
+  const deletedResult = await withCacheMutation(ENTITY_CACHE_DOMAINS, async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${sql.raw("2147483001")})`);
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${input.providerId})`);
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${input.transferTargetProviderId})`);
@@ -2171,13 +2171,12 @@ export async function deleteProviderAndTransferModels(
       transferredModelCount: sourceModels.length,
       transferTargetProviderId: input.transferTargetProviderId
     };
-  });
+  }, transactionExecutor);
 
   if (!deletedResult.deletedProvider) {
     throw new Error("failed to delete provider");
   }
 
-  await invalidateAllCaches();
   return {
     ok: true,
     providerId: deletedResult.deletedProvider.id,
@@ -2435,9 +2434,10 @@ export async function getModelDedupeRule() {
   }
 }
 
-export async function rebuildModelCanonicalKeysByRule(rawRule: unknown) {
+export async function rebuildModelCanonicalKeysByRule(rawRule: unknown, executor?: DbTransactionClient): Promise<{ ok: boolean; totalModels: number; canonicalGroups: number; mergedCount: number }> {
+  if (!executor) return withCacheMutation(ENTITY_CACHE_DOMAINS, (tx) => rebuildModelCanonicalKeysByRule(rawRule, tx));
   const dedupeRule = normalizeModelDedupeRule(rawRule);
-  const allModels = await db
+  const allModels = await executor
     .select({
       id: models.id,
       modelName: models.modelName,
@@ -2459,7 +2459,7 @@ export async function rebuildModelCanonicalKeysByRule(rawRule: unknown) {
   const tempSuffix = Date.now();
   let mergedCount = 0;
 
-  await db.transaction(async (tx: DbTransactionClient) => {
+  await (async (tx: DbTransactionClient) => {
     // Phase 1: Batch assign temporary keys to all models in a single UPDATE
     await tx.execute(
       sql`UPDATE models SET canonical_key = 'tmp-model-' || id::text || '-' || ${String(tempSuffix)}`
@@ -2509,9 +2509,7 @@ export async function rebuildModelCanonicalKeysByRule(rawRule: unknown) {
         mergedCount += 1;
       }
     }
-  });
-
-  await invalidateAllCaches();
+  })(executor);
 
   return {
     ok: true,
@@ -2521,9 +2519,10 @@ export async function rebuildModelCanonicalKeysByRule(rawRule: unknown) {
   };
 }
 
-export async function rebuildBenchmarkCanonicalKeysByRule(rawRule: unknown) {
+export async function rebuildBenchmarkCanonicalKeysByRule(rawRule: unknown, executor?: DbTransactionClient): Promise<{ ok: boolean; totalBenchmarks: number; canonicalGroups: number; mergedCount: number }> {
+  if (!executor) return withCacheMutation(RECORD_CACHE_DOMAINS, (tx) => rebuildBenchmarkCanonicalKeysByRule(rawRule, tx));
   const dedupeRule = normalizeModelDedupeRule(rawRule);
-  const allBenchmarks = await db
+  const allBenchmarks = await executor
     .select({
       id: benchmarks.id,
       benchmarkName: benchmarks.benchmarkName,
@@ -2556,7 +2555,7 @@ export async function rebuildBenchmarkCanonicalKeysByRule(rawRule: unknown) {
   const tempSuffix = Date.now();
   let mergedCount = 0;
 
-  await db.transaction(async (tx: DbTransactionClient) => {
+  await (async (tx: DbTransactionClient) => {
     // Phase 1: Batch assign temporary keys to all benchmarks in a single UPDATE
     await tx.execute(
       sql`UPDATE benchmarks SET canonical_key = 'tmp-benchmark-' || id::text || '-' || ${String(tempSuffix)}`
@@ -2692,9 +2691,7 @@ export async function rebuildBenchmarkCanonicalKeysByRule(rawRule: unknown) {
         mergedCount += 1;
       }
     }
-  });
-
-  await invalidateAllCaches();
+  })(executor);
 
   return {
     ok: true,
@@ -2704,7 +2701,11 @@ export async function rebuildBenchmarkCanonicalKeysByRule(rawRule: unknown) {
   };
 }
 
-export async function ensureProvider(name: string, options?: { db?: DbExecutor }) {
+export async function ensureProvider(name: string, options?: { db?: DbExecutor; onChanged?: () => void }): Promise<typeof providers.$inferSelect> {
+  if (!options?.db) {
+    let changed = false;
+    return withCacheMutation(() => changed ? ENTITY_CACHE_DOMAINS : [], (tx) => ensureProvider(name, { db: tx, onChanged: () => { changed = true; } }));
+  }
   const cleanName = name.trim();
   if (!cleanName) {
     throw new Error("provider name is required");
@@ -2726,10 +2727,17 @@ export async function ensureProvider(name: string, options?: { db?: DbExecutor }
       set: {
         name: cleanName,
         updatedAt: new Date()
-      }
+      },
+      setWhere: ne(providers.name, cleanName)
     })
     .returning();
 
+  if (providerResult.length === 0) {
+    const [existing] = await executor.select().from(providers).where(eq(providers.slug, slug)).limit(1);
+    if (!existing) throw new Error("failed to resolve provider");
+    return existing;
+  }
+  options?.onChanged?.();
   const provider = firstResultRow<typeof providers.$inferSelect>(providerResult);
   if (!provider) {
     throw new Error("failed to upsert provider");
@@ -2882,7 +2890,11 @@ export async function ensureModelByProviderId(input: {
   modelName: string;
   modelAlias?: string | null;
   sourceModelId?: string | null;
-}, options?: { dedupeRule?: ReturnType<typeof normalizeModelDedupeRule>; db?: DbExecutor }) {
+}, options?: { dedupeRule?: ReturnType<typeof normalizeModelDedupeRule>; db?: DbExecutor; onChanged?: () => void }): Promise<typeof models.$inferSelect> {
+  if (!options?.db) {
+    let changed = false;
+    return withCacheMutation(() => changed ? ENTITY_CACHE_DOMAINS : [], (tx) => ensureModelByProviderId(input, { ...options, db: tx, onChanged: () => { changed = true; } }));
+  }
   const cleanName = normalizeNameParenthesisSpacing(input.modelName);
   if (!cleanName) {
     throw new Error("modelName is required");
@@ -2904,6 +2916,7 @@ export async function ensureModelByProviderId(input: {
     return resolveActiveModel(existing, executor);
   }
 
+  options?.onChanged?.();
   const createdResult = await executor
     .insert(models)
     .values({
@@ -2950,8 +2963,12 @@ async function resolveActiveBenchmark(
 
 export async function ensureBenchmark(
   input: EnsureBenchmarkInput,
-  options?: { dedupeRule?: ModelDedupeRule; db?: DbExecutor }
-) {
+  options?: { dedupeRule?: ModelDedupeRule; db?: DbExecutor; onChanged?: () => void }
+): Promise<typeof benchmarks.$inferSelect> {
+  if (!options?.db) {
+    let changed = false;
+    return withCacheMutation(() => changed ? RECORD_CACHE_DOMAINS : [], (tx) => ensureBenchmark(input, { ...options, db: tx, onChanged: () => { changed = true; } }));
+  }
   const cleanName = normalizeNameParenthesisSpacing(input.benchmarkName);
   const cleanType = input.benchmarkType.trim() || "general";
 
@@ -2975,6 +2992,7 @@ export async function ensureBenchmark(
   if (existing) {
     const activeBenchmark = await resolveActiveBenchmark(existing, executor);
     if (forceLowerIsBetter && activeBenchmark.higherIsBetter) {
+      options?.onChanged?.();
       const updatedResult = await executor
         .update(benchmarks)
         .set({ higherIsBetter: false })
@@ -3003,6 +3021,7 @@ export async function ensureBenchmark(
     if (existingByNameType.mergedIntoBenchmarkId !== null) {
       const activeBenchmark = await resolveActiveBenchmark(existingByNameType, executor);
       if (forceLowerIsBetter && activeBenchmark.higherIsBetter) {
+        options?.onChanged?.();
         const updatedResult = await executor
           .update(benchmarks)
           .set({ higherIsBetter: false })
@@ -3019,6 +3038,7 @@ export async function ensureBenchmark(
     const shouldSyncLowerIsBetter = forceLowerIsBetter && existingByNameType.higherIsBetter;
 
     if (shouldSyncCanonical || shouldSyncLowerIsBetter) {
+      options?.onChanged?.();
       const updatedResult = await executor
         .update(benchmarks)
         .set({
@@ -3039,6 +3059,7 @@ export async function ensureBenchmark(
     return existingByNameType;
   }
 
+  options?.onChanged?.();
   const createdResult = await executor
     .insert(benchmarks)
     .values({
@@ -3082,28 +3103,28 @@ export async function createBenchmarkValue(input: {
     ? normalizeStoredBenchmarkValue(benchmarkName, parseBenchmarkValue(input.valueRaw))
     : parseBenchmarkValue(input.valueRaw);
 
-  const createdResult = await db
-    .insert(benchmarkValues)
-    .values({
-      modelId: input.modelId,
-      benchmarkId: input.benchmarkId,
-      benchTime: input.benchTime,
-      valueRaw: parsed.valueRaw,
-      valueNum: parsed.valueNum !== null ? String(parsed.valueNum) : null,
-      valueNum2: parsed.valueNum2 !== null ? String(parsed.valueNum2) : null,
-      valueNote: parsed.valueNote,
-      source: input.source ?? null
-    })
-    .returning();
+  return withCacheMutation(RECORD_CACHE_DOMAINS, async (tx) => {
+    const createdResult = await tx
+      .insert(benchmarkValues)
+      .values({
+        modelId: input.modelId,
+        benchmarkId: input.benchmarkId,
+        benchTime: input.benchTime,
+        valueRaw: parsed.valueRaw,
+        valueNum: parsed.valueNum !== null ? String(parsed.valueNum) : null,
+        valueNum2: parsed.valueNum2 !== null ? String(parsed.valueNum2) : null,
+        valueNote: parsed.valueNote,
+        source: input.source ?? null
+      })
+      .returning();
 
-  const created = firstResultRow<typeof benchmarkValues.$inferSelect>(createdResult);
-  if (!created) {
-    throw new Error("failed to create benchmark value");
-  }
+    const created = firstResultRow<typeof benchmarkValues.$inferSelect>(createdResult);
+    if (!created) {
+      throw new Error("failed to create benchmark value");
+    }
 
-  await invalidateAllCaches();
-
-  return created;
+    return created;
+  });
 }
 
 export type BenchmarkValueOverlapStats = {
@@ -3421,12 +3442,13 @@ export async function mergeEntity(input: {
   targetId: number;
   targetBenchmarkName?: string;
   targetBenchmarkType?: string;
-}) {
+}, executor?: DbTransactionClient): Promise<void> {
+  if (!executor) return withCacheMutation(input.entityType === "model" ? ENTITY_CACHE_DOMAINS : RECORD_CACHE_DOMAINS, (tx) => mergeEntity(input, tx));
   if (input.sourceId === input.targetId) {
     throw new Error("sourceId and targetId cannot be the same");
   }
 
-  await db.transaction(async (tx: DbTransactionClient) => {
+  await (async (tx: DbTransactionClient) => {
     if (input.entityType === "model") {
       await tx
         .update(benchmarkValues)
@@ -3640,9 +3662,7 @@ export async function mergeEntity(input: {
       .update(benchmarks)
       .set({ mergedIntoBenchmarkId: input.targetId })
       .where(eq(benchmarks.mergedIntoBenchmarkId, input.sourceId));
-  });
-
-  await invalidateAllCaches();
+  })(executor);
 }
 
 export type RenameEntityInput =
@@ -3685,7 +3705,8 @@ export type RenameEntityResult = {
   mergedSourceMetaCount?: number;
 };
 
-export async function renameEntity(input: RenameEntityInput): Promise<RenameEntityResult> {
+export async function renameEntity(input: RenameEntityInput, executor?: DbTransactionClient): Promise<RenameEntityResult> {
+  if (!executor) return withCacheMutation((result) => result.action === "unchanged" ? [] : input.entityType === "model" ? ENTITY_CACHE_DOMAINS : RECORD_CACHE_DOMAINS, (tx) => renameEntity(input, tx));
   const mergeOnConflict = input.mergeOnConflict !== false;
 
   if (input.entityType === "source") {
@@ -3700,7 +3721,7 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
       throw new Error("nextName is required");
     }
 
-    const result = await db.transaction(async (tx: DbTransactionClient): Promise<RenameEntityResult> => {
+    const result = await (async (tx: DbTransactionClient): Promise<RenameEntityResult> => {
       const previousValueRows = await tx
         .select({ id: benchmarkValues.id })
         .from(benchmarkValues)
@@ -3789,9 +3810,7 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
         renamedSourceMetaCount: sourceMetaIdsToUpdate.length,
         mergedSourceMetaCount: sourceMetaIdsToDelete.length
       };
-    });
-
-    await invalidateAllCaches();
+    })(executor);
 
     return result;
   }
@@ -3804,7 +3823,7 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
   const dedupeRule = await getModelDedupeRule();
 
   if (input.entityType === "benchmark") {
-    const [current] = await db
+    const [current] = await executor
       .select({
         id: benchmarks.id,
         benchmarkName: benchmarks.benchmarkName,
@@ -3830,7 +3849,7 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
 
     const nextCanonicalKey = buildBenchmarkCanonicalKey(nextName, normalizedNextBenchmarkType, dedupeRule);
 
-    const [conflict] = await db
+    const [conflict] = await executor
       .select({
         id: benchmarks.id,
         benchmarkName: benchmarks.benchmarkName,
@@ -3867,7 +3886,7 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
         };
       }
 
-      await db
+      await executor
         .update(benchmarks)
         .set({
           benchmarkName: nextName,
@@ -3875,8 +3894,6 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
           canonicalKey: nextCanonicalKey
         })
         .where(eq(benchmarks.id, current.id));
-
-      await invalidateAllCaches();
 
       return {
         ok: true,
@@ -3902,7 +3919,7 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
       targetId: current.id,
       targetBenchmarkName: nextName,
       targetBenchmarkType: normalizedNextBenchmarkType
-    });
+    }, executor);
 
     return {
       ok: true,
@@ -3918,7 +3935,7 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
     };
   }
 
-  const result: RenameEntityResult = await db.transaction(async (tx: DbTransactionClient): Promise<RenameEntityResult> => {
+  const result: RenameEntityResult = await (async (tx: DbTransactionClient): Promise<RenameEntityResult> => {
     const [current] = await tx
       .select({
         id: models.id,
@@ -4056,9 +4073,7 @@ export async function renameEntity(input: RenameEntityInput): Promise<RenameEnti
       mergedSourceId,
       mergedSourceName
     };
-  });
-
-  await invalidateAllCaches();
+  })(executor);
 
   return result;
 }
@@ -4072,7 +4087,7 @@ export async function updateMergedEntityRecord(input: {
     throw new Error("sourceId and targetId cannot be the same");
   }
 
-  await db.transaction(async (tx: DbTransactionClient) => {
+  await withCacheMutation(input.entityType === "model" ? ENTITY_CACHE_DOMAINS : RECORD_CACHE_DOMAINS, async (tx: DbTransactionClient) => {
     if (input.entityType === "model") {
       await tx
         .update(benchmarkValues)
@@ -4108,8 +4123,6 @@ export async function updateMergedEntityRecord(input: {
     }
   });
 
-  await invalidateAllCaches();
-
   return { ok: true };
 }
 
@@ -4117,27 +4130,28 @@ export async function deleteMergedEntityRecord(input: {
   entityType: "model" | "benchmark";
   sourceId: number;
 }) {
-  if (input.entityType === "model") {
-    await db
-      .update(models)
-      .set({ mergedIntoModelId: null })
-      .where(eq(models.id, input.sourceId));
-  } else {
-    await db
-      .update(benchmarks)
-      .set({ mergedIntoBenchmarkId: null })
-      .where(eq(benchmarks.id, input.sourceId));
-  }
+  return withCacheMutation(input.entityType === "model" ? ENTITY_CACHE_DOMAINS : RECORD_CACHE_DOMAINS, async (tx) => {
+    if (input.entityType === "model") {
+      await tx
+        .update(models)
+        .set({ mergedIntoModelId: null })
+        .where(eq(models.id, input.sourceId));
+    } else {
+      await tx
+        .update(benchmarks)
+        .set({ mergedIntoBenchmarkId: null })
+        .where(eq(benchmarks.id, input.sourceId));
+    }
 
-  await invalidateAllCaches();
-
-  return { ok: true };
+    return { ok: true };
+  });
 }
 
 export async function migrateOrphanedMergedEntityValues(options?: {
   db?: DbExecutor;
 }): Promise<{ migratedModels: number; migratedBenchmarks: number }> {
-  const executor = options?.db ?? db;
+  if (!options?.db) return withCacheMutation((result) => result.migratedModels + result.migratedBenchmarks > 0 ? RECORD_CACHE_DOMAINS : [], (tx) => migrateOrphanedMergedEntityValues({ db: tx }));
+  const executor = options.db;
 
   const [mergedModels, mergedBenchmarks] = await Promise.all([
     executor
@@ -4208,9 +4222,6 @@ export async function migrateOrphanedMergedEntityValues(options?: {
     }
   }
 
-  if (migratedModels > 0 || migratedBenchmarks > 0) {
-    await invalidateAllCaches();
-  }
 
   return { migratedModels, migratedBenchmarks };
 }
@@ -4256,7 +4267,6 @@ export async function importParsedRecords(
 
   const expandedRows = expandMetricLabeledImportRows(rows);
   const { inserted } = await importNormalizedRows(expandedRows);
-  clearTextImportDuplicateCheckCache();
 
   return {
     total: expandedRows.length,
@@ -4271,7 +4281,8 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
 
   const dedupeRule = await getModelDedupeRule();
 
-  const result = await db.transaction(async (tx: DbTransactionClient) => {
+  let pricingChanged = false;
+  const result = await withCacheMutation(() => pricingChanged ? ENTITY_CACHE_DOMAINS : RECORD_CACHE_DOMAINS, async (tx: DbTransactionClient) => {
     const providerCache = new Map<string, Awaited<ReturnType<typeof ensureProvider>>>();
     const modelCache = new Map<string, Awaited<ReturnType<typeof ensureModelByProviderId>>>();
     const benchmarkByNameCache = new Map<string, Array<typeof benchmarks.$inferSelect>>();
@@ -4397,7 +4408,7 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
         const providerKey = toProviderSlug(providerName);
         let provider = providerCache.get(providerKey);
         if (!provider) {
-          provider = await ensureProvider(providerName, { db: tx });
+          provider = await ensureProvider(providerName, { db: tx, onChanged: () => { pricingChanged = true; } });
           providerCache.set(providerKey, provider);
         }
 
@@ -4411,7 +4422,7 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
               modelAlias: row.modelAlias,
               sourceModelId: row.sourceModelId
             },
-            { dedupeRule, db: tx }
+            { dedupeRule, db: tx, onChanged: () => { pricingChanged = true; } }
           );
           modelCache.set(modelCanonicalKey, model);
         }
@@ -4552,8 +4563,6 @@ async function importNormalizedRows(rows: NormalizedTextImportRow[]) {
     return { inserted: valueRows.length };
   });
 
-  await invalidateAllCaches();
-
   return result;
 }
 
@@ -4614,7 +4623,6 @@ export async function importStructuredRows(
 
   const expandedRows = expandMetricLabeledImportRows(normalizedRows);
   const { inserted } = await importNormalizedRows(expandedRows);
-  clearTextImportDuplicateCheckCache();
 
   return {
     total: expandedRows.length,
@@ -4768,6 +4776,8 @@ export async function importExternalBenchmarkRows(
      * 用来判断「库里那行旧记录属于哪个版本」；不传则用冷启动种子。
      */
     versionCutoffs?: readonly AaVersionCutoff[];
+    executor?: DbTransactionClient;
+    onChanged?: (domains: CacheVersionDomain[]) => void;
   }
 ): Promise<ExternalImportResult> {
   const source = options.source.trim();
@@ -4803,8 +4813,8 @@ export async function importExternalBenchmarkRows(
     return { ...emptyResult, skipped: 0 };
   }
 
-  const runTransaction = async (): Promise<ExternalImportResult> =>
-    db.transaction(async (tx: DbTransactionClient) => {
+  let pricingChanged = false;
+  const write = async (tx: DbTransactionClient): Promise<ExternalImportResult> => {
       const providerCache = new Map<string, Awaited<ReturnType<typeof ensureProvider>>>();
       const modelCache = new Map<string, Awaited<ReturnType<typeof ensureModelByProviderId>>>();
       const benchmarkCache = new Map<string, typeof benchmarks.$inferSelect>();
@@ -4923,7 +4933,7 @@ export async function importExternalBenchmarkRows(
         const providerKey = toProviderSlug(providerName);
         let provider = providerCache.get(providerKey);
         if (!provider) {
-          provider = await ensureProvider(providerName, { db: tx });
+          provider = await ensureProvider(providerName, { db: tx, onChanged: () => { pricingChanged = true; } });
           providerCache.set(providerKey, provider);
           if (preexistingProviderNameBySlug.get(provider.slug) !== provider.name) {
             publicChanged = true;
@@ -4935,7 +4945,7 @@ export async function importExternalBenchmarkRows(
         if (!model) {
           model = await ensureModelByProviderId(
             { providerId: provider.id, modelName, sourceModelId: row.sourceModelId ?? null },
-            { dedupeRule, db: tx }
+            { dedupeRule, db: tx, onChanged: () => { pricingChanged = true; } }
           );
           modelCache.set(modelCanonicalKey, model);
         }
@@ -5154,14 +5164,14 @@ export async function importExternalBenchmarkRows(
         throw new ExternalImportDryRunRollback(result);
       }
 
+      if (result.publicChanged) options.onChanged?.(pricingChanged ? ENTITY_CACHE_DOMAINS : RECORD_CACHE_DOMAINS);
       return result;
-    });
+    };
 
   try {
-    const result = await runTransaction();
-    if (result.publicChanged) {
-      await invalidateAllCaches();
-    }
+    const result = options.executor
+      ? await write(options.executor)
+      : await withCacheMutation((result) => result.publicChanged ? (pricingChanged ? ENTITY_CACHE_DOMAINS : RECORD_CACHE_DOMAINS) : [], write);
     return result;
   } catch (error) {
     if (error instanceof ExternalImportDryRunRollback) {
@@ -6304,6 +6314,8 @@ export function clearTextImportDuplicateCheckCache(): void {
   duplicateCheckInFlight.clear();
 }
 
+registerCacheInvalidator(clearTextImportDuplicateCheckCache, RECORD_CACHE_DOMAINS);
+
 async function loadExistingValuesBySlot(
   cacheKey: string,
   sourceCandidates: string[],
@@ -6592,7 +6604,6 @@ export async function importBenchmarkCsv(inputText: string, sourceInput?: string
   const parseWarnings = parsed.warnings ?? [];
   const allWarnings = [...parseWarnings, ...directionWarnings];
   const { inserted } = await importNormalizedRows(parsed.rows);
-  clearTextImportDuplicateCheckCache();
 
   return {
     format: parsed.format,
@@ -6616,7 +6627,7 @@ export async function deleteModelAndAllValues(modelId: number) {
     throw new Error(`model not found: ${modelId}`);
   }
 
-  await db.transaction(async (tx: DbTransactionClient) => {
+  await withCacheMutation(ENTITY_CACHE_DOMAINS, async (tx: DbTransactionClient) => {
     await tx
       .update(models)
       .set({ mergedIntoModelId: null })
@@ -6624,8 +6635,6 @@ export async function deleteModelAndAllValues(modelId: number) {
 
     await tx.delete(models).where(eq(models.id, modelId));
   });
-
-  await invalidateAllCaches();
 
   return {
     ok: true,
@@ -6663,7 +6672,7 @@ export async function deleteBenchmarkAndAllValues(benchmarkId: number) {
     .where(eq(benchmarkValues.benchmarkId, benchmarkId));
   const deletedValueCount = Number(valueStats?.valueCount ?? 0);
 
-  await db.transaction(async (tx: DbTransactionClient) => {
+  await withCacheMutation(RECORD_CACHE_DOMAINS, async (tx: DbTransactionClient) => {
     await tx
       .update(benchmarks)
       .set({ mergedIntoBenchmarkId: null })
@@ -6671,8 +6680,6 @@ export async function deleteBenchmarkAndAllValues(benchmarkId: number) {
 
     await tx.delete(benchmarks).where(eq(benchmarks.id, benchmarkId));
   });
-
-  await invalidateAllCaches();
 
   return {
     ok: true,
@@ -6686,7 +6693,7 @@ export async function deleteBenchmarkAndAllValues(benchmarkId: number) {
 export async function deleteBenchmarkValuesBySource(sourceInput: string) {
   const rawSource = sourceInput.trim();
   if (!rawSource) {
-    const result = await db.transaction(async (tx: DbTransactionClient) => {
+    const result = await withCacheMutation((result) => result.deletedRows.length > 0 || result.deletedSourceMetaRows.length > 0 ? RECORD_CACHE_DOMAINS : [], async (tx: DbTransactionClient) => {
       const deletedRows = await tx
         .delete(benchmarkValues)
         .where(or(isNull(benchmarkValues.source), eq(benchmarkValues.source, "")))
@@ -6702,8 +6709,6 @@ export async function deleteBenchmarkValuesBySource(sourceInput: string) {
         deletedSourceMetaRows
       };
     });
-
-    await invalidateAllCaches();
 
     return {
       ok: true,
@@ -6728,7 +6733,7 @@ export async function deleteBenchmarkValuesBySource(sourceInput: string) {
   }
 
   const matchedSources = Array.from(candidates).filter(Boolean);
-  const result = await db.transaction(async (tx: DbTransactionClient) => {
+  const result = await withCacheMutation((result) => result.deletedRows.length > 0 || result.deletedSourceMetaRows.length > 0 ? RECORD_CACHE_DOMAINS : [], async (tx: DbTransactionClient) => {
     const deletedRows = await tx
       .delete(benchmarkValues)
       .where(inArray(benchmarkValues.source, matchedSources))
@@ -6744,8 +6749,6 @@ export async function deleteBenchmarkValuesBySource(sourceInput: string) {
       deletedSourceMetaRows
     };
   });
-
-  await invalidateAllCaches();
 
   return {
     ok: true,
@@ -7133,7 +7136,7 @@ const duplicateCandidatesStore = createVersionedCacheStore<DuplicateEntityDetect
 
 registerCacheInvalidator(() => {
   invalidateVersionedCacheStore(duplicateCandidatesStore);
-});
+}, ["admin_entities"]);
 
 export async function detectDuplicateEntityCandidates(): Promise<DuplicateEntityDetectionResult> {
   return withVersionedCache(
@@ -8059,7 +8062,7 @@ export async function normalizeBenchmarkScaleByTarget(input: {
     throw new Error(`benchmark not found or merged: ${input.benchmarkId}`);
   }
 
-  const { updatedRows, updatedCells } = await db.transaction(async (tx: DbTransactionClient) => {
+  const { updatedRows, updatedCells } = await withCacheMutation((result) => result.updatedRows > 0 ? RECORD_CACHE_DOMAINS : [], async (tx: DbTransactionClient) => {
     const rows = await tx
       .select({
         id: benchmarkValues.id,
@@ -8144,8 +8147,6 @@ export async function normalizeBenchmarkScaleByTarget(input: {
     };
   });
 
-  await invalidateAllCaches();
-
   return {
     ok: true,
     benchmarkId: benchmark.id,
@@ -8210,7 +8211,7 @@ export async function splitBenchmarkScaleByMode(input: {
     throw new Error("该 benchmark 当前没有可迁移到 Elo 的 >100 分值");
   }
 
-  const result = await db.transaction(async (tx: DbTransactionClient) => {
+  const result = await withCacheMutation(RECORD_CACHE_DOMAINS, async (tx: DbTransactionClient) => {
     const baseBenchmark = benchmark.benchmarkName === baseBenchmarkName
       ? benchmark
       : await ensureBenchmark(
@@ -8437,8 +8438,6 @@ export async function splitBenchmarkScaleByMode(input: {
     };
   });
 
-  await invalidateAllCaches();
-
   return {
     ok: true,
     benchmarkId: benchmark.id,
@@ -8450,15 +8449,13 @@ export async function splitBenchmarkScaleByMode(input: {
 }
 
 export async function clearNonSettingsData() {
-  await db.transaction(async (tx: DbTransactionClient) => {
+  await withCacheMutation(ENTITY_CACHE_DOMAINS, async (tx: DbTransactionClient) => {
     await tx.delete(benchmarkValues);
     await tx.delete(benchmarkSourceMeta);
     await tx.delete(models);
     await tx.delete(benchmarks);
     await tx.delete(providers);
   });
-
-  await invalidateAllCaches();
 
   return {
     ok: true

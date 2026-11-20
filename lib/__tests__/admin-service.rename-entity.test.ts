@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 
 type RenameEntityFn = (input: {
   entityType: "model" | "benchmark" | "source";
@@ -54,6 +54,10 @@ beforeAll(async () => {
 
   const dbClientModule = await import("@/lib/db/client");
   dbForTest = dbClientModule.db as typeof dbForTest;
+});
+
+beforeEach(() => {
+  vi.spyOn(dbForTest, "transaction").mockImplementation(async (callback) => callback(dbForTest));
 });
 
 afterEach(() => {
@@ -244,6 +248,8 @@ describe("renameEntity", () => {
     vi.spyOn(dbForTest, "select").mockImplementation(() => ({ from: dbSelectFrom }));
 
     const txSelectWhere = createSelectWhereMock([
+      [{ id: 401, benchmarkName: "Bench-Alpha", benchmarkType: "Type-A", canonicalKey: "benchalpha:typea", mergedIntoBenchmarkId: null }],
+      [{ id: 499, benchmarkName: "Bench Beta", mergedIntoBenchmarkId: null }],
       [{ benchmarkName: "Bench-Alpha", benchmarkType: "Type-A" }],
       [],
       [],
