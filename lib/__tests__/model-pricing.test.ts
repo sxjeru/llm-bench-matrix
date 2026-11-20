@@ -25,6 +25,9 @@ type ActiveModelRow = {
 type ExistingPricingRow = {
   modelId: number;
   manualOverride: boolean;
+  sourceProviderId?: string | null;
+  sourceModelId?: string | null;
+  releaseDate?: string | null;
   inputCost?: string | number | null;
   outputCost?: string | number | null;
   reasoningCost?: string | number | null;
@@ -1462,6 +1465,217 @@ describe("model pricing module", () => {
     ]);
     expect(result.matchedCount).toBe(1);
     expect(result.unmatchedCount).toBe(0);
+  });
+
+  test("syncModelsDevPricing 对多个候选记录的发布日期取众数", async () => {
+    const { db, values } = createDbMock(
+      [
+        {
+          id: 27,
+          modelName: "Shared Model",
+          sourceModelId: null,
+          providerName: "Unknown Proxy",
+          providerSlug: "unknown-proxy",
+          providerConfig: {}
+        }
+      ],
+      []
+    );
+
+    mockModelsDevResponse({
+      providerA: {
+        id: "provider-a",
+        name: "Provider A",
+        models: {
+          "shared-model": {
+            id: "shared-model",
+            name: "Shared Model",
+            release_date: "2025-01-15",
+            cost: { input: 1, output: 2 }
+          }
+        }
+      },
+      providerB: {
+        id: "provider-b",
+        name: "Provider B",
+        models: {
+          "shared-model": {
+            id: "shared-model",
+            name: "Shared Model",
+            release_date: "2025-01-15",
+            cost: { input: 1, output: 2 }
+          }
+        }
+      },
+      providerC: {
+        id: "provider-c",
+        name: "Provider C",
+        models: {
+          "shared-model": {
+            id: "shared-model",
+            name: "Shared Model",
+            release_date: "2025-02-20",
+            cost: { input: 3, output: 6 }
+          }
+        }
+      }
+    });
+
+    const pricingModule = await importPricingModule(db);
+    await pricingModule.syncModelsDevPricing();
+
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({
+        modelId: 27,
+        sourceProviderId: "provider-a",
+        sourceModelId: "shared-model",
+        releaseDate: "2025-01-15"
+      })
+    ]);
+  });
+
+  test("syncModelsDevPricing 供方决定价格时，发布日期仍取全局候选众数", async () => {
+    const { db, values } = createDbMock(
+      [
+        {
+          id: 29,
+          modelName: "Shared Model",
+          sourceModelId: null,
+          providerName: "Provider A",
+          providerSlug: "provider-a",
+          providerConfig: {}
+        }
+      ],
+      []
+    );
+
+    mockModelsDevResponse({
+      providerA: {
+        id: "provider-a",
+        name: "Provider A",
+        models: {
+          "shared-model": {
+            id: "shared-model",
+            name: "Shared Model",
+            release_date: "2025-01-15",
+            cost: { input: 1, output: 2 }
+          }
+        }
+      },
+      providerB: {
+        id: "provider-b",
+        name: "Provider B",
+        models: {
+          "shared-model": {
+            id: "shared-model",
+            name: "Shared Model",
+            release_date: "2025-02-20",
+            cost: { input: 3, output: 6 }
+          }
+        }
+      },
+      providerC: {
+        id: "provider-c",
+        name: "Provider C",
+        models: {
+          "shared-model": {
+            id: "shared-model",
+            name: "Shared Model",
+            release_date: "2025-02-20",
+            cost: { input: 3, output: 6 }
+          }
+        }
+      }
+    });
+
+    const pricingModule = await importPricingModule(db);
+    await pricingModule.syncModelsDevPricing();
+
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({
+        modelId: 29,
+        sourceProviderId: "provider-a",
+        sourceModelId: "shared-model",
+        inputCost: "1",
+        outputCost: "2",
+        releaseDate: "2025-02-20"
+      })
+    ]);
+  });
+
+  test("syncModelsDevPricing 已有绑定时也用同模型候选日期众数", async () => {
+    const { db, values } = createDbMock(
+      [
+        {
+          id: 28,
+          modelName: "Shared Model",
+          sourceModelId: null,
+          providerName: "Provider A",
+          providerSlug: "provider-a",
+          providerConfig: {}
+        }
+      ],
+      [
+        {
+          modelId: 28,
+          manualOverride: false,
+          sourceProviderId: "provider-a",
+          sourceModelId: "shared-model",
+          releaseDate: "2024-12-31"
+        }
+      ]
+    );
+
+    mockModelsDevResponse({
+      providerA: {
+        id: "provider-a",
+        name: "Provider A",
+        models: {
+          "shared-model": {
+            id: "shared-model",
+            name: "Shared Model",
+            release_date: "2025-01-15",
+            cost: { input: 1, output: 2 }
+          }
+        }
+      },
+      providerB: {
+        id: "provider-b",
+        name: "Provider B",
+        models: {
+          "shared-model": {
+            id: "shared-model",
+            name: "Shared Model",
+            release_date: "2025-01-15",
+            cost: { input: 1, output: 2 }
+          }
+        }
+      },
+      providerC: {
+        id: "provider-c",
+        name: "Provider C",
+        models: {
+          "shared-model": {
+            id: "shared-model",
+            name: "Shared Model",
+            release_date: "2025-02-20",
+            cost: { input: 3, output: 6 }
+          }
+        }
+      }
+    });
+
+    const pricingModule = await importPricingModule(db);
+    await pricingModule.syncModelsDevPricing();
+
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({
+        modelId: 28,
+        sourceProviderId: "provider-a",
+        sourceModelId: "shared-model",
+        releaseDate: "2025-01-15"
+      })
+    ]);
   });
 
   test("syncModelsDevPricing 在无合适 provider 时使用所有同名模型的众数价格", async () => {

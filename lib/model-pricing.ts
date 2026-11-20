@@ -74,6 +74,8 @@ type ModelMatch = {
   confidence: number;
   reason: string;
   fuzzyScore?: number;
+  /** 同一模型多条上游记录的发布日期众数；没有共识时省略。 */
+  releaseDate?: string;
 };
 
 const COST_KEYS = [
@@ -468,6 +470,80 @@ function resolvePriceModeMatch(matches: ModelMatch[]): ModelMatch | null {
   };
 }
 
+/**
+ * 在同一模型的多个 models.dev 候选中取发布日期众数。
+ *
+ * 日期并列时优先沿用当前价格候选的日期，再按候选出现顺序兜底，
+ * 保证结果确定且不会因为对象遍历顺序变化而无意义地跳日期。
+ */
+function resolveReleaseDateMode(
+  matches: readonly ModelMatch[],
+  preferredDate?: string | null
+): string | undefined {
+  const counts = new Map<string, { count: number; firstIndex: number }>();
+
+  matches.forEach((match, index) => {
+    const date = normalizeText(match.model.release_date);
+    if (!date) return;
+
+    const existing = counts.get(date);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      counts.set(date, { count: 1, firstIndex: index });
+    }
+  });
+
+  if (counts.size === 0) return undefined;
+
+  const preferred = normalizeText(preferredDate);
+  const maxCount = Math.max(...Array.from(counts.values()).map((item) => item.count));
+  const winners = Array.from(counts.entries())
+    .filter(([, item]) => item.count === maxCount)
+    .sort((left, right) => left[1].firstIndex - right[1].firstIndex)
+    .map(([date]) => date);
+
+  if (preferred && winners.includes(preferred)) return preferred;
+  return winners[0];
+}
+
+function withReleaseDateMode(match: ModelMatch, candidates: readonly ModelMatch[]): ModelMatch {
+  const releaseDate = resolveReleaseDateMode(candidates, match.model.release_date);
+  return releaseDate ? { ...match, releaseDate } : match;
+}
+
+/**
+ * 已有绑定仍决定价格来源，但发布日期可以参考其他 provider 的同模型记录。
+ * 只按上游 ID/名称的规范化 token 交集收集，避免把相近名称的不同模型混进众数。
+ */
+function collectBoundReleaseDateMatches(
+  boundMatch: ModelMatch,
+  providersById: Map<string, ModelsDevProvider>
+): ModelMatch[] {
+  const boundTokens = getUpstreamModelMatchTokens(boundMatch.modelKey, boundMatch.model);
+  const candidates: ModelMatch[] = [];
+
+  for (const provider of providersById.values()) {
+    for (const [modelKey, model] of Object.entries(provider.models)) {
+      const sourceTokens = getUpstreamModelMatchTokens(modelKey, model);
+      const sameModel =
+        hasTokenIntersection(boundTokens.exact, sourceTokens.exact) ||
+        hasTokenIntersection(boundTokens.variant, sourceTokens.variant);
+      if (!sameModel) continue;
+
+      candidates.push({
+        provider,
+        modelKey,
+        model,
+        confidence: boundMatch.confidence,
+        reason: boundMatch.reason
+      });
+    }
+  }
+
+  return candidates.length > 0 ? candidates : [boundMatch];
+}
+
 function resolveModelMatch(model: DbModel, sourceProvider: ModelsDevProvider | null, providersById: Map<string, ModelsDevProvider>) {
   const sourceModelId = model.sourceModelId?.trim();
   const modelName = model.modelName.trim();
@@ -536,14 +612,18 @@ function resolveModelMatch(model: DbModel, sourceProvider: ModelsDevProvider | n
 
   if (sourceProvider) {
     const providerMatch = providerMatches.get(sourceProvider.id)?.[0];
-    if (providerMatch) return providerMatch;
+    // 价格仍优先使用本地供方的候选；发布日期则在所有同名候选中取众数。
+    if (providerMatch) return withReleaseDateMode(providerMatch, globalMatches);
   }
 
   const priceModeMatch = resolvePriceModeMatch(globalMatches);
-  if (priceModeMatch) return priceModeMatch;
+  if (priceModeMatch) return withReleaseDateMode(priceModeMatch, globalMatches);
 
   if (globalMatches.length === 1) {
-    return { ...globalMatches[0]!, confidence: Math.min(globalMatches[0]!.confidence, 72), reason: `global-${globalMatches[0]!.reason}` };
+    return withReleaseDateMode(
+      { ...globalMatches[0]!, confidence: Math.min(globalMatches[0]!.confidence, 72), reason: `global-${globalMatches[0]!.reason}` },
+      globalMatches
+    );
   }
 
   if (globalMatches.length > 1) {
@@ -553,16 +633,19 @@ function resolveModelMatch(model: DbModel, sourceProvider: ModelsDevProvider | n
 
     if (bestScore > 0 && bestMatches.length === 1) {
       const bestMatch = bestMatches[0]!.match;
-      return {
-        ...bestMatch,
-        confidence: Math.min(bestMatch.confidence, bestScore >= 80 ? 88 : 78),
-        reason: `${bestMatch.reason}-provider-disambiguated`
-      };
+      return withReleaseDateMode(
+        {
+          ...bestMatch,
+          confidence: Math.min(bestMatch.confidence, bestScore >= 80 ? 88 : 78),
+          reason: `${bestMatch.reason}-provider-disambiguated`
+        },
+        globalMatches
+      );
     }
   }
 
   const fuzzyPriceModeMatch = resolvePriceModeMatch(fuzzyMatches);
-  if (fuzzyPriceModeMatch) return fuzzyPriceModeMatch;
+  if (fuzzyPriceModeMatch) return withReleaseDateMode(fuzzyPriceModeMatch, fuzzyMatches);
 
   return null;
 }
@@ -885,13 +968,17 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
       const boundProvider = sourceProviders.get(existing.sourceProviderId);
       const boundModel = boundProvider?.models[existing.sourceModelId];
       if (boundProvider && boundModel) {
-        match = {
+        const boundMatch: ModelMatch = {
           provider: boundProvider,
           modelKey: existing.sourceModelId,
           model: boundModel,
           confidence: 100,
           reason: "bound-source-model"
         };
+        match = withReleaseDateMode(
+          boundMatch,
+          collectBoundReleaseDateMatches(boundMatch, sourceProviders)
+        );
       }
     }
 
@@ -927,7 +1014,7 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
       });
 
       const existingDate = normalizeText(existing.releaseDate);
-      const upstreamDate = normalizeText(match.model.release_date);
+      const upstreamDate = normalizeText(match.releaseDate ?? match.model.release_date);
       const isDateEqual = existingDate === upstreamDate;
       const hasCustomDate = existingDate !== null && !isDateEqual;
 
@@ -964,7 +1051,7 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
       }
 
       const isDateEmpty = !existing.releaseDate || existing.releaseDate.trim() === "";
-      const upstreamReleaseDate = match.model.release_date?.trim();
+      const upstreamReleaseDate = normalizeText(match.releaseDate ?? match.model.release_date) ?? undefined;
 
       if (isDateEmpty && upstreamReleaseDate) {
         const sourceModelName = match.model.name ?? match.model.id ?? match.modelKey;
@@ -1030,7 +1117,7 @@ export async function syncModelsDevPricing(): Promise<ModelPricingSyncResult> {
       sourceProviderName: match.provider.name,
       sourceModelId: match.model.id ?? match.modelKey,
       sourceModelName,
-      releaseDate: match.model.release_date ?? existing?.releaseDate ?? null,
+      releaseDate: match.releaseDate ?? match.model.release_date ?? existing?.releaseDate ?? null,
       inputCost: cost.input?.toString() ?? null,
       outputCost: cost.output?.toString() ?? null,
       reasoningCost: cost.reasoning?.toString() ?? null,
