@@ -447,7 +447,9 @@ export function ScatterCanvas({
     if (!node || !plotArea) return;
 
     const handleWheel = (event: WheelEvent) => {
-      if (event.deltaY === 0) return;
+      // 部分浏览器会将 Shift + 滚轮转换成横向滚动。
+      const delta = event.deltaY || (event.shiftKey ? event.deltaX : 0);
+      if (delta === 0) return;
 
       const rect = node.getBoundingClientRect();
       const pointerX = event.clientX - rect.left;
@@ -462,18 +464,27 @@ export function ScatterCanvas({
 
       event.preventDefault();
 
-      const factor = event.deltaY > 0 ? SCATTER_WHEEL_ZOOM_STEP : 1 / SCATTER_WHEEL_ZOOM_STEP;
+      const factor = delta > 0 ? SCATTER_WHEEL_ZOOM_STEP : 1 / SCATTER_WHEEL_ZOOM_STEP;
       const xRatio = pixelToAxisRatio(pointerX, plotArea.left, plotArea.right);
       // 屏幕 y 向下增长、数据 y 向上增长，锚点比例要按底边→顶边来算
       const yRatio = pixelToAxisRatio(pointerY, plotArea.bottom, plotArea.top);
+      // Shift 仅缩放 X 轴，Ctrl 仅缩放 Y 轴。
+      const zoomX = !event.ctrlKey;
+      const zoomY = !event.shiftKey;
 
       setZoom((previous) => {
         const current = previous && previous.key === domainKey ? previous : null;
+        const currentX = current?.x ?? baseXDomain;
+        const currentY = current?.y ?? baseYDomain;
 
         return {
           key: domainKey,
-          x: zoomAxisDomain(current?.x ?? baseXDomain, baseXDomain, xScale, xRatio, factor),
-          y: zoomAxisDomain(current?.y ?? baseYDomain, baseYDomain, yScale, yRatio, factor)
+          x: zoomX
+            ? zoomAxisDomain(currentX, baseXDomain, xScale, xRatio, factor)
+            : currentX,
+          y: zoomY
+            ? zoomAxisDomain(currentY, baseYDomain, yScale, yRatio, factor)
+            : currentY
         };
       });
     };
@@ -856,8 +867,8 @@ export function ScatterCanvas({
         arrowStartModelName
           ? `已选择 ${arrowStartModelName}，按住 Ctrl 点击另一个点作为终点`
           : isZoomed
-            ? "拖拽平移 · 滚轮缩放 · 双击重置 · Ctrl 点击两点添加箭头 · Alt 点击查看历史点"
-            : "拖拽平移 · 滚轮缩放 · Ctrl 点击两点添加箭头 · Alt 点击查看历史点"
+            ? "拖拽平移 · 滚轮缩放 · Shift 滚轮仅缩放 X 轴 · Ctrl 滚轮仅缩放 Y 轴 · 双击重置 · Ctrl 点击两点添加箭头 · Alt 点击查看历史点"
+            : "拖拽平移 · 滚轮缩放 · Shift 滚轮仅缩放 X 轴 · Ctrl 滚轮仅缩放 Y 轴 · Ctrl 点击两点添加箭头 · Alt 点击查看历史点"
       }
     >
       <ScatterChart width={width} height={height} margin={{ ...SCATTER_CHART_MARGIN }}>

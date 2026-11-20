@@ -88,7 +88,7 @@ export const SCATTER_X_AXIS_HEIGHT = 30;
 export const SCATTER_CHART_FULLSCREEN_CHROME = 210;
 export const SCATTER_CHART_MIN_HEIGHT = 320;
 /** 单次滚轮的缩放步长 */
-export const SCATTER_WHEEL_ZOOM_STEP = 1.18;
+export const SCATTER_WHEEL_ZOOM_STEP = 1.1;
 /** 快照被归为「主要变动组」的最小模型数阈值（> 15） */
 export const SNAPSHOT_MAJOR_MODEL_COUNT_THRESHOLD = 15;
 

@@ -2005,6 +2005,56 @@ describe("ScatterCanvas", () => {
     expect(dotPositions()).not.toBe(before);
   });
 
+  test.each(["deltaY", "deltaX"] as const)("Shift 滚轮（%s）只缩放 X 轴，Ctrl 滚轮只缩放 Y 轴", (deltaAxis) => {
+    const { container } = renderCanvas();
+    const surface = container.querySelector(".scatter-chart-surface") as HTMLElement;
+    stubSurfaceRect(surface);
+
+    const pointPositions = () =>
+      Array.from(container.querySelectorAll<SVGGElement>(".recharts-scatter-symbol")).map((symbol) => {
+        const circle = symbol.querySelector("circle");
+        return {
+          x: circle?.getAttribute("cx") ?? "",
+          y: circle?.getAttribute("cy") ?? ""
+        };
+      });
+
+    const beforeShift = pointPositions();
+    act(() => {
+      surface.dispatchEvent(
+        new WheelEvent("wheel", {
+          [deltaAxis]: -120,
+          clientX: 320,
+          clientY: 210,
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true
+        })
+      );
+    });
+
+    const afterShift = pointPositions();
+    expect(afterShift.some((point, index) => point.x !== beforeShift[index]?.x)).toBe(true);
+    expect(afterShift.every((point, index) => point.y === beforeShift[index]?.y)).toBe(true);
+
+    act(() => {
+      surface.dispatchEvent(
+        new WheelEvent("wheel", {
+          deltaY: -120,
+          clientX: 320,
+          clientY: 210,
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true
+        })
+      );
+    });
+
+    const afterCtrl = pointPositions();
+    expect(afterCtrl.every((point, index) => point.x === afterShift[index]?.x)).toBe(true);
+    expect(afterCtrl.some((point, index) => point.y !== afterShift[index]?.y)).toBe(true);
+  });
+
   test("缩放时回报当前视窗内的点，重置后恢复全部", () => {
     const onVisiblePointsChange = vi.fn();
     const { container } = renderCanvas({ onVisiblePointsChange });
