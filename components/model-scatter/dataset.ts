@@ -168,7 +168,7 @@ export function buildScatterDataset(input: BuildScatterDatasetInput): ScatterPlo
     yMetric.higherIsBetter
   );
 
-  const trendLine = computeScatterTrendLine(points);
+  const trendLine = computeScatterTrendLine(points, xScale, yScale);
 
   return { points, paretoKeys, paretoPath, trendLine, missingCount, nonPositiveCount };
 }

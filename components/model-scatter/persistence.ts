@@ -7,6 +7,7 @@ import {
   SCATTER_PARETO_LINE_STYLE_STORAGE_KEY,
   SCATTER_PARETO_ONLY_STORAGE_KEY,
   SCATTER_PARETO_STORAGE_KEY,
+  SCATTER_TREND_STORAGE_KEY,
   SCATTER_SCALE_X_STORAGE_KEY,
   SCATTER_SCALE_Y_STORAGE_KEY,
   SCATTER_SHOW_GUIDES_STORAGE_KEY
@@ -22,7 +23,9 @@ export type ScatterViewState = {
   overlaySnapshot: string | null;
   xScale: ScatterAxisScale;
   yScale: ScatterAxisScale;
-  showPareto: boolean;
+  // null 由当前两轴的优劣方向决定，布尔值表示手动选择。
+  showPareto: boolean | null;
+  showTrendLine: boolean | null;
   dimNonPareto: boolean;
   paretoLineStyle: ScatterParetoLineStyle;
   labelMode: ScatterLabelMode;
@@ -38,7 +41,8 @@ export const DEFAULT_SCATTER_VIEW_STATE: ScatterViewState = {
   overlaySnapshot: null,
   xScale: "linear",
   yScale: "linear",
-  showPareto: true,
+  showPareto: null,
+  showTrendLine: null,
   dimNonPareto: false,
   paretoLineStyle: "linear",
   labelMode: "auto",
@@ -106,7 +110,15 @@ export function loadScatterPreferences(): Partial<ScatterViewState> {
   if (isAxisScale(yScale)) preferences.yScale = yScale;
 
   const showPareto = readBoolean(SCATTER_PARETO_STORAGE_KEY);
-  if (showPareto !== null) preferences.showPareto = showPareto;
+  const showTrendLine = readBoolean(SCATTER_TREND_STORAGE_KEY);
+  if (showTrendLine !== null) {
+    preferences.showPareto = showPareto;
+    preferences.showTrendLine = showTrendLine;
+  } else if (showPareto === false) {
+    // 旧版只有一个共用开关，默认开启；关闭时应继续隐藏叠加层。
+    preferences.showPareto = false;
+    preferences.showTrendLine = false;
+  }
 
   const dimNonPareto = readBoolean(SCATTER_PARETO_ONLY_STORAGE_KEY);
   if (dimNonPareto !== null) preferences.dimNonPareto = dimNonPareto;
@@ -128,7 +140,8 @@ export function saveScatterPreferences(state: ScatterViewState) {
   writeStoredString(SCATTER_AXIS_Y_STORAGE_KEY, state.yKey);
   writeStoredString(SCATTER_SCALE_X_STORAGE_KEY, state.xScale);
   writeStoredString(SCATTER_SCALE_Y_STORAGE_KEY, state.yScale);
-  writeStoredBoolean(SCATTER_PARETO_STORAGE_KEY, state.showPareto);
+  writeStoredString(SCATTER_PARETO_STORAGE_KEY, state.showPareto === null ? null : state.showPareto ? "1" : "0");
+  writeStoredString(SCATTER_TREND_STORAGE_KEY, state.showTrendLine === null ? null : state.showTrendLine ? "1" : "0");
   writeStoredBoolean(SCATTER_PARETO_ONLY_STORAGE_KEY, state.dimNonPareto);
   writeStoredString(SCATTER_PARETO_LINE_STYLE_STORAGE_KEY, state.paretoLineStyle);
   writeStoredString(SCATTER_LABEL_MODE_STORAGE_KEY, state.labelMode);
@@ -167,6 +180,10 @@ export function parseScatterSearchParams(searchParams: ReadableSearchParams): Pa
 
   const pareto = searchParams.get("pareto");
   if (pareto === "1" || pareto === "0") parsed.showPareto = pareto === "1";
+
+  const trend = searchParams.get("trend");
+  if (trend === "1" || trend === "0") parsed.showTrendLine = trend === "1";
+  else if (pareto === "0") parsed.showTrendLine = false;
 
   const dim = searchParams.get("dim");
   if (dim === "1" || dim === "0") parsed.dimNonPareto = dim === "1";
@@ -211,6 +228,7 @@ export function buildScatterSearchParams(
           "logx",
           "logy",
           "pareto",
+          "trend",
           "dim",
           "line",
           "labels",
@@ -231,7 +249,8 @@ export function buildScatterSearchParams(
   if (state.overlaySnapshot) params.set("oy", state.overlaySnapshot);
   if (state.xScale !== DEFAULT_SCATTER_VIEW_STATE.xScale) params.set("logx", state.xScale === "log" ? "1" : "0");
   if (state.yScale !== DEFAULT_SCATTER_VIEW_STATE.yScale) params.set("logy", state.yScale === "log" ? "1" : "0");
-  if (state.showPareto !== DEFAULT_SCATTER_VIEW_STATE.showPareto) params.set("pareto", state.showPareto ? "1" : "0");
+  if (state.showPareto !== null) params.set("pareto", state.showPareto ? "1" : "0");
+  if (state.showTrendLine !== null) params.set("trend", state.showTrendLine ? "1" : "0");
   if (state.dimNonPareto !== DEFAULT_SCATTER_VIEW_STATE.dimNonPareto) params.set("dim", state.dimNonPareto ? "1" : "0");
   if (state.paretoLineStyle !== DEFAULT_SCATTER_VIEW_STATE.paretoLineStyle) params.set("line", state.paretoLineStyle);
   if (state.labelMode !== DEFAULT_SCATTER_VIEW_STATE.labelMode) params.set("labels", state.labelMode);

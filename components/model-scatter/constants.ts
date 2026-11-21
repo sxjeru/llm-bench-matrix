@@ -11,6 +11,7 @@ import {
 export const SCATTER_AXIS_X_STORAGE_KEY = "model-scatter:axis-x";
 export const SCATTER_AXIS_Y_STORAGE_KEY = "model-scatter:axis-y";
 export const SCATTER_PARETO_STORAGE_KEY = "model-scatter:pareto";
+export const SCATTER_TREND_STORAGE_KEY = "model-scatter:trend";
 export const SCATTER_PARETO_ONLY_STORAGE_KEY = "model-scatter:pareto-only";
 export const SCATTER_PARETO_LINE_STYLE_STORAGE_KEY = "model-scatter:pareto-line-style";
 export const SCATTER_SCALE_X_STORAGE_KEY = "model-scatter:scale-x";

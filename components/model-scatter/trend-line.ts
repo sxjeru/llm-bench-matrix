@@ -1,38 +1,43 @@
-import type { ScatterPoint, ScatterTrendLine } from "./types";
+import type { ScatterAxisScale, ScatterPoint, ScatterTrendLine } from "./types";
 
-/** 对当前可绘制点做最小二乘线性回归。 */
-export function computeScatterTrendLine(points: readonly Pick<ScatterPoint, "x" | "y">[]): ScatterTrendLine | null {
-  const finitePoints = points.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+/** 对当前可绘制点做最小二乘线性回归；对数轴在变换后的坐标空间中拟合。 */
+export function computeScatterTrendLine(
+  points: readonly Pick<ScatterPoint, "x" | "y">[],
+  xScale: ScatterAxisScale = "linear",
+  yScale: ScatterAxisScale = "linear"
+): ScatterTrendLine | null {
+  const finitePoints = points.filter(
+    (point) =>
+      Number.isFinite(point.x) &&
+      Number.isFinite(point.y) &&
+      (xScale !== "log" || point.x > 0) &&
+      (yScale !== "log" || point.y > 0)
+  );
   if (finitePoints.length < 2) return null;
 
-  let sumX = 0;
-  let sumY = 0;
-  let sumXY = 0;
-  let sumXX = 0;
+  function transform(value: number, scale: ScatterAxisScale) {
+    return scale === "log" ? Math.log10(value) : value;
+  }
 
-  finitePoints.forEach((point) => {
-    sumX += point.x;
-    sumY += point.y;
-    sumXY += point.x * point.y;
-    sumXX += point.x * point.x;
-  });
+  // 先居中再计算，避免日期轴等绝对值很大、相对差值很小的数据丢失精度。
+  const transformed = finitePoints.map(({ x, y }) => ({ x: transform(x, xScale), y: transform(y, yScale) }));
+  const meanX = transformed.reduce((sum, point) => sum + point.x, 0) / transformed.length;
+  const meanY = transformed.reduce((sum, point) => sum + point.y, 0) / transformed.length;
 
-  const count = finitePoints.length;
-  const denominator = count * sumXX - sumX * sumX;
-  if (!Number.isFinite(denominator) || Math.abs(denominator) < Number.EPSILON) return null;
+  let covariance = 0;
+  let variance = 0;
+  for (const { x, y } of transformed) {
+    const deltaX = x - meanX;
+    covariance += deltaX * (y - meanY);
+    variance += deltaX * deltaX;
+  }
+  if (variance === 0 || !Number.isFinite(variance) || transformed.every(({ x }) => x === transformed[0].x)) {
+    return null;
+  }
 
-  const slope = (count * sumXY - sumX * sumY) / denominator;
-  const intercept = (sumY - slope * sumX) / count;
+  const slope = covariance / variance;
+  const intercept = meanY - slope * meanX;
   if (!Number.isFinite(slope) || !Number.isFinite(intercept)) return null;
 
-  const xValues = finitePoints.map((point) => point.x);
-  const minX = Math.min(...xValues);
-  const maxX = Math.max(...xValues);
-
-  return {
-    slope,
-    intercept,
-    start: { x: minX, y: slope * minX + intercept },
-    end: { x: maxX, y: slope * maxX + intercept }
-  };
+  return { slope, intercept };
 }

@@ -453,6 +453,7 @@ describe("URL persistence with snapshots and overlay", () => {
       xScale: "linear",
       yScale: "linear",
       showPareto: true,
+      showTrendLine: false,
       dimNonPareto: false,
       paretoLineStyle: "linear",
       labelMode: "auto",

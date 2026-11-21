@@ -77,8 +77,7 @@ import type {
   ModelScatterProps,
   ScatterAxisScale,
   ScatterHistoricalPoint,
-  ScatterHistoryMode,
-  ScatterOverlayMode
+  ScatterHistoryMode
 } from "./model-scatter/types";
 
 /** 散点图不做重复行拆分：合并同名 benchmark 才能得到干净的轴列表。 */
@@ -528,9 +527,12 @@ export function ModelScatter({
     if (hydratedRef.current) return;
     hydratedRef.current = true;
 
+    const fromUrl = parseScatterSearchParams(searchParams);
     const restored = {
       ...loadScatterPreferences(),
-      ...parseScatterSearchParams(searchParams)
+      // 带坐标轴的分享链接使用链接里的叠加层设置，缺省时按轴自动选择。
+      ...(fromUrl.xKey || fromUrl.yKey ? { showPareto: null, showTrendLine: null } : {}),
+      ...fromUrl
     };
 
     // 恢复的轴在矩阵默认视图之外时（分享链接或上次停留的轴），把对应模式的记忆打开，
@@ -647,6 +649,12 @@ export function ModelScatter({
 
   const effectiveXScale: ScatterAxisScale = xMetric?.unit === "date" ? "linear" : viewState.xScale;
   const effectiveYScale: ScatterAxisScale = yMetric?.unit === "date" ? "linear" : viewState.yScale;
+
+  const axesHaveSameDirection = Boolean(
+    xMetric && yMetric && xMetric.higherIsBetter === yMetric.higherIsBetter
+  );
+  const showPareto = viewState.showPareto ?? !axesHaveSameDirection;
+  const showTrendLine = viewState.showTrendLine ?? axesHaveSameDirection;
 
   const providerNameByModel = useMemo(() => {
     const nameMap = new Map<string, string>();
@@ -959,6 +967,7 @@ export function ModelScatter({
 
       setHistorySelections([]);
       setViewState((prev) => {
+        const axisKey = axis === "x" ? "xKey" : "yKey";
         const otherKey = axis === "x" ? prev.yKey : prev.xKey;
         const otherMetric = otherKey ? findScatterMetric(allMetrics, otherKey) : null;
         const retainsOverlay = Boolean(
@@ -969,7 +978,9 @@ export function ModelScatter({
 
         return {
           ...prev,
-          [axis === "x" ? "xKey" : "yKey"]: key,
+          // 指标变更时回到自动选择，选择同一指标的历史快照时保留手动开关。
+          ...(prev[axisKey] !== key ? { showPareto: null, showTrendLine: null } : {}),
+          [axisKey]: key,
           [axis === "x" ? "xSnapshot" : "ySnapshot"]: snapshotId ?? null,
           overlaySnapshot: retainsOverlay ? prev.overlaySnapshot : null,
           // 换轴时按新指标的量纲重设刻度：价格/参数量自动切对数
@@ -1099,15 +1110,6 @@ export function ModelScatter({
   const paretoCount = dataset.points.filter((point) => point.isPareto).length;
   const hasAxes = Boolean(xMetric && yMetric);
   const hasEnoughPoints = dataset.points.length >= 1;
-  const overlayMode: ScatterOverlayMode =
-    xMetric &&
-    yMetric &&
-    effectiveXScale === "linear" &&
-    effectiveYScale === "linear" &&
-    xMetric.higherIsBetter === yMetric.higherIsBetter
-      ? "trend"
-      : "pareto";
-
   return (
     <section
       className={`scatter-page ${isFullscreen ? "is-fullscreen" : ""}`}
@@ -1129,9 +1131,14 @@ export function ModelScatter({
           xScale={effectiveXScale}
           yScale={effectiveYScale}
           onChangeScale={handleChangeScale}
-          showPareto={viewState.showPareto}
-          onChangeShowPareto={(value) => setViewState((prev) => ({ ...prev, showPareto: value }))}
-          overlayMode={overlayMode}
+          showPareto={showPareto}
+          onChangeShowPareto={(value) =>
+            setViewState((prev) => ({ ...prev, showPareto: value, showTrendLine }))
+          }
+          showTrendLine={showTrendLine}
+          onChangeShowTrendLine={(value) =>
+            setViewState((prev) => ({ ...prev, showPareto, showTrendLine: value }))
+          }
           dimNonPareto={viewState.dimNonPareto}
           onChangeDimNonPareto={(value) => setViewState((prev) => ({ ...prev, dimNonPareto: value }))}
           paretoLineStyle={viewState.paretoLineStyle}
@@ -1174,8 +1181,8 @@ export function ModelScatter({
                     snapshotOverlay={snapshotOverlay}
                     xScale={effectiveXScale}
                     yScale={effectiveYScale}
-                    showPareto={viewState.showPareto}
-                    overlayMode={overlayMode}
+                    showPareto={showPareto}
+                    showTrendLine={showTrendLine}
                     dimNonPareto={viewState.dimNonPareto}
                     paretoLineStyle={viewState.paretoLineStyle}
                     labelMode={viewState.labelMode}
@@ -1237,7 +1244,7 @@ export function ModelScatter({
             可比模型 <b>{dataset.points.length}</b>
             <span className="scatter-note-dim">/ {baseModelColumns.length}</span>
           </span>
-          {overlayMode === "pareto" && viewState.showPareto ? (
+          {showPareto ? (
             <span className="scatter-note scatter-note-pareto">
               帕累托前沿 <b>{paretoCount}</b>
             </span>

@@ -38,6 +38,7 @@ import { formatScatterAxisTick, formatScatterValue, getMetricAxisLabel } from ".
 import { computeParetoFrontier, orderParetoPath } from "./pareto";
 import { ScatterParetoLayer } from "./pareto-layer";
 import { ScatterTrendLineLayer } from "./trend-line-layer";
+import { computeScatterTrendLine } from "./trend-line";
 import {
   buildPointProjections,
   computePlotArea,
@@ -52,7 +53,6 @@ import type {
   ScatterLabelCandidate,
   ScatterLabelMode,
   ScatterMetric,
-  ScatterOverlayMode,
   ScatterOverlaySnapshotPoint,
   ScatterParetoLineStyle,
   ScatterPlacedLabel,
@@ -72,7 +72,7 @@ export type ScatterCanvasProps = {
   xScale: ScatterAxisScale;
   yScale: ScatterAxisScale;
   showPareto: boolean;
-  overlayMode: ScatterOverlayMode;
+  showTrendLine: boolean;
   dimNonPareto: boolean;
   paretoLineStyle: ScatterParetoLineStyle;
   labelMode: ScatterLabelMode;
@@ -182,7 +182,7 @@ export function ScatterCanvas({
   xScale,
   yScale,
   showPareto,
-  overlayMode,
+  showTrendLine,
   dimNonPareto,
   paretoLineStyle,
   labelMode,
@@ -244,9 +244,10 @@ export function ScatterCanvas({
         points.filter((point) => point.isPareto),
         xMetric.higherIsBetter,
         yMetric.higherIsBetter
-      )
+      ),
+      trendLine: computeScatterTrendLine(activePoints, xScale, yScale)
     };
-  }, [activeHiddenModelNames, dataset, xMetric.higherIsBetter, yMetric.higherIsBetter]);
+  }, [activeHiddenModelNames, dataset, xMetric.higherIsBetter, yMetric.higherIsBetter, xScale, yScale]);
 
   const xValues = useMemo(
     () => activeDataset.points.map((point) => point.x),
@@ -373,7 +374,7 @@ export function ScatterCanvas({
           yRankByModel.get(point.modelName) ?? activeDataset.points.length,
           activeDataset.points.length,
           highlightedModel,
-          overlayMode === "pareto" && showPareto
+          showPareto
         )
       });
     });
@@ -416,7 +417,6 @@ export function ScatterCanvas({
     highlightedModel,
     hoveredProvider,
     yMetric.higherIsBetter,
-    overlayMode,
     showPareto
   ]);
 
@@ -493,7 +493,7 @@ export function ScatterCanvas({
     return () => node.removeEventListener("wheel", handleWheel);
   }, [domainKey, baseXDomain, baseYDomain, xScale, yScale, plotArea]);
 
-  const shouldDim = overlayMode === "pareto" && showPareto && dimNonPareto;
+  const shouldDim = showPareto && dimNonPareto;
 
   /**
    * 绘制顺序。
@@ -508,12 +508,12 @@ export function ScatterCanvas({
     const rank = (point: ScatterPoint) => {
       if (point.modelName === highlightedModel) return 3;
       if (hoveredProvider && point.providerName === hoveredProvider) return 2;
-      if (overlayMode === "pareto" && showPareto && point.isPareto) return 1;
+      if (showPareto && point.isPareto) return 1;
       return 0;
     };
 
     return [...activeDataset.points].sort((left, right) => rank(left) - rank(right));
-  }, [activeDataset.points, hoveredProvider, highlightedModel, overlayMode, showPareto]);
+  }, [activeDataset.points, hoveredProvider, highlightedModel, showPareto]);
 
   const orderedHistoricalPoints = useMemo(() => {
     if (!hoveredHistoryModel) return historicalPoints;
@@ -665,7 +665,7 @@ export function ScatterCanvas({
       const isTemporarilyHidden = activeHiddenModelNames.has(payload.modelName);
       const isHighlighted = payload.modelName === highlightedModel;
       const isArrowStart = payload.modelName === arrowStartModelName;
-      const isPareto = overlayMode === "pareto" && showPareto && payload.isPareto;
+      const isPareto = showPareto && payload.isPareto;
       const radius = isPareto ? SCATTER_DOT_RADIUS_PARETO : SCATTER_DOT_RADIUS;
 
       // 悬浮图例时只留下该厂商；被钉住的点无论属于谁都保持全亮，免得刚选中就看不见了
@@ -764,7 +764,6 @@ export function ScatterCanvas({
       highlightedPoint,
       arrowStartModelName,
       activeHiddenModelNames,
-      overlayMode,
       showPareto,
       shouldDim,
       hoveredProvider,
@@ -933,7 +932,7 @@ export function ScatterCanvas({
                 yMetric={yMetric}
                 xScale={xScale}
                 yScale={yScale}
-                showPareto={overlayMode === "pareto" && showPareto}
+                showPareto={showPareto}
                 points={activeDataset.points}
               />
             )
@@ -966,11 +965,17 @@ export function ScatterCanvas({
 
         <Scatter data={orderedPoints} shape={renderDot} isAnimationActive={false} onClick={handleSelect} />
 
-        {overlayMode === "pareto" && showPareto ? (
-          <ScatterParetoLayer path={activeDataset.paretoPath} lineStyle={paretoLineStyle} />
+        {showTrendLine ? (
+          <ScatterTrendLineLayer
+            line={activeDataset.trendLine}
+            xDomain={xDomain}
+            yDomain={yDomain}
+            xScaleType={xScale}
+            yScaleType={yScale}
+          />
         ) : null}
-        {overlayMode === "trend" && showPareto ? (
-          <ScatterTrendLineLayer line={dataset.trendLine} xDomain={xDomain} />
+        {showPareto ? (
+          <ScatterParetoLayer path={activeDataset.paretoPath} lineStyle={paretoLineStyle} />
         ) : null}
         <ScatterArrowLayer
           annotations={arrowAnnotations}

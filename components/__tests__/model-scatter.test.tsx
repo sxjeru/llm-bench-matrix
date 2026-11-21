@@ -253,28 +253,47 @@ describe("ModelScatter", () => {
     expect(paretoCount()).toBe("3");
   });
 
-  test("双线性且两轴方向一致时切换为散点趋势线", async () => {
+  test("两轴都越高越好时默认打开趋势线，可以手动打开帕累托前沿", async () => {
     const { container } = await renderScatter();
 
     pickAxisOption(container, "y", "Bench-Two");
     pickAxisOption(container, "x", "Bench-One");
 
-    expect(screen.getByRole("checkbox", { name: /散点趋势线/ })).toBeInTheDocument();
-    expect(screen.queryByRole("checkbox", { name: /淡化非前沿/ })).toBeNull();
+    const trend = screen.getByRole("checkbox", { name: "散点趋势线" });
+    const pareto = screen.getByRole("checkbox", { name: "帕累托前沿" });
+    expect(trend).toBeChecked();
+    expect(pareto).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "淡化非前沿" })).toBeDisabled();
     expect(paretoCount()).toBe("--");
+
+    fireEvent.click(pareto);
+    expect(pareto).toBeChecked();
+    expect(trend).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "淡化非前沿" })).toBeEnabled();
   });
 
-  test("任一坐标轴切为对数后恢复帕累托前沿", async () => {
+  test("切换刻度保留手动选择，换指标后恢复自动设置", async () => {
     const { container } = await renderScatter();
 
     pickAxisOption(container, "y", "Bench-Two");
     pickAxisOption(container, "x", "Bench-One");
+    const trend = screen.getByRole("checkbox", { name: "散点趋势线" });
+    const pareto = screen.getByRole("checkbox", { name: "帕累托前沿" });
+    fireEvent.click(pareto);
+    expect(trend).toBeChecked();
     const yAxisField = axisInput(container, "y").closest<HTMLElement>(".scatter-axis-field");
     if (!yAxisField) throw new Error("未找到 Y 轴控件");
     fireEvent.click(within(yAxisField).getByRole("button", { name: "对数" }));
 
-    expect(screen.getByRole("checkbox", { name: /帕累托前沿/ })).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: /淡化非前沿/ })).toBeInTheDocument();
+    expect(pareto).toBeChecked();
+    expect(trend).toBeChecked();
+
+    pickAxisOption(container, "x", "Output Price");
+    expect(pareto).toBeChecked();
+    expect(trend).not.toBeChecked();
+    fireEvent.click(trend);
+    expect(pareto).toBeChecked();
+    expect(trend).toBeChecked();
   });
 
   test("交换按钮互换双轴", async () => {
@@ -286,13 +305,16 @@ describe("ModelScatter", () => {
     expect(axisLabel(container, "x")).toBe("Overall Score");
   });
 
-  test("切换 Y 轴指标后卡片与前沿同步更新", async () => {
+  test("两轴都越低越好时即使为对数刻度也默认打开趋势线", async () => {
     const { container } = await renderScatter();
 
     pickAxisOption(container, "y", "Params");
 
     expect(axisLabel(container, "y")).toBe("Params");
-    // 参数量与价格都是越小越好，Gamma（1 美元 / 300B）与 Alpha（10 美元 / 100B）等构成前沿
+    const pareto = screen.getByRole("checkbox", { name: "帕累托前沿" });
+    expect(pareto).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "散点趋势线" })).toBeChecked();
+    fireEvent.click(pareto);
     expect(Number(paretoCount())).toBeGreaterThan(0);
   });
 
@@ -568,13 +590,14 @@ describe("ModelScatter", () => {
   });
 
   test("URL 参数优先于默认值", async () => {
-    mockSearchParams = new URLSearchParams("x=params&y=price-output&pareto=0&labels=none");
+    mockSearchParams = new URLSearchParams("x=params&y=price-output&pareto=1&trend=0&labels=none");
 
     const { container } = await renderScatter();
 
     expect(axisLabel(container, "x")).toBe("Params");
     expect(axisLabel(container, "y")).toBe("Output Price");
-    expect(paretoCount()).toBe("--");
+    expect(screen.getByRole("checkbox", { name: "帕累托前沿" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "散点趋势线" })).not.toBeChecked();
   });
 
   test("URL 参数优先于 localStorage 存档", async () => {
@@ -1458,7 +1481,7 @@ const canvasProps: React.ComponentProps<typeof ScatterCanvas> = {
   xScale: "linear",
   yScale: "linear",
   showPareto: true,
-  overlayMode: "pareto",
+  showTrendLine: false,
   dimNonPareto: false,
   paretoLineStyle: "linear",
   labelMode: "auto",
@@ -1506,9 +1529,13 @@ describe("ScatterCanvas", () => {
     expect(container.querySelector(".scatter-pareto-layer")).toBeNull();
   });
 
-  test("趋势线模式绘制回归线而不绘制帕累托层", () => {
-    const { container } = renderCanvas({ overlayMode: "trend" });
+  test("趋势线和帕累托前沿可以同时绘制，也可以单独绘制趋势线", () => {
+    const { container, rerender } = renderCanvas({ showTrendLine: true });
 
+    expect(container.querySelector(".scatter-trend-line-layer line")).not.toBeNull();
+    expect(container.querySelector(".scatter-pareto-layer")).not.toBeNull();
+
+    rerender(<ScatterCanvas {...canvasProps} showTrendLine showPareto={false} />);
     expect(container.querySelector(".scatter-trend-line-layer line")).not.toBeNull();
     expect(container.querySelector(".scatter-pareto-layer")).toBeNull();
   });

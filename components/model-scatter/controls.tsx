@@ -22,7 +22,6 @@ import type {
   ScatterLabelMode,
   ScatterMetric,
   ScatterMetricGroup,
-  ScatterOverlayMode,
   ScatterParetoLineStyle
 } from "./types";
 
@@ -45,7 +44,8 @@ type ScatterControlsProps = {
 
   showPareto: boolean;
   onChangeShowPareto: (value: boolean) => void;
-  overlayMode: ScatterOverlayMode;
+  showTrendLine: boolean;
+  onChangeShowTrendLine: (value: boolean) => void;
   dimNonPareto: boolean;
   onChangeDimNonPareto: (value: boolean) => void;
   paretoLineStyle: ScatterParetoLineStyle;
@@ -167,7 +167,8 @@ export function ScatterControls(props: ScatterControlsProps) {
     onChangeScale,
     showPareto,
     onChangeShowPareto,
-    overlayMode,
+    showTrendLine,
+    onChangeShowTrendLine,
     dimNonPareto,
     onChangeDimNonPareto,
     paretoLineStyle,
@@ -256,7 +257,21 @@ export function ScatterControls(props: ScatterControlsProps) {
         <div className="scatter-toggle-group">
           <label
             className="scatter-toggle"
-            title={overlayMode === "trend" ? "绘制当前散点的线性回归趋势" : "连出不被任何模型全面压制的边界"}
+            title="绘制当前散点的回归趋势；对数刻度下按变换后的坐标拟合"
+          >
+            <input
+              type="checkbox"
+              className="checkbox checkbox-xs"
+              checked={showTrendLine}
+              onChange={(event) => onChangeShowTrendLine(event.target.checked)}
+            />
+            <TrendingUp size={14} />
+            <span>散点趋势线</span>
+          </label>
+
+          <label
+            className="scatter-toggle"
+            title="连出不被任何模型全面压制的边界"
           >
             <input
               type="checkbox"
@@ -264,48 +279,44 @@ export function ScatterControls(props: ScatterControlsProps) {
               checked={showPareto}
               onChange={(event) => onChangeShowPareto(event.target.checked)}
             />
-            {overlayMode === "trend" ? <TrendingUp size={14} /> : <Waypoints size={14} />}
-            <span>{overlayMode === "trend" ? "散点趋势线" : "帕累托前沿"}</span>
+            <Waypoints size={14} />
+            <span>帕累托前沿</span>
           </label>
 
-          {overlayMode === "pareto" ? (
-            <>
-              <label
-                className={`scatter-toggle ${showPareto ? "" : "is-disabled"}`}
-                title="把非前沿模型降到低透明度，突出结论"
-              >
-                <input
-                  type="checkbox"
-                  className="checkbox checkbox-xs"
-                  checked={dimNonPareto}
-                  disabled={!showPareto}
-                  onChange={(event) => onChangeDimNonPareto(event.target.checked)}
-                />
-                <span>淡化非前沿</span>
-              </label>
+          <label
+            className={`scatter-toggle ${showPareto ? "" : "is-disabled"}`}
+            title="把非前沿模型降到低透明度，突出结论"
+          >
+            <input
+              type="checkbox"
+              className="checkbox checkbox-xs"
+              checked={dimNonPareto}
+              disabled={!showPareto}
+              onChange={(event) => onChangeDimNonPareto(event.target.checked)}
+            />
+            <span>淡化非前沿</span>
+          </label>
 
-              <div className={`scatter-segment ${showPareto ? "" : "is-disabled"}`} role="group" aria-label="前沿线型">
-                <button
-                  type="button"
-                  className={`scatter-btn scatter-segment-btn ${paretoLineStyle === "linear" ? "is-active" : ""}`}
-                  disabled={!showPareto}
-                  onClick={() => onChangeParetoLineStyle("linear")}
-                  title="直线：直接连接相邻前沿点"
-                >
-                  直线
-                </button>
-                <button
-                  type="button"
-                  className={`scatter-btn scatter-segment-btn ${paretoLineStyle === "step" ? "is-active" : ""}`}
-                  disabled={!showPareto}
-                  onClick={() => onChangeParetoLineStyle("step")}
-                  title="阶梯：还原被压制区域的真实边界"
-                >
-                  阶梯
-                </button>
-              </div>
-            </>
-          ) : null}
+          <div className={`scatter-segment ${showPareto ? "" : "is-disabled"}`} role="group" aria-label="前沿线型">
+            <button
+              type="button"
+              className={`scatter-btn scatter-segment-btn ${paretoLineStyle === "linear" ? "is-active" : ""}`}
+              disabled={!showPareto}
+              onClick={() => onChangeParetoLineStyle("linear")}
+              title="直线：直接连接相邻前沿点"
+            >
+              直线
+            </button>
+            <button
+              type="button"
+              className={`scatter-btn scatter-segment-btn ${paretoLineStyle === "step" ? "is-active" : ""}`}
+              disabled={!showPareto}
+              onClick={() => onChangeParetoLineStyle("step")}
+              title="阶梯：还原被压制区域的真实边界"
+            >
+              阶梯
+            </button>
+          </div>
         </div>
 
         <div className="scatter-toggle-group">
