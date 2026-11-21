@@ -73,38 +73,35 @@ function PageviewCounter({ scriptUrl, isHome }: { scriptUrl: string; isHome: boo
   }, [isHome, scriptUrl]);
 
   useEffect(() => {
-    if (!sample || sample.count === sample.baseline || typeof IntersectionObserver === "undefined") return;
+    if (!sample || sample.count === sample.baseline) return;
     const item = sample.count > sample.baseline ? increaseRef.current : totalRef.current;
     if (!item) return;
 
-    const visibilityThreshold = 0.99;
-    let observing = true;
-    const observer = new IntersectionObserver((entries) => {
-      const entry = entries.at(-1);
-      if (!observing || !item.isConnected || !entry?.isIntersecting ||
-          entry.intersectionRatio < visibilityThreshold || document.visibilityState !== "visible") return;
+    let lastScrollY = Math.max(0, window.scrollY);
+    const acknowledgeOnScroll = () => {
+      const scrollY = Math.max(0, window.scrollY);
+      const scrollingDown = scrollY > lastScrollY;
+      lastScrollY = scrollY;
+      if (!scrollingDown || !item.isConnected || document.visibilityState !== "visible") return;
+
+      const root = document.scrollingElement ?? document.documentElement;
+      if (scrollY + window.innerHeight < root.scrollHeight - 2) return;
+
+      // Loading can bring the footer into view; only scrolling down to it acknowledges the delta.
+      const bounds = item.getBoundingClientRect();
+      if (bounds.width <= 0 || bounds.height <= 0 || bounds.top < 0 || bounds.left < 0 ||
+          bounds.bottom > window.innerHeight || bounds.right > window.innerWidth) return;
 
       const stored = readCount(HOME_BASELINE_KEY);
       // Allow a reset when the provider total drops, without undoing a newer baseline from another tab.
       if (stored === null || stored < sample.count || (sample.canReset && stored === sample.baseline)) {
         writeCount(HOME_BASELINE_KEY, sample.count);
       }
-      stopObserving();
-    }, { threshold: visibilityThreshold });
-    const observeWhenVisible = () => {
-      observer.unobserve(item);
-      observer.takeRecords();
-      if (document.visibilityState === "visible") observer.observe(item);
-    };
-    const stopObserving = () => {
-      observing = false;
-      observer.disconnect();
-      document.removeEventListener("visibilitychange", observeWhenVisible);
+      window.removeEventListener("scroll", acknowledgeOnScroll);
     };
 
-    observeWhenVisible();
-    document.addEventListener("visibilitychange", observeWhenVisible);
-    return stopObserving;
+    window.addEventListener("scroll", acknowledgeOnScroll, { passive: true });
+    return () => window.removeEventListener("scroll", acknowledgeOnScroll);
   }, [sample]);
 
   const increase = sample ? sample.count - sample.baseline : 0;

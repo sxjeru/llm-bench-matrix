@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { VercountPageview } from "@/components/vercount-pageview";
@@ -6,24 +6,9 @@ import { VercountPageview } from "@/components/vercount-pageview";
 const pathnameState = vi.hoisted(() => ({ value: "/" }));
 vi.mock("next/navigation", () => ({ usePathname: () => pathnameState.value }));
 
-const observers = new Set<TestObserver>();
-class TestObserver {
-  constructor(private callback: (entries: Partial<IntersectionObserverEntry>[]) => void) {}
-
-  observe() { observers.add(this); }
-  unobserve() { observers.delete(this); }
-  disconnect() { observers.delete(this); }
-  takeRecords() { return []; }
-
-  intersect(ratio: number) {
-    this.callback([{ isIntersecting: ratio > 0, intersectionRatio: ratio }]);
-  }
-}
-
-function showTraffic(ratio = 1) {
-  act(() => {
-    for (const observer of observers) observer.intersect(ratio);
-  });
+function scrollPageTo(scrollY: number) {
+  vi.stubGlobal("scrollY", scrollY);
+  fireEvent.scroll(window);
 }
 
 function counterResponse(count: number) {
@@ -32,13 +17,21 @@ function counterResponse(count: number) {
 
 const fetchMock = vi.fn();
 let visibility: DocumentVisibilityState;
+let pageHeight: number;
+let trafficBounds: DOMRect;
 
 describe("VercountPageview", () => {
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubEnv("NEXT_PUBLIC_VERCOUNT_SCRIPT_URL", "https://count.example.com/js");
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("IntersectionObserver", TestObserver);
+    vi.stubGlobal("scrollY", 0);
+    vi.stubGlobal("innerHeight", 800);
+    vi.stubGlobal("innerWidth", 1200);
+    pageHeight = 2000;
+    trafficBounds = new DOMRect(200, 750, 100, 20);
+    vi.spyOn(document.documentElement, "scrollHeight", "get").mockImplementation(() => pageHeight);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(() => trafficBounds);
     visibility = "visible";
     vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
   });
@@ -47,10 +40,9 @@ describe("VercountPageview", () => {
     pathnameState.value = "/";
     localStorage.clear();
     vi.unstubAllEnvs();
-    observers.clear();
   });
 
-  test("提前渲染累计增量，直到页脚实际展示后才更新基线", async () => {
+  test("提前渲染累计增量，直到向下滚动到页底后才更新基线", async () => {
     fetchMock.mockResolvedValueOnce(counterResponse(2496));
     const first = render(<VercountPageview />);
     await screen.findByText("2496");
@@ -61,20 +53,71 @@ describe("VercountPageview", () => {
     fetchMock.mockResolvedValueOnce(counterResponse(2501));
     const second = render(<VercountPageview />);
     await screen.findByText("(+5)");
-    showTraffic(0.1);
-    showTraffic(0.5);
+    scrollPageTo(100);
+    scrollPageTo(800);
     second.unmount();
 
     fetchMock.mockResolvedValueOnce(counterResponse(2508));
     const third = render(<VercountPageview />);
     await screen.findByText("(+12)");
-    showTraffic();
+    scrollPageTo(1200);
     expect(screen.getByText("(+12)")).toBeInTheDocument();
     third.unmount();
 
     fetchMock.mockResolvedValueOnce(counterResponse(2510));
     render(<VercountPageview />);
     await screen.findByText("(+2)");
+  });
+
+  test("加载时脚注进入首屏和后续布局变化都不会清零增量", async () => {
+    localStorage.setItem("bench-matrix:home-pageview-baseline", "100");
+    pageHeight = 800;
+    fetchMock.mockResolvedValueOnce(counterResponse(105));
+    render(<VercountPageview />);
+    await screen.findByText("(+5)");
+
+    scrollPageTo(0);
+    fireEvent.resize(window);
+    expect(localStorage.getItem("bench-matrix:home-pageview-baseline")).toBe("100");
+
+    pageHeight = 2000;
+    scrollPageTo(600);
+    expect(localStorage.getItem("bench-matrix:home-pageview-baseline")).toBe("100");
+
+    scrollPageTo(1200);
+    expect(localStorage.getItem("bench-matrix:home-pageview-baseline")).toBe("105");
+    expect(screen.getByText("(+5)")).toBeInTheDocument();
+  });
+
+  test("停留在页底或向上滚动不会重置，需再次向下滚动到页底", async () => {
+    localStorage.setItem("bench-matrix:home-pageview-baseline", "100");
+    vi.stubGlobal("scrollY", 1200);
+    fetchMock.mockResolvedValueOnce(counterResponse(105));
+    render(<VercountPageview />);
+    await screen.findByText("(+5)");
+
+    scrollPageTo(1200);
+    scrollPageTo(1199);
+    expect(localStorage.getItem("bench-matrix:home-pageview-baseline")).toBe("100");
+
+    scrollPageTo(1200);
+    expect(localStorage.getItem("bench-matrix:home-pageview-baseline")).toBe("105");
+  });
+
+  test("滚动到页底但计数未完整可见时仍保留增量", async () => {
+    localStorage.setItem("bench-matrix:home-pageview-baseline", "100");
+    fetchMock.mockResolvedValueOnce(counterResponse(105));
+    render(<VercountPageview />);
+    await screen.findByText("(+5)");
+
+    trafficBounds = new DOMRect(200, 790, 100, 20);
+    scrollPageTo(1200);
+    expect(localStorage.getItem("bench-matrix:home-pageview-baseline")).toBe("100");
+
+    trafficBounds = new DOMRect(200, 750, 100, 20);
+    scrollPageTo(1100);
+    scrollPageTo(1200);
+    expect(localStorage.getItem("bench-matrix:home-pageview-baseline")).toBe("105");
   });
 
   test("后台标签页不会把增量标记为已读", async () => {
@@ -87,7 +130,10 @@ describe("VercountPageview", () => {
     const second = render(<VercountPageview />);
     await screen.findByText("(+5)");
     visibility = "hidden";
-    showTraffic();
+    scrollPageTo(1200);
+    visibility = "visible";
+    fireEvent(document, new Event("visibilitychange"));
+    expect(localStorage.getItem("bench-matrix:home-pageview-baseline")).toBe("100");
     second.unmount();
 
     fetchMock.mockResolvedValueOnce(counterResponse(106));
