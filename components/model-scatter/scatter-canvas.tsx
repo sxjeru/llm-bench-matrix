@@ -35,10 +35,8 @@ import {
 import { isInWorstQuadrant, ScatterGuideLayer } from "./guide-layer";
 import { getPlacedLabelBox, layoutScatterLabels } from "./label-layout";
 import { formatScatterAxisTick, formatScatterValue, getMetricAxisLabel } from "./metrics";
-import { computeParetoFrontier, orderParetoPath } from "./pareto";
 import { ScatterParetoLayer } from "./pareto-layer";
 import { ScatterTrendLineLayer } from "./trend-line-layer";
-import { computeScatterTrendLine } from "./trend-line";
 import {
   buildPointProjections,
   computePlotArea,
@@ -68,6 +66,8 @@ export type ScatterCanvasProps = {
   xMetric: ScatterMetric;
   yMetric: ScatterMetric;
   dataset: ScatterPlotDataset;
+  hiddenModelNames?: ReadonlySet<string>;
+  onToggleModelVisibility?: (modelName: string) => void;
   snapshotOverlay?: ScatterSnapshotOverlayDataset | null;
   xScale: ScatterAxisScale;
   yScale: ScatterAxisScale;
@@ -137,6 +137,7 @@ type PanSession = {
 
 /** 位移超过这个像素数才算拖拽；更小的移动仍视为点击钉住 */
 const PAN_CLICK_SUPPRESS_THRESHOLD = 4;
+const EMPTY_HIDDEN_MODEL_NAMES: ReadonlySet<string> = new Set();
 
 /**
  * 标签放置优先级。
@@ -178,6 +179,8 @@ export function ScatterCanvas({
   xMetric,
   yMetric,
   dataset,
+  hiddenModelNames = EMPTY_HIDDEN_MODEL_NAMES,
+  onToggleModelVisibility,
   snapshotOverlay = null,
   xScale,
   yScale,
@@ -206,7 +209,6 @@ export function ScatterCanvas({
   const [zoom, setZoom] = useState<ZoomState | null>(null);
   const [isPanning, setIsPanning] = useState(false);
   const [isTooltipDismissed, setIsTooltipDismissed] = useState(false);
-  const [hiddenModelNames, setHiddenModelNames] = useState<Set<string>>(() => new Set());
   const [arrowStartModelName, setArrowStartModelName] = useState<string | null>(null);
   const [arrowAnnotations, setArrowAnnotations] = useState<ScatterArrowAnnotation[]>([]);
   const [hoveredHistoryModel, setHoveredHistoryModel] = useState<string | null>(null);
@@ -215,47 +217,13 @@ export function ScatterCanvas({
     coords: { x: number; y: number };
   } | null>(null);
 
-  const activeHiddenModelNames = useMemo(() => {
-    const datasetModelNames = new Set(dataset.points.map((point) => point.modelName));
-    return new Set([...hiddenModelNames].filter((modelName) => datasetModelNames.has(modelName)));
-  }, [dataset.points, hiddenModelNames]);
-
-  const activeDataset = useMemo<ScatterPlotDataset>(() => {
-    if (activeHiddenModelNames.size === 0) return dataset;
-
-    const activePoints = dataset.points.filter(
-      (point) => !activeHiddenModelNames.has(point.modelName)
-    );
-    const paretoKeys = computeParetoFrontier(
-      activePoints.map((point) => ({ key: point.modelName, x: point.x, y: point.y })),
-      xMetric.higherIsBetter,
-      yMetric.higherIsBetter
-    );
-    const points = dataset.points.map((point) => ({
-      ...point,
-      isPareto: paretoKeys.has(point.modelName)
-    }));
-
-    return {
-      ...dataset,
-      points,
-      paretoKeys,
-      paretoPath: orderParetoPath(
-        points.filter((point) => point.isPareto),
-        xMetric.higherIsBetter,
-        yMetric.higherIsBetter
-      ),
-      trendLine: computeScatterTrendLine(activePoints, xScale, yScale)
-    };
-  }, [activeHiddenModelNames, dataset, xMetric.higherIsBetter, yMetric.higherIsBetter, xScale, yScale]);
-
   const xValues = useMemo(
-    () => activeDataset.points.map((point) => point.x),
-    [activeDataset.points]
+    () => dataset.points.map((point) => point.x),
+    [dataset.points]
   );
   const yValues = useMemo(
-    () => activeDataset.points.map((point) => point.y),
-    [activeDataset.points]
+    () => dataset.points.map((point) => point.y),
+    [dataset.points]
   );
   // 历史点只扩轴域，避免被裁切；中位线/参考线仍只看当前散点
   const domainXValues = useMemo(() => {
@@ -303,15 +271,15 @@ export function ScatterCanvas({
 
   const visiblePoints = useMemo(
     () =>
-      activeDataset.points.filter(
+      dataset.points.filter(
         (point) =>
-          !activeHiddenModelNames.has(point.modelName) &&
+          !hiddenModelNames.has(point.modelName) &&
           point.x >= xDomain[0] &&
           point.x <= xDomain[1] &&
           point.y >= yDomain[0] &&
           point.y <= yDomain[1]
       ),
-    [activeDataset.points, activeHiddenModelNames, xDomain, yDomain]
+    [dataset.points, hiddenModelNames, xDomain, yDomain]
   );
 
   useEffect(() => {
@@ -334,7 +302,7 @@ export function ScatterCanvas({
     if (labelMode === "none" || !plotArea) return new Map();
 
     const projections = buildPointProjections({
-      points: activeDataset.points,
+      points: dataset.points,
       xDomain,
       yDomain,
       xScale,
@@ -342,7 +310,7 @@ export function ScatterCanvas({
       plotArea
     });
 
-    const rankedModels = [...activeDataset.points]
+    const rankedModels = [...dataset.points]
       .sort((left, right) => (yMetric.higherIsBetter ? right.y - left.y : left.y - right.y))
       .map((point) => point.modelName);
     const yRankByModel = new Map(rankedModels.map((modelName, index) => [modelName, index]));
@@ -350,7 +318,7 @@ export function ScatterCanvas({
     const candidates: ScatterLabelCandidate[] = [];
     const providerByModel = new Map<string, string>();
 
-    activeDataset.points.forEach((point) => {
+    dataset.points.forEach((point) => {
       const projection = projections.get(point.modelName);
       if (!projection) return;
       // 缩放后落在绘图区外的点不参与排版，免得标签飘到坐标轴上
@@ -371,8 +339,8 @@ export function ScatterCanvas({
         cy: projection.cy,
         priority: computeLabelPriority(
           point,
-          yRankByModel.get(point.modelName) ?? activeDataset.points.length,
-          activeDataset.points.length,
+          yRankByModel.get(point.modelName) ?? dataset.points.length,
+          dataset.points.length,
           highlightedModel,
           showPareto
         )
@@ -407,7 +375,7 @@ export function ScatterCanvas({
 
     return labelByKey;
   }, [
-    activeDataset.points,
+    dataset.points,
     plotArea,
     xDomain,
     yDomain,
@@ -426,9 +394,9 @@ export function ScatterCanvas({
   const highlightedPoint = useMemo(
     () =>
       highlightedModel
-        ? (activeDataset.points.find((point) => point.modelName === highlightedModel) ?? null)
+        ? (dataset.points.find((point) => point.modelName === highlightedModel) ?? null)
         : null,
-      [activeDataset.points, highlightedModel]
+      [dataset.points, highlightedModel]
   );
 
   // 钉住时十字与最优象限以该点为中心；取消钉住后回到全体中位
@@ -503,7 +471,7 @@ export function ScatterCanvas({
    * 让当前最该被看清的点始终画在最上层。排序是稳定的，同组内相对次序不变。
    */
   const orderedPoints = useMemo(() => {
-    if (!hoveredProvider && !highlightedModel) return activeDataset.points;
+    if (!hoveredProvider && !highlightedModel) return dataset.points;
 
     const rank = (point: ScatterPoint) => {
       if (point.modelName === highlightedModel) return 3;
@@ -512,8 +480,8 @@ export function ScatterCanvas({
       return 0;
     };
 
-    return [...activeDataset.points].sort((left, right) => rank(left) - rank(right));
-  }, [activeDataset.points, hoveredProvider, highlightedModel, showPareto]);
+    return [...dataset.points].sort((left, right) => rank(left) - rank(right));
+  }, [dataset.points, hoveredProvider, highlightedModel, showPareto]);
 
   const orderedHistoricalPoints = useMemo(() => {
     if (!hoveredHistoryModel) return historicalPoints;
@@ -662,7 +630,7 @@ export function ScatterCanvas({
       const { cx, cy, payload } = dotProps;
       if (typeof cx !== "number" || typeof cy !== "number" || !payload) return <g />;
 
-      const isTemporarilyHidden = activeHiddenModelNames.has(payload.modelName);
+      const isTemporarilyHidden = hiddenModelNames.has(payload.modelName);
       const isHighlighted = payload.modelName === highlightedModel;
       const isArrowStart = payload.modelName === arrowStartModelName;
       const isPareto = showPareto && payload.isPareto;
@@ -763,7 +731,7 @@ export function ScatterCanvas({
       highlightedModel,
       highlightedPoint,
       arrowStartModelName,
-      activeHiddenModelNames,
+      hiddenModelNames,
       showPareto,
       shouldDim,
       hoveredProvider,
@@ -815,18 +783,13 @@ export function ScatterCanvas({
       setArrowStartModelName(null);
 
       if (event?.shiftKey) {
-        setHiddenModelNames((previous) => {
-          const next = new Set(previous);
-          if (next.has(modelName)) next.delete(modelName);
-          else next.add(modelName);
-          return next;
-        });
+        onToggleModelVisibility?.(modelName);
         return;
       }
 
       onSelectModel?.(modelName);
     },
-    [onSelectModel, onToggleHistory]
+    [onSelectModel, onToggleHistory, onToggleModelVisibility]
   );
 
   const handleContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
@@ -933,7 +896,7 @@ export function ScatterCanvas({
                 xScale={xScale}
                 yScale={yScale}
                 showPareto={showPareto}
-                points={activeDataset.points}
+                points={dataset.points}
               />
             )
           }
@@ -967,7 +930,7 @@ export function ScatterCanvas({
 
         {showTrendLine ? (
           <ScatterTrendLineLayer
-            line={activeDataset.trendLine}
+            line={dataset.trendLine}
             xDomain={xDomain}
             yDomain={yDomain}
             xScaleType={xScale}
@@ -975,11 +938,11 @@ export function ScatterCanvas({
           />
         ) : null}
         {showPareto ? (
-          <ScatterParetoLayer path={activeDataset.paretoPath} lineStyle={paretoLineStyle} />
+          <ScatterParetoLayer path={dataset.paretoPath} lineStyle={paretoLineStyle} />
         ) : null}
         <ScatterArrowLayer
           annotations={arrowAnnotations}
-          points={activeDataset.points}
+          points={dataset.points}
           xDomain={xDomain}
           yDomain={yDomain}
           xScale={xScale}
@@ -1014,7 +977,7 @@ export function ScatterCanvas({
               preferredArrowSign={arrowIndex % 2 === 0 ? 1 : -1}
               arrowCurvatureScale={1 + Math.floor(arrowIndex / 2) * 0.35}
               opacity={
-                activeHiddenModelNames.has(historicalPoint.modelName)
+                hiddenModelNames.has(historicalPoint.modelName)
                   ? SCATTER_DIMMED_OPACITY
                   : 1
               }

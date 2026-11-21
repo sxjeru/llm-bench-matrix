@@ -16,6 +16,7 @@ import type { SourceOption } from "@/components/benchmark-matrix/selectors";
 import { EXPORT_PRESET_MAP, SOURCE_ALL } from "@/components/benchmark-matrix/constants";
 import { sourceTabDisplayLabel } from "@/components/benchmark-matrix/utils";
 import { MetricCombobox } from "./metric-combobox";
+import { SCATTER_AUTO_PARETO_MIN_POINTS } from "./constants";
 import { describeMetricDirection } from "./metrics";
 import type {
   ScatterAxisScale,
@@ -43,8 +44,10 @@ type ScatterControlsProps = {
   onChangeScale: (axis: "x" | "y", scale: ScatterAxisScale) => void;
 
   showPareto: boolean;
+  paretoCount: number;
   onChangeShowPareto: (value: boolean) => void;
   showTrendLine: boolean;
+  trendLineUnavailableReason: string | null;
   onChangeShowTrendLine: (value: boolean) => void;
   dimNonPareto: boolean;
   onChangeDimNonPareto: (value: boolean) => void;
@@ -166,8 +169,10 @@ export function ScatterControls(props: ScatterControlsProps) {
     yScale,
     onChangeScale,
     showPareto,
+    paretoCount,
     onChangeShowPareto,
     showTrendLine,
+    trendLineUnavailableReason,
     onChangeShowTrendLine,
     dimNonPareto,
     onChangeDimNonPareto,
@@ -256,13 +261,14 @@ export function ScatterControls(props: ScatterControlsProps) {
       <div className="scatter-controls-row scatter-controls-row-secondary">
         <div className="scatter-toggle-group">
           <label
-            className="scatter-toggle"
-            title="绘制当前散点的回归趋势；对数刻度下按变换后的坐标拟合"
+            className={`scatter-toggle${trendLineUnavailableReason ? " is-disabled" : ""}`}
+            title={trendLineUnavailableReason ?? "绘制当前散点的线性回归趋势"}
           >
             <input
               type="checkbox"
               className="checkbox checkbox-xs"
               checked={showTrendLine}
+              disabled={trendLineUnavailableReason !== null}
               onChange={(event) => onChangeShowTrendLine(event.target.checked)}
             />
             <TrendingUp size={14} />
@@ -271,7 +277,7 @@ export function ScatterControls(props: ScatterControlsProps) {
 
           <label
             className="scatter-toggle"
-            title="连出不被任何模型全面压制的边界"
+            title={`连出不被任何模型全面压制的边界。当前有 ${paretoCount} 个前沿点，自动显示至少需要 ${SCATTER_AUTO_PARETO_MIN_POINTS} 个。`}
           >
             <input
               type="checkbox"

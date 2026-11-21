@@ -42,6 +42,7 @@ import { ScatterChartHost } from "./model-scatter/chart-host";
 import {
   OVERALL_METRIC_SLUG,
   SCATTER_ALWAYS_VISIBLE_BENCHMARK_TYPES,
+  SCATTER_AUTO_PARETO_MIN_POINTS,
   SCATTER_CHART_COMPACT_BREAKPOINT,
   SCATTER_CHART_FULLSCREEN_CHROME,
   SCATTER_CHART_HEIGHT,
@@ -49,7 +50,11 @@ import {
   SCATTER_CHART_MIN_HEIGHT
 } from "./model-scatter/constants";
 import { ScatterControls } from "./model-scatter/controls";
-import { buildScatterDataset, buildScatterSnapshotOverlayDataset } from "./model-scatter/dataset";
+import {
+  buildScatterDataset,
+  buildScatterSnapshotOverlayDataset,
+  excludeScatterOverlayPoints
+} from "./model-scatter/dataset";
 import { useScatterImageActions } from "./model-scatter/image-actions";
 import {
   buildScatterMetrics,
@@ -122,6 +127,7 @@ export function ModelScatter({
     [applyLowCoveragePref, isOverallAxisActive]
   );
   const [hiddenProviders, setHiddenProviders] = useState<string[]>([]);
+  const [hiddenModelNames, setHiddenModelNames] = useState<ReadonlySet<string>>(() => new Set());
   const [hoveredProvider, setHoveredProvider] = useState<string | null>(null);
   const [highlightedModel, setHighlightedModel] = useState<string | null>(null);
   const [historySelections, setHistorySelections] = useState<Array<{
@@ -607,6 +613,7 @@ export function ModelScatter({
             : null;
 
         const axisChanged = !hasX || !hasY;
+        const replacedAxis = (!hasX && prev.xKey !== null) || (!hasY && prev.yKey !== null);
         const snapshotChanged =
           validXSnapshot !== prev.xSnapshot ||
           validYSnapshot !== prev.ySnapshot ||
@@ -616,6 +623,7 @@ export function ModelScatter({
 
         return {
           ...prev,
+          ...(replacedAxis ? { showPareto: null, showTrendLine: null } : {}),
           xKey: nextXKey,
           yKey: nextYKey,
           xSnapshot: validXSnapshot,
@@ -649,12 +657,6 @@ export function ModelScatter({
 
   const effectiveXScale: ScatterAxisScale = xMetric?.unit === "date" ? "linear" : viewState.xScale;
   const effectiveYScale: ScatterAxisScale = yMetric?.unit === "date" ? "linear" : viewState.yScale;
-
-  const axesHaveSameDirection = Boolean(
-    xMetric && yMetric && xMetric.higherIsBetter === yMetric.higherIsBetter
-  );
-  const showPareto = viewState.showPareto ?? !axesHaveSameDirection;
-  const showTrendLine = viewState.showTrendLine ?? axesHaveSameDirection;
 
   const providerNameByModel = useMemo(() => {
     const nameMap = new Map<string, string>();
@@ -723,6 +725,21 @@ export function ModelScatter({
     viewState.xSnapshot,
     viewState.ySnapshot
   ]);
+
+  const activeDataset = useMemo(
+    () => xMetric && yMetric
+      ? excludeScatterOverlayPoints(dataset, hiddenModelNames, xMetric, yMetric, effectiveXScale, effectiveYScale)
+      : dataset,
+    [dataset, hiddenModelNames, xMetric, yMetric, effectiveXScale, effectiveYScale]
+  );
+  const toggleModelVisibility = useCallback((modelName: string) => {
+    setHiddenModelNames((previous) => {
+      const next = new Set(previous);
+      if (next.has(modelName)) next.delete(modelName);
+      else next.add(modelName);
+      return next;
+    });
+  }, []);
 
   const snapshotOverlay = useMemo(() => {
     if (!viewState.overlaySnapshot || !xMetric || !yMetric) return null;
@@ -1107,7 +1124,21 @@ export function ModelScatter({
     [dataset.points, historySelections, xMetric, yMetric, effectiveXScale, effectiveYScale]
   );
 
-  const paretoCount = dataset.points.filter((point) => point.isPareto).length;
+  const paretoCount = activeDataset.paretoKeys.size;
+  const trendAxesMatch = Boolean(
+    xMetric &&
+    yMetric &&
+    xMetric.higherIsBetter === yMetric.higherIsBetter &&
+    effectiveXScale === "linear" &&
+    effectiveYScale === "linear"
+  );
+  const trendLineUnavailableReason = !trendAxesMatch
+    ? "趋势线仅适用于方向相同的两个线性轴"
+    : !activeDataset.trendLine
+      ? "趋势线至少需要两个 X 值不同的有效散点"
+      : null;
+  const showTrendLine = trendLineUnavailableReason === null && (viewState.showTrendLine ?? true);
+  const showPareto = viewState.showPareto ?? (!trendAxesMatch && paretoCount >= SCATTER_AUTO_PARETO_MIN_POINTS);
   const hasAxes = Boolean(xMetric && yMetric);
   const hasEnoughPoints = dataset.points.length >= 1;
   return (
@@ -1132,12 +1163,14 @@ export function ModelScatter({
           yScale={effectiveYScale}
           onChangeScale={handleChangeScale}
           showPareto={showPareto}
+          paretoCount={paretoCount}
           onChangeShowPareto={(value) =>
-            setViewState((prev) => ({ ...prev, showPareto: value, showTrendLine }))
+            setViewState((prev) => ({ ...prev, showPareto: value }))
           }
           showTrendLine={showTrendLine}
+          trendLineUnavailableReason={trendLineUnavailableReason}
           onChangeShowTrendLine={(value) =>
-            setViewState((prev) => ({ ...prev, showPareto, showTrendLine: value }))
+            setViewState((prev) => ({ ...prev, showTrendLine: value }))
           }
           dimNonPareto={viewState.dimNonPareto}
           onChangeDimNonPareto={(value) => setViewState((prev) => ({ ...prev, dimNonPareto: value }))}
@@ -1177,7 +1210,9 @@ export function ModelScatter({
                     height={height}
                     xMetric={xMetric!}
                     yMetric={yMetric!}
-                    dataset={dataset}
+                    dataset={activeDataset}
+                    hiddenModelNames={hiddenModelNames}
+                    onToggleModelVisibility={toggleModelVisibility}
                     snapshotOverlay={snapshotOverlay}
                     xScale={effectiveXScale}
                     yScale={effectiveYScale}

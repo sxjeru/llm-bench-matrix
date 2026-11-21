@@ -173,6 +173,43 @@ export function buildScatterDataset(input: BuildScatterDatasetInput): ScatterPlo
   return { points, paretoKeys, paretoPath, trendLine, missingCount, nonPositiveCount };
 }
 
+/** 临时排除的模型仍留在图上以便恢复，但不参与前沿或趋势计算。 */
+export function excludeScatterOverlayPoints(
+  dataset: ScatterPlotDataset,
+  hiddenModelNames: ReadonlySet<string>,
+  xMetric: Pick<ScatterMetric, "higherIsBetter">,
+  yMetric: Pick<ScatterMetric, "higherIsBetter">,
+  xScale: ScatterAxisScale,
+  yScale: ScatterAxisScale
+): ScatterPlotDataset {
+  if (hiddenModelNames.size === 0) return dataset;
+
+  const activePoints = dataset.points.filter((point) => !hiddenModelNames.has(point.modelName));
+  if (activePoints.length === dataset.points.length) return dataset;
+
+  const paretoKeys = computeParetoFrontier(
+    activePoints.map((point) => ({ key: point.modelName, x: point.x, y: point.y })),
+    xMetric.higherIsBetter,
+    yMetric.higherIsBetter
+  );
+  const points = dataset.points.map((point) => ({
+    ...point,
+    isPareto: paretoKeys.has(point.modelName)
+  }));
+
+  return {
+    ...dataset,
+    points,
+    paretoKeys,
+    paretoPath: orderParetoPath(
+      points.filter((point) => point.isPareto),
+      xMetric.higherIsBetter,
+      yMetric.higherIsBetter
+    ),
+    trendLine: computeScatterTrendLine(activePoints, xScale, yScale)
+  };
+}
+
 export type BuildScatterSnapshotOverlayDatasetInput = {
   snapshotId: string;
   xMetric: ScatterMetric;

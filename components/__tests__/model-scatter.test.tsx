@@ -116,11 +116,11 @@ const sparseRows: MatrixInputRow[] = [
   }
 ];
 
-async function renderScatter() {
+async function renderScatter(inputRows = rows) {
   return renderReady(
     <ModelScatter
-      rows={rows}
-      allRows={rows}
+      rows={inputRows}
+      allRows={inputRows}
       sourceOptions={["text:demo"]}
       modelPrices={modelPrices}
       modelParams={modelParams}
@@ -232,11 +232,17 @@ describe("ModelScatter", () => {
     expect(legendSelect).toHaveValue("include");
   });
 
-  test("统计出可比模型数与帕累托前沿数", async () => {
+  test("只有三个前沿点时两条线默认关闭，可以手动显示帕累托前沿", async () => {
     await renderScatter();
 
     expect(comparableModelCount()).toBe("4");
     // Delta 又贵又弱，被 Alpha 全面压制
+    expect(screen.getByRole("checkbox", { name: "散点趋势线" })).not.toBeChecked();
+    const pareto = screen.getByRole("checkbox", { name: "帕累托前沿" });
+    expect(pareto).not.toBeChecked();
+    expect(paretoCount()).toBe("--");
+
+    fireEvent.click(pareto);
     expect(paretoCount()).toBe("3");
   });
 
@@ -244,6 +250,7 @@ describe("ModelScatter", () => {
     await renderScatter();
 
     const toggle = screen.getByRole("checkbox", { name: /帕累托前沿/ });
+    fireEvent.click(toggle);
     expect(paretoCount()).toBe("3");
 
     fireEvent.click(toggle);
@@ -272,28 +279,42 @@ describe("ModelScatter", () => {
     expect(screen.getByRole("checkbox", { name: "淡化非前沿" })).toBeEnabled();
   });
 
-  test("切换刻度保留手动选择，换指标后恢复自动设置", async () => {
-    const { container } = await renderScatter();
+  test("同向轴切为对数时，有四个前沿点就自动切到帕累托；临时排除一点后隐藏", async () => {
+    stubScatterChartHostSize();
+    const tradeoffRows = rows.map((row) => {
+      if (row.benchmarkName !== "Bench-Two") return row;
+      const valueNum = 10 + (90 - (row.valueNum ?? 0)) ** 2 / 20;
+      return { ...row, valueNum, valueRaw: String(valueNum) };
+    });
+    const { container } = await renderScatter(tradeoffRows);
 
     pickAxisOption(container, "y", "Bench-Two");
     pickAxisOption(container, "x", "Bench-One");
     const trend = screen.getByRole("checkbox", { name: "散点趋势线" });
     const pareto = screen.getByRole("checkbox", { name: "帕累托前沿" });
-    fireEvent.click(pareto);
     expect(trend).toBeChecked();
+    expect(pareto).not.toBeChecked();
     const yAxisField = axisInput(container, "y").closest<HTMLElement>(".scatter-axis-field");
     if (!yAxisField) throw new Error("未找到 Y 轴控件");
     fireEvent.click(within(yAxisField).getByRole("button", { name: "对数" }));
 
-    expect(pareto).toBeChecked();
-    expect(trend).toBeChecked();
-
-    pickAxisOption(container, "x", "Output Price");
-    expect(pareto).toBeChecked();
     expect(trend).not.toBeChecked();
-    fireEvent.click(trend);
+    expect(trend).toBeDisabled();
     expect(pareto).toBeChecked();
+    expect(paretoCount()).toBe("4");
+    expect(container.querySelector(".scatter-pareto-layer polyline")).not.toBeNull();
+
+    const alphaSymbol = () => container.querySelector(".recharts-scatter-symbol:has([data-model-name='Alpha'])")!;
+    fireEvent.click(alphaSymbol(), { shiftKey: true });
+    expect(alphaSymbol().querySelector("[data-model-name='Alpha']")?.getAttribute("opacity")).toBe(String(SCATTER_DIMMED_OPACITY));
+    expect(pareto).not.toBeChecked();
+    expect(container.querySelector(".scatter-pareto-layer")).toBeNull();
+    fireEvent.click(alphaSymbol(), { shiftKey: true });
+    expect(pareto).toBeChecked();
+
+    fireEvent.click(within(yAxisField).getByRole("button", { name: "线性" }));
     expect(trend).toBeChecked();
+    expect(pareto).not.toBeChecked();
   });
 
   test("交换按钮互换双轴", async () => {
@@ -305,17 +326,37 @@ describe("ModelScatter", () => {
     expect(axisLabel(container, "x")).toBe("Overall Score");
   });
 
-  test("两轴都越低越好时即使为对数刻度也默认打开趋势线", async () => {
+  test("两轴都越低越好时，切为双线性才启用趋势线", async () => {
     const { container } = await renderScatter();
 
     pickAxisOption(container, "y", "Params");
 
     expect(axisLabel(container, "y")).toBe("Params");
     const pareto = screen.getByRole("checkbox", { name: "帕累托前沿" });
+    const trend = screen.getByRole("checkbox", { name: "散点趋势线" });
     expect(pareto).not.toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "散点趋势线" })).toBeChecked();
-    fireEvent.click(pareto);
-    expect(Number(paretoCount())).toBeGreaterThan(0);
+    expect(trend).toBeDisabled();
+    for (const axis of ["x", "y"] as const) {
+      const axisField = axisInput(container, axis).closest<HTMLElement>(".scatter-axis-field")!;
+      fireEvent.click(within(axisField).getByRole("button", { name: "线性" }));
+    }
+    expect(trend).toBeChecked();
+    expect(pareto).not.toBeChecked();
+  });
+
+  test("手动显示帕累托时，Shift 点击前沿点会更新路径和点数", async () => {
+    stubScatterChartHostSize();
+    const { container } = await renderScatter();
+    fireEvent.click(screen.getByRole("checkbox", { name: "帕累托前沿" }));
+    const symbol = container.querySelector("[data-model-name='Alpha']")?.closest(".recharts-scatter-symbol");
+    if (!symbol) throw new Error("未找到 Alpha 散点");
+    const pathBefore = container.querySelector(".scatter-pareto-layer polyline")?.getAttribute("points");
+    expect(pathBefore).toBeTruthy();
+
+    fireEvent.click(symbol, { shiftKey: true });
+    expect(container.querySelector("[data-model-name='Alpha']")?.getAttribute("opacity")).toBe(String(SCATTER_DIMMED_OPACITY));
+    expect(container.querySelector(".scatter-pareto-layer polyline")?.getAttribute("points")).not.toBe(pathBefore);
+    expect(paretoCount()).toBe("2");
   });
 
   test("轴选择器按分类分组，且总评排在最前", async () => {
@@ -562,7 +603,13 @@ describe("ModelScatter", () => {
 
     expect(replaceStateSpy).toHaveBeenCalled();
     const lastUrl = replaceStateSpy.mock.calls.at(-1)?.[2] as string;
-    expect(lastUrl).toContain("pareto=0");
+    expect(lastUrl).toContain("pareto=1");
+    expect(lastUrl).toContain("logy=0");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /帕累托前沿/ }));
+    const params = new URL(String(replaceStateSpy.mock.calls.at(-1)?.[2]), window.location.origin).searchParams;
+    expect(params.get("pareto")).toBe("0");
+    expect(params.get("trend")).toBe("auto");
   });
 
   test("urlSyncEnabled=false 时仍更新视图并写本地偏好，但不改写地址栏", async () => {
@@ -581,6 +628,7 @@ describe("ModelScatter", () => {
     );
     replaceStateSpy.mockClear();
     fireEvent.click(screen.getByRole("checkbox", { name: /帕累托前沿/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /帕累托前沿/ }));
 
     expect(paretoCount()).toBe("--");
     // urlSyncEnabled 只管地址栏：本地偏好照旧持久化
@@ -590,7 +638,7 @@ describe("ModelScatter", () => {
   });
 
   test("URL 参数优先于默认值", async () => {
-    mockSearchParams = new URLSearchParams("x=params&y=price-output&pareto=1&trend=0&labels=none");
+    mockSearchParams = new URLSearchParams("x=params&y=price-output&logx=1&pareto=1&trend=1&labels=none");
 
     const { container } = await renderScatter();
 
@@ -598,6 +646,7 @@ describe("ModelScatter", () => {
     expect(axisLabel(container, "y")).toBe("Output Price");
     expect(screen.getByRole("checkbox", { name: "帕累托前沿" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "散点趋势线" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "散点趋势线" })).toBeDisabled();
   });
 
   test("URL 参数优先于 localStorage 存档", async () => {
@@ -1594,37 +1643,6 @@ describe("ScatterCanvas", () => {
     expect(container.querySelector(".scatter-tooltip")).not.toBeNull();
   });
 
-  test("Shift 点击前沿点会临时隐藏该点并刷新帕累托前沿", () => {
-    const { container } = renderCanvas({ labelMode: "all" });
-    const findAlphaSymbol = () =>
-      Array.from(container.querySelectorAll(".recharts-scatter-symbol")).find(
-        (symbol) =>
-          symbol.querySelector("text")?.textContent === "Alpha" ||
-          symbol.querySelector("[data-model-name='Alpha']") !== null
-      ) as HTMLElement | undefined;
-
-    const alphaSymbol = findAlphaSymbol();
-    expect(alphaSymbol).not.toBeUndefined();
-
-    const lineBefore = container.querySelector(".scatter-pareto-layer polyline");
-    const pointsBefore = lineBefore?.getAttribute("points");
-    expect(pointsBefore).toBeTruthy();
-
-    fireEvent.click(alphaSymbol!, { shiftKey: true });
-
-    const hiddenAlpha = findAlphaSymbol();
-    expect(hiddenAlpha).not.toBeUndefined();
-    const hiddenGroup = hiddenAlpha!.querySelector("[data-model-name='Alpha']");
-    expect(hiddenGroup?.getAttribute("opacity")).toBe(String(SCATTER_DIMMED_OPACITY));
-    expect(hiddenGroup?.querySelector("text")?.textContent).toBe("Alpha");
-    const lineAfter = container.querySelector(".scatter-pareto-layer polyline");
-    expect(lineAfter?.getAttribute("points")).toBeTruthy();
-    expect(lineAfter?.getAttribute("points")).not.toBe(pointsBefore);
-    expect(container.querySelectorAll(".scatter-pareto-layer circle").length).toBe(
-      dataset.paretoPath.length - 1
-    );
-  });
-
   function findSymbolByModel(container: HTMLElement, modelName: string): HTMLElement | undefined {
     return Array.from(container.querySelectorAll(".recharts-scatter-symbol")).find(
       (symbol) =>
@@ -1789,8 +1807,8 @@ describe("ScatterCanvas", () => {
     expect(resolveArrowHeadSize(180, 20)).toBeGreaterThanOrEqual(14);
   });
 
-  test("Shift 淡化当前模型时历史层同步淡化", () => {
-    const { container } = renderCanvas({
+  test("临时排除单个模型时历史层同步淡化", () => {
+    const props = {
       labelMode: "all",
       historicalPoints: [{
         modelName: "Alpha",
@@ -1804,9 +1822,10 @@ describe("ScatterCanvas", () => {
         currentX: 10,
         currentY: 100
       }]
-    });
+    } as const;
 
-    fireEvent.click(findSymbolByModel(container, "Alpha")!, { shiftKey: true });
+    const { container, rerender } = renderCanvas(props);
+    rerender(<ScatterCanvas {...canvasProps} {...props} hiddenModelNames={new Set(["Alpha"])} />);
 
     expect(container.querySelector(".scatter-history-layer")?.getAttribute("opacity")).toBe(
       String(SCATTER_DIMMED_OPACITY)

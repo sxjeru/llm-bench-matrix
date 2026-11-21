@@ -110,10 +110,10 @@ export function loadScatterPreferences(): Partial<ScatterViewState> {
   if (isAxisScale(yScale)) preferences.yScale = yScale;
 
   const showPareto = readBoolean(SCATTER_PARETO_STORAGE_KEY);
-  const showTrendLine = readBoolean(SCATTER_TREND_STORAGE_KEY);
-  if (showTrendLine !== null) {
+  const storedTrend = readString(SCATTER_TREND_STORAGE_KEY);
+  if (storedTrend === "0" || storedTrend === "1" || storedTrend === "auto") {
     preferences.showPareto = showPareto;
-    preferences.showTrendLine = showTrendLine;
+    preferences.showTrendLine = storedTrend === "auto" ? null : storedTrend === "1";
   } else if (showPareto === false) {
     // 旧版只有一个共用开关，默认开启；关闭时应继续隐藏叠加层。
     preferences.showPareto = false;
@@ -141,7 +141,12 @@ export function saveScatterPreferences(state: ScatterViewState) {
   writeStoredString(SCATTER_SCALE_X_STORAGE_KEY, state.xScale);
   writeStoredString(SCATTER_SCALE_Y_STORAGE_KEY, state.yScale);
   writeStoredString(SCATTER_PARETO_STORAGE_KEY, state.showPareto === null ? null : state.showPareto ? "1" : "0");
-  writeStoredString(SCATTER_TREND_STORAGE_KEY, state.showTrendLine === null ? null : state.showTrendLine ? "1" : "0");
+  if (state.showTrendLine === null) {
+    // 标记独立保存的帕累托开关，避免按旧版的共用开关恢复。
+    writeStoredString(SCATTER_TREND_STORAGE_KEY, state.showPareto !== null ? "auto" : null);
+  } else {
+    writeStoredBoolean(SCATTER_TREND_STORAGE_KEY, state.showTrendLine);
+  }
   writeStoredBoolean(SCATTER_PARETO_ONLY_STORAGE_KEY, state.dimNonPareto);
   writeStoredString(SCATTER_PARETO_LINE_STYLE_STORAGE_KEY, state.paretoLineStyle);
   writeStoredString(SCATTER_LABEL_MODE_STORAGE_KEY, state.labelMode);
@@ -183,6 +188,7 @@ export function parseScatterSearchParams(searchParams: ReadableSearchParams): Pa
 
   const trend = searchParams.get("trend");
   if (trend === "1" || trend === "0") parsed.showTrendLine = trend === "1";
+  else if (trend === "auto") parsed.showTrendLine = null;
   else if (pareto === "0") parsed.showTrendLine = false;
 
   const dim = searchParams.get("dim");
@@ -206,8 +212,8 @@ export function parseScatterSearchParams(searchParams: ReadableSearchParams): Pa
 /**
  * 把视图状态写回查询串。
  *
- * 与默认值相同的项直接省略，链接才不会因为一堆 `pareto=1&line=linear`
- * 变得没法读；非默认项一个不落，分享才完整。
+ * 省略可由视图推导的默认值。已选轴的刻度总是写入，
+ * 因为本地刻度偏好会影响分享链接采用哪种叠加层。
  */
 export function buildScatterSearchParams(
   state: ScatterViewState,
@@ -247,10 +253,11 @@ export function buildScatterSearchParams(
   if (state.xSnapshot) params.set("xt", state.xSnapshot);
   if (state.ySnapshot) params.set("yt", state.ySnapshot);
   if (state.overlaySnapshot) params.set("oy", state.overlaySnapshot);
-  if (state.xScale !== DEFAULT_SCATTER_VIEW_STATE.xScale) params.set("logx", state.xScale === "log" ? "1" : "0");
-  if (state.yScale !== DEFAULT_SCATTER_VIEW_STATE.yScale) params.set("logy", state.yScale === "log" ? "1" : "0");
+  if (state.xKey || state.xScale === "log") params.set("logx", state.xScale === "log" ? "1" : "0");
+  if (state.yKey || state.yScale === "log") params.set("logy", state.yScale === "log" ? "1" : "0");
   if (state.showPareto !== null) params.set("pareto", state.showPareto ? "1" : "0");
   if (state.showTrendLine !== null) params.set("trend", state.showTrendLine ? "1" : "0");
+  else if (state.showPareto === false) params.set("trend", "auto");
   if (state.dimNonPareto !== DEFAULT_SCATTER_VIEW_STATE.dimNonPareto) params.set("dim", state.dimNonPareto ? "1" : "0");
   if (state.paretoLineStyle !== DEFAULT_SCATTER_VIEW_STATE.paretoLineStyle) params.set("line", state.paretoLineStyle);
   if (state.labelMode !== DEFAULT_SCATTER_VIEW_STATE.labelMode) params.set("labels", state.labelMode);
