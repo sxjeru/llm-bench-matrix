@@ -121,6 +121,7 @@ describe("buildParamsMatrixRows", () => {
 
     expect(paramsRow.cells.get("Estimated Model")?.noteText).toContain("估算值");
     expect(paramsRow.cells.get("MoE Model")?.noteText).toContain("MoE");
+    expect(paramsRow.cells.get("Dense Model")?.shouldShowQuestionMark).toBe(false);
   });
 
   test("排在价格行（-100）之前", () => {
@@ -168,7 +169,7 @@ describe("BenchmarkMatrix 参数量展示", () => {
     const paramsCell = container.querySelector(
       '[data-metric-type="info"] [data-model-name="MoE Model"]'
     ) as HTMLElement | null;
-    expect(paramsCell?.textContent).toBe("17B/397B");
+    expect(paramsCell?.textContent).toBe("17B/397B?");
     // 斜杠单独成段，靠 mx-[2px] 撑开两侧间距，与 pair 数值单元格一致
     const slashSpans = Array.from(paramsCell!.querySelectorAll("span")).filter(
       (node) => node.textContent === "/"
@@ -179,6 +180,32 @@ describe("BenchmarkMatrix 参数量展示", () => {
     // 表头徽标已移除，参数量只在 Model Info 行里出现
     expect(screen.queryByText("17B / 397B")).toBeNull();
     expect(screen.queryByText("MoE")).toBeNull();
+  });
+
+  test("参数备注通过问号提示", async () => {
+    const paramsWithNote = modelParams.map((params) =>
+      params.modelName === "Dense Model"
+        ? { ...params, note: "来源：官方技术报告" }
+        : params
+    );
+    const { container } = await renderReady(
+      <BenchmarkMatrix rows={rows} allRows={rows} modelParams={paramsWithNote} />
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /显示参数量/ })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /显示参数量/ }));
+
+    const paramsRow = container.querySelector('[data-metric-type="info"]') as HTMLElement;
+    const denseCell = paramsRow.querySelector('[data-model-name="Dense Model"]') as HTMLElement;
+    const noteQuestionMark = Array.from(denseCell.querySelectorAll("span"))
+      .find((node) => node.textContent === "?");
+
+    expect(noteQuestionMark).toBeTruthy();
+
+    fireEvent.mouseEnter(noteQuestionMark!);
+    expect(await screen.findByText("注释：来源：官方技术报告")).toBeInTheDocument();
   });
 
   test("名次样式只落在斜杠两侧的数值上", async () => {

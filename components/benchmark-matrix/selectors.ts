@@ -1675,7 +1675,7 @@ function createParamsCell(params: ModelParamsInfo | undefined): MatrixCell {
     displayValue,
     hasMeaningfulMultipleValues: false,
     hasMultipleActiveSourceValues: false,
-    shouldShowQuestionMark: false
+    shouldShowQuestionMark: noteText.length > 0
   };
 }
 
