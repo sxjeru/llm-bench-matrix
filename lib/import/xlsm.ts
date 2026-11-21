@@ -1,6 +1,7 @@
 import { parseBenchmarkValue } from "@/lib/db/parse-value";
 import { isEmptyImportPairValue } from "@/lib/import/pair-value";
 import { parseBenchmarkNameAndDirection } from "@/lib/import/benchmark-direction";
+import { isImportNotesHeader } from "@/lib/import/table-headers";
 import { normalizeNameParenthesisSpacing } from "@/lib/import/slot-key";
 import {
   IMPORT_VALUE_PAIR_REGEX,
@@ -211,7 +212,9 @@ export async function parseWorkbookBuffer(buffer: Buffer, sheetName?: string): P
   const categoryIndex = hasCategoryColumn ? firstIndex : null;
   const benchmarkIndex = hasCategoryColumn ? nonEmptyIndices[1] : firstIndex;
 
-  const modelIndices = nonEmptyIndices.filter((index) => index > benchmarkIndex);
+  const modelIndices = nonEmptyIndices.filter((index) =>
+    index > benchmarkIndex && !isImportNotesHeader(headerRow[index])
+  );
   if (modelIndices.length === 0) {
     throw new Error("No model columns found to the right side of benchmark column");
   }

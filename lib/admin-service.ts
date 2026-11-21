@@ -22,6 +22,7 @@ import {
 } from "@/lib/import/value-patterns";
 import { composeImportPairValueRaw, isEmptyImportPairValue, parseImportPairValue } from "@/lib/import/pair-value";
 import { parseBenchmarkNameAndDirection } from "@/lib/import/benchmark-direction";
+import { isImportNotesHeader } from "@/lib/import/table-headers";
 import {
   hasEloCandidateValue,
   resolveEloCandidateSlots,
@@ -5375,10 +5376,8 @@ function isMatrixCategoryHeaderCell(input: string): boolean {
   return /(评测大类|大类|类别|分类|领域|赛道)/.test(normalized);
 }
 
-function getMatrixRowValues(cells: string[], startIndex: number, count: number): string[] {
-  if (count <= 0) return [];
-
-  return Array.from({ length: count }, (_, offset) => (cells[startIndex + offset] || "").trim());
+function getMatrixRowValues(cells: string[], columnIndices: number[]): string[] {
+  return columnIndices.map((index) => (cells[index] || "").trim());
 }
 
 function rebalanceMatrixRowCells(
@@ -5587,10 +5586,16 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
     : modelHeaderStartIndex;
   const modelValueStartIndex = hasImplicitBenchmarkColumn ? 1 : resolvedModelHeaderStartIndex;
 
-  const modelNames = headerCells
-    .slice(resolvedModelHeaderStartIndex)
-    .map((cell) => normalizeNameParenthesisSpacing(cell))
-    .filter(Boolean);
+  const modelHeaderCells = headerCells.slice(resolvedModelHeaderStartIndex);
+  // Keep original column positions so excluding Notes never shifts model scores.
+  const modelColumns = modelHeaderCells.flatMap((cell, offset) => {
+    const modelName = normalizeNameParenthesisSpacing(cell);
+    return modelName && !isImportNotesHeader(modelName)
+      ? [{ modelName, columnIndex: modelValueStartIndex + offset }]
+      : [];
+  });
+  const modelNames = modelColumns.map((column) => column.modelName);
+  const modelColumnIndices = modelColumns.map((column) => column.columnIndex);
 
   if (modelNames.length === 0) {
     return {
@@ -5612,7 +5617,7 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
   const matrixRowLayout = {
     benchmarkColumnIndex,
     modelValueStartIndex,
-    modelCount: modelNames.length
+    modelCount: modelHeaderCells.length
   };
 
   for (let dataRowIndex = 0; dataRowIndex < dataRowsCells.length; dataRowIndex += 1) {
@@ -5622,7 +5627,7 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
       ? normalizeNameParenthesisSpacing(cells[categoryColumnIndex] || "")
       : "";
     const rawBenchmarkInput = normalizeNameParenthesisSpacing(cells[benchmarkColumnIndex] || "");
-    const modelValues = getMatrixRowValues(cells, modelValueStartIndex, modelNames.length);
+    const modelValues = getMatrixRowValues(cells, modelColumnIndices);
 
     if (isPureMatrixCategoryRow(categoryInput, rawBenchmarkInput, modelValues)) {
       currentBenchmarkType = categoryInput;
@@ -5649,7 +5654,7 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
         const nextCells = rebalanceMatrixRowCells(nextRawCells, matrixRowLayout);
         const nextBenchmarkInput = normalizeNameParenthesisSpacing(nextCells[benchmarkColumnIndex] || "");
         const nextHasAnyModelValue = hasAnyMatrixValue(
-          getMatrixRowValues(nextCells, modelValueStartIndex, modelNames.length)
+          getMatrixRowValues(nextCells, modelColumnIndices)
         );
 
         if (nextHasAnyModelValue && isMatrixBenchmarkContinuationFragment(nextBenchmarkInput)) {
@@ -5701,9 +5706,8 @@ function parseMatrixTextRows(inputText: string, defaultSource: string | null): P
       continue;
     }
 
-    for (let modelIndex = 0; modelIndex < modelNames.length; modelIndex += 1) {
-      const modelName = modelNames[modelIndex];
-      const rawInput = (cells[modelValueStartIndex + modelIndex] || "").trim();
+    for (const { modelName, columnIndex } of modelColumns) {
+      const rawInput = (cells[columnIndex] || "").trim();
 
       if (!modelName || isEmptyImportValue(rawInput)) {
         continue;

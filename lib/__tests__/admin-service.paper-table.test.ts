@@ -1204,6 +1204,60 @@ describe("paper-table 文本解析", () => {
     expect(parsed.modelColumns).toEqual(["Model A", "Model B", "Model C"]);
   });
 
+  test.each([",", "\t"])("矩阵导入自动排除 Notes 列并保留模型成绩对齐（分隔符 %j）", async (delimiter) => {
+    const inputText = [
+      ["Category", "Benchmark", "Notes", "Inkling 2 Mini", "Gemma 4 31B", "Muse Glimmer", "Qwen3.8-27B", "Nemotron 3.5 Super VL"],
+      ["Third Party Index", "AA Index (v5.0)", "", "20.1", "4.4", "6.3", "20.1", "13.6"],
+      ["Third Party Index", "Vals Index (v2.2)", "", "46.5%", "-", "-", "-", "29.8%"],
+      ["Coding and Autoresearch", "FrontierCode v2.0", "stirrup v0.2.1", "15.1%", "0.0%", "1.5%", "14.9%", "6.1%"]
+    ].map((cells) => cells.join(delimiter)).join("\n");
+
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+
+    expect(parsed.format).toBe("matrix-table");
+    expect(parsed.modelColumns).toEqual([
+      "Inkling 2 Mini", "Gemma 4 31B", "Muse Glimmer", "Qwen3.8-27B", "Nemotron 3.5 Super VL"
+    ]);
+    expect(parsed.rows).toHaveLength(12);
+    expect(parsed.rows.filter((row) => row.benchmarkName === "FrontierCode v2.0").map((row) => [
+      row.modelName, row.valueRaw, row.benchmarkType
+    ])).toEqual([
+      ["Inkling 2 Mini", "15.1", "Coding and Autoresearch"],
+      ["Gemma 4 31B", "0.0", "Coding and Autoresearch"],
+      ["Muse Glimmer", "1.5", "Coding and Autoresearch"],
+      ["Qwen3.8-27B", "14.9", "Coding and Autoresearch"],
+      ["Nemotron 3.5 Super VL", "6.1", "Coding and Autoresearch"]
+    ]);
+    expect(parsed.rows.filter((row) => row.benchmarkName === "Vals Index (v2.2)").map((row) => [
+      row.modelName, row.valueRaw
+    ])).toEqual([["Inkling 2 Mini", "46.5"], ["Nemotron 3.5 Super VL", "29.8"]]);
+    expect(parsed.warnings ?? []).toEqual([]);
+  });
+
+  test.each([
+    [" note ", 2],
+    ["NOTES", 3],
+    ["备注", 4],
+    ["注释", 2]
+  ] as const)("排除 %s 辅助列（位置 %i）且不误排 Notes-7B 模型", async (header, columnIndex) => {
+    const cells = [
+      ["Category", "Benchmark", "Model A", "Notes-7B"],
+      ["Coding", "Code Bench", "15.1%", "0.0%"],
+      ["", "No Scores", "", ""]
+    ];
+    cells[0].splice(columnIndex, 0, header);
+    cells[1].splice(columnIndex, 0, "999");
+    cells[2].splice(columnIndex, 0, "stirrup v0.2.1");
+    const parsed = await parseBenchmarkTextRowsForTest(cells.map((row) => row.join(",")).join("\n"));
+
+    expect(parsed.modelColumns).toEqual(["Model A", "Notes-7B"]);
+    expect(parsed.rows.map((row) => [row.benchmarkName, row.modelName, row.valueRaw])).toEqual([
+      ["Code Bench", "Model A", "15.1"],
+      ["Code Bench", "Notes-7B", "0.0"]
+    ]);
+    expect(parsed.warnings ?? []).toEqual([]);
+  });
+
   test("结构化 CSV 解析按行顺序返回去重后的 modelColumns", async () => {
     const inputText = [
       "model,benchmark,value",

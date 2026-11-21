@@ -15,6 +15,32 @@ function buildWorkbookBuffer(rows: Array<Array<string>>): Buffer {
 }
 
 describe("parseWorkbookBuffer", () => {
+  test("自动排除 Notes 辅助列，保留百分比、零分和缺失成绩的模型列对齐", async () => {
+    const buffer = buildWorkbookBuffer([
+      ["Category", "Benchmark", "Notes", "Inkling 2 Mini", "Gemma 4 31B", "Muse Glimmer", "Qwen3.8-27B", "Nemotron 3.5 Super VL"],
+      ["Third Party Index", "AA Index (v5.0)", "", "20.1", "4.4", "6.3", "20.1", "13.6"],
+      ["Third Party Index", "Vals Index (v2.2)", "", "46.5%", "-", "-", "-", "29.8%"],
+      ["Coding and Autoresearch", "FrontierCode v2.0", "stirrup v0.2.1", "15.1%", "0.0%", "1.5%", "14.9%", "6.1%"]
+    ]);
+
+    const parsed = await parseWorkbookBuffer(buffer, "Sheet1");
+
+    expect(parsed.modelColumns).toEqual([
+      "Inkling 2 Mini", "Gemma 4 31B", "Muse Glimmer", "Qwen3.8-27B", "Nemotron 3.5 Super VL"
+    ]);
+    expect(parsed.records).toHaveLength(12);
+    expect(parsed.records.filter((row) => row.benchmarkName === "FrontierCode v2.0").map((row) => [
+      row.modelName, row.valueNum, row.category
+    ])).toEqual([
+      ["Inkling 2 Mini", 15.1, "Coding and Autoresearch"],
+      ["Gemma 4 31B", 0, "Coding and Autoresearch"],
+      ["Muse Glimmer", 1.5, "Coding and Autoresearch"],
+      ["Qwen3.8-27B", 14.9, "Coding and Autoresearch"],
+      ["Nemotron 3.5 Super VL", 6.1, "Coding and Autoresearch"]
+    ]);
+    expect(parsed.warnings).toEqual([]);
+  });
+
   test.each(["↓", "⬇", "⬇️"])("去除 benchmark 末尾的 %s 并标记为以小为好", async (arrow) => {
     const buffer = buildWorkbookBuffer([
       ["Category", "Benchmark", "Model A", "Model B", "Model C", "Model D", "Model E", "Model F"],
