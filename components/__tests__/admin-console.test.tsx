@@ -588,12 +588,12 @@ describe("AdminConsole text import", () => {
     expect(importPayload.csvText).toMatch(/Bench-B,Type-B,[^\n]*Vision/);
   });
 
-  test("首次修改非 General type 的模态会同步同 type 的其他 benchmark", async () => {
+  test("首次修改非 General type 的模态只同步同 type 的 Text benchmark", async () => {
     const user = userEvent.setup();
 
     const previewResponse: PreviewResponse = {
       format: "paper-table",
-      total: 3,
+      total: 4,
       skipped: 0,
       warningCount: 0,
       previewRows: [
@@ -603,7 +603,7 @@ describe("AdminConsole text import", () => {
           modelName: "Model A",
           benchmarkName: "SameType-A",
           benchmarkType: "Vision",
-          modalities: ["Text"],
+          modalities: ["Vision"],
           rawValue: "70.1",
           valueNum: 70.1,
           valueNum2: null,
@@ -629,6 +629,20 @@ describe("AdminConsole text import", () => {
           rowNumber: 3,
           providerName: "OpenAI",
           modelName: "Model A",
+          benchmarkName: "SameType-C",
+          benchmarkType: "Vision",
+          modalities: ["Vision"],
+          rawValue: "72.3",
+          valueNum: 72.3,
+          valueNum2: null,
+          valueNote: null,
+          source: "text:sample",
+          valid: true
+        },
+        {
+          rowNumber: 4,
+          providerName: "OpenAI",
+          modelName: "Model A",
           benchmarkName: "OtherType",
           benchmarkType: "Audio",
           modalities: ["Text"],
@@ -644,9 +658,9 @@ describe("AdminConsole text import", () => {
 
     const importResponse = {
       format: "structured-csv",
-      total: 3,
+      total: 4,
       skipped: 0,
-      inserted: 3,
+      inserted: 4,
       warningCount: 0,
       warnings: []
     };
@@ -672,8 +686,8 @@ describe("AdminConsole text import", () => {
     }
 
     rowDropdown.setAttribute("open", "");
-    const visionCheckbox = within(rowDropdown).getByRole("checkbox", { name: "Vision" });
-    await user.click(visionCheckbox);
+    const audioCheckbox = within(rowDropdown).getByRole("checkbox", { name: "Audio" });
+    await user.click(audioCheckbox);
 
     await user.click(screen.getByRole("button", { name: "执行导入" }));
 
@@ -687,10 +701,10 @@ describe("AdminConsole text import", () => {
       csvText?: string;
     };
 
-    expect(importPayload.csvText).toMatch(/SameType-A,Vision,[^\n]*Vision/);
-    expect(importPayload.csvText).toMatch(/SameType-B,Vision,[^\n]*Vision/);
-    expect(importPayload.csvText).toMatch(/OtherType,Audio,[^\n]*Text/);
-    expect(importPayload.csvText).not.toMatch(/OtherType,Audio,[^\n]*Vision/);
+    expect(importPayload.csvText).toMatch(/SameType-A,Vision,[^\n]*,"Vision,Audio",/);
+    expect(importPayload.csvText).toMatch(/SameType-B,Vision,[^\n]*,"Vision,Audio",/);
+    expect(importPayload.csvText).toMatch(/SameType-C,Vision,[^\n]*,,Vision,/);
+    expect(importPayload.csvText).toMatch(/OtherType,Audio,[^\n]*,,Text,/);
   });
 
   test("首次修改 General type 的模态不会同步其他 General benchmark", async () => {
@@ -2330,7 +2344,12 @@ describe("AdminConsole text import", () => {
     });
   });
 
-  test("预览内 benchmark 快捷合并后仍优先保留导入 type", async () => {
+  test.each([
+    { importedName: "Bench 1", targetName: "Bench-1", targetId: 11, modalities: ["Vision", "Audio"], expected: '"Vision,Audio"' },
+    { importedName: "Bench 2", targetName: "Bench-2", targetId: 12, modalities: ["Text"], expected: "Text" },
+    { importedName: "Bench 2", targetName: "Bench-2", targetId: 12, modalities: undefined, expected: "Vision" },
+    { importedName: "ARC-AGI v1", targetName: "ARC-AGI-1", targetId: 13, modalities: ["Vision"], expected: "Vision" }
+  ])("预览内 benchmark 候选 $importedName → $targetName 保留导入 type，模态为 $expected", async ({ importedName, targetName, targetId, modalities, expected }) => {
     const user = userEvent.setup();
 
     const previewResponse: PreviewResponse = {
@@ -2343,8 +2362,9 @@ describe("AdminConsole text import", () => {
           rowNumber: 1,
           providerName: "OpenAI",
           modelName: "Model A",
-          benchmarkName: "Bench 1",
+          benchmarkName: importedName,
           benchmarkType: "Professional",
+          modalities,
           rawValue: "70.1",
           valueNum: 70.1,
           valueNum2: null,
@@ -2371,7 +2391,9 @@ describe("AdminConsole text import", () => {
           ...buildProps(),
           benchmarks: [
             { id: 11, benchmarkName: "Bench-1", benchmarkType: "Type-A", modalities: ["Text"] },
-            { id: 12, benchmarkName: "Bench-2", benchmarkType: "Type-B", modalities: ["Vision"] }
+            { id: 12, benchmarkName: "Bench-2", benchmarkType: "Type-B", modalities: ["Vision"] },
+            { id: 14, benchmarkName: "ARC-AGI-2", benchmarkType: "Reasoning", modalities: ["Text"] },
+            { id: 13, benchmarkName: "ARC-AGI-1", benchmarkType: "Reasoning", modalities: ["Text"] }
           ]
         }}
       />
@@ -2381,18 +2403,14 @@ describe("AdminConsole text import", () => {
     await triggerPreview(user);
 
     const matrixTable = await findMatrixPreviewTable();
-    const benchmarkInput = within(matrixTable).getByDisplayValue("Bench 1") as HTMLInputElement;
-    const benchmarkRow = benchmarkInput.closest("tr");
-    if (!benchmarkRow) {
-      throw new Error("Benchmark row not found");
-    }
+    const benchmarkInput = within(matrixTable).getByDisplayValue(importedName);
 
     await user.click(benchmarkInput);
 
-    const optionButton = screen.getByRole("option", {
-      name: /Bench-1 \[Type-A\] \[11\]/
-    });
-    await user.click(optionButton);
+    const [firstCandidate] = screen.getAllByRole("option");
+    expect(firstCandidate).toHaveTextContent(targetName);
+    expect(firstCandidate).toHaveTextContent(`[${targetId}]`);
+    await user.click(firstCandidate);
 
     await user.click(screen.getByRole("button", { name: "执行导入" }));
 
@@ -2405,7 +2423,7 @@ describe("AdminConsole text import", () => {
       csvText?: string;
     };
 
-    expect(secondPayload.csvText).toContain("Bench-1,Professional");
+    expect(secondPayload.csvText).toContain(`${targetName},Professional,1,1,70.1,,${expected},text:sample`);
   });
 
   test("在矩阵预览里修改 type 类别（即使未失焦 blur）导入也能正确应用并入库", async () => {

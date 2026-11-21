@@ -29,6 +29,7 @@ export function buildBenchmarkCompareKey(input: string): string {
   normalized = normalized
     .replace(/[\/_-]/g, " ")
     .replace(/\s+/g, " ")
+    .replace(/(^| )v(\d+(?:\.\d+)*)(?= |$)/g, "$1$2")
     .trim();
 
   return normalized;

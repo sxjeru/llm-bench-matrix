@@ -1545,18 +1545,12 @@ export function AdminConsole({
   }
 
   function onToggleMatrixBenchmarkModality(benchmarkKey: string, modality: string, checked: boolean) {
-    const matchedRows = textImportDraftRows.filter(
-      (row) => getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType) === benchmarkKey
-    );
-
-    if (matchedRows.length === 0) {
+    const seedRow = matrixPreview.rows.find((row) => row.key === benchmarkKey);
+    if (!seedRow) {
       return;
     }
 
-    const seedRow = matchedRows[0];
-    const currentModalities = normalizeModalityList(
-      seedRow.modalities?.length ? seedRow.modalities : [seedRow.benchmarkType]
-    );
+    const currentModalities = normalizeModalityList(seedRow.modalities);
 
     let nextRawModalities = checked
       ? [...currentModalities, modality]
@@ -1576,7 +1570,7 @@ export function AdminConsole({
 
     const isFirstEdit = !modalityEditedByBenchmark[benchmarkKey];
     const normalizedType = seedRow.benchmarkType.trim().toLowerCase();
-    // 首次修改且 type 非 General 时，同步同 type 下尚未手动改过的 benchmark
+    // 首次修改且 type 非 General 时，仅同步同 type 下尚未编辑且仍为 Text 的 benchmark
     const shouldPropagateByType =
       isFirstEdit
       && normalizedType.length > 0
@@ -1584,13 +1578,13 @@ export function AdminConsole({
 
     const affectedBenchmarkKeys = new Set<string>([benchmarkKey]);
     if (shouldPropagateByType) {
-      textImportDraftRows.forEach((row) => {
-        const rowKey = getTextImportBenchmarkKey(row.benchmarkName, row.benchmarkType);
+      matrixPreview.rows.forEach((row) => {
         if (
           row.benchmarkType.trim().toLowerCase() === normalizedType
-          && !modalityEditedByBenchmark[rowKey]
+          && !modalityEditedByBenchmark[row.key]
+          && normalizeModalityList(row.modalities).every((item) => item === "Text")
         ) {
-          affectedBenchmarkKeys.add(rowKey);
+          affectedBenchmarkKeys.add(row.key);
         }
       });
     }
@@ -1813,6 +1807,13 @@ export function AdminConsole({
 
     const nextName = target.benchmarkName;
     const nextKey = getTextImportBenchmarkKey(nextName, originalType);
+    const previewModalities = normalizeModalityList(
+      matrixPreview.rows.find((row) => row.key === benchmarkKey)?.modalities,
+      originalType
+    );
+    const fallbackModalities = previewModalities.includes("Text") && target.modalities?.length
+      ? normalizeModalityList(target.modalities)
+      : previewModalities;
 
     setTextImportDraftRows((prev) =>
       prev.map((row) =>
@@ -1822,7 +1823,7 @@ export function AdminConsole({
               benchmarkName: nextName,
               benchmarkType: originalType,
               benchmarkTypeProvided: true,
-              modalities: target.modalities?.length ? normalizeModalityList(target.modalities) : row.modalities
+              modalities: row.modalities?.length ? row.modalities : fallbackModalities
             }
           : row
       )
