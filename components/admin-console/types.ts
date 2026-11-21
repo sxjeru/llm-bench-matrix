@@ -56,6 +56,7 @@ export type PreviewRow = {
   valueNum2: number | null;
   valueNote: string | null;
   valid: boolean;
+  higherIsBetter?: boolean;
 };
 
 export type ImportWarning = {

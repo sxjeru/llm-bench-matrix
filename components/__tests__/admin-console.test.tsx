@@ -2559,7 +2559,7 @@ describe("AdminConsole text import", () => {
     expect(modelNames.slice(0, 2)).toEqual(["Model.B", "Model-A"]);
   });
 
-  test("XLSX 预览会同步到统一矩阵预览，且导入走结构化文本通道", async () => {
+  test("XLSX 预览会同步到统一矩阵预览，保留排序方向且导入走结构化文本通道", async () => {
     const user = userEvent.setup();
 
     const workbookPreviewResponse = {
@@ -2568,7 +2568,7 @@ describe("AdminConsole text import", () => {
       benchmarkColumn: "Benchmark",
       categoryColumn: "Category",
       modelColumns: ["Model A", "Model B"],
-      parsedCount: 2,
+      parsedCount: 3,
       warningCount: 0,
       warnings: [],
       previewRows: [
@@ -2593,15 +2593,27 @@ describe("AdminConsole text import", () => {
           valueNum2: null,
           valueNote: null,
           valid: true
+        },
+        {
+          rowNumber: 4,
+          category: "Safety and Alignment",
+          benchmarkName: "Covert misbehavior (Internal)",
+          modelName: "Model B",
+          rawValue: "8.3%",
+          valueNum: 8.3,
+          valueNum2: null,
+          valueNote: null,
+          valid: true,
+          higherIsBetter: false
         }
       ]
     };
 
     const importResponse = {
       format: "structured-csv",
-      total: 2,
+      total: 3,
       skipped: 0,
-      inserted: 2,
+      inserted: 3,
       warningCount: 0,
       warnings: []
     };
@@ -2641,6 +2653,18 @@ describe("AdminConsole text import", () => {
 
     expect(within(financeRow).getByDisplayValue("Professional")).toBeInTheDocument();
 
+    const covertBenchmarkInput = within(matrixTable).getByDisplayValue("Covert misbehavior (Internal)");
+    const covertRow = covertBenchmarkInput.closest("tr");
+    if (!covertRow) {
+      throw new Error("Covert misbehavior benchmark row not found");
+    }
+    const lowerIsBetterCheckbox = within(within(covertRow).getByTitle("以小为好")).getByRole("checkbox");
+    expect(lowerIsBetterCheckbox).toBeChecked();
+    await user.click(lowerIsBetterCheckbox);
+    expect(lowerIsBetterCheckbox).not.toBeChecked();
+    await user.click(lowerIsBetterCheckbox);
+    expect(lowerIsBetterCheckbox).toBeChecked();
+
     await user.click(screen.getByRole("button", { name: "导入当前工作表" }));
 
     await waitFor(() => {
@@ -2652,11 +2676,14 @@ describe("AdminConsole text import", () => {
 
     const secondPayload = JSON.parse(((secondCall[1] as RequestInit).body ?? "{}") as string) as {
       csvText?: string;
+      rows?: Array<{ benchmarkName: string; higherIsBetter?: boolean }>;
     };
 
     expect(secondPayload.csvText).toContain("GDPval");
     expect(secondPayload.csvText).toContain("FinanceAgent v1.1");
     expect(secondPayload.csvText).toContain("xlsm:Sheet1");
+    expect(secondPayload.rows?.find((row) => row.benchmarkName === "Covert misbehavior (Internal)"))
+      .toMatchObject({ higherIsBetter: false });
   });
 
   test("编辑预览模型名后导入会按新模型名更新 provider 划分", async () => {

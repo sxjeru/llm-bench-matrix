@@ -1172,6 +1172,27 @@ describe("paper-table 文本解析", () => {
     expect(downRows.every((row) => row.higherIsBetter === false)).toBe(true);
   });
 
+  test("带下箭头的 CSV benchmark 去除方向标记并保留首个模型空值", async () => {
+    const inputText = [
+      "Category,Benchmark,Model A,Model B,Model C,Model D,Model E,Model F",
+      "Safety and Alignment,Covert misbehavior (Internal) ↓,,8.3%,24.3%,45.6%,33.2%,43.4%"
+    ].join("\n");
+
+    const parsed = await parseBenchmarkTextRowsForTest(inputText, "text:unit-test");
+
+    expect(parsed.format).toBe("matrix-table");
+    expect(parsed.rows).toHaveLength(5);
+    expect(parsed.rows.map((row) => row.modelName)).toEqual([
+      "Model B", "Model C", "Model D", "Model E", "Model F"
+    ]);
+    expect(parsed.rows.map((row) => row.valueRaw)).toEqual(["8.3", "24.3", "45.6", "33.2", "43.4"]);
+    expect(parsed.rows.every((row) =>
+      row.benchmarkName === "Covert misbehavior (Internal)"
+      && row.benchmarkType === "Safety and Alignment"
+      && row.higherIsBetter === false
+    )).toBe(true);
+  });
+
   test("矩阵表格解析返回完整的原始 modelColumns", async () => {
     const inputText = [
       "Benchmark\tModel A\tModel B\tModel C",

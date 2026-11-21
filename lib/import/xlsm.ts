@@ -1,5 +1,6 @@
 import { parseBenchmarkValue } from "@/lib/db/parse-value";
 import { isEmptyImportPairValue } from "@/lib/import/pair-value";
+import { parseBenchmarkNameAndDirection } from "@/lib/import/benchmark-direction";
 import { normalizeNameParenthesisSpacing } from "@/lib/import/slot-key";
 import {
   IMPORT_VALUE_PAIR_REGEX,
@@ -230,7 +231,10 @@ export async function parseWorkbookBuffer(buffer: Buffer, sheetName?: string): P
     }
 
     const category = categoryIndex !== null ? currentCategory : null;
-    const benchmarkName = normalizeNameParenthesisSpacing(normalizeCell(row[benchmarkIndex]));
+    const benchmarkDirection = parseBenchmarkNameAndDirection(
+      normalizeNameParenthesisSpacing(normalizeCell(row[benchmarkIndex]))
+    );
+    const benchmarkName = benchmarkDirection.benchmarkName;
 
     if (!benchmarkName) {
       continue;
@@ -269,7 +273,9 @@ export async function parseWorkbookBuffer(buffer: Buffer, sheetName?: string): P
         const parsedValueNote = parsed.valueNote === "non-numeric" ? null : parsed.valueNote;
         const mergedValueNote = mergeValueNotes(cell.valueNote, parsedValueNote);
 
-        const higherIsBetter = IMPORT_VALUE_RANK_PREFIX_REGEX.test(cell.rawValue.trim()) ? false : undefined;
+        const higherIsBetter = benchmarkDirection.hadDirectionMarker
+          ? benchmarkDirection.higherIsBetter
+          : IMPORT_VALUE_RANK_PREFIX_REGEX.test(cell.rawValue.trim()) ? false : undefined;
 
         records.push({
           rowNumber: rowIndex + 1,

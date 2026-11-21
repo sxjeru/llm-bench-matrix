@@ -15,6 +15,26 @@ function buildWorkbookBuffer(rows: Array<Array<string>>): Buffer {
 }
 
 describe("parseWorkbookBuffer", () => {
+  test.each(["↓", "⬇", "⬇️"])("去除 benchmark 末尾的 %s 并标记为以小为好", async (arrow) => {
+    const buffer = buildWorkbookBuffer([
+      ["Category", "Benchmark", "Model A", "Model B", "Model C", "Model D", "Model E", "Model F"],
+      ["Safety and Alignment", `Covert misbehavior (Internal) ${arrow}`, "", "8.3%", "24.3%", "45.6%", "33.2%", "43.4%"]
+    ]);
+
+    const parsed = await parseWorkbookBuffer(buffer, "Sheet1");
+
+    expect(parsed.records).toHaveLength(5);
+    expect(parsed.records.map((row) => row.modelName)).toEqual([
+      "Model B", "Model C", "Model D", "Model E", "Model F"
+    ]);
+    expect(parsed.records.every((row) =>
+      row.benchmarkName === "Covert misbehavior (Internal)"
+      && row.category === "Safety and Alignment"
+      && row.higherIsBetter === false
+    )).toBe(true);
+    expect(parsed.warnings).toHaveLength(0);
+  });
+
   test("Category 列为空时会继承上一行分类", async () => {
     const buffer = buildWorkbookBuffer([
       ["Category", "Benchmark", "Model A", "Model B"],

@@ -21,6 +21,7 @@ import {
   isImportValueEmptyMarker
 } from "@/lib/import/value-patterns";
 import { composeImportPairValueRaw, isEmptyImportPairValue, parseImportPairValue } from "@/lib/import/pair-value";
+import { parseBenchmarkNameAndDirection } from "@/lib/import/benchmark-direction";
 import {
   hasEloCandidateValue,
   resolveEloCandidateSlots,
@@ -607,45 +608,6 @@ function normalizeBenchmarkImportName(rawBenchmarkName: string): string {
   return stripBenchmarkCitationRefs(rawBenchmarkName)
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function parseBenchmarkNameAndDirection(rawBenchmarkName: string): {
-  benchmarkName: string;
-  higherIsBetter: boolean;
-  hadDirectionMarker: boolean;
-} {
-  const trimmed = rawBenchmarkName.trim();
-  if (!trimmed) {
-    return {
-      benchmarkName: "",
-      higherIsBetter: true,
-      hadDirectionMarker: false
-    };
-  }
-
-  const removedDown = trimmed.replace(/\s*[↓⬇️]+$/u, "").trim();
-  if (removedDown !== trimmed) {
-    return {
-      benchmarkName: removedDown,
-      higherIsBetter: false,
-      hadDirectionMarker: true
-    };
-  }
-
-  const removedUp = trimmed.replace(/\s*[↑⬆️]+$/u, "").trim();
-  if (removedUp !== trimmed) {
-    return {
-      benchmarkName: removedUp,
-      higherIsBetter: true,
-      hadDirectionMarker: true
-    };
-  }
-
-  return {
-    benchmarkName: trimmed,
-    higherIsBetter: true,
-    hadDirectionMarker: false
-  };
 }
 
 function isEmptyImportValue(rawInput: string | undefined): boolean {

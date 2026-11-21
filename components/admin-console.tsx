@@ -1186,7 +1186,8 @@ export function AdminConsole({
       const providerDisplayName = existingModel
         ? (getProviderDisplayNameById(existingModel.providerId, providerById) || providerName)
         : (resolvedProvider?.providerDisplayName ?? providerName);
-      const inferredHigherIsBetter = !isLowerBetterPreviewBenchmark(row.benchmarkName, benchmarkType);
+      const inferredHigherIsBetter = row.higherIsBetter
+        ?? !isLowerBetterPreviewBenchmark(row.benchmarkName, benchmarkType);
 
       return {
         rowNumber: row.rowNumber,
