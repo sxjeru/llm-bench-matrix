@@ -116,12 +116,20 @@ describe("buildParamsMatrixRows", () => {
     expect(paramsRow.maxComparable).toBe(-4);
   });
 
-  test("估算值与 MoE 写进 noteText 供 tooltip 使用", () => {
+  test("只有真实备注写进 noteText，MoE 与估算状态不再生成注释", () => {
     const [paramsRow] = buildParamsMatrixRows(modelColumns, modelParams);
 
-    expect(paramsRow.cells.get("Estimated Model")?.noteText).toContain("估算值");
-    expect(paramsRow.cells.get("MoE Model")?.noteText).toContain("MoE");
-    expect(paramsRow.cells.get("Dense Model")?.shouldShowQuestionMark).toBe(false);
+    for (const modelName of ["MoE Model", "Dense Model", "Estimated Model"]) {
+      expect(paramsRow.cells.get(modelName)?.noteText).toBe("");
+      expect(paramsRow.cells.get(modelName)?.valueNote).toBeNull();
+      expect(paramsRow.cells.get(modelName)?.shouldShowQuestionMark).toBe(false);
+    }
+
+    const withNote = buildParamsMatrixRows(modelColumns, modelParams.map((params) =>
+      params.modelName === "MoE Model" ? { ...params, note: "来源：官方技术报告" } : params
+    ));
+    expect(withNote[0].cells.get("MoE Model")?.noteText).toBe("来源：官方技术报告");
+    expect(withNote[0].cells.get("MoE Model")?.shouldShowQuestionMark).toBe(true);
   });
 
   test("排在价格行（-100）之前", () => {
@@ -169,7 +177,7 @@ describe("BenchmarkMatrix 参数量展示", () => {
     const paramsCell = container.querySelector(
       '[data-metric-type="info"] [data-model-name="MoE Model"]'
     ) as HTMLElement | null;
-    expect(paramsCell?.textContent).toBe("17B/397B?");
+    expect(paramsCell?.textContent).toBe("17B/397B");
     // 斜杠单独成段，靠 mx-[2px] 撑开两侧间距，与 pair 数值单元格一致
     const slashSpans = Array.from(paramsCell!.querySelectorAll("span")).filter(
       (node) => node.textContent === "/"

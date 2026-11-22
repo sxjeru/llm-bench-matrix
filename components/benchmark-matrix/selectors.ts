@@ -1646,11 +1646,8 @@ function createParamsCell(params: ModelParamsInfo | undefined): MatrixCell {
       ? `${formatParamsBillions(activated)} / ${formatParamsBillions(total)}`
       : formatParamsBillions(primary);
 
-  const noteParts: string[] = [];
-  if (params?.isEstimated) noteParts.push("估算值");
-  if (total !== null && activated !== null) noteParts.push("MoE（激活 / 总量）");
-  if (params?.note) noteParts.push(params.note);
-  const noteText = noteParts.join("；");
+  // 只展示用户填写的备注；激活/总量与估算状态由数值本身表达，不再生成无效注释
+  const noteText = (params?.note ?? "").trim();
 
   const entry: MatrixCellEntry = {
     valueRaw: displayValue,
