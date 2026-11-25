@@ -2225,18 +2225,16 @@ describe("ScatterCanvas", () => {
     expect(labels).toEqual(dataset.points.map((point) => point.modelName));
   });
 
-  test("图表内除根 svg 外还有 tabindex=-1 的分层容器（焦点框压制必须覆盖后代）", () => {
+  test("图表根 svg 保留 tabindex=0，且内部 z-index 分层容器不再附带 tabindex=-1", () => {
     const { container } = renderCanvas();
 
     const surface = container.querySelector(".recharts-surface");
     expect(surface?.getAttribute("tabindex")).toBe("0");
 
-    // 这些 <g> 只是 Recharts 的 z-index 排版容器，却带着 tabindex=-1。
-    // Chrome 里它们能被鼠标点中并获得焦点，焦点框套在其包围盒上就成了「整张图被框住」。
-    // globals.css 里的压制规则因此必须写成 `.scatter-chart-surface :focus`，
-    // 只盯着 .recharts-surface 是不够的 —— 这条测试就是为了守住这个前提。
+    // Recharts 3.10 及更早版本曾给 z-index 分层 <g> 加上 tabindex=-1，导致点击图表时触发整图焦点框；
+    // 3.11.0 起上游已移除裸 <g> 上的 tabIndex，仅保留根 svg 的 tabindex=0（配合 globals.css 的 :focus / :focus-visible）。
     const focusableLayers = container.querySelectorAll('.recharts-surface [tabindex="-1"]');
-    expect(focusableLayers.length).toBeGreaterThan(0);
+    expect(focusableLayers.length).toBe(0);
   });
 
   test("钉住标记用模型自己的品牌色，不画白环", () => {
